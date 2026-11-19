@@ -185,6 +185,14 @@ impl<A: App> Panels<'_, A> {
         over.then(|| pressed.clone())
     }
 
+    /// True when the element with UI ID `id` is a button or a switch,
+    /// which a pointer press does not focus.
+    fn takes_no_press_focus(&self, id: &UiId) -> bool {
+        self.window
+            .access_of(id)
+            .is_some_and(|access| matches!(access.role(), crate::access::Role::Button | crate::access::Role::Switch))
+    }
+
     /// Offers a pointer event to the runtime's layers above the target.
     pub(crate) fn pointer_above(&mut self, input: InputState, event: &Event, point: Point) -> Heard {
         self.offer(input, event, point, Side::Above)
@@ -283,10 +291,18 @@ impl<A: App> Panels<'_, A> {
     }
 
     /// [`Panels::focus_at`] among the panels of the layers `keep` allows,
-    /// so a press focuses in the same panels it hits.
+    /// so a press focuses in the same panels it hits. A button or a switch
+    /// takes no focus from a press: the focus stays where it was, in
+    /// either toolkit, as a push button on macOS leaves it (ui-layer.md,
+    /// section 6, rule 3; Brylie's decision, 2026-11-19). Tab and a screen
+    /// reader's Focus still reach it. A field, or a press on no stop,
+    /// moves the focus as before.
     fn focus_in(&mut self, point: Point, keep: impl Fn(Layer) -> bool) {
-        self.focus.wanted = None;
         let to = self.window.focus_at_in(point, keep).flatten().cloned();
+        if to.as_ref().is_some_and(|id| self.takes_no_press_focus(id)) {
+            return;
+        }
+        self.focus.wanted = None;
         self.focus.set(to);
         self.focus.ring = false;
         if self.focus.id().is_some() {

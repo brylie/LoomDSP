@@ -667,17 +667,19 @@ impl crate::App {
             return None;
         }
         let id = self.a11y.ids.id(request.target_node.0)?;
-        // The bar is `loom-ui`'s: its Click is the same click a pointer or
-        // a key gives (section 3, rule 4).
+        // The toolbar, the breadcrumb, and the bar are `loom-ui`'s: their
+        // Click is the same click a pointer or a key gives (section 3,
+        // rule 4).
+        if id.is_under(&crate::toolbar::toolbar_id()) {
+            return self.toolbar_click(id);
+        }
+        if id.is_under(&crate::breadcrumb::breadcrumb_id()) {
+            return self.breadcrumb_click(id);
+        }
         if id.is_under(&crate::stats_bar::stats_id()) {
             return self.bar_click(id);
         }
         match tree::frame_part(id)? {
-            tree::FramePart::Button(name) => {
-                let model = self.toolbar_model();
-                let button = model.buttons.iter().find(|button| button.name == name)?;
-                button.press()
-            }
             tree::FramePart::Tab(tab) => Some(Message::Matrix(crate::matrix::Event::Tab(tab))),
         }
     }
@@ -731,12 +733,13 @@ impl crate::App {
             self.reader_event(ReaderEvent::Close);
             return vec![crate::Message::Canvas(event)];
         }
-        // Focus on one of the bar's stops (a ×, a developer switch) moves the
-        // runtime's focus there, as Tab would, through a focus effect
-        // (ui-layer.md, section 7, rule 6). Only a stop the bar shows now.
+        // Focus on one of the runtime's stops (a toolbar button, a
+        // breadcrumb entry, a ×, a developer switch) moves the runtime's
+        // focus there, as Tab would, through a focus effect (ui-layer.md,
+        // section 7, rule 6). Only a stop that shows now.
         if request.action == accesskit::Action::Focus
             && let Some(id) = self.a11y.ids.id(request.target_node.0)
-            && self.bar_stops().contains(id)
+            && self.our_stops().contains(id)
         {
             let id = id.clone();
             // A focus move ends the screen reader's undo group, as it does

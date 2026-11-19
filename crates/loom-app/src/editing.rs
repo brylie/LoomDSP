@@ -90,32 +90,39 @@ impl App {
         focused.is_some_and(|focused| self.tab_fields().contains(focused))
     }
 
-    /// True while the window's own Tab order has fields that read before
-    /// the stats bar's stops: patch info's, with no overlay open, and the
-    /// bar has a stop to hand Tab on to (ui-layer.md, section 6, rule 2).
-    pub(crate) fn fields_before_the_bar(&self) -> bool {
-        self.no_overlay() && !self.tab_fields().is_empty() && !self.bar_stops().is_empty()
+    /// True while the window's own Tab order has fields among the
+    /// runtime's stops: patch info's, with no overlay open, and the runtime
+    /// has a stop to hand Tab on to (ui-layer.md, section 6, rule 3).
+    pub(crate) fn fields_among_ours(&self) -> bool {
+        self.no_overlay() && !self.tab_fields().is_empty() && !self.our_stops().is_empty()
     }
 
     /// Tab or Shift+Tab between the fields of the view on top: the next one
-    /// takes focus. Past either end of patch info's fields, focus goes on to
-    /// the stats bar's first stop (or its last, with Shift), when it has
-    /// any. With no stop in the bar, and in an overlay, the fields loop as
+    /// takes focus. Past patch info's last field, focus goes on to the
+    /// stats bar's first stop, or the top run's first when the bar has
+    /// none; before its first, to the top run's last stop (Brylie's
+    /// decision, 2026-11-18), or the bar's last when the top run has none.
+    /// With no stop of the runtime's, and in an overlay, the fields loop as
     /// before. With no field of the view in focus it changes nothing: Tab
-    /// from nothing is the canvas's (section 6, rule 2).
+    /// from nothing is the canvas's (section 6, rule 3).
     pub(crate) fn tab_between_fields(&mut self, focused: Option<&UiId>, backwards: bool) {
         let fields = self.tab_fields();
         let at = focused.and_then(|focused| fields.iter().position(|field| field == focused));
         let next = match at {
-            Some(at) if self.fields_before_the_bar() => {
+            Some(at) if self.fields_among_ours() => {
                 let step = if backwards { at.checked_sub(1) } else { Some(at + 1) };
                 match step.and_then(|step| fields.get(step)) {
                     Some(field) => field.clone(),
-                    // Past an end: on to the bar.
+                    // Past an end: on to the runtime's stops, in reading
+                    // order: the bar after the fields, the top run before.
                     None => {
-                        let stops = self.bar_stops();
-                        let stop = if backwards { stops.last() } else { stops.first() };
-                        stop.cloned().expect("fields_before_the_bar checked the bar has a stop")
+                        let (top, bar) = (self.top_stops(), self.bar_stops());
+                        let stop = if backwards {
+                            top.last().or(bar.last())
+                        } else {
+                            bar.first().or(top.first())
+                        };
+                        stop.cloned().expect("fields_among_ours checked there is a stop")
                     }
                 }
             }
@@ -128,6 +135,17 @@ impl App {
             None => return,
         };
         self.effect(loom_ui::Effects::focus(next));
+    }
+
+    /// Focuses patch info's last field, or its first when not `backwards`:
+    /// Tab arriving from one of the runtime's stops (section 6, rule 3).
+    /// Nothing when the view on top has no field.
+    pub(crate) fn enter_fields(&mut self, backwards: bool) {
+        let fields = self.tab_fields();
+        let field = if backwards { fields.last() } else { fields.first() };
+        if let Some(field) = field.cloned() {
+            self.effect(loom_ui::Effects::focus(field));
+        }
     }
 
     /// Starts recording an edit: keeps the patch as it is now. Does nothing

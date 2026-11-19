@@ -227,8 +227,11 @@ fn layers_above_the_target_come_first() {
     click(&mut harness, 5.0, 5.0);
     assert_eq!(clicks(&harness), [UiId::panel("menu").with("item")]);
     assert!(harness.runtime().target().heard.is_empty(), "the target heard nothing");
-    assert_eq!(harness.runtime().focused(), Some(&UiId::panel("menu").with("item")));
-    assert_eq!(harness.runtime().focus_ring(), None, "a press shows no ring");
+    assert_eq!(
+        harness.runtime().focused(),
+        None,
+        "a press on a button takes no focus (section 6, rule 3)"
+    );
 }
 
 /// What the target answers decides the layers below it: Taken stops the
@@ -243,7 +246,7 @@ fn the_target_answer_decides_the_layers_below() {
     let mut passed = harness(false, Routed::Passed);
     click(&mut passed, 5.0, 5.0);
     assert_eq!(clicks(&passed), [UiId::panel("bar").with("a")]);
-    assert_eq!(passed.runtime().focused(), Some(&UiId::panel("bar").with("a")));
+    assert_eq!(passed.runtime().focused(), None, "a button takes no focus from a press");
 
     let mut later = harness(false, Routed::Later);
     click(&mut later, 5.0, 5.0);
@@ -266,7 +269,11 @@ fn pointer_below_runs_the_same_step_for_a_late_answer() {
         assert!(heard.taken);
     }
     assert!(harness.app().heard.is_empty(), "not in the turn that found it");
-    assert_eq!(harness.runtime().focused(), Some(&UiId::panel("bar").with("b")));
+    assert_eq!(
+        harness.runtime().focused(),
+        None,
+        "a button takes no focus from a press"
+    );
     harness.step(key());
     assert_eq!(
         harness.app().heard,
@@ -906,4 +913,23 @@ fn a_held_space_stops_looking_pressed_when_a_layer_rises() {
     assert_eq!(pressed_and_layouts(&mut harness).0, None, "no longer pressed");
     harness.step(release_key(loom_ui_core::Key::Space));
     assert!(clicks(&harness).is_empty(), "and letting go clicks nothing");
+}
+
+/// A press on a button leaves the focus where it was (section 6, rule 3;
+/// Brylie's decision, 2026-11-19): a button that Tab focused keeps the
+/// focus when another button is clicked, and the click still lands, with
+/// the pressed look while it is held.
+#[test]
+fn a_press_on_a_button_leaves_the_focus_where_it_was() {
+    let mut harness = harness(false, Routed::Passed);
+    let (a, b) = (UiId::panel("bar").with("a"), UiId::panel("bar").with("b"));
+    harness.step(press_key(loom_ui_core::Key::Tab, false));
+    assert_eq!(harness.runtime().focused(), Some(&a));
+    harness.step(at(45.0, 5.0, PointerEvent::Moved));
+    harness.step(at(45.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    assert_eq!(pressed_and_layouts(&mut harness).0, Some(b.clone()), "b looks pressed");
+    assert_eq!(harness.runtime().focused(), Some(&a), "a keeps the focus");
+    harness.step(at(45.0, 5.0, PointerEvent::Released(PointerButton::Left)));
+    assert_eq!(clicks(&harness), [b], "the click landed on b");
+    assert_eq!(harness.runtime().focused(), Some(&a), "and a still has it");
 }

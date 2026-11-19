@@ -2740,7 +2740,13 @@ fn measure_and_wgpu_lay_out_alike() {
         assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
         return;
     };
-    assert!(measured.len() > 20, "the walk found the window's parts");
+    // The toolbar and the bar are `loom-ui`'s, so Iced's walk finds the
+    // right column's parts and the canvas's.
+    assert!(
+        measured.len() > 5,
+        "the walk found the window's parts: {}",
+        measured.len()
+    );
     assert_eq!(measured, drawn, "with module 4 selected");
 
     ui.send(Message::OpenBrowser);
@@ -2753,24 +2759,27 @@ fn measure_and_wgpu_lay_out_alike() {
     assert_eq!(measured, drawn, "with the module browser open");
 }
 
-/// A capture runs a redraw update before it draws, as the window does
-/// before every frame: Iced 0.14 sets a button's status only then, and
-/// draws a newly built one as disabled until it has (#460, #776). So an
-/// enabled toolbar button is captured in its enabled colour.
+/// A capture draws the toolbar's buttons in their role's looks
+/// (visual-system.md, Role tokens): an enabled button in its normal fill,
+/// and a turned-off one, Undo with nothing to undo, in its off fill (#460,
+/// #776: a button once drew as disabled in a capture).
 #[test]
 fn a_capture_draws_enabled_buttons_as_enabled() {
-    use iced::widget::button::Status;
     use std::sync::{Arc, Mutex};
     let mut ui = Ui::open("subtractive.ron");
     if !ui.draws_the_canvas() {
         assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
         return;
     }
+    ui.lay_out_panels();
     let open = ui
-        .places()
-        .of(&"toolbar/open".parse().unwrap())
-        .expect("the toolbar shows Open")
-        .rect;
+        .runtime()
+        .bounds(&"toolbar/open".parse().unwrap())
+        .expect("the toolbar shows Open");
+    let undo = ui
+        .runtime()
+        .bounds(&"toolbar/undo".parse().unwrap())
+        .expect("the toolbar shows Undo");
     let seen = Arc::new(Mutex::new(None));
     let got = seen.clone();
     ui.app_mut().effect(loom_ui::Effects::capture(move |image| {
@@ -2785,22 +2794,28 @@ fn a_capture_draws_enabled_buttons_as_enabled() {
         .expect("the capture was answered")
         .expect("a GPU draws it");
 
-    // A pixel inside the button's padding, left of its label.
-    let (x, y) = ((open.x + 3.0) as u32, (open.y + open.height / 2.0) as u32);
-    let at = ((y * image.width() + x) * 4) as usize;
-    let pixel = &image.rgba()[at..at + 3];
-    let theme = ui.app().theme();
-    let colour = |status: Status| match crate::style::secondary(&theme, status).background {
-        Some(iced::Background::Color(color)) => color.into_rgba8(),
-        other => panic!("a secondary button has a plain fill, not {other:?}"),
+    // A pixel inside each button's padding, left of its label.
+    let pixel = |rect: loom_ui_core::Rect| {
+        let (x, y) = ((rect.x + 3.0) as u32, (rect.y + rect.height / 2.0) as u32);
+        let at = ((y * image.width() + x) * 4) as usize;
+        [image.rgba()[at], image.rgba()[at + 1], image.rgba()[at + 2]]
     };
-    let near = |want: [u8; 4]| pixel.iter().zip(want).all(|(got, want)| got.abs_diff(want) <= 2);
-    // The disabled fill is this colour at half opacity, so a button drawn
-    // as disabled shows the toolbar through it and does not match.
+    let rgb = |colour: Option<loom_ui_core::Color>| {
+        let colour = colour.expect("a filled role");
+        [colour.r, colour.g, colour.b].map(|c| (c * 255.0).round() as u8)
+    };
+    let near = |got: [u8; 3], want: [u8; 3]| got.iter().zip(want).all(|(got, want)| got.abs_diff(want) <= 2);
+    let normal = rgb(crate::style::SECONDARY.normal.fill);
+    let off = rgb(crate::style::SECONDARY.off.fill);
     assert!(
-        near(colour(Status::Active)),
-        "{pixel:?} is the enabled fill {:?}",
-        colour(Status::Active)
+        near(pixel(open), normal),
+        "Open: {:?} is the normal fill {normal:?}",
+        pixel(open)
+    );
+    assert!(
+        near(pixel(undo), off),
+        "Undo: {:?} is the off fill {off:?}",
+        pixel(undo)
     );
 }
 

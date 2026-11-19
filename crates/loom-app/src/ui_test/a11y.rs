@@ -206,6 +206,17 @@ impl<'a> A11yNode<'a> {
         self.raw().bounds()
     }
 
+    /// True when it is marked as the current item of its set, as the
+    /// open level's breadcrumb entry is (`aria_current`, Page).
+    pub fn is_current(&self) -> bool {
+        self.raw().aria_current() == Some(accesskit::AriaCurrent::Page)
+    }
+
+    /// True when it is turned off.
+    pub fn is_disabled(&self) -> bool {
+        self.raw().is_disabled()
+    }
+
     /// Its checked state, for a radio option, a toggle, or a check box.
     pub fn toggled(&self) -> Option<accesskit::Toggled> {
         self.raw().toggled()

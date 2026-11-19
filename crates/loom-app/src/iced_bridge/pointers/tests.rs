@@ -92,7 +92,8 @@ fn click(ui: &mut Ui, at: Point) -> Vec<Message> {
 /// The plan's test: with a question open, a click on the toolbar and one
 /// on the bar each reach only the question, and the bar is neither
 /// hovered nor focused. With the question gone, the bar's click is the
-/// bar's: its message runs, and its button has the focus, with no ring.
+/// bar's: its message runs, and its button takes no focus from the press
+/// (section 6, rule 3; Brylie's decision, 2026-11-19).
 #[test]
 fn a_question_holds_presses_on_both_toolkits() {
     let mut ui = ui_with(bar);
@@ -111,19 +112,20 @@ fn a_question_holds_presses_on_both_toolkits() {
     ui.redraw();
     let heard = click(&mut ui, on_go());
     assert!(heard.iter().any(|m| matches!(m, Message::ShowHelp)), "{heard:?}");
-    assert_eq!(ui.runtime().focused(), Some(&go()));
-    assert_eq!(ui.runtime().focus_ring(), None, "a press shows no ring");
+    assert_eq!(ui.runtime().focused(), None, "a press on a button takes no focus");
 }
 
 /// A press Iced captures never reaches the runtime's layers, so the focus
-/// they had stays (section 6, rule 1 is the target's to keep there).
+/// they had stays (section 6, rule 1 is the target's to keep there): a
+/// click on the right panel's Matrix tab, one of Iced's buttons.
 #[test]
 fn a_press_iced_captures_leaves_our_focus() {
     let mut ui = ui_with(bar);
-    click(&mut ui, on_go());
+    // Focused as one of the app's panels would ask, with no click.
+    ui.send(Message::MidiGhosts);
     assert_eq!(ui.runtime().focused(), Some(&go()));
-    let undo = ui.text("Undo").expect("the toolbar shows Undo").center();
-    click(&mut ui, undo);
+    let tab = ui.text("Matrix").expect("Iced shows the Matrix tab").center();
+    click(&mut ui, tab);
     assert_eq!(ui.runtime().focused(), Some(&go()), "Iced took that press");
 }
 
@@ -149,18 +151,24 @@ fn an_iced_field_taking_the_keyboard_ends_our_focus() {
     assert_eq!(ui.app().focus, part, "the app's copy is the field");
 }
 
-/// A layer above Iced takes its point before Iced hears it: a click on the
-/// pop-up over the toolbar is the pop-up's, and the toolbar under it hears
-/// nothing. A move onto it hovers it; a move off, onto the bar below Iced,
-/// moves the hover there; and a move onto the toolbar clears it.
+/// A layer above Iced takes its point before Iced hears it, and before
+/// the toolbar below Iced: a click on the pop-up over the toolbar is the
+/// pop-up's, and the toolbar under it hears nothing. A move onto it hovers
+/// it; a move off, onto the bar below Iced, moves the hover there; a move
+/// onto the toolbar's Undo, past the pop-up, hovers Undo; and a move onto
+/// the canvas, Iced's, clears it.
 #[test]
 fn a_layer_above_iced_keeps_its_points_from_iced() {
     let mut ui = ui_with(bar_and_pop);
-    let open = ui.text("Open").expect("the toolbar shows Open").center();
+    let open = ui
+        .runtime()
+        .text_bounds("Open")
+        .expect("the toolbar shows Open")
+        .center();
     assert!(open.x < POP.0 && open.y < POP.1, "the pop-up covers Open at {open:?}");
-    // The other half of what the pop-up's size assumes: Undo, where the
-    // hover goes back to Iced below, starts past its right edge.
-    let undo_box = ui.text("Undo").expect("the toolbar shows Undo");
+    // The other half of what the pop-up's size assumes: Undo starts past
+    // its right edge.
+    let undo_box = ui.runtime().text_bounds("Undo").expect("the toolbar shows Undo");
     assert!(undo_box.x >= POP.0, "the pop-up leaves Undo out, at {undo_box:?}");
     let heard = click(&mut ui, open);
     assert!(heard.iter().any(|m| matches!(m, Message::ShowShortcuts)), "{heard:?}");
@@ -171,8 +179,11 @@ fn a_layer_above_iced_keeps_its_points_from_iced() {
     assert_eq!(ui.runtime().hovered(), Some(&UiId::panel("test-pop").with("pop")));
     ui.move_to(on_go());
     assert_eq!(ui.runtime().hovered(), Some(&go()));
-    let undo = ui.text("Undo").expect("the toolbar shows Undo").center();
-    ui.move_to(undo);
+    ui.move_to(undo_box.center());
+    assert_eq!(ui.runtime().hovered(), Some(&UiId::panel("toolbar").with("undo")));
+    // The canvas's middle: Iced's, and clear of Undo's hover text, which
+    // keeps the hover while the pointer is on it.
+    ui.move_to(Point::new(500.0, 400.0));
     assert_eq!(ui.runtime().hovered(), None, "Iced holds the hover now");
 }
 
@@ -370,7 +381,7 @@ fn a_key_our_field_takes_is_kept_from_iced() {
     );
 
     ui.step(&[key_press(tab.clone(), none, None, false)]);
-    assert_eq!(ui.runtime().focused(), None, "Tab left our field, past our last stop");
+    assert_ne!(ui.runtime().focused(), Some(&go()), "Tab left our field");
 }
 
 /// Where our text field's focus meets Iced's (section 6, rule 1): with our

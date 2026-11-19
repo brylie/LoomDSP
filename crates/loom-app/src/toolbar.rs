@@ -1,10 +1,21 @@
 //! The toolbar as plain data: what each button says, whether it works, and
-//! its hover text. The window draws its buttons from this model, and the
-//! accessibility tree and the UI snapshot read the same model, so the three
+//! its hover text, and the toolbar's panel, which `loom-ui` draws from it
+//! (plan for leaving Iced, step 3.2, row 2). The panel's elements give the
+//! toolbar's nodes too, and the UI snapshot reads the same model, so they
 //! cannot disagree (`docs/design/ui-layer.md`, section 7, rule 1).
 
+use crate::style::{self, Role as ButtonRole};
 use crate::{App, FileAction, Message, learn, settings};
+use loom_canvas::iced_convert::ToCore as _;
+use loom_ui::access::{Access, Action, Role, States, Value};
+use loom_ui::{Align, Element, Layer, Length, Padding, View};
+use loom_ui_core::{Color, UiId};
 use serde::Serialize;
+
+/// The toolbar's panel. Every button's UI ID is inside it.
+pub(crate) fn toolbar_id() -> UiId {
+    UiId::panel("toolbar")
+}
 
 /// The buttons that sit together in the toolbar, left to right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -182,3 +193,128 @@ impl App {
 
 #[cfg(test)]
 mod tests;
+
+/// What the toolbar's panel is drawn from.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Panel {
+    /// The buttons.
+    pub(crate) model: Model,
+    /// The patch name it shows first, with `* ` while it is unsaved.
+    pub(crate) title: String,
+    /// The rule under it, the theme's strong background, as Iced's was.
+    pub(crate) rule: Color,
+}
+
+impl App {
+    /// Adds the toolbar's panel to the runtime's view, for its slot in the
+    /// window's root panel (`chrome.rs`).
+    pub(crate) fn toolbar_panel(&self, view: &mut View) {
+        let panel = Panel {
+            model: self.toolbar_model(),
+            title: format!("{}{}", if self.unsaved() { "* " } else { "" }, self.patch_name()),
+            rule: self.theme().extended_palette().background.strong.color.to_core(),
+        };
+        view.panel_with(toolbar_id(), Layer::Panels, &panel, toolbar);
+    }
+
+    /// The toolbar's focus stops in the order Tab meets them: its turned-on
+    /// buttons, left to right.
+    pub(crate) fn toolbar_stops(&self) -> Vec<UiId> {
+        self.toolbar_model()
+            .buttons
+            .iter()
+            .filter(|button| button.enabled)
+            .map(|button| toolbar_id().with(button.name))
+            .collect()
+    }
+
+    /// The message for a click, from the pointer, Enter or Space, or a
+    /// screen reader, on a toolbar button: its press, while it is turned on.
+    pub(crate) fn toolbar_click(&self, id: &UiId) -> Option<Message> {
+        let [_, loom_ui_core::IdKey::Name(name)] = id.keys() else {
+            return None;
+        };
+        if !id.is_under(&toolbar_id()) {
+            return None;
+        }
+        let model = self.toolbar_model();
+        model.buttons.iter().find(|button| button.name == &**name)?.press()
+    }
+}
+
+/// A button's role: Panic is danger, a mode that is on is primary, and the
+/// rest are secondary (visual-system.md, Toolbar).
+pub(crate) fn role_of(button: &Button) -> ButtonRole {
+    match (button.name, button.on) {
+        ("panic", _) => ButtonRole::Danger,
+        (_, Some(true)) => ButtonRole::Primary,
+        _ => ButtonRole::Secondary,
+    }
+}
+
+/// The toolbar: the patch name, then the buttons in their groups, with
+/// wider space between groups than inside them, and the rule under it.
+fn toolbar(panel: &Panel) -> Element {
+    let group = |which: Group| {
+        Element::row(
+            panel
+                .model
+                .buttons
+                .iter()
+                .filter(|button| button.group == which)
+                .map(button),
+        )
+        .spacing(6.0)
+        .align_y(Align::Center)
+    };
+    let row = Element::row([
+        Element::text(panel.title.clone(), style::HEADING_TEXT),
+        group(Group::File),
+        Element::space(Length::FILL, Length::Shrink),
+        group(Group::Add),
+        group(Group::Play),
+        group(Group::Edit),
+        group(Group::Setup),
+    ])
+    .spacing(20.0)
+    .padding(Padding::symmetric(6.0, 10.0))
+    .align_y(Align::Center)
+    .width(Length::FILL)
+    .height(Length::FILL);
+    Element::column([
+        row,
+        Element::space(Length::FILL, Length::Fixed(style::RULE)).background(panel.rule),
+    ])
+    .width(Length::FILL)
+    .height(Length::FILL)
+}
+
+/// One button: its label in its role's looks, a focus stop while it is
+/// turned on, with its hover text, which is also its description, and a
+/// mode's on or off (ui-layer.md, section 7, the toolbar button's row).
+fn button(button: &Button) -> Element {
+    let role = role_of(button);
+    let mut access = Access::new(Role::Button, button.label);
+    if let Some(on) = button.on {
+        access = access.value(Value::On(on));
+    }
+    access = if button.enabled {
+        access.action(Action::Click)
+    } else {
+        access.states(States {
+            disabled: true,
+            ..States::default()
+        })
+    };
+    let face = Element::text(button.label, style::CONTROL_TEXT)
+        .padding(style::BUTTON_PADDING)
+        .radius(role.tokens().radius)
+        .looks(role.looks())
+        .key(button.name)
+        .focusable()
+        .access(access);
+    match &button.hover {
+        Some(hover) => face.hover_text(hover.clone()),
+        None => face,
+    }
+}

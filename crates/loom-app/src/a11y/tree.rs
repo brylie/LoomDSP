@@ -14,7 +14,6 @@ use super::items;
 use crate::matrix::Tab;
 use crate::places::Places;
 use crate::snapshot::{Rect, UiSnapshot, Widget};
-use crate::toolbar;
 use accesskit::{Action, Node, NodeId, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
 use loom_canvas::{CanvasView, ControlPart, Reading, WidgetViewKind, arrow_share, option_bounds, part_bounds};
 use loom_core::ParamSpec;
@@ -403,8 +402,13 @@ pub(crate) fn tree(
         table,
         nodes: &mut nodes,
     };
-    let mut children = vec![frame.toolbar(&snapshot.toolbar), frame.tabs(snapshot.matrix.tab)];
-    let bar = frame.ours(ours);
+    // The runtime's own panels: the toolbar, the breadcrumb inside a
+    // sub-patch, and the bar, each in its named group.
+    let groups = frame.ours(ours);
+    let mut children = groups.toolbar;
+    children.extend(groups.breadcrumb);
+    children.push(frame.tabs(snapshot.matrix.tab));
+    let bar = groups.bar;
     // The open panel, drawn beside the canvas: each of its parts, and the
     // panel itself marked as cutting off what it scrolls out of view.
     let panel: Vec<NodeId> = frames.panel.iter().map(|item| frame.panel(item)).collect();
@@ -585,9 +589,7 @@ pub(crate) fn fixed_id(text: &str) -> UiId {
 }
 
 /// The UI ID of the toolbar. Every button's ID is inside it.
-pub(crate) fn toolbar_id() -> UiId {
-    UiId::panel("toolbar")
-}
+pub(crate) use crate::toolbar::toolbar_id;
 
 /// The UI ID of the right panel's tabs. Each tab's ID is inside it.
 pub(crate) fn tabs_id() -> UiId {
@@ -608,21 +610,19 @@ pub(crate) fn is_live_bar_item(id: &UiId) -> bool {
     *id == fixed_id("stats/load") || *id == fixed_id("stats/dropouts")
 }
 
-/// What a press, a tab, or a switch outside the canvas does, by the node's
-/// UI ID.
+/// What a press on a part Iced draws outside the canvas does, by the
+/// node's UI ID. The toolbar, the breadcrumb, and the bar are `loom-ui`'s,
+/// and act through their own clicks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FramePart<'a> {
-    /// A toolbar button, by its fixed name.
-    Button(&'a str),
+pub(crate) enum FramePart {
     /// One of the right panel's tabs.
     Tab(Tab),
 }
 
 /// What `id` names outside the canvas, if it names something that acts.
-pub(crate) fn frame_part(id: &UiId) -> Option<FramePart<'_>> {
+pub(crate) fn frame_part(id: &UiId) -> Option<FramePart> {
     if let [IdKey::Name(panel), IdKey::Name(name)] = id.keys() {
         match (&**panel, &**name) {
-            ("toolbar", name) => return Some(FramePart::Button(name)),
             ("panel", "inspector") => return Some(FramePart::Tab(Tab::Inspector)),
             ("panel", "matrix") => return Some(FramePart::Tab(Tab::Matrix)),
             _ => {}
@@ -835,35 +835,6 @@ impl Frame<'_> {
         id
     }
 
-    /// The toolbar: a named group with one button per toolbar button. A
-    /// button's hover text is its description, and says why while the
-    /// button is disabled. Outside the canvas only text fields take
-    /// keyboard focus until phase 3, so a button offers Click and no
-    /// Focus (ui-layer.md, section 7, rule 22).
-    fn toolbar(&mut self, model: &toolbar::Model) -> NodeId {
-        let mut buttons = Vec::new();
-        for button in &model.buttons {
-            let mut node = Node::new(Role::Button);
-            node.set_label(button.label);
-            if let Some(hover) = &button.hover {
-                node.set_description(hover.clone());
-            }
-            if let Some(on) = button.on {
-                node.set_toggled(if on { Toggled::True } else { Toggled::False });
-            }
-            if button.enabled {
-                node.add_action(Action::Click);
-            } else {
-                node.set_disabled();
-            }
-            buttons.push(self.add(&toolbar_id().with(button.name), node));
-        }
-        let mut group = Node::new(Role::Group);
-        group.set_label("Toolbar");
-        group.set_children(buttons);
-        self.add(&toolbar_id(), group)
-    }
-
     /// The right panel's tabs: a tab list with the open tab selected.
     fn tabs(&mut self, open: Tab) -> NodeId {
         let mut tabs = Vec::new();
@@ -880,12 +851,12 @@ impl Frame<'_> {
         self.add(&tabs_id(), list)
     }
 
-    /// The runtime's own nodes, from `loom-ui`'s layout: the stats bar's
-    /// items, in a group named "Status bar" around them, as the window's
-    /// child. Below a panel that owns the input they are hidden, as the
-    /// window's other parts are.
-    fn ours(&mut self, ours: &loom_ui::AccessNodes) -> Vec<NodeId> {
-        let mut bounds: Option<accesskit::Rect> = None;
+    /// The runtime's own nodes, from `loom-ui`'s layout, as the window's
+    /// children: the toolbar's buttons in a group named "Toolbar", the
+    /// breadcrumb's entries in one named "Patch levels", and the stats
+    /// bar's items in one named "Status bar". Below a panel that owns the
+    /// input they are hidden, as the window's other parts are.
+    fn ours(&mut self, ours: &loom_ui::AccessNodes) -> Ours {
         let tops: Vec<NodeId> = ours
             .roots
             .iter()
@@ -896,29 +867,61 @@ impl Frame<'_> {
             if self.covered {
                 node.set_hidden();
             }
-            if tops.contains(id)
-                && let Some(b) = node.bounds()
-            {
-                bounds = Some(bounds.map_or(b, |a| a.union(b)));
-            }
             self.nodes.push((*id, node));
         }
-        if tops.is_empty() {
+        let under = |panel: &UiId| -> Vec<NodeId> {
+            tops.iter()
+                .copied()
+                .filter(|top| self.table.id(top.0).is_some_and(|id| id.is_under(panel)))
+                .collect()
+        };
+        let toolbar = under(&toolbar_id());
+        let breadcrumb = under(&crate::breadcrumb::breadcrumb_id());
+        let bar = under(&crate::stats_bar::stats_id());
+        Ours {
+            toolbar: self.group(toolbar, "Toolbar", &toolbar_id()),
+            breadcrumb: self.group(breadcrumb, "Patch levels", &crate::breadcrumb::breadcrumb_id()),
+            bar: self.group(bar, "Status bar", &crate::stats_bar::stats_id()),
+        }
+    }
+
+    /// A group named `label`, with UI ID `id`, around `children`, which
+    /// were pushed already, and their bounds; none when there are no
+    /// children.
+    fn group(&mut self, children: Vec<NodeId>, label: &str, id: &UiId) -> Vec<NodeId> {
+        if children.is_empty() {
             return Vec::new();
         }
+        let bounds = self
+            .nodes
+            .iter()
+            .filter(|(node, _)| children.contains(node))
+            .filter_map(|(_, node)| node.bounds())
+            .reduce(|a, b| a.union(b));
         let mut group = Node::new(Role::Group);
-        group.set_label("Status bar");
-        group.set_children(tops);
+        group.set_label(label);
+        group.set_children(children);
         if let Some(bounds) = bounds {
             group.set_bounds(bounds);
         }
         if self.covered {
             group.set_hidden();
         }
-        let id = node_id(self.table, &crate::stats_bar::stats_id());
+        let id = node_id(self.table, id);
         self.nodes.push((id, group));
         vec![id]
     }
+}
+
+/// The runtime's own nodes, in their groups: each list is empty or holds
+/// its group.
+struct Ours {
+    /// The toolbar's group.
+    toolbar: Vec<NodeId>,
+    /// The breadcrumb's group, inside a sub-patch.
+    breadcrumb: Vec<NodeId>,
+    /// The stats bar's group.
+    bar: Vec<NodeId>,
 }
 
 /// Sets a slider's value, range, and step from the parameter it moves.

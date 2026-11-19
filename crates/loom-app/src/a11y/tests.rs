@@ -1232,10 +1232,9 @@ fn only_changed_nodes_are_sent() {
     assert!(changes.tree.is_none(), "the root is named once");
     let changed = sent_ids(&changes);
     assert!(changed.contains(&cutoff));
-    // The knob, at most what shows the same value beside it, and the
-    // toolbar's Undo and Redo, which now have a step to name.
-    let undo = node_of(&mut app, &tree::toolbar_id().with("undo"));
-    assert!(changed.contains(&undo));
+    // The knob, and at most what shows the same value beside it. The
+    // toolbar's Undo and Redo, which now have a step to name, are
+    // `loom-ui`'s nodes (`toolbar/tests.rs`).
     assert!(changed.len() <= 4, "{changed:?}");
     assert!(changed.len() < whole.nodes.len());
 }
@@ -1957,35 +1956,6 @@ fn a_click_on_another_tile_drops_focus_from_the_first() {
     );
 }
 
-/// The toolbar is a named group of buttons. Each button has its label, its
-/// hover text as the description, and Click only while it works. A mode
-/// button says whether its mode is on. No button offers Focus: outside
-/// the canvas only text fields take it until phase 3 (ui-layer.md, section
-/// 7, rule 22).
-#[test]
-fn the_toolbar_is_a_group_of_buttons() {
-    let (mut app, _, _) = app_with_filter();
-    let update = app.a11y_tree(&Places::default());
-    let root = node_of(&mut app, &window_id());
-    let toolbar = node_of(&mut app, &tree::toolbar_id());
-    assert_eq!(node(&update, root).children().first(), Some(&toolbar));
-    assert_eq!(node(&update, toolbar).role(), Role::Group);
-    assert_eq!(node(&update, toolbar).label(), Some("Toolbar"));
-
-    let model = app.toolbar_model();
-    assert_eq!(node(&update, toolbar).children().len(), model.buttons.len());
-    for button in &model.buttons {
-        let found = node(&update, node_of(&mut app, &tree::toolbar_id().with(button.name)));
-        assert_eq!(found.role(), Role::Button, "{}", button.name);
-        assert_eq!(found.label(), Some(button.label));
-        assert_eq!(found.description(), button.hover.as_deref());
-        assert_eq!(found.supports_action(Action::Click), button.enabled, "{}", button.name);
-        assert_eq!(found.is_disabled(), !button.enabled, "{}", button.name);
-        assert!(!found.supports_action(Action::Focus), "{}", button.name);
-        assert_eq!(found.toggled().is_some(), button.on.is_some(), "{}", button.name);
-    }
-}
-
 /// A Click on a toolbar button sends the message its press sends. A
 /// disabled button, another action, and a node that is no button send
 /// nothing.
@@ -2019,8 +1989,8 @@ fn a_click_on_a_toolbar_button_presses_it() {
     let learn = node_of(&mut app, &tree::toolbar_id().with("midi_learn"));
     act(&mut app, &request(Action::Click, learn, None), now);
     assert!(app.ui_snapshot().learning);
-    let update = app.a11y_tree(&Places::default());
-    assert_eq!(node(&update, learn).toggled(), Some(accesskit::Toggled::True));
+    // The node says it is on: the toolbar's nodes come from `loom-ui`'s
+    // layout, checked with the `Ui` harness (`toolbar/tests.rs`).
 }
 
 /// The right panel's tabs are a tab list with the open tab selected, and a
@@ -2049,13 +2019,14 @@ fn the_right_panel_has_tabs() {
     assert_eq!(node(&update, inspector).is_selected(), Some(false));
 }
 
-/// What a UI ID names outside the canvas: a button, a tab, or nothing that
-/// acts. The stats bar's parts are `loom-ui`'s (`stats_bar/tests.rs`).
+/// What a UI ID names outside the canvas: a tab, or nothing that acts. The
+/// toolbar's, the breadcrumb's, and the stats bar's parts are `loom-ui`'s
+/// and act through their own clicks (`toolbar/tests.rs`,
+/// `stats_bar/tests.rs`).
 #[test]
 fn frame_parts_are_told_by_their_ids() {
     use tree::{FramePart, frame_part};
     let id = |text: &str| tree::fixed_id(text);
-    assert_eq!(frame_part(&id("toolbar/undo")), Some(FramePart::Button("undo")));
     assert_eq!(
         frame_part(&id("panel/matrix")),
         Some(FramePart::Tab(crate::matrix::Tab::Matrix))
@@ -2065,6 +2036,7 @@ fn frame_parts_are_told_by_their_ids() {
         Some(FramePart::Tab(crate::matrix::Tab::Inspector))
     );
     for nothing in [
+        "toolbar/undo",
         "stats/load",
         "stats/status/dismiss",
         "stats/measure",
@@ -2091,29 +2063,23 @@ fn frame_nodes_have_the_bounds_the_window_drew() {
     ui.app_mut().window_scale = 2.0;
     let update = ui.app_mut().a11y_tree(&places);
 
-    let mut ids: Vec<UiId> = ui
-        .app()
-        .toolbar_model()
-        .buttons
-        .iter()
-        .map(|button| tree::toolbar_id().with(button.name))
-        .collect();
-    // The stats bar's parts are `loom-ui`'s, placed by its layout
-    // (`stats_bar/tests.rs`).
-    ids.push(tree::tab_id(crate::matrix::Tab::Inspector));
-    ids.push(tree::tab_id(crate::matrix::Tab::Matrix));
-    // The groups hold their parts, so only the parts are compared for
+    // The toolbar's and the stats bar's parts are `loom-ui`'s, placed by
+    // its layout (`toolbar/tests.rs`, `stats_bar/tests.rs`).
+    let ids: Vec<UiId> = vec![
+        tree::tab_id(crate::matrix::Tab::Inspector),
+        tree::tab_id(crate::matrix::Tab::Matrix),
+    ];
+    // The tab list holds the tabs, so only the tabs are compared for
     // overlap below.
-    for group in [tree::toolbar_id(), tree::tabs_id()] {
-        let place = places
-            .of(&group)
-            .unwrap_or_else(|| panic!("the window drew no `{group}`"));
-        assert!(place.rect.width > 0.0 && place.rect.height > 0.0, "{group}");
-        assert!(
-            node(&update, node_of(ui.app_mut(), &group)).bounds().is_some(),
-            "{group}"
-        );
-    }
+    let group = tree::tabs_id();
+    let place = places
+        .of(&group)
+        .unwrap_or_else(|| panic!("the window drew no `{group}`"));
+    assert!(place.rect.width > 0.0 && place.rect.height > 0.0, "{group}");
+    assert!(
+        node(&update, node_of(ui.app_mut(), &group)).bounds().is_some(),
+        "{group}"
+    );
     let mut seen: Vec<accesskit::Rect> = Vec::new();
     for id in &ids {
         let place = places.of(id).unwrap_or_else(|| panic!("the window drew no `{id}`"));
@@ -2136,20 +2102,25 @@ fn frame_nodes_have_the_bounds_the_window_drew() {
 
 /// While a panel owns the input, the toolbar, the tabs, and the bar are
 /// hidden with the tiles, and a Click on a button behind the panel does
-/// nothing.
+/// nothing. The toolbar's nodes come from `loom-ui`'s layout, so this
+/// runs on the `Ui` harness.
 #[test]
 fn frame_nodes_are_hidden_below_a_panel() {
-    let (mut app, _, _) = app_with_filter();
-    let _ = app.a11y_tree(&Places::default());
-    let add = node_of(&mut app, &tree::toolbar_id().with("add_module"));
-    app.overlays.open(crate::overlays::Overlay::RecentList(Vec::new()));
-    assert!(!app.no_overlay());
-    let update = app.a11y_tree(&Places::default());
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let add = node_of(ui.app_mut(), &tree::toolbar_id().with("add_module"));
+    ui.app_mut()
+        .overlays
+        .open(crate::overlays::Overlay::RecentList(Vec::new()));
+    ui.redraw();
+    assert!(!ui.app().no_overlay());
+    ui.read_runtime_nodes();
+    let places = ui.places();
+    let update = ui.app_mut().a11y_tree(&places);
     for id in [tree::toolbar_id(), tree::tabs_id(), tree::toolbar_id().with("undo")] {
-        assert!(node(&update, node_of(&mut app, &id)).is_hidden(), "{id}");
+        assert!(node(&update, node_of(ui.app_mut(), &id)).is_hidden(), "{id}");
     }
-    assert!(!act(
-        &mut app,
+    assert!(!ui_act(
+        &mut ui,
         &request(Action::Click, add, None),
         std::time::Instant::now()
     ));
@@ -2285,10 +2256,12 @@ fn the_tree_follows_the_pointer_under_every_panel() {
             tile.widgets[knob].position
         };
 
-        // What a screen reader is told, and what its actions would do.
+        // What a screen reader is told, and what its actions would do. The
+        // toolbar is `loom-ui`'s: its nodes come from the runtime's layout.
+        ui.read_runtime_nodes();
         let places = ui.places();
         let panic_id = tree::toolbar_id().with("panic");
-        assert!(places.of(&panic_id).is_some(), "Panic is drawn");
+        assert!(ui.runtime().bounds(&panic_id).is_some(), "Panic is drawn");
         let update = ui.app_mut().a11y_tree(&places);
         let panic_node = node_of(ui.app_mut(), &panic_id);
         let click = ui.app().a11y_frame_message(&request(Action::Click, panic_node, None));
@@ -2350,11 +2323,12 @@ fn the_tree_follows_the_pointer_under_every_panel() {
     }
     for (owner, mut ui) in with_each_panel() {
         let open = owner == InputOwner::Canvas;
+        ui.lay_out_panels();
         let panic = ui
-            .places()
-            .of(&tree::toolbar_id().with("panic"))
+            .runtime()
+            .bounds(&tree::toolbar_id().with("panic"))
             .expect("Panic is drawn");
-        let mut messages = ui.move_to(panic.rect.center());
+        let mut messages = ui.move_to(panic.center());
         messages.extend(ui.press());
         messages.extend(ui.release());
         let reached = messages.iter().any(|message| matches!(message, Message::Panic));
@@ -3624,6 +3598,7 @@ fn with_each_small_overlay() -> Vec<(&'static str, crate::ui_test::Ui)> {
 fn every_small_overlay_part_is_named_and_placed() {
     use super::items::Kind;
     for (name, mut ui) in with_each_small_overlay() {
+        ui.read_runtime_nodes();
         let places = ui.places();
         let update = ui.app_mut().a11y_tree(&places);
         let frames = ui.app().a11y_frames();

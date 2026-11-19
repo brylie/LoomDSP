@@ -178,6 +178,7 @@ fn states_reach_the_node_and_disabled_offers_nothing() {
             selected: true,
             expanded: Some(false),
             modal: true,
+            current: true,
         });
     assert!(access.is_disabled());
     let node = access.node(false);
@@ -185,6 +186,7 @@ fn states_reach_the_node_and_disabled_offers_nothing() {
     assert_eq!(node.is_selected(), Some(true));
     assert_eq!(node.is_expanded(), Some(false));
     assert!(node.is_modal());
+    assert_eq!(node.aria_current(), Some(accesskit::AriaCurrent::Page));
     assert!(!node.supports_action(KitAction::Increment));
     assert!(!node.supports_action(KitAction::ShowContextMenu));
     assert!(!node.supports_action(KitAction::Focus));
