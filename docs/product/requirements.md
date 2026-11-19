@@ -249,7 +249,7 @@ Deferred; see the roadmap and ADR-0003. It will ship, as a first-class target (B
 
 | ID | Requirement | Priority | Phase | Rationale |
 |---|---|---|---|---|
-| FR-WAM-01 | Export a patch as a WAM2 package: descriptor, JS glue, AudioWorklet processor, WASM engine, patch data, and panel GUI. | Could | Later | Opens the browser plugin ecosystem. |
+| FR-WAM-01 | Export a patch as a WAM2 package: descriptor, JS glue, AudioWorklet processor, WASM engine, patch data, and panel GUI. | Must | Later | Opens the browser plugin ecosystem. Must since Brylie's decision of 2026-11-19, as web export will ship; the roadmap sets when. |
 | FR-WAM-02 | The whole patch runs inside one AudioWorkletProcessor and one WASM instance. | Must (if web) | Later | Separate Web Audio nodes add 128-sample delays and break feedback. |
 | FR-WAM-03 | Exposed panel parameters become WAM2 parameters. MIDI and automation events are sample-accurate. State save/restore works. | Must (if web) | Later | Basic WAM2 contract. |
 | FR-WAM-04 | Works without cross-origin isolation, with reduced visual update quality. | Should (if web) | Later | Many hosts cannot set COOP/COEP headers. |
