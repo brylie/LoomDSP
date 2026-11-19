@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 432" width="1040" height="432" role="img" aria-labelledby="title desc">
+  <title id="title">Proposed filter tile and inspector in LoomDSP</title>
+  <desc id="desc">In Subtractive, the selected SVF has a thin amber outer edge. A schematic Lowpass response falls toward high frequencies above the play controls. Cutoff has a blue keyboard focus ring, a white pointer, an amber value arc and a separate 300.0 Hz readout. The inspector repeats the same value on the right and gives modulation a quieter text action. Panic stays at the end of the command bar.</desc>
+  <defs>
+    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="10" cy="10" r="0.9" fill="#383c43"/>
+    </pattern>
+    <path id="dial" d="M-21.21 21.21 A30 30 0 1 1 21.21 21.21"/>
+    <style>
+      text { font-family: Inter, Helvetica, sans-serif; fill: #eceef2; font-size: 15px; }
+      .title { font-size: 19px; font-weight: 600; }
+      .detail { fill: #bcc2cd; font-size: 13px; }
+      .small { font-size: 13px; }
+      .number { font-variant-numeric: tabular-nums; }
+      .track { fill: none; stroke: #808794; stroke-width: 4; stroke-linecap: round; }
+      .value { fill: none; stroke: #f5a623; stroke-width: 4; stroke-linecap: round; }
+    </style>
+  </defs>
+  <rect width="1040" height="432" fill="#1c1e23"/>
+  <rect y="57" width="686" height="331" fill="url(#grid)"/>
+  <!-- Toolbar and inspector share a flat surface. -->
+  <g fill="#22242a">
+    <rect width="1040" height="56"/>
+    <rect x="686" y="56" width="354" height="332"/>
+    <rect y="388" width="1040" height="44"/>
+  </g>
+  <path d="M0 56H1040 M686 56V388 M0 388H1040" fill="none" stroke="#494e59"/>
+  <text x="24" y="34" class="title">Subtractive</text>
+  <rect x="147" y="12" width="78" height="32" rx="4" fill="#343942"/>
+  <text x="162" y="33">Patch</text>
+  <path d="m206 25 4 4 4-4" stroke="#eceef2" fill="none"/>
+  <rect x="524" y="12" width="114" height="32" rx="4" fill="#343942"/>
+  <text x="540" y="33">Add module</text>
+  <text x="661" y="33">Hold note</text>
+  <text x="760" y="33">MIDI learn</text>
+  <text x="870" y="33">More</text>
+  <rect x="944" y="11" width="74" height="34" rx="4" fill="#e04f4f"/>
+  <text x="981" y="33" text-anchor="middle" style="fill:#16181c;font-weight:600">Panic</text>
+  <!-- A detail view. Two cables enter, Lowpass leaves. -->
+  <g fill="none" stroke-width="3">
+    <path d="M0 139C46 139 53 210 111 210 M536 210C600 210 605 156 686 156" stroke="#e66961"/>
+    <path d="M0 296C50 296 54 243 111 243" stroke="#ed9e51"/>
+  </g>
+  <rect x="111" y="77" width="425" height="239" rx="6" fill="#2b2e35" stroke="#f5a623" stroke-width="2"/>
+  <path d="M118 79H529Q534 79 534 84V111H113V84Q113 79 118 79Z" fill="#324553"/>
+  <text x="129" y="101" class="title">SVF</text>
+  <text x="518" y="101" text-anchor="end" class="small">Filters and effects</text>
+  <rect x="122" y="116" width="402" height="54" rx="3" fill="#22242a" stroke="#454954"/>
+  <text x="131" y="138" class="small">Lowpass response</text>
+  <text x="131" y="157" class="detail">20 Hz to 20 kHz →</text>
+  <path d="M270 135H512" stroke="#555c68" stroke-dasharray="3 5"/>
+  <path d="M270 135H319C341 135 355 128 365 129S398 139 413 143L508 166"
+        fill="none" stroke="#b0cad7" stroke-width="2.5" stroke-linejoin="round"/>
+  <g fill="#2b2e35" stroke-width="2.5">
+    <circle cx="111" cy="210" r="5" stroke="#e66961"/>
+    <rect x="106" y="238" width="10" height="10" stroke="#ed9e51"/>
+    <g stroke="#e66961">
+      <circle cx="536" cy="210" r="5"/><circle cx="536" cy="235" r="5"/>
+      <circle cx="536" cy="260" r="5"/><circle cx="536" cy="285" r="5"/>
+    </g>
+  </g>
+  <g class="small">
+    <text x="126" y="215" class="detail">In</text>
+    <text x="126" y="248" class="detail">Cutoff</text>
+    <g text-anchor="end">
+      <text x="520" y="215" class="detail">Lowpass</text><text x="520" y="240" class="detail">Bandpass</text>
+      <text x="520" y="265" class="detail">Highpass</text><text x="520" y="290" class="detail">Notch</text>
+    </g>
+  </g>
+  <g transform="translate(260 216)">
+    <rect x="-40" y="-39" width="80" height="77" rx="10" fill="none" stroke="#6cb4f0" stroke-width="2"/>
+    <use href="#dial" class="track"/>
+    <path d="M-21.21 21.21 A30 30 0 0 1 -14.62 -26.20" class="value"/>
+    <circle r="23" fill="#3a3e47"/>
+    <path d="M-6 -11L-10 -18" stroke="#eceef2" stroke-width="3" stroke-linecap="round"/>
+    <text y="60" text-anchor="middle">Cutoff</text>
+    <text y="80" text-anchor="middle" class="detail number">300.0 Hz</text>
+  </g>
+  <g transform="translate(368 216)">
+    <use href="#dial" class="track"/>
+    <path d="M-21.21 21.21 A30 30 0 0 1 13.62 -26.73" class="value"/>
+    <circle r="23" fill="#3a3e47"/>
+    <path d="M6 -11L10 -18" stroke="#eceef2" stroke-width="3" stroke-linecap="round"/>
+    <text y="60" text-anchor="middle">Resonance</text>
+  </g>
+  <!-- The same parameter in its precision editor. -->
+  <text x="711" y="89" font-weight="600">Inspector</text>
+  <text x="815" y="89" class="detail">Matrix</text>
+  <path d="M710 101H781" stroke="#eceef2" stroke-width="2"/>
+  <path d="M704 111H1020 M709 244H1015" stroke="#414650"/>
+  <text x="711" y="142" class="title">SVF</text>
+  <text x="1013" y="142" text-anchor="end" class="detail">Help</text>
+  <text x="711" y="181">Cutoff</text>
+  <rect x="923" y="159" width="91" height="31" rx="4" fill="#2b2e35" stroke="#808794"/>
+  <text x="1004" y="180" text-anchor="end" class="number">300.0 Hz</text>
+  <path d="M713 204H1011" class="track"/>
+  <path d="M713 204H830" class="value"/>
+  <circle cx="830" cy="204" r="6" fill="#f5a623"/>
+  <text x="711" y="231" class="detail">+ Add modulation</text>
+  <text x="711" y="275">Resonance</text>
+  <rect x="923" y="253" width="91" height="31" rx="4" fill="#2b2e35" stroke="#808794"/>
+  <text x="1004" y="274" text-anchor="end" class="number">0.600</text>
+  <path d="M713 298H1011" class="track"/>
+  <path d="M713 298H892" class="value"/>
+  <circle cx="892" cy="298" r="6" fill="#f5a623"/>
+  <text x="711" y="325" class="detail">+ Add modulation</text>
+  <text x="711" y="368" class="detail">Ports</text>
+  <path d="m1001 359 5 5-5 5" fill="none" stroke="#bcc2cd" stroke-width="2"/>
+  <text x="24" y="415" class="detail">10 modules, 10 cables</text>
+  <text x="1016" y="415" text-anchor="end" class="detail">Arrows change, Enter types a value, Escape leaves</text>
+</svg>

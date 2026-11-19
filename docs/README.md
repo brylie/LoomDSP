@@ -56,6 +56,7 @@ Why decisions are kept apart from specifications: a decision record explains *wh
 |---|---|
 | [Prior-art survey, 2026-10](research/2026-10-prior-art-survey.md) | Modules in 15 modular environments, as evidence for the module catalogue |
 | [Desktop play test, 2026-11-19](research/2026-11-19-desktop-playtest.md) | Three playable examples, repeatable UX checks, and backlog follow-ups |
+| [Desktop UX audit and design language, 2026-11-19](research/2026-11-19-release-polish.md) | Release priorities, window captures, module shapes, live polyphonic envelope study, and checks with musicians |
 
 ## Benchmarks
 
