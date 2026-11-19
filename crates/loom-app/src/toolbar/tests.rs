@@ -130,7 +130,11 @@ fn the_toolbar_nodes_match_the_snapshot() {
     if std::env::var_os("LOOM_UPDATE_REFERENCES").is_some() {
         std::fs::write(&path, &got).expect("the snapshot is written");
     }
-    let want = std::fs::read_to_string(&path).expect("the snapshot exists: run with LOOM_UPDATE_REFERENCES=1");
+    // Read with Unix line endings: a checkout on Windows may write the file
+    // with CRLF, and the snapshot is the same either way.
+    let want = std::fs::read_to_string(&path)
+        .expect("the snapshot exists: run with LOOM_UPDATE_REFERENCES=1")
+        .replace("\r\n", "\n");
     assert_eq!(got, want);
 }
 
