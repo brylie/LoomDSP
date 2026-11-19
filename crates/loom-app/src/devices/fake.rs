@@ -15,6 +15,8 @@ pub enum Event {
 #[derive(Default)]
 pub struct Fake {
     pub outputs: RefCell<Outputs>,
+    /// Changes the system default immediately after the next device list is read.
+    pub default_after_list: RefCell<Option<String>>,
     /// Available fake input devices.
     pub audio_inputs: RefCell<Inputs>,
     /// The producer held by the open fake input.
@@ -260,7 +262,12 @@ pub struct Shared(pub Rc<Fake>);
 
 impl Host for Shared {
     fn outputs(&self) -> Result<Outputs, String> {
-        Ok(self.0.outputs.borrow().clone())
+        let mut outputs = self.0.outputs.borrow_mut();
+        let listed = outputs.clone();
+        if let Some(name) = self.0.default_after_list.borrow_mut().take() {
+            outputs.default = Some(name);
+        }
+        Ok(listed)
     }
 
     fn midi_lister(&self) -> Option<crate::devices::MidiLister> {

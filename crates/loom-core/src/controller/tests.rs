@@ -61,6 +61,7 @@ fn rebuild_resets_transient_values_and_keeps_saved_controls() {
         controller: 9,
     };
     let (mapping, _) = original.map_midi(control, module, 1).unwrap();
+    original.graph.midi_mappings.get_mut(&mapping).unwrap().learned = true;
     original.set_label(module, Some("Stage switch".into()));
     original.set_tempo(99.0).unwrap();
     original.set_running(false).unwrap();
@@ -74,6 +75,8 @@ fn rebuild_resets_transient_values_and_keeps_saved_controls() {
     assert_eq!(node.label.as_deref(), Some("Stage switch"));
     assert_eq!(node.params, [0.0, 1.0, 0.0]);
     assert_eq!(rebuilt.graph().midi_mapping_on(control).unwrap().0, mapping);
+    assert!(!rebuilt.graph().midi_mapping_on(control).unwrap().1.learned);
+    assert!(original.graph().midi_mapping_on(control).unwrap().1.learned);
     assert_eq!(rebuilt.transport().tempo, 99.0);
     assert!(!rebuilt.transport().running);
     assert_eq!(rebuilt.config().sample_rate, 44_100.0);
@@ -89,6 +92,31 @@ fn rebuild_resets_transient_values_and_keeps_saved_controls() {
         )
         .unwrap();
     assert_ne!(new_mapping, mapping);
+}
+
+/// Rebuilding drains startup commands without growing the runtime queue
+/// or advancing the transport, even when only one command fits at a time.
+#[test]
+fn rebuild_batches_modules_and_transport_with_a_one_command_queue() {
+    let mut original = controller(16);
+    for _ in 0..4 {
+        original.add_module(GATE.id).unwrap();
+    }
+    original.set_tempo(99.0).unwrap();
+    original.set_time_signature(TimeSignature::new(7, 8)).unwrap();
+    original.set_running(false).unwrap();
+    original.commit().unwrap();
+
+    let config = EngineConfig {
+        command_capacity: 1,
+        ..EngineConfig::with_sample_rate(44_100.0)
+    };
+    let mut rebuilt = original.rebuild(config).unwrap().controller;
+    assert_eq!(rebuilt.graph().len(), 4);
+    assert_eq!(rebuilt.transport(), original.transport());
+    assert_eq!(rebuilt.config().command_capacity, 1);
+    rebuilt.set_running(true).unwrap();
+    assert!(matches!(rebuilt.set_running(false), Err(LoomError::QueueFull)));
 }
 
 #[test]

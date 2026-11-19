@@ -327,7 +327,8 @@ pub fn offered_rates(info: &OutputInfo) -> Vec<u32> {
         .collect()
 }
 
-fn offers_rate(info: &OutputInfo, rate: u32) -> bool {
+/// Whether the reported hardware range supports this exact rate.
+pub(crate) fn offers_rate(info: &OutputInfo, rate: u32) -> bool {
     info.rates.iter().any(|&(lo, hi)| (lo..=hi).contains(&rate))
 }
 

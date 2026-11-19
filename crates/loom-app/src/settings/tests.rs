@@ -1918,3 +1918,172 @@ fn external_clock_disables_local_edits_and_reports_signal_loss() {
     app.poll_midi();
     assert_eq!(app.alerts.status(), "Following Drums clock");
 }
+
+/// The default selected to check capabilities is the device actually opened.
+#[test]
+fn device_change_pins_the_default_read_for_capabilities() {
+    let dir = folder("pin-default");
+    write(&dir, "(audio: (device: Named(\"Fake A\"), sample_rate: Hz(96000)))");
+    let mut a = fake::device("Fake A");
+    a.rates.push((96_000, 96_000));
+    let fake = Rc::new(Fake::new(&[a.clone(), fake::device("Fake B")], &[]));
+    let mut app = start(args(&dir), &fake);
+    assert_eq!(app.rig.output.playing.as_ref().unwrap().rate, 96_000);
+    fake.outputs.borrow_mut().default = Some("Fake B".into());
+    *fake.default_after_list.borrow_mut() = Some(a.name);
+
+    app.preferences(Message::Audio(Change::Device(DeviceChoice::SystemDefault)));
+
+    let playing = app.rig.output.playing.as_ref().unwrap();
+    assert_eq!(playing.device, "Fake B");
+    assert_eq!(playing.rate, 48_000);
+    let saved = &app.rig.store.saved().audio;
+    assert_eq!(saved.device, DeviceChoice::SystemDefault);
+    assert_eq!(saved.sample_rate, RateChoice::DeviceDefault);
+}
+
+/// Incompatible flags are cleared only after a successful device change.
+/// A compatible buffer flag still applies until the player changes it.
+#[test]
+fn device_change_clears_only_incompatible_overrides_on_success() {
+    let dir = folder("device-overrides");
+    let mut a = fake::device("Fake A");
+    a.rates.push((96_000, 96_000));
+    let fake = Rc::new(Fake::new(&[a, fake::device("Fake B")], &[]));
+    let mut options = args(&dir);
+    options.devices.sample_rate = Some(96_000);
+    options.devices.buffer = Some(256);
+    let mut app = start(options, &fake);
+    let switch = Message::Audio(Change::Device(DeviceChoice::Named("Fake B".into())));
+
+    fake.broken.borrow_mut().push("Fake B".into());
+    app.preferences(switch.clone());
+    assert_eq!(app.rig.flags.sample_rate, Some(96_000));
+    assert_eq!(app.rig.flags.buffer, Some(256));
+    assert_eq!(app.rig.output.playing.as_ref().unwrap().device, "Fake A");
+
+    fake.broken.borrow_mut().clear();
+    app.preferences(switch);
+    assert_eq!(app.rig.output.playing.as_ref().unwrap().device, "Fake B");
+    assert_eq!(app.rig.flags.sample_rate, None);
+    assert_eq!(app.rig.flags.buffer, Some(256));
+
+    app.preferences(Message::Audio(Change::Buffer(BufferChoice::Frames(128))));
+    let playing = app.rig.output.playing.as_ref().unwrap();
+    assert_eq!(playing.rate, 48_000);
+    assert_eq!(playing.buffer, Some(128));
+}
+
+/// An audio restart picks up mapped values the old engine already applied
+/// even when the UI has yet to see their feedback.
+#[test]
+fn audio_restart_imports_midi_feedback_before_rebuilding() {
+    let dir = folder("restart-mapped-value");
+    let tape = loom_host_desktop::Tape::new();
+    let fake = Rc::new(Fake {
+        tape: Some(tape.clone()),
+        ..Fake::new(&[fake::device("Fake A")], &["Keys"])
+    });
+    let mut app = start(args(&dir), &fake);
+    let controller = &mut app.session.controller;
+    let module = controller.add_module("loom.math.constant").unwrap();
+    let control = loom_core::MidiControl {
+        channel: 0,
+        controller: 7,
+    };
+    controller.map_midi(control, module, 0).unwrap();
+    let before = controller.graph().node(module).unwrap().params[0];
+    controller.commit().unwrap();
+    tape.step(256);
+    fake.play("Keys", &[0xB0, 7, 127]);
+    tape.step(256);
+    assert_eq!(app.session.controller.graph().node(module).unwrap().params[0], before);
+
+    app.preferences(Message::Audio(Change::Rate(RateChoice::Hz(44_100))));
+
+    assert_eq!(app.rig.output.playing.as_ref().unwrap().rate, 44_100);
+    assert_eq!(app.session.controller.graph().node(module).unwrap().params[0], 1.0);
+}
+
+/// Turning off a port while the queue is full reserves its ID until the
+/// release goes through and eventually ends its held notes.
+#[test]
+fn a_closed_midi_port_retries_its_release_when_the_queue_drains() {
+    let dir = folder("queued-midi-release");
+    let tape = loom_host_desktop::Tape::new();
+    let fake = Rc::new(Fake {
+        tape: Some(tape.clone()),
+        ..Fake::new(&[fake::device("Fake A")], &["Keys", "Pad"])
+    });
+    let (mut app, _) = note_app(&dir, &fake);
+    let module = loom_core::ModuleId(*app.session.selection.first().unwrap());
+    let gate = app
+        .session
+        .controller
+        .graph()
+        .node(module)
+        .unwrap()
+        .descriptor
+        .display_index("gate")
+        .unwrap();
+    let input = app.rig.midi.ports.iter().find(|p| p.name() == "Keys").unwrap().input();
+    // Model a note the engine must release itself, with no note-off from the host.
+    let note = loom_core::MidiEvent::from_bytes(0, &[0x90, 60, 100]).from_input(input);
+    assert!(loom_host_desktop::send_midi(app.rig.midi.input.as_ref().unwrap(), note));
+    tape.step(256);
+    assert_eq!(app.session.controller.display(module, gate), Some(1.0));
+    while app.session.controller.set_tempo(120.0).is_ok() {}
+
+    app.preferences(Message::Midi("Keys".into(), false));
+    assert!(app.rig.midi.tracking_pending());
+    tape.step(256);
+    assert_eq!(app.session.controller.display(module, gate), Some(1.0));
+
+    fake.plug("New");
+    app.rig.midi.last_input = input.0 - 1;
+    app.preferences(Message::Midi("New".into(), true));
+    assert_ne!(app.rig.midi.ports.last().unwrap().input(), input);
+    app.poll_midi();
+    tape.step(256);
+    assert!(!app.rig.midi.tracking_pending());
+    assert_eq!(app.session.controller.display(module, gate), Some(0.0));
+}
+
+/// An existing host connection is registered on a replacement engine on
+/// the next poll when its first OpenInput command cannot fit.
+#[test]
+fn a_replacement_engine_retries_tracking_connected_midi_inputs() {
+    let dir = folder("queued-midi-open");
+    let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Keys"]));
+    let (mut app, _) = note_app(&dir, &fake);
+    let module = loom_core::ModuleId(*app.session.selection.first().unwrap());
+    let gate = app
+        .session
+        .controller
+        .graph()
+        .node(module)
+        .unwrap()
+        .descriptor
+        .display_index("gate")
+        .unwrap();
+    let config = EngineConfig {
+        command_capacity: 1,
+        ..EngineConfig::default()
+    };
+    let mut replacement = app.session.controller.rebuild(config).unwrap();
+    app.stop_audio();
+    replacement.controller.set_tempo(120.0).unwrap();
+    app.rig.midi.attach(replacement.midi);
+    app.session.controller = replacement.controller;
+    app.session.engine.stream.keep_idle(replacement.engine);
+    app.connect_midi(false, false);
+    assert!(app.rig.midi.tracking_pending());
+    assert_eq!(app.open_midi_inputs(), ["Keys"]);
+
+    app.session.engine.stream.idle_mut().unwrap().apply_pending();
+    app.poll_midi();
+    assert!(!app.rig.midi.tracking_pending());
+    fake.play("Keys", &[0x90, 60, 100]);
+    app.process(256);
+    assert_eq!(app.session.controller.display(module, gate), Some(1.0));
+}

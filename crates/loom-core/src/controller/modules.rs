@@ -47,15 +47,38 @@ impl Controller {
         next.graph.cables.clone_from(&self.graph.cables);
         next.graph.assignments.clone_from(&self.graph.assignments);
         next.graph.midi_mappings.clone_from(&self.graph.midi_mappings);
+        // Pickup starts waiting in a fresh engine, as it does on patch load.
+        for mapping in next.graph.midi_mappings.values_mut() {
+            mapping.learned = false;
+        }
         next.graph.midi_followers.clone_from(&self.graph.midi_followers);
         next.next_id = self.next_id;
         next.next_assignment = self.next_assignment;
         next.midi.keep_mapping_ids(&self.midi);
         let transport = self.transport();
         next.set_tempo(transport.tempo)?;
+        parts.engine.apply_pending();
         next.set_time_signature(transport.time_signature)?;
+        parts.engine.apply_pending();
         next.set_running(transport.running)?;
+        parts.engine.apply_pending();
+
+        // The replacement engine is still ours. Install its instances in
+        // batches without rendering, leaving room for the schedule swap.
+        let copies = next.copy_plan().starting;
+        if next.slots.free_count() < copies.len() {
+            return Err(LoomError::TooManyModules(config.max_modules));
+        }
+        for (id, key) in copies {
+            let (slot, fresh) = next.fresh_copy(id, key);
+            next.slots.hold(slot, fresh);
+        }
+        while next.slots.waiting() > 0 {
+            next.send_waiting_modules(next.commands.slots());
+            parts.engine.apply_pending();
+        }
         next.commit()?;
+        parts.engine.apply_pending();
         Ok(parts)
     }
 

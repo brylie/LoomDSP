@@ -305,6 +305,8 @@ The app takes the same flags as `loom play`, with the same rule as `--output-saf
 
 When a flag sets a value, a line under that control says `Set by --device for this run.`, as Output safety does. Changing it in the window applies, is saved, and wins for the rest of the run.
 
+A device change checks the capabilities of the same output it opens. After a successful switch, incompatible rate and buffer flags give way to the saved choice if it is supported, or the new device's default. Compatible flags continue to apply.
+
 *Why the flags:* scripts and agents use the control channel with `--fake-audio` and need a known setup, and a player can rescue a run on a strange machine without editing files. Matching `loom play` keeps one set of names.
 
 ### Rules

@@ -2,8 +2,16 @@
 
 use crate::devices::MidiPort;
 use crate::{App, devices};
-use loom_core::MidiInputId;
+use loom_core::{LoomError, MidiInputId};
 use loom_host_desktop::{MidiInputInfo, SharedMidi};
+use std::collections::BTreeMap;
+
+/// A change to the engine's note tracking that still needs queue space.
+#[derive(Clone, Copy)]
+enum InputTracking {
+    Open,
+    Release,
+}
 
 /// The MIDI rig and its links to the current engine.
 #[derive(Default)]
@@ -13,6 +21,8 @@ pub(crate) struct MidiRig {
     pub input: Option<SharedMidi>,
     /// Open MIDI inputs.
     pub ports: Vec<Box<dyn MidiPort>>,
+    /// Tracking changes the current engine has yet to accept, by input ID.
+    pending: BTreeMap<MidiInputId, InputTracking>,
     /// Output routing shared with the playback worker.
     pub(crate) clock_ports: loom_host_desktop::ClockPorts,
     /// Selected external name once it has taken over, including while absent.
@@ -55,6 +65,8 @@ impl MidiRig {
     /// Points MIDI at a new engine. Returns true the first time, when the
     /// inputs are still to be opened.
     pub fn attach(&mut self, sender: loom_core::MidiSender) -> bool {
+        self.pending.clear();
+        self.clock_input = None;
         if let Some(midi) = &self.input {
             midi.lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -65,12 +77,17 @@ impl MidiRig {
         true
     }
 
+    /// Whether polling is needed even when the host's port list is unchanged.
+    pub(crate) fn tracking_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
     /// An input id no open input uses, going round from the last one.
     fn free_input(&mut self) -> Option<MidiInputId> {
         let max = loom_core::MAX_MIDI_INPUTS;
         for step in 1..max {
             let id = (self.last_input + step - 1) % (max - 1) + 1;
-            if self.ports.iter().all(|port| port.input().0 != id) {
+            if !self.pending.contains_key(&MidiInputId(id)) && self.ports.iter().all(|port| port.input().0 != id) {
                 self.last_input = id;
                 return Some(MidiInputId(id));
             }
@@ -114,7 +131,7 @@ impl App {
                 Ok(())
             }
             Err(e) => {
-                let _ = self.session.controller.release_midi_input(input);
+                self.release_input_tracking(input);
                 Err(e)
             }
         }
@@ -131,8 +148,36 @@ impl App {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clear_input(input);
         }
-        let _ = self.session.controller.release_midi_input(input);
+        self.release_input_tracking(input);
         self.sync_clock_source(false);
+    }
+
+    /// Releases notes as soon as the engine can take the command. The
+    /// pending ID stays reserved so its notes cannot affect a new port.
+    fn release_input_tracking(&mut self, input: MidiInputId) {
+        self.rig.midi.pending.insert(input, InputTracking::Release);
+        self.retry_input_tracking();
+    }
+
+    /// Sends pending tracking changes. A sent command leaves the list
+    /// because commands on the same engine are processed in order.
+    fn retry_input_tracking(&mut self) {
+        let controller = &mut self.session.controller;
+        let alerts = &mut self.alerts;
+        self.rig.midi.pending.retain(|&input, tracking| {
+            let result = match tracking {
+                InputTracking::Open => controller.open_midi_input(input),
+                InputTracking::Release => controller.release_midi_input(input),
+            };
+            match result {
+                Ok(()) => false,
+                Err(LoomError::QueueFull) => true,
+                Err(error) => {
+                    alerts.warn(format!("MIDI: {error}"));
+                    false
+                }
+            }
+        });
     }
 
     /// After a new engine is attached: tracks the open inputs on it, or the
@@ -140,9 +185,10 @@ impl App {
     /// `connect` is true. Returns a status bar line about an input that
     /// failed to open; the others still play.
     pub(crate) fn connect_midi(&mut self, first: bool, connect: bool) -> Option<String> {
-        for input in self.rig.midi.ports.iter().map(|port| port.input()).collect::<Vec<_>>() {
-            let _ = self.session.controller.open_midi_input(input);
-        }
+        let rig = &mut self.rig.midi;
+        rig.pending
+            .extend(rig.ports.iter().map(|port| (port.input(), InputTracking::Open)));
+        self.retry_input_tracking();
         self.sync_clock_source(true);
         if !(first && connect) {
             return None;
@@ -169,6 +215,7 @@ impl App {
     /// identity is opened again as a new connection. The window's list
     /// follows too.
     pub(crate) fn poll_midi(&mut self) {
+        self.retry_input_tracking();
         self.poll_midi_clock();
         let Ok(list) = self.rig.host.midi_list() else { return };
         if let Some(window) = self.overlays.preferences_mut() {

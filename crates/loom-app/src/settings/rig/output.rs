@@ -191,28 +191,19 @@ impl App {
         }
         let mut saved = self.rig.store.saved().clone();
         change.apply(&mut saved.audio);
-        // A new device starts from its own rate and buffer size when it
-        // does not offer the ones chosen for the old one (Rule D4).
-        if let Change::Device(_) = change
-            && let Some(info) = self.device_info(&play.device)
-        {
-            for audio in [&mut play, &mut saved.audio] {
-                if audio
-                    .sample_rate
-                    .hz()
-                    .is_some_and(|hz| !devices::offered_rates(&info).contains(&hz))
-                {
-                    audio.sample_rate = RateChoice::DeviceDefault;
-                }
-                if audio
-                    .buffer
-                    .frames()
-                    .is_some_and(|f| !devices::offered_buffers(&info).contains(&f))
-                {
-                    audio.buffer = BufferChoice::DeviceDefault;
+        let (clear_rate, clear_buffer) = if matches!(change, Change::Device(_)) {
+            match self.prepare_device_change(&mut play, &mut saved.audio) {
+                Ok(clear) => clear,
+                Err(error) => {
+                    let error = self.could_not_use(&play, &error);
+                    self.audio_failed(&change, &error);
+                    self.alerts.warn(error);
+                    return;
                 }
             }
-        }
+        } else {
+            (false, false)
+        };
 
         if !self.session.engine.stream.without_device() {
             // The new device opens first: if it fails, the old one keeps
@@ -239,7 +230,15 @@ impl App {
             window.failed = None;
         }
         match change {
-            Change::Device(_) => self.rig.flags.device = None,
+            Change::Device(_) => {
+                self.rig.flags.device = None;
+                if clear_rate {
+                    self.rig.flags.sample_rate = None;
+                }
+                if clear_buffer {
+                    self.rig.flags.buffer = None;
+                }
+            }
             Change::Rate(_) => self.rig.flags.sample_rate = None,
             Change::Buffer(_) => self.rig.flags.buffer = None,
         }
@@ -248,6 +247,54 @@ impl App {
         if let Some(error) = self.rig.save(saved) {
             self.alerts.warn(error);
         }
+    }
+
+    /// Picks the concrete device from one host snapshot, then checks both
+    /// sets of settings against it. The effective choice is pinned for one
+    /// open, and the saved choice can still follow the system default.
+    /// Returns which run overrides should be cleared after a successful switch.
+    fn prepare_device_change(&self, play: &mut AudioPrefs, saved: &mut AudioPrefs) -> Result<(bool, bool), String> {
+        let outputs = self.rig.host.outputs();
+        let name = match &play.device {
+            DeviceChoice::Named(name) => name.clone(),
+            DeviceChoice::SystemDefault => {
+                let default = outputs.as_ref().map_err(Clone::clone).and_then(|outputs| {
+                    outputs
+                        .default
+                        .clone()
+                        .ok_or_else(|| "no audio output device found".to_string())
+                });
+                match default {
+                    Ok(name) => name,
+                    Err(_) if self.session.engine.stream.without_device() => return Ok((false, false)),
+                    Err(error) => return Err(error),
+                }
+            }
+        };
+        let info = outputs
+            .ok()
+            .and_then(|outputs| outputs.devices.into_iter().find(|d| d.name == name));
+        play.device = DeviceChoice::Named(name);
+        let Some(info) = info else { return Ok((false, false)) };
+        let buffers = devices::offered_buffers(&info);
+        let unsupported_rate = |rate: Option<u32>| rate.is_some_and(|hz| !devices::offers_rate(&info, hz));
+        let unsupported_buffer = |buffer: Option<u32>| buffer.is_some_and(|frames| !buffers.contains(&frames));
+        if unsupported_rate(saved.sample_rate.hz()) {
+            saved.sample_rate = RateChoice::DeviceDefault;
+        }
+        if unsupported_buffer(saved.buffer.frames()) {
+            saved.buffer = BufferChoice::DeviceDefault;
+        }
+        if unsupported_rate(play.sample_rate.hz()) {
+            play.sample_rate = saved.sample_rate;
+        }
+        if unsupported_buffer(play.buffer.frames()) {
+            play.buffer = saved.buffer;
+        }
+        Ok((
+            unsupported_rate(self.rig.flags.sample_rate),
+            unsupported_buffer(self.rig.flags.buffer),
+        ))
     }
 
     /// Notes in the open window that `change` could not be used.
@@ -349,7 +396,10 @@ impl App {
     }
 
     /// Starts the current graph at a new rate, with fresh DSP state.
-    fn rebuilt_engine(&self, rate: f32) -> Result<EngineParts, loom_core::LoomError> {
+    fn rebuilt_engine(&mut self, rate: f32) -> Result<EngineParts, loom_core::LoomError> {
+        if self.sync_midi_values() {
+            self.refresh_values();
+        }
         let config = EngineConfig {
             output_safety: self.session.engine.stream.output_safety(),
             ..EngineConfig::with_sample_rate(rate)

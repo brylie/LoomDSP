@@ -204,7 +204,8 @@ impl App {
         // MIDI inputs plugged in and out are found by polling four times a
         // second: the systems offer no portable callback (device-changes.md).
         // A real host's list is read by a watcher thread (`watching.rs`).
-        let midi_poll = self.rig.midi.following_clock.is_some()
+        let midi_poll = self.rig.midi.tracking_pending()
+            || self.rig.midi.following_clock.is_some()
             || !self.rig.store.saved().midi.send_clock.is_empty()
             || (self.rig.midi.input.is_some() && !self.rig.flags.no_midi && self.rig.host.midi_lister().is_none());
         let wanted = [
