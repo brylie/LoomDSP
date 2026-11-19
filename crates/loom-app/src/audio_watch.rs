@@ -226,6 +226,18 @@ pub struct Watch {
     pub engine: Arc<EngineStats>,
 }
 
+impl Watch {
+    /// Takes one read from the live stream and engine for the watcher.
+    pub(crate) fn poll(&self, watcher: &mut Watcher, now: Instant) -> Vec<Event> {
+        let peak = if (watcher.reads + 1).is_multiple_of(LOAD_EVERY) {
+            self.stats.take_peak_since_read()
+        } else {
+            0.0
+        };
+        watcher.read_peak(&self.stats.snapshot(), peak, EngineRead::of(&self.engine), now)
+    }
+}
+
 impl Hash for Watch {
     fn hash<H: Hasher>(&self, state: &mut H) {
         "loom-app audio watch".hash(state);
@@ -242,17 +254,7 @@ pub fn run(watch: &Watch, tx: Outlet<Event>) {
     {
         let mut watcher = Watcher::new(Instant::now());
         while !tx.is_closed() {
-            let peak = if (watcher.reads + 1).is_multiple_of(LOAD_EVERY) {
-                watch.stats.take_peak_since_read()
-            } else {
-                0.0
-            };
-            for event in watcher.read_peak(
-                &watch.stats.snapshot(),
-                peak,
-                EngineRead::of(&watch.engine),
-                Instant::now(),
-            ) {
+            for event in watch.poll(&mut watcher, Instant::now()) {
                 let stats = matches!(event, Event::Stats { .. });
                 match tx.try_send(event) {
                     Ok(()) => {}

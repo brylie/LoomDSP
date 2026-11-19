@@ -17,7 +17,10 @@ A control script stops with exit status 2 when a variable it uses is not set ([c
 Run the hardware tests one at a time, so no two of them use a device at once:
 
 ```sh
-LOOM_DEVICE="<part of a name>" LOOM_LOOPBACK="<part of a name>" cargo test --workspace -- --ignored --test-threads=1
+export LOOM_DEVICE="<part of a name>" LOOM_LOOPBACK="<part of a name>"
+cargo test -p loom-host-desktop --lib -- --ignored --test-threads=1
+cargo test -p loom-app --lib -- --ignored --test-threads=1 system_input_adapter_uses_loopback_device turning_a_real_input_off_releases_its_notes_and_is_saved
+cargo test -p loom-cli --test capture -- --ignored --test-threads=1
 ```
 
 ## Kinds of device
@@ -60,3 +63,18 @@ The control socket (`--control`) needs Unix sockets, so on Windows use `--contro
 ## When a test skips
 
 A skip is not a pass of the check. In a manual check, write down which tests skipped and why. In CI, a job that installs a device should fail if its test skips, for example by checking for `skipped:` in the output.
+
+## Unattended playback and the offline soak
+
+`loom play` keeps playing when standard input closes. An input line, Ctrl+C,
+or SIGTERM on Unix requests the output fade and exit. When stderr is
+redirected, it records timestamped starts, stops, callback stalls, and
+changes to the overrun or stream-error counts.
+
+A 12-hour offline run is available without an audio device. It plays the
+modulation example at 8 kHz to check for silent or stuck output, non-finite
+samples, DC, and bar timing. Run it in release mode:
+
+```sh
+cargo test --release -p loom-cli --bin loom modulated_patch_survives_a_twelve_hour_offline_soak -- --ignored
+```

@@ -270,3 +270,134 @@ fn canvas_menu_contrast() {
         );
     }
 }
+
+/// The panel background the role tokens are set for: the one dark theme's
+/// (`boot.rs`). A light theme needs a token table of its own.
+const ROLE_BACKGROUND: loom_ui_core::Color = loom_ui_core::Color::rgb8(0x22, 0x24, 0x2A);
+
+/// One role's rows of the token table: its name and tokens, text on fill
+/// for normal, hovered, pressed, and off, fill on the background for the
+/// same, and hovered and pressed against normal.
+type Row = (&'static str, super::RoleTokens, [f32; 4], [f32; 4], [f32; 2]);
+
+/// Every role's tokens meet visual-system.md, Role tokens, and match its
+/// table to two decimals: text at least 4.5:1 on its fill (or on the
+/// background, for a state with no fill) in every state; a turned-on fill
+/// of a filled role at least 3:1 against the background; hovered and
+/// pressed at least 1.3:1 against normal for a filled role, and plain's
+/// hover at least 1.5:1 on the background, with pressed a further step.
+#[test]
+fn the_role_tokens_meet_their_table() {
+    use super::{DANGER, PLAIN, PRIMARY, RoleState, SECONDARY};
+    use loom_canvas::contrast_ratio;
+    let app = crate::tests::app();
+    let background = app.theme().extended_palette().background.base.color;
+    assert_eq!(
+        loom_canvas::iced_convert::ToCore::to_core(background),
+        ROLE_BACKGROUND,
+        "the theme's background is the one the table is set for"
+    );
+    let round = |ratio: f32| (ratio * 100.0).round() / 100.0;
+    let on = |state: RoleState| state.fill.unwrap_or(ROLE_BACKGROUND);
+    let text = |state: RoleState| round(contrast_ratio(state.text, on(state)));
+    let edge = |state: RoleState| round(contrast_ratio(on(state), ROLE_BACKGROUND));
+    let step = |a: RoleState, b: RoleState| round(contrast_ratio(on(a), on(b)));
+    // Each role's table rows: text on fill for normal, hovered, pressed,
+    // off; fill on background for the same; and hovered and pressed
+    // against normal.
+    let table: [Row; 4] = [
+        (
+            "primary",
+            PRIMARY,
+            [8.31, 10.87, 6.31, 4.60],
+            [7.65, 10.01, 5.80, 1.83],
+            [1.31, 1.32],
+        ),
+        (
+            "secondary",
+            SECONDARY,
+            [5.03, 6.61, 4.51, 4.75],
+            [4.05, 5.31, 3.10, 1.52],
+            [1.31, 1.31],
+        ),
+        (
+            "danger",
+            DANGER,
+            [4.96, 6.56, 4.63, 5.01],
+            [3.99, 5.28, 3.02, 1.46],
+            [1.32, 1.32],
+        ),
+        (
+            "plain",
+            PLAIN,
+            [12.66, 7.94, 6.02, 4.98],
+            [1.00, 1.59, 2.10, 1.00],
+            [1.59, 2.10],
+        ),
+    ];
+    for (name, tokens, texts, edges, steps) in table {
+        let states = [tokens.normal, tokens.hovered, tokens.pressed, tokens.off];
+        for (state, (want_text, want_edge)) in states.iter().zip(texts.iter().zip(edges)) {
+            assert_eq!(text(*state), *want_text, "{name}: text");
+            assert_eq!(edge(*state), want_edge, "{name}: fill on the background");
+            assert!(text(*state) >= 4.5, "{name}: text at 4.5:1 or more");
+        }
+        assert_eq!(
+            [step(tokens.hovered, tokens.normal), step(tokens.pressed, tokens.normal)],
+            steps,
+            "{name}: states against normal"
+        );
+        if name == "plain" {
+            assert!(edge(tokens.hovered) >= 1.5, "plain's hover shows on the bar");
+            assert!(
+                step(tokens.pressed, tokens.hovered) >= 1.3,
+                "plain's press is a step past hover"
+            );
+        } else {
+            for state in &states[..3] {
+                assert!(edge(*state) >= 3.0, "{name}: a turned-on fill at 3:1 or more");
+            }
+            assert!(steps.iter().all(|step| *step >= 1.3), "{name}: no state is lost");
+        }
+    }
+}
+
+/// `loom-ui`'s buttons and Iced's role style functions take the same
+/// tokens, state for state: one source for both toolkits.
+#[test]
+fn both_toolkits_read_the_same_role_tokens() {
+    use super::Role;
+    use iced::widget::button::Status;
+    use loom_canvas::iced_convert::ToIced as _;
+    let app = crate::tests::app();
+    let theme = app.theme();
+    let iced_style = |role: Role| match role {
+        Role::Primary => super::primary,
+        Role::Secondary => super::secondary,
+        Role::Plain => super::plain,
+        Role::Danger => |_: &iced::Theme, status| Role::Danger.iced_for_tests(status),
+    };
+    for role in [Role::Primary, Role::Secondary, Role::Danger, Role::Plain] {
+        let looks = role.looks();
+        let style = iced_style(role);
+        for (status, state) in [
+            (Status::Active, looks.normal),
+            (Status::Hovered, looks.hovered),
+            (Status::Pressed, looks.pressed),
+            (Status::Disabled, looks.off),
+        ] {
+            let iced = style(&theme, status);
+            let fill = match iced.background {
+                Some(iced::Background::Color(colour)) => Some(colour),
+                None => None,
+                Some(other) => panic!("{role:?}: a plain fill, not {other:?}"),
+            };
+            assert_eq!(fill, state.background.map(|c| c.to_iced()), "{role:?} {status:?}: fill");
+            assert_eq!(
+                Some(iced.text_color),
+                state.text.map(|c| c.to_iced()),
+                "{role:?} {status:?}: text"
+            );
+        }
+    }
+}

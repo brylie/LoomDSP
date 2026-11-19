@@ -232,9 +232,7 @@ impl App {
         self.session.engine.live.set_activity(on);
         self.session.carrying.clear();
         self.sync_live();
-        if let Err(error) = self.session.controller.commit() {
-            self.alerts.warn(error.to_string());
-        }
+        self.commit_maintenance();
     }
 }
 

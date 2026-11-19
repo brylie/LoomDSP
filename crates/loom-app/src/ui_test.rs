@@ -78,6 +78,10 @@ pub struct Ui {
     pointers: crate::iced_bridge::Pointers,
     /// Lays out the runtime's own panels, as the window's draw does.
     text: loom_ui::paint::Typesetter,
+    /// The copy folder [`Ui::open`] made for this `Ui`, removed when it
+    /// drops. Kept from the start, because the open file can change after
+    /// New, Open, or Save As. `None` for an app the test built.
+    copy: Option<PathBuf>,
 }
 
 /// The clipboard Iced's widgets use during one frame: a copy of the
@@ -96,12 +100,98 @@ impl Clipboard for Memory {
     }
 }
 
-/// The app [`Ui::open`] runs, for a test that applies messages to it
-/// directly: a patch from `examples/patches`, with no audio.
-pub(crate) fn open_app(patch: &str) -> App {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+/// The example patch `patch` from `examples/patches` in the repository.
+pub(crate) fn example_path(patch: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/patches")
-        .join(patch);
+        .join(patch)
+}
+
+/// The start of the name of each folder [`example_copy`] makes in the
+/// system's temporary folder.
+const COPY_PREFIX: &str = "loom-app-ui-";
+
+/// True when `dir` is one of the folders [`example_copy`] makes: directly
+/// inside the system's temporary folder, and named with
+/// [`COPY_PREFIX`]. Nothing else is ever removed.
+fn is_copy_folder(dir: &std::path::Path) -> bool {
+    let temp = std::fs::canonicalize(std::env::temp_dir()).ok();
+    let parent = dir.parent().and_then(|parent| std::fs::canonicalize(parent).ok());
+    let named = dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with(COPY_PREFIX));
+    named && temp.is_some() && parent == temp
+}
+
+/// Removes the copy folders left by earlier runs: those more than an hour
+/// old, so a folder another test process is using now stays. Once a
+/// process, on its first copy.
+fn sweep_old_copies() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    let hour = std::time::Duration::from_secs(3600);
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        let old = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age > hour);
+        if old && is_copy_folder(&dir) {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+}
+
+/// A copy of the example patch `patch`, in a new folder of the system's
+/// temporary folder for this test alone: the process ID and a count keep
+/// tests that run at once apart. A save in a test then writes the copy.
+/// A [`Ui`] removes the folder when it drops; any other is cleared by a
+/// later run's sweep ([`sweep_old_copies`]).
+///
+/// Anything that is not an example in the repository is opened as it was
+/// before: a test's own file by its absolute path (joined to the examples
+/// folder, it stays itself), or a name that is no file, which opens the
+/// app with no patch.
+pub(crate) fn example_copy(patch: &str) -> PathBuf {
+    example_copy_owned(patch).0
+}
+
+/// [`example_copy`], with the folder it made for the copy. The folder is
+/// `None` when the patch was opened as it was, so a caller owns only a
+/// folder made for it, never one a path it was given happens to sit in.
+fn example_copy_owned(patch: &str) -> (PathBuf, Option<PathBuf>) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    static SWEPT: std::sync::Once = std::sync::Once::new();
+    let source = example_path(patch);
+    if std::path::Path::new(patch).is_absolute() || !source.is_file() {
+        return (source, None);
+    }
+    SWEPT.call_once(sweep_old_copies);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("{COPY_PREFIX}{}-{n}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a folder for the copy");
+    let copy = dir.join(patch);
+    std::fs::copy(&source, &copy).unwrap_or_else(|why| panic!("copy {patch}: {why}"));
+    (copy, Some(dir))
+}
+
+/// The app [`Ui::open`] runs, for a test that applies messages to it
+/// directly: a patch from `examples/patches`, with no audio. It opens a
+/// copy of the patch in a folder of its own ([`example_copy`]), so a test
+/// that saves writes the copy, never the example in the repository. A
+/// [`Ui`] removes its copy when it drops; a test that uses this app with
+/// no `Ui` leaves its copy for a later run's sweep, an hour on.
+pub(crate) fn open_app(patch: &str) -> App {
+    app_at(example_copy(patch))
+}
+
+/// The app [`open_app`] runs, on the patch file at `path`.
+fn app_at(path: PathBuf) -> App {
     App::new(Args {
         patch: Some(path),
         generate: None,
@@ -123,6 +213,16 @@ pub(crate) fn open_app(patch: &str) -> App {
         test_modules: false,
         dev: false,
     })
+}
+
+/// A `Ui` removes the copy folder it made, so copies do not pile up
+/// across runs. Only a copy folder is removed ([`is_copy_folder`]).
+impl Drop for Ui {
+    fn drop(&mut self) {
+        if let Some(dir) = self.copy.take().filter(|dir| is_copy_folder(dir)) {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
 }
 
 impl Ui {
@@ -229,7 +329,10 @@ impl Ui {
     /// Opens a patch from `examples/patches` with no audio, as the app does
     /// in a window of [`WINDOW`] size, and draws the first frame.
     pub(crate) fn open(patch: &str) -> Self {
-        Self::with_app(open_app(patch))
+        let (path, copy) = example_copy_owned(patch);
+        let mut ui = Self::with_app(app_at(path));
+        ui.copy = copy;
+        ui
     }
 
     /// Draws the first frame of an app built by the test, for example one
@@ -242,6 +345,7 @@ impl Ui {
             surface: Surface::new(WINDOW),
             pointers: crate::iced_bridge::Pointers::default(),
             text: loom_ui::paint::Typesetter::new(),
+            copy: None,
         };
         ui.settle(vec![first]);
         // The canvas frames the patch on its first redraw.

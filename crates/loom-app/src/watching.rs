@@ -22,12 +22,27 @@ const EVENTS: usize = 4;
 /// One at a time: fresh values follow once the app takes this one.
 const LATEST: usize = 1;
 
+/// Waits for the audio thread to free command space, then requests one retry.
+fn watch_commit(stats: &loom_core::EngineStats, before: u64, generation: u64, outlet: crate::watcher::Outlet<u64>) {
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+    while !outlet.is_closed() {
+        if stats.command_drains.load(Ordering::Acquire) != before {
+            let _ = outlet.try_send(generation);
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 /// The watchers that read one engine. On the session's engine, so a new
 /// engine drops them with the one they read.
 #[derive(Debug, Default)]
 pub(crate) struct EngineWatchers {
     /// The audio stats and stalled callbacks (`audio_watch.rs`).
     audio: Option<Watcher>,
+    /// Room for a staged graph commit (live-patching.md, rule 10).
+    commit: Option<Watcher>,
     /// The audio input's health (`input_watch.rs`).
     input: Option<Watcher>,
     /// The lights and readouts on screen (`lights.rs`).
@@ -75,9 +90,16 @@ impl EngineWatchers {
 
     /// True while none runs, as for a new engine.
     pub(crate) fn none_running(&self) -> bool {
-        [&self.audio, &self.input, &self.lights, &self.monitor, &self.learn]
-            .iter()
-            .all(|watcher| watcher.is_none())
+        [
+            &self.audio,
+            &self.commit,
+            &self.input,
+            &self.lights,
+            &self.monitor,
+            &self.learn,
+        ]
+        .iter()
+        .all(|watcher| watcher.is_none())
     }
 }
 
@@ -85,6 +107,7 @@ impl EngineWatchers {
 /// each one still in the queue, so taking it frees only its sender.
 #[derive(Debug, Default)]
 pub(crate) struct Ledgers {
+    commit: Ledger,
     audio: Ledger,
     input: Ledger,
     lights: Ledger,
@@ -117,6 +140,7 @@ impl App {
         let ledgers = &self.watchers.ledgers;
         let ledger = match message {
             Message::Audio(_) => &ledgers.audio,
+            Message::RetryCommit(_) => &ledgers.commit,
             Message::InputAudio(_) => &ledgers.input,
             Message::Lights(_) => &ledgers.lights,
             Message::Telemetry(_) => &ledgers.monitor,
@@ -147,10 +171,24 @@ impl App {
         let midi_ports = self.midi_port_watch();
         let bench = self.reporter.clone();
         let generation = self.generation;
+        let commit = self.session.retry_commit.map(|retry| (generation, retry.before));
+        let stats = self.session.controller.stats().clone();
 
         let engine = &mut self.session.engine.watchers;
         let lights = engine.light_watch(generation, on_screen);
         let ledgers = &self.watchers.ledgers;
+        keep(&mut engine.commit, commit, |key, (generation, before)| {
+            Watcher::start(
+                &ledgers.commit,
+                key,
+                LATEST,
+                waker.clone(),
+                Message::RetryCommit,
+                move |outlet| {
+                    watch_commit(&stats, before, generation, outlet);
+                },
+            )
+        });
         keep(&mut engine.audio, audio, |key, watch| {
             Watcher::start(
                 &ledgers.audio,
@@ -209,7 +247,7 @@ impl App {
                 key,
                 LATEST,
                 waker.clone(),
-                |_: u32| Message::Midi,
+                |()| Message::Midi,
                 move |outlet| {
                     learn::run(&watch, outlet);
                 },

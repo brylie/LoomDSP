@@ -13,7 +13,9 @@ impl App {
     pub(crate) fn canvas_event(&mut self, event: CanvasEvent) {
         if event == CanvasEvent::PointerDown {
             self.session.outline.active = false;
-            self.session.outline.toolbar = false;
+            if self.toolbar_has_focus() {
+                self.effect(loom_ui::Effects::unfocus());
+            }
             self.session.outline.inspector_action = None;
             self.session.outline.close_jump();
             self.session.outline.focus_port = None;

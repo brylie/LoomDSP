@@ -153,9 +153,15 @@ impl<A: App> Panels<'_, A> {
     /// target, for a driver to call when its target answered
     /// [`Routed::Later`](crate::Routed::Later) and then left this event
     /// unused. A click's message is sent for the next turn.
+    ///
+    /// It runs outside a turn, so it reports a change of what shows as
+    /// pressed itself, in [`Heard::redraw`]: the turn's own comparison
+    /// never sees it.
     pub fn pointer_below(&mut self, event: &Event, point: Point) -> Heard {
         let input = self.app.input();
-        let heard = self.offer(input, event, point, Side::Below);
+        let pressed = self.shown_pressed();
+        let mut heard = self.offer(input, event, point, Side::Below);
+        heard.redraw |= self.shown_pressed() != pressed;
         self.report_focus();
         heard
     }
@@ -167,6 +173,7 @@ impl<A: App> Panels<'_, A> {
     /// so does a new left press, which can only follow a release the
     /// runtime missed (section 3, rule 4).
     pub fn pointer_taken(&mut self, event: &Event) -> Heard {
+        let pressed = self.shown_pressed();
         if matches!(
             event,
             Event::Pointer(PointerEvent::Pressed(PointerButton::Left) | PointerEvent::Released(PointerButton::Left))
@@ -176,10 +183,37 @@ impl<A: App> Panels<'_, A> {
         if matches!(event, Event::Pointer(PointerEvent::Pressed(_))) {
             self.pointer.space = None;
         }
+        let hover = self.pointer.set_hover(None);
         Heard {
             taken: false,
-            redraw: self.pointer.set_hover(None),
+            redraw: hover || self.shown_pressed() != pressed,
         }
+    }
+
+    /// The element that shows as pressed (visual-system.md, Role tokens):
+    /// the one a held left press went down on while the pointer is still
+    /// over it, or the one a held Space would click now
+    /// ([`live_arm`](crate::runtime::live_arm)), so the look says exactly
+    /// what letting go does. `None` when neither holds.
+    pub(crate) fn shown_pressed(&self) -> Option<UiId> {
+        if let Some(armed) = crate::runtime::live_arm(self.window, self.app, self.focus, self.pointer) {
+            return Some(armed);
+        }
+        let (_, pressed) = self.pointer.pressed.as_ref()?;
+        let over = self
+            .pointer
+            .hovered
+            .as_ref()
+            .is_some_and(|(_, hovered)| hovered == pressed);
+        over.then(|| pressed.clone())
+    }
+
+    /// True when the element with UI ID `id` is a button or a switch,
+    /// which a pointer press does not focus.
+    fn takes_no_press_focus(&self, id: &UiId) -> bool {
+        self.window
+            .access_of(id)
+            .is_some_and(|access| matches!(access.role(), crate::access::Role::Button | crate::access::Role::Switch))
     }
 
     /// Offers a pointer event to the runtime's layers above the target.
@@ -294,10 +328,18 @@ impl<A: App> Panels<'_, A> {
     }
 
     /// [`Panels::focus_at`] among the panels of the layers `keep` allows,
-    /// so a press focuses in the same panels it hits.
+    /// so a press focuses in the same panels it hits. A button or a switch
+    /// takes no focus from a press: the focus stays where it was, in
+    /// either toolkit, as a push button on macOS leaves it (ui-layer.md,
+    /// section 6, rule 3; Brylie's decision, 2026-11-19). Tab and a screen
+    /// reader's Focus still reach it. A field, or a press on no stop,
+    /// moves the focus as before.
     fn focus_in(&mut self, point: Point, keep: impl Fn(Layer) -> bool) {
-        self.focus.wanted = None;
         let to = self.window.focus_at_in(point, keep).flatten().cloned();
+        if to.as_ref().is_some_and(|id| self.takes_no_press_focus(id)) {
+            return;
+        }
+        self.focus.wanted = None;
         self.focus.set(to);
         self.focus.ring = false;
         if self.focus.id().is_some() {

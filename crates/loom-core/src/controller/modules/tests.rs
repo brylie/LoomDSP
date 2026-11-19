@@ -42,7 +42,8 @@ fn a_running_module_retires_until_the_swap() {
     slots.release(slot);
     assert_eq!(slots.retiring(), &[slot]);
     assert_eq!(slots.free_count(), 1);
-    slots.free_retired();
+    slots.detach_retired();
+    slots.free_detached(1);
     assert!(slots.retiring().is_empty());
     assert_eq!(slots.free_count(), 2);
 }

@@ -214,3 +214,45 @@ fn markdown_writes_then_checks() {
     assert_eq!(markdown(&dir, true).unwrap(), ExitCode::FAILURE);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The live player hands its MIDI input the sender for the mapped patch's engine.
+#[test]
+fn live_midi_input_updates_a_mapping_in_the_played_patch() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron");
+    let (_, mut parts) = load_engine(&path, EngineConfig::default(), None).unwrap();
+    let target = ModuleId(4);
+    let param = parts
+        .controller
+        .graph()
+        .node(target)
+        .unwrap()
+        .descriptor
+        .param_index("cutoff")
+        .unwrap();
+    let control = loom_core::MidiControl {
+        channel: 0,
+        controller: 74,
+    };
+    parts.controller.map_midi(control, target, param).unwrap();
+    parts.controller.commit().unwrap();
+    let (ports, _) = connect_live_midi(
+        parts.midi,
+        MidiPlan::Named("QA controller"),
+        |wanted, sender| {
+            assert_eq!(wanted, "QA controller");
+            assert!(loom_host_desktop::send_midi(
+                sender,
+                MidiEvent::control_change(0, 0, 74, 127)
+            ));
+            Ok(Some("QA controller"))
+        },
+        |_| panic!("the named port is the only live input"),
+        |name| name,
+    )
+    .unwrap();
+    assert_eq!(ports, ["QA controller"]);
+    parts.engine.process(&mut [0.0; 64], &mut [0.0; 64]);
+    assert_eq!(parts.controller.sync_midi(), [(target, param)]);
+    let node = parts.controller.graph().node(target).unwrap();
+    assert_eq!(node.params[param], node.spec(param).unwrap().max);
+}

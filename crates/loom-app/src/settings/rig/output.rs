@@ -428,6 +428,8 @@ impl App {
         self.rig.midi.attach(midi);
         self.generation += 1;
         self.session.controller = controller;
+        self.session.retry_commit = None;
+        self.alerts.clear(crate::alerts::Cause::Commit);
         // The new engine needs the panic trigger and the open MIDI inputs,
         // as in `play`, so panic and held-note release still work.
         self.send_panic_trigger();
@@ -460,6 +462,8 @@ impl App {
         let label = format!("{} at {} Hz", output.name(), output.sample_rate());
         self.generation += 1;
         self.session.controller = controller;
+        self.session.retry_commit = None;
+        self.alerts.clear(crate::alerts::Cause::Commit);
         self.send_panic_trigger();
         self.connect_midi(false, false);
         self.session.engine.monitor =

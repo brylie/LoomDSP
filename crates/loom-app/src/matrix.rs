@@ -665,7 +665,9 @@ impl App {
                 self.session.outline.inspector_action = None;
                 self.right_tab = tab;
                 self.session.outline.active = tab == Tab::Outline;
-                self.session.outline.toolbar = false;
+                if self.toolbar_has_focus() {
+                    self.effect(loom_ui::Effects::unfocus());
+                }
                 self.session.matrix.focused = tab == Tab::Matrix;
                 self.session.matrix.edit = None;
                 self.session.matrix.add = None;

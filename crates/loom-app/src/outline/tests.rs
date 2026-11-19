@@ -908,3 +908,41 @@ fn region_keys_remember_a_later_inspector_field() {
     region(&mut ui, true);
     assert_eq!(focused(&mut ui), crate::patch_info::tags_part());
 }
+
+/// In the toolbar region, the arrow keys, Home, and End move the runtime's
+/// focus among the turned-on buttons, Ctrl+Tab comes back to the button
+/// last focused, and Escape returns to the canvas. The toolbar's focus is
+/// the runtime's, so the ring and the screen reader agree on one button.
+#[test]
+fn toolbar_region_keys_move_the_runtime_focus() {
+    let mut ui = Ui::open("subtractive.ron");
+    let stops = ui.app().toolbar_stops();
+    assert!(stops.len() > 2, "the toolbar has buttons to walk");
+    // From the canvas, the toolbar is the region before it.
+    region(&mut ui, true);
+    assert_eq!(
+        ui.runtime().focused(),
+        Some(&stops[0]),
+        "the first button the first time"
+    );
+    assert_eq!(focused(&mut ui), stops[0]);
+    ui.tap(Key::Named(Named::ArrowRight), NONE);
+    assert_eq!(ui.runtime().focused(), Some(&stops[1]));
+    ui.tap(Key::Named(Named::ArrowLeft), NONE);
+    ui.tap(Key::Named(Named::ArrowLeft), NONE);
+    assert_eq!(ui.runtime().focused(), Some(&stops[0]), "Left stops at the first");
+    ui.tap(Key::Named(Named::End), NONE);
+    let last = stops.last().unwrap();
+    assert_eq!(ui.runtime().focused(), Some(last));
+    assert_eq!(focused(&mut ui), *last);
+    ui.tap(Key::Named(Named::Home), NONE);
+    ui.tap(Key::Named(Named::ArrowRight), NONE);
+    // Away to the right column and back: the toolbar remembers its button.
+    region(&mut ui, true);
+    assert!(!ui.app().toolbar_has_focus());
+    region(&mut ui, false);
+    assert_eq!(ui.runtime().focused(), Some(&stops[1]), "the button last focused");
+    ui.tap(Key::Named(Named::Escape), NONE);
+    assert!(!ui.app().toolbar_has_focus(), "Escape leaves the toolbar");
+    assert!(!focused(&mut ui).is_under(&crate::a11y::tree::toolbar_id()));
+}

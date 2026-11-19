@@ -42,6 +42,8 @@ pub enum Cause {
     /// have better things to do than free disk space. Clears when autosave
     /// works again.
     Autosave,
+    /// A staged or refused commit. Clears when the graph reaches the engine.
+    Commit,
     /// Anything else that lost the player's work.
     Other,
 }

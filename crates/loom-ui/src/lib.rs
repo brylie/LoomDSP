@@ -80,11 +80,11 @@ mod view;
 mod waker;
 mod window;
 
-pub use app::{App, Context, Deadline, InputState, WindowSpec};
+pub use app::{App, Context, Deadline, InputState, TabStep, WindowSpec};
 pub use draw::Panels;
 pub use driver::{Driver, Paste};
 pub use effect::{Effect, Effects};
-pub use element::{Align, Element, Length, Padding};
+pub use element::{Align, Element, Length, Looks, Padding, StateLook};
 pub use event::{AccessEvent, DriverEvent, Ime, WindowEvent, WindowState};
 pub use field::FieldEvent;
 pub use focus::{AccessNodes, FocusStep, RingStyle};

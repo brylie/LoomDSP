@@ -371,3 +371,38 @@ Quit the app. Press Ctrl+D in the Keys and Pad terminals to end them.
 ## When a step fails
 
 Write the step's name, what you heard or saw, and what you expected in Notes. Copy the status bar text exactly. For a click, record it again with `--record`, and capture it on the loopback if you can, and attach both `loom analyze` outputs. A click in the capture but not in the recording happened after the engine: in the stop, the stream, or the device. A failure the fake host cannot show, such as a device that opens and then refuses to start, is a new issue linked to #26.
+
+## Control scripts for Parts 1, 3, 4, and 5
+
+Run from the repository root. Give each run a dedicated preferences file with
+`--preferences`. The script sends the same messages as the window, and the
+JSON replies show their results. Listening and unplugging still need a person.
+
+- **`safety-switch` and `safety-leave-clean`:** Start `examples/dev/check-loud-noise.ron`
+  with `--control-script examples/dev/check-devices-part-1.jsonl --preferences target/check-safety.ron`.
+  Restart on the same file to check `safety-remembered`. Confirm
+  `output_safety: "clean"` in the preferences file.
+- **`open-another`:** Start `examples/dev/check-dc.ron` with
+  `--output-safety off --record target/check-dc.wav --preferences target/check-prefs.ron --control-script examples/dev/check-devices-part-3.jsonl`
+  after the Part 2 script, so the recording uses the saved interface and rate.
+  Check that the `open-drone` reply has `"ok": true` and that the recording
+  contains the drone tone after the DC segment and before silence. Run
+  `loom analyze target/check-dc.wav --max-step 0.01` after the app exits.
+  All three checks must pass.
+- **`choice-remembered`:** Start `examples/dev/check-drone.ron` with
+  `--preferences target/check-prefs.ron --control-script examples/dev/check-devices-part-4.jsonl`
+  after the Part 2 script. Check the top-level `audio` field for the device, rate, buffer,
+  and callback progress.
+- **`pad-stays-off`:** Start both MIDI controllers and set `LOOM_MIDI_PAD`
+  to the full name of Pad. Start `examples/patches/subtractive.ron` with
+  `--preferences target/check-midi.ron --control-script examples/dev/check-devices-part-5.jsonl`.
+  Check each reply's `inputs` for the ports' open state. Restart the same patch
+  without the script and with the same preferences. Confirm that Pad is off
+  and silent and that Keys still plays. Use the interactive `both-inputs`
+  and `pad-off-while-held` checks above with this patch to hear each controller
+  play and to check that turning off Pad releases a held note.
+
+For `rate-96k` and `smallest-buffer`, record one run at each sample rate.
+A mid-run rate change ends `--record` as the audio QA spec says. To check
+the device-side fade, capture each rate separately with `loom capture` at
+the matching rate and apply the loopback check above.

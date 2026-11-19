@@ -1,12 +1,11 @@
 //! The stats bar and the status line, drawn by `loom-ui` (plan for leaving
 //! Iced, step 3.2, row 1; ui-layer.md, section 5, rule 10).
 //!
-//! Two panels in the Panels layer: `bottom` fills the window and holds
-//! `stats` in a slot of [`style::STATS_BAR_HEIGHT`] at its foot, so the
-//! bar and each of its items keep their own place and UI ID (`stats`,
-//! `stats/load`, `stats/status/dismiss`, ...). `bottom`'s space above the
-//! bar has no key and paints nothing, so a point there goes on to Iced.
-//! Iced keeps a transparent space of the same height where the bar was
+//! The bar is the `stats` panel in the Panels layer, in a slot of
+//! [`style::STATS_BAR_HEIGHT`] at the foot of the window's root panel
+//! (`chrome.rs`), so the bar and each of its items keep their own place
+//! and UI ID (`stats`, `stats/load`, `stats/status/dismiss`, ...). Iced
+//! keeps a transparent space of the same height where the bar was
 //! (`view.rs`), from the same token.
 //!
 //! Both draw from [`bars::Model`], which the snapshot reads too, and each
@@ -20,11 +19,6 @@ use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role, Value};
 use loom_ui::{Align, Element, Layer, Length, Padding, View};
 use loom_ui_core::{Color, UiId};
-
-/// The root panel around the bar: the whole window, empty above the bar.
-pub(crate) fn bottom_id() -> UiId {
-    UiId::panel("bottom")
-}
 
 /// The bar's panel. Every item's UI ID is inside it.
 pub(crate) fn stats_id() -> UiId {
@@ -46,8 +40,9 @@ pub(crate) struct Bar {
 }
 
 impl App {
-    /// Adds the bar's two panels to the runtime's view.
-    pub(crate) fn bar_panels(&self, view: &mut View) {
+    /// Adds the bar's panel to the runtime's view, for its slot in the
+    /// window's root panel.
+    pub(crate) fn bar_panel(&self, view: &mut View) {
         let theme = self.theme();
         let palette = theme.extended_palette();
         let bar = Bar {
@@ -56,7 +51,6 @@ impl App {
             off: palette.background.strong.color.to_core(),
             knob: palette.background.base.text.to_core(),
         };
-        view.panel_with(bottom_id(), Layer::Panels, &(), bottom);
         view.panel_with(stats_id(), Layer::Panels, &bar, stats);
     }
 
@@ -100,18 +94,6 @@ impl App {
         }
         None
     }
-}
-
-/// The root panel: a space that fills the window, then the bar's slot.
-fn bottom(_: &()) -> Element {
-    Element::column([
-        Element::space(Length::Shrink, Length::FILL),
-        Element::slot(stats_id())
-            .width(Length::FILL)
-            .height(Length::Fixed(style::STATS_BAR_HEIGHT)),
-    ])
-    .width(Length::FILL)
-    .height(Length::FILL)
 }
 
 /// The bar, left to right: the developer switches, the fixed items, then

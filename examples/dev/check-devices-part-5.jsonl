@@ -1,0 +1,8 @@
+{"id":"both-on","cmd":"midi","input":"${LOOM_MIDI_PAD}","on":true}
+{"id":"both-on","cmd":"snapshot"}
+{"id":"pad-off","cmd":"midi","input":"${LOOM_MIDI_PAD}","on":false}
+{"id":"pad-off","cmd":"snapshot"}
+{"id":"pad-on","cmd":"midi","input":"${LOOM_MIDI_PAD}","on":true}
+{"id":"pad-on","cmd":"snapshot"}
+{"id":"leave-pad-off","cmd":"midi","input":"${LOOM_MIDI_PAD}","on":false}
+{"cmd":"quit"}

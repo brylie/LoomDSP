@@ -1,81 +1,230 @@
 use super::*;
 use loom_canvas::iced_convert::ToCore as _;
 use loom_core::{EngineConfig, LoomError, TRANSPORT_MODULE, create_engine};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-/// A full queue stages fresh modules until the idle engine drains it;
-/// the next update commits them without another edit from the player.
+/// A staged graph drains without Tick or another edit on an idle engine.
 #[test]
 fn a_full_queue_retries_staged_modules() {
     let mut app = app_with_engine(EngineConfig {
         command_capacity: 4,
         ..EngineConfig::default()
     });
-    for _ in 0..4 {
+    for _ in 0..9 {
         app.session.controller.add_module("loom.osc.sine").unwrap();
     }
     assert!(!app.commit());
-    assert!(app.session.retry_commit);
-    let _ = app.send(Message::Tick);
-    assert!(!app.session.retry_commit);
+    assert!(app.session.retry_commit.is_some());
+    let _ = app.send(Message::WindowRescaled);
+    assert!(app.session.retry_commit.is_none());
     assert!(!app.session.controller.has_uncommitted_changes());
-    assert_eq!(app.session.controller.last_report().modules, 4);
+    assert_eq!(app.session.controller.last_report().modules, 9);
 }
 
-/// A full queue fixes itself, so with no undo history to lose it is a warning
-/// and the commit retries. A commit that cannot retry leaves the graph ahead
-/// of the engine, so it stays on screen.
+/// A permanent commit error stays until a graph reaches the engine.
 #[test]
-fn a_commit_that_cannot_retry_is_kept() {
+fn a_commit_that_cannot_retry_is_kept_until_the_next_commit() {
     let mut app = app();
-    assert!(app.session.edits.history.undo_step().is_none());
-    app.commit_failed(&LoomError::QueueFull);
-    assert!(app.session.retry_commit);
+    app.commit_failed(&LoomError::QueueFull, 0);
+    assert!(app.session.retry_commit.is_some());
     assert_eq!(app.alerts.severity(), alerts::Severity::Warning);
-    assert!(app.alerts.kept().is_empty());
-
-    app.commit_failed(&LoomError::TooManyModules(4));
-    assert!(!app.session.retry_commit);
+    assert_eq!(app.alerts.top_kept().unwrap().cause, alerts::Cause::Commit);
+    app.commit_failed(&LoomError::TooManyModules(4), 0);
+    assert!(app.session.retry_commit.is_none());
     assert_eq!(app.alerts.severity(), alerts::Severity::Alarm);
-    assert_eq!(app.alerts.top_kept().unwrap().cause, alerts::Cause::Other);
     app.alerts.say("saved");
-    assert!(app.alerts.kept_field().is_some(), "a later message does not hide it");
+    assert!(app.alerts.kept_field().is_some());
+    assert!(app.commit());
+    assert!(app.alerts.kept_field().is_none());
 }
 
-/// A full queue clears the undo history, and a retry that works does not bring
-/// it back. So the loss stays on screen after the retry's own message.
+/// The callback makes room for a staged edit, the watcher retries it,
+/// and the edit is undoable as a single step.
 #[test]
-fn a_full_queue_keeps_the_loss_of_the_undo_history_on_screen() {
-    let mut app = app_with_engine(EngineConfig {
-        command_capacity: 8,
+fn the_playing_engine_wakes_a_staged_commit_and_keeps_undo() {
+    let config = EngineConfig {
+        command_capacity: 4,
+        output_safety: OutputSafety::Off,
         ..EngineConfig::default()
-    });
-    let module = app.session.controller.add_module("loom.osc.sine").unwrap();
+    };
+    let mut app = app_with_engine(config);
+    let tape = start_stepped_engine(&mut app, create_engine(registry(true), config));
+
+    let mut ids = Vec::new();
     app.edit(|app| {
-        app.session.controller.remove_module(module).unwrap();
-        assert!(app.commit());
+        let c = &mut app.session.controller;
+        for _ in 0..10 {
+            ids.push(c.add_module("loom.math.constant").unwrap());
+        }
+        let out = c.add_module("loom.io.audio-out").unwrap();
+        c.set_param_named(ids[0], "value", 0.25).unwrap();
+        c.connect_named(ids[0], "out", out, "in").unwrap();
+        assert!(!app.commit());
     });
-    assert!(
-        app.session.edits.history.undo_step().is_some(),
-        "there is history to lose"
-    );
-    for _ in 0..8 {
-        app.session.controller.add_module("loom.osc.sine").unwrap();
+    assert!(app.session.retry_commit.is_some());
+    let name = app.session.edits.history.undo_step().unwrap().name().to_owned();
+
+    let (sender, messages) = std::sync::mpsc::channel();
+    let waker = loom_ui::Waker::new(sender, std::sync::Arc::new(|| {}));
+    app.watching = true;
+    app.sync_watchers(&waker);
+    let staged = app.session.controller.staged_modules();
+    let scene = app.session.scene.generation();
+    let stats = app.session.controller.stats().clone();
+    let swaps = stats.schedule_swaps.load(Ordering::Relaxed);
+    app.undo();
+    assert_eq!(app.session.edits.history.undo_step().unwrap().name(), name);
+    app.apply(Message::Tick);
+    app.retry_staged_commit();
+    assert_eq!(app.session.scene.generation(), scene, "a full queue did not retry");
+    assert_eq!(app.session.controller.staged_modules(), staged);
+    assert_eq!(app.command_drains(), 0);
+    assert_eq!(stats.schedule_swaps.load(Ordering::Relaxed), swaps);
+    for message in messages.try_iter() {
+        assert!(!matches!(message, Message::RetryCommit(_)));
+        app.watched_message_taken(&message);
     }
-    assert!(!app.commit());
-    assert!(app.session.retry_commit, "it still retries");
-    assert!(app.session.edits.history.undo_step().is_none());
+    let drain = |app: &mut App| {
+        for _ in 0..8 {
+            if app.session.retry_commit.is_none() {
+                return;
+            }
+            tape.step(64);
+            take_watcher_message(app, &messages, |message| matches!(message, Message::RetryCommit(_)));
+            app.sync_watchers(&waker);
+        }
+        assert!(app.session.retry_commit.is_none(), "staged work drained");
+    };
+    drain(&mut app);
+    tape.step(1024);
+    assert_eq!(tape.left().last(), Some(&0.25));
+    assert_eq!(app.session.edits.history.undo_step().unwrap().name(), name);
     assert!(
-        app.alerts.status().contains("undo history cleared"),
-        "{}",
-        app.alerts.status()
+        app.alerts
+            .kept()
+            .iter()
+            .all(|problem| problem.cause != alerts::Cause::Commit)
     );
 
-    let _ = app.send(Message::Tick);
-    assert!(!app.session.retry_commit, "the retry worked");
-    let kept = app.alerts.kept_field().expect("the loss stays on screen");
-    assert!(kept.text.contains("undo history cleared"), "{}", kept.text);
-    assert!(kept.dismissible);
+    app.undo();
+    app.sync_watchers(&waker);
+    drain(&mut app);
+    tape.step(1024);
+    assert_eq!(tape.left().last(), Some(&0.0));
+    assert!(ids.iter().all(|id| app.session.controller.graph().node(*id).is_none()));
+    assert_eq!(app.session.edits.history.redo_step().unwrap().name(), name);
+}
+
+/// A probe commit retires every removed slot even when the first swap only
+/// has room to send some removals. Housekeeping keeps the undo history.
+#[test]
+fn a_probe_commit_retries_outstanding_removals() {
+    let config = EngineConfig {
+        command_capacity: 3,
+        ..EngineConfig::default()
+    };
+    let mut app = app_with_engine(config);
+    let mut parts = create_engine(registry(true), config);
+    let mut ids = Vec::new();
+    for _ in 0..6 {
+        ids.push(parts.controller.add_module("loom.math.constant").unwrap());
+        parts.controller.commit().unwrap();
+        parts.engine.process(&mut [0.0; 64], &mut [0.0; 64]);
+    }
+    let tape = start_stepped_engine(&mut app, parts);
+    let sine = registry(true).resolve("loom.osc.sine").unwrap();
+    app.add_module(sine, Point::ORIGIN);
+    tape.step(64);
+    let history = app.session.edits.history.undo_step().unwrap().name().to_owned();
+
+    for id in &ids {
+        app.session.controller.remove_module(*id).unwrap();
+    }
+    app.sync_probes();
+    assert!(app.session.retry_commit.is_some_and(|retry| !retry.edit));
+    assert!(app.session.controller.has_uncommitted_changes());
+    assert_eq!(app.session.controller.free_module_slots(), config.max_modules - 5);
+
+    let (sender, messages) = std::sync::mpsc::channel();
+    let waker = loom_ui::Waker::new(sender, std::sync::Arc::new(|| {}));
+    app.watching = true;
+    for _ in 0..2 {
+        app.sync_watchers(&waker);
+        tape.step(64);
+        take_watcher_message(&mut app, &messages, |message| {
+            matches!(message, Message::RetryCommit(_))
+        });
+    }
+    assert!(app.session.retry_commit.is_none());
+    assert!(!app.session.controller.has_uncommitted_changes());
+    assert_eq!(app.session.controller.free_module_slots(), config.max_modules - 1);
+    assert_eq!(app.session.edits.history.undo_step().unwrap().name(), history);
+}
+
+/// A CC that lands on the next callback's grid line wakes the app again
+/// when the engine publishes the parameter value, with no further MIDI.
+#[test]
+fn deferred_midi_feedback_wakes_the_app_when_it_plays() {
+    use loom_core::{MidiControl, MidiEvent};
+    let config = EngineConfig::default();
+    let mut app = app_with_engine(config);
+    let mut parts = create_engine(registry(true), config);
+    let c = &mut parts.controller;
+    let id = c.add_module("loom.math.constant").unwrap();
+    let index = c.graph().node(id).unwrap().descriptor.param_index("value").unwrap();
+    c.map_midi(
+        MidiControl {
+            channel: 0,
+            controller: 74,
+        },
+        id,
+        index,
+    )
+    .unwrap();
+    c.commit().unwrap();
+    assert!(parts.midi.send(MidiEvent::control_change(40, 0, 74, 127)));
+    let tape = start_stepped_engine(&mut app, parts);
+    let (sender, messages) = std::sync::mpsc::channel();
+    let waker = loom_ui::Waker::new(sender, std::sync::Arc::new(|| {}));
+    app.watching = true;
+    app.sync_watchers(&waker);
+
+    let value = |app: &App| app.session.controller.graph().node(id).unwrap().params[index];
+    let initial = value(&app);
+    tape.step(64);
+    take_watcher_message(&mut app, &messages, |message| matches!(message, Message::Midi));
+    assert_eq!(value(&app), initial);
+
+    tape.step(64);
+    take_watcher_message(&mut app, &messages, |message| matches!(message, Message::Midi));
+    assert_eq!(value(&app), 1.0);
+}
+
+/// Plays the given engine in 64-frame callbacks with no external device.
+fn start_stepped_engine(app: &mut App, parts: loom_core::EngineParts) -> loom_host_desktop::Tape {
+    let tape = loom_host_desktop::Tape::new();
+    let audio = loom_host_desktop::AudioOutput::stepped(48_000, 64, &tape)
+        .start(parts.engine)
+        .unwrap();
+    app.session.controller = parts.controller;
+    app.session.engine.stream.prepare(48_000.0);
+    app.session.engine.stream.started(audio, "Stepped".into());
+    tape
+}
+
+/// Drives a watcher message through the app, releasing other watcher outlets.
+fn take_watcher_message(app: &mut App, messages: &std::sync::mpsc::Receiver<Message>, want: impl Fn(&Message) -> bool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        let message = messages.recv_timeout(remaining).expect("watcher message");
+        if want(&message) {
+            app.apply(message);
+            break;
+        }
+        app.watched_message_taken(&message);
+    }
 }
 
 pub(crate) fn app() -> App {
@@ -2882,9 +3031,11 @@ fn escape_from_a_text_box_gives_keys_back_to_the_canvas() {
     );
 }
 
-/// Tab moves through one view's text fields and wraps, sent as a real key.
-/// It stays inside the patch browser, so focus cannot land on the form behind
-/// it. The browser focuses its search field by a task, which sends no message,
+/// Tab moves through one view's text fields, sent as a real key. On the
+/// main view, past patch info's last field it goes on to the runtime's
+/// stops: with the bar empty, the toolbar's first (ui-layer.md, section 6,
+/// rule 3, from row 2). It stays inside the patch browser, which loops, so
+/// focus cannot land on the form behind it. The browser focuses its search field by a task, which sends no message,
 /// so the key cannot wait for the app to have heard of the focus.
 #[test]
 fn tab_moves_between_the_fields_of_one_view() {
@@ -2897,9 +3048,13 @@ fn tab_moves_between_the_fields_of_one_view() {
     ui.tap(tab.clone(), Modifiers::default());
     assert_eq!(ui.focused_field(), Some(tags.clone()), "Tab goes to Tags");
     ui.tap(tab.clone(), Modifiers::default());
-    assert_eq!(ui.focused_field(), Some(authors.clone()), "Tab wraps to Authors");
-    ui.tap(tab.clone(), Modifiers::SHIFT);
-    assert_eq!(ui.focused_field(), Some(tags), "Shift-Tab wraps back to Tags");
+    assert_eq!(ui.focused_field(), None, "past Tags, out of Iced's fields");
+    assert_eq!(
+        ui.runtime().focused(),
+        Some(&crate::toolbar::toolbar_id().with("new")),
+        "on to the toolbar"
+    );
+    let _ = authors;
 
     let _ = press_key(&mut ui, Key::Named(Named::Escape), None, Modifiers::default());
     ui.app_mut()

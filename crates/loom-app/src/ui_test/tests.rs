@@ -2740,7 +2740,13 @@ fn measure_and_wgpu_lay_out_alike() {
         assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
         return;
     };
-    assert!(measured.len() > 20, "the walk found the window's parts");
+    // The toolbar and the bar are `loom-ui`'s, so Iced's walk finds the
+    // right column's parts and the canvas's.
+    assert!(
+        measured.len() > 5,
+        "the walk found the window's parts: {}",
+        measured.len()
+    );
     assert_eq!(measured, drawn, "with module 4 selected");
 
     ui.send(Message::OpenBrowser);
@@ -2753,24 +2759,27 @@ fn measure_and_wgpu_lay_out_alike() {
     assert_eq!(measured, drawn, "with the module browser open");
 }
 
-/// A capture runs a redraw update before it draws, as the window does
-/// before every frame: Iced 0.14 sets a button's status only then, and
-/// draws a newly built one as disabled until it has (#460, #776). So an
-/// enabled toolbar button is captured in its enabled colour.
+/// A capture draws the toolbar's buttons in their role's looks
+/// (visual-system.md, Role tokens): an enabled button in its normal fill,
+/// and a turned-off one, Undo with nothing to undo, in its off fill (#460,
+/// #776: a button once drew as disabled in a capture).
 #[test]
 fn a_capture_draws_enabled_buttons_as_enabled() {
-    use iced::widget::button::Status;
     use std::sync::{Arc, Mutex};
     let mut ui = Ui::open("subtractive.ron");
     if !ui.draws_the_canvas() {
         assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
         return;
     }
+    ui.lay_out_panels();
     let open = ui
-        .places()
-        .of(&"toolbar/open".parse().unwrap())
-        .expect("the toolbar shows Open")
-        .rect;
+        .runtime()
+        .bounds(&"toolbar/open".parse().unwrap())
+        .expect("the toolbar shows Open");
+    let undo = ui
+        .runtime()
+        .bounds(&"toolbar/undo".parse().unwrap())
+        .expect("the toolbar shows Undo");
     let seen = Arc::new(Mutex::new(None));
     let got = seen.clone();
     ui.app_mut().effect(loom_ui::Effects::capture(move |image| {
@@ -2785,22 +2794,28 @@ fn a_capture_draws_enabled_buttons_as_enabled() {
         .expect("the capture was answered")
         .expect("a GPU draws it");
 
-    // A pixel inside the button's padding, left of its label.
-    let (x, y) = ((open.x + 3.0) as u32, (open.y + open.height / 2.0) as u32);
-    let at = ((y * image.width() + x) * 4) as usize;
-    let pixel = &image.rgba()[at..at + 3];
-    let theme = ui.app().theme();
-    let colour = |status: Status| match crate::style::secondary(&theme, status).background {
-        Some(iced::Background::Color(color)) => color.into_rgba8(),
-        other => panic!("a secondary button has a plain fill, not {other:?}"),
+    // A pixel inside each button's padding, left of its label.
+    let pixel = |rect: loom_ui_core::Rect| {
+        let (x, y) = ((rect.x + 3.0) as u32, (rect.y + rect.height / 2.0) as u32);
+        let at = ((y * image.width() + x) * 4) as usize;
+        [image.rgba()[at], image.rgba()[at + 1], image.rgba()[at + 2]]
     };
-    let near = |want: [u8; 4]| pixel.iter().zip(want).all(|(got, want)| got.abs_diff(want) <= 2);
-    // The disabled fill is this colour at half opacity, so a button drawn
-    // as disabled shows the toolbar through it and does not match.
+    let rgb = |colour: Option<loom_ui_core::Color>| {
+        let colour = colour.expect("a filled role");
+        [colour.r, colour.g, colour.b].map(|c| (c * 255.0).round() as u8)
+    };
+    let near = |got: [u8; 3], want: [u8; 3]| got.iter().zip(want).all(|(got, want)| got.abs_diff(want) <= 2);
+    let normal = rgb(crate::style::SECONDARY.normal.fill);
+    let off = rgb(crate::style::SECONDARY.off.fill);
     assert!(
-        near(colour(Status::Active)),
-        "{pixel:?} is the enabled fill {:?}",
-        colour(Status::Active)
+        near(pixel(open), normal),
+        "Open: {:?} is the normal fill {normal:?}",
+        pixel(open)
+    );
+    assert!(
+        near(pixel(undo), off),
+        "Undo: {:?} is the off fill {off:?}",
+        pixel(undo)
     );
 }
 
@@ -3026,4 +3041,71 @@ fn a_capture_after_a_shrink_draws_the_last_frame_again() {
         .expect("the frame is read back");
     assert_eq!(again.len(), (half.width * half.height * 4) as usize);
     drop(built);
+}
+
+/// A test that saves writes its own copy of the example, never the
+/// example in the repository: after an edit, Cmd+S (Ctrl+S elsewhere) in
+/// the harness saves the copy `Ui::open` opened, so the copy's bytes
+/// change and the real file's stay.
+#[test]
+fn a_save_in_the_harness_writes_the_copy() {
+    use iced::keyboard::{Key, Modifiers};
+    let real = example_path("subtractive.ron");
+    let before = std::fs::read(&real).unwrap();
+    let mut ui = Ui::open("subtractive.ron");
+    let copy = ui.app().session.document.file().expect("a file is open").to_path_buf();
+    assert_ne!(
+        std::fs::canonicalize(&copy).unwrap(),
+        std::fs::canonicalize(&real).unwrap(),
+        "the harness opened a copy"
+    );
+    let unsaved = std::fs::read(&copy).unwrap();
+    // Turn the filter's cutoff, so the save has something new to write.
+    let _ = ui.app_mut().send(Message::Inspector(crate::inspector::Message::Param {
+        module: 4,
+        index: 0,
+        position: 0.123,
+    }));
+    let _ = ui.app_mut().send(Message::SliderReleased);
+    ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
+    ui.redraw();
+    assert_ne!(std::fs::read(&copy).unwrap(), unsaved, "the save wrote the copy");
+    assert_eq!(std::fs::read(&real).unwrap(), before, "the example is unchanged");
+}
+
+/// A `Ui` removes the copy folder it made when it drops, even after the
+/// open file changed, as New, Open, or Save As change it.
+#[test]
+fn a_ui_removes_its_own_copy_folder_when_the_file_changed() {
+    let mut ui = Ui::open("subtractive.ron");
+    let file = ui.app().session.document.file().expect("a file is open");
+    let folder = file.parent().expect("the copy has a folder").to_path_buf();
+    assert!(folder.is_dir());
+    ui.app_mut()
+        .session
+        .document
+        .saved(PathBuf::from("elsewhere.ron"), loom_patch::Patch::new("Elsewhere"));
+    drop(ui);
+    assert!(!folder.exists(), "the copy folder is gone");
+}
+
+/// A `Ui` owns only a copy folder it made: a second `Ui` opened on the
+/// first one's copy, by its absolute path, leaves that folder in place
+/// when it drops (CodeRabbit, #850).
+#[test]
+fn a_ui_on_another_ui_s_copy_leaves_that_folder() {
+    let first = Ui::open("subtractive.ron");
+    let file = first
+        .app()
+        .session
+        .document
+        .file()
+        .expect("a file is open")
+        .to_path_buf();
+    let folder = file.parent().expect("the copy has a folder").to_path_buf();
+    let second = Ui::open(file.to_str().expect("a path in UTF-8"));
+    drop(second);
+    assert!(folder.is_dir(), "the first Ui's folder stays");
+    drop(first);
+    assert!(!folder.exists(), "and goes with its own Ui");
 }

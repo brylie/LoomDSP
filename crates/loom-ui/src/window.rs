@@ -559,6 +559,7 @@ impl Window {
         painter: &mut dyn crate::paint::TextPainter,
         style: &crate::paint::PanelStyle,
         focus: Option<&UiId>,
+        (hovered, pressed): (Option<&UiId>, Option<&UiId>),
         scale: f32,
     ) -> crate::draw::Painted {
         let mut painted = crate::draw::Painted::default();
@@ -568,9 +569,11 @@ impl Window {
                 continue;
             }
             painter.begin_layer(record.clip);
-            let fields = crate::draw::FieldPaint {
+            let fields = crate::draw::PaintState {
                 fields: &self.fields,
                 focus,
+                hovered,
+                pressed,
                 scale,
             };
             painted.elements += record

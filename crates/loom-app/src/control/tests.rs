@@ -2518,12 +2518,19 @@ fn locate_takes_a_ui_id_as_text() {
     ));
     assert!(locate(ui.app(), "canvas/8/output/nonsense", &found).is_err());
 
-    // Outside the canvas: where the window drew the part.
-    let undo = locate(ui.app(), "toolbar/undo", &found).unwrap();
-    let label = ui.text("Undo").expect("the toolbar shows Undo");
+    // Outside the canvas: where the window drew the part. The toolbar is
+    // `loom-ui`'s, so the answering update fills its place from the
+    // runtime's layout (`Found::ours`), as here.
+    let ours = |id: &str| {
+        let mut found = found.clone();
+        found.ours = ui.runtime().bounds(&id.parse().unwrap());
+        found
+    };
+    let undo = locate(ui.app(), "toolbar/undo", &ours("toolbar/undo")).unwrap();
+    let label = ui.runtime().text_bounds("Undo").expect("the toolbar shows Undo");
     assert!(undo.contains(label.center()), "the button holds its label");
     assert!(undo.width < 200.0, "the button, not the toolbar");
-    let toolbar = locate(ui.app(), "toolbar", &found).unwrap();
+    let toolbar = locate(ui.app(), "toolbar", &ours("toolbar")).unwrap();
     assert!(toolbar.contains(undo.center()));
     for id in [
         "panel/inspector",
@@ -3069,6 +3076,34 @@ fn a_pointer_command_aims_a_module_target_at_the_canvas() {
         assert!(
             (want - got).abs() < 1.0,
             "{key}: the hover went to the knob, {got} for {want}"
+        );
+    }
+}
+
+/// `locate` finds a breadcrumb entry and a toolbar button by UI ID, from
+/// the runtime's layout, where the window's root panel puts them
+/// (control-channel.md; plan for leaving Iced, step 3.2, row 2).
+#[test]
+fn locate_finds_the_toolbar_and_the_breadcrumb_by_ui_id() {
+    let mut ui = crate::ui_test::Ui::open("nested-subtractive.ron");
+    ui.send(Message::OpenLevel(loom_patch::ModulePath::top(2)));
+    for (target, id) in [
+        ("breadcrumb/2", crate::breadcrumb::breadcrumb_id().with(2u32)),
+        ("breadcrumb/patch", crate::breadcrumb::breadcrumb_id().with("patch")),
+        ("toolbar/undo", crate::toolbar::toolbar_id().with("undo")),
+    ] {
+        let reply = run_ui(&mut ui, &format!(r#"{{"cmd": "locate", "target": "{target}"}}"#))
+            .unwrap_or_else(|why| panic!("{target}: {why}"));
+        let laid = ui.runtime().bounds(&id).expect("laid out");
+        let x = reply["x"].as_f64().unwrap();
+        let y = reply["y"].as_f64().unwrap();
+        assert!(
+            (x - f64::from(laid.center_x())).abs() < 0.5,
+            "{target}: {reply:?} against {laid:?}"
+        );
+        assert!(
+            (y - f64::from(laid.center_y())).abs() < 0.5,
+            "{target}: {reply:?} against {laid:?}"
         );
     }
 }
