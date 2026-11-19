@@ -60,6 +60,54 @@ fn a_dump_shows_the_focused_value_in_place_of_the_caption() {
     });
 }
 
+/// A learned mapping replaces the focused value in the snapshot while Learn is on.
+#[test]
+fn a_focused_mapped_caption_shows_its_mapping_in_learn_mode() {
+    let mut app = open("subtractive.ron");
+    let id = loom_core::ModuleId(4);
+    let parameter = app
+        .session
+        .controller
+        .graph()
+        .node(id)
+        .unwrap()
+        .descriptor
+        .param_index("cutoff")
+        .unwrap();
+    app.session
+        .controller
+        .map_midi(
+            loom_core::MidiControl {
+                channel: 0,
+                controller: 74,
+            },
+            id,
+            parameter,
+        )
+        .unwrap();
+    app.commit();
+    let index =
+        crate::surface::find_control(app.session.controller.graph(), &app.session.hierarchy, id.0, "cutoff").unwrap();
+    app.a11y.set_focus(Some((id.0, index)));
+    let shown = |app: &App| {
+        app.ui_snapshot()
+            .tiles
+            .into_iter()
+            .find(|tile| tile.id == id.0)
+            .unwrap()
+            .widgets[index]
+            .shown
+            .clone()
+    };
+
+    let value = shown(&app);
+    assert!(value.as_deref().is_some_and(|text| text != "CC 74"));
+    app.learn_message(crate::learn::Message::Toggle);
+    assert_eq!(shown(&app).as_deref(), Some("CC 74"));
+    app.learn_message(crate::learn::Message::Toggle);
+    assert_eq!(shown(&app), value);
+}
+
 /// A label that fits has no `shown`. SVF's Resonance caption was cut
 /// until labels could use the empty space beside them (#455).
 #[test]
@@ -104,7 +152,7 @@ fn a_cut_label_shows_what_the_tile_draws() {
             widgets: vec![knob(0, "Much longer caption"), knob(3, "Another long caption")],
         },
     };
-    let cut = cut_labels(&module, None);
+    let cut = cut_labels(&module, None, None);
     for index in 0..2 {
         let shown = cut.get(&TextKind::Caption(index)).expect("cut");
         assert!(shown.ends_with('…'), "{shown}");

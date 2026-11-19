@@ -289,9 +289,7 @@ impl App {
     fn proceed(&mut self, next: AfterDiscard) {
         match next {
             AfterDiscard::New => {
-                if self.replace(Source::Empty) {
-                    self.alerts.say("new patch".to_string());
-                }
+                self.replace_with_empty_patch();
             }
             AfterDiscard::OpenDialog => {
                 let current = self.session.document.file().map(Path::to_path_buf);
@@ -352,8 +350,24 @@ impl App {
     /// Replaces the patch (and its engine) with `source`. If the source does
     /// not load, the running patch is unchanged.
     pub(crate) fn replace(&mut self, source: Source) -> bool {
+        self.replace_reporting(source, |_| {})
+    }
+
+    /// A new empty patch, with the same final status for the window and the control channel.
+    pub(crate) fn replace_with_empty_patch(&mut self) -> bool {
+        self.replace_reporting(Source::Empty, |app| app.alerts.say("new patch"))
+    }
+
+    /// Reports a successful replacement, then adds any warning about a superseded drop.
+    fn replace_reporting(&mut self, source: Source, report: impl FnOnce(&mut Self)) -> bool {
         let message = match self.try_replace(source) {
-            Ok(()) => return true,
+            Ok(skipped_drop) => {
+                report(self);
+                if skipped_drop {
+                    self.warn_skipped_drop();
+                }
+                return true;
+            }
             Err(NotReplaced::NoDevice(e)) => format!(
                 "Could not open the patch: the audio device is not available ({e}). The current patch is unchanged."
             ),
@@ -366,7 +380,8 @@ impl App {
 
     /// Replaces the patch as [`App::replace`] does, but says nothing when
     /// it cannot: the caller words why, as a restore does (`dialogs.rs`).
-    pub(crate) fn try_replace(&mut self, source: Source) -> Result<(), NotReplaced> {
+    /// On success, returns whether the replacement discarded a pending drop.
+    pub(crate) fn try_replace(&mut self, source: Source) -> Result<bool, NotReplaced> {
         // Choosing the device does not start a stream, so the old patch keeps
         // playing. The engine is built at the rate of the device that will
         // play it.
@@ -445,14 +460,22 @@ impl App {
         if self.session.engine.stream.is_playing() {
             self.audio_back();
         }
-        if skipped_drop {
-            self.alerts
-                .warn("The dropped file was not opened: the patch changed first.");
-        }
         drop(old);
         // The new patch has no unsaved changes: the copy goes.
         self.autosave(Instant::now());
-        Ok(())
+        Ok(skipped_drop)
+    }
+
+    /// Adds the drop explanation to the command's final status.
+    pub(crate) fn warn_skipped_drop(&mut self) {
+        const WARNING: &str = "The dropped file was not opened: the patch changed first.";
+        let status = self.alerts.status();
+        if status.is_empty() {
+            self.alerts.warn(WARNING);
+        } else {
+            let separator = if status.ends_with('.') { " " } else { ". " };
+            self.alerts.append_warning(&format!("{separator}{WARNING}"));
+        }
     }
 
     /// Tells the user that something failed, in the window, unless the
@@ -501,35 +524,38 @@ impl App {
     /// Opens the patch at `path` in place of this one, and says so in the
     /// status bar, with any notes about what loaded differently.
     pub(crate) fn open_path(&mut self, path: &std::path::Path) -> bool {
-        let opened = self.replace(Source::File(path));
-        if opened {
-            self.say_opened(path);
-            self.remember_current();
-        }
-        opened
+        self.open_file(path, |_| {})
+    }
+
+    /// Opens a file and completes the caller's work before the pending drop warning.
+    fn open_file(&mut self, path: &Path, after_open: impl FnOnce(&mut Self)) -> bool {
+        self.replace_reporting(Source::File(path), |app| {
+            app.say_opened(path);
+            app.remember_current();
+            after_open(app);
+        })
     }
 
     /// Opens a dropped patch. Overlays close only once it has opened, so
     /// Cancel changes nothing. When others came with it, the status says so
     /// and keeps any notes about what loaded differently.
     fn open_dropped(&mut self, path: &Path, several: bool) {
-        if !self.open_path(path) {
-            return;
-        }
-        if self.overlays.preferences().is_some() {
-            self.preferences(settings::Message::Close);
-        }
-        if several {
-            let notes = join_notes(self.session.document.load_notes());
-            let name = files::display_name(Some(path));
-            let notes = if notes.is_empty() {
-                notes
-            } else {
-                format!(" Note: {notes}.")
-            };
-            self.alerts
-                .warn(format!("Opened \"{name}\". Drop one patch at a time.{notes}"));
-        }
+        self.open_file(path, |app| {
+            if app.overlays.preferences().is_some() {
+                app.preferences(settings::Message::Close);
+            }
+            if several {
+                let notes = join_notes(app.session.document.load_notes());
+                let name = files::display_name(Some(path));
+                let notes = if notes.is_empty() {
+                    notes
+                } else {
+                    format!(" Note: {notes}.")
+                };
+                app.alerts
+                    .warn(format!("Opened \"{name}\". Drop one patch at a time.{notes}"));
+            }
+        });
     }
 
     /// Opens the recent list, if it has anything to show. Whether a file is
@@ -751,8 +777,8 @@ impl App {
     }
 
     /// Says a patch opened: info, or a warning when it loaded differently
-    /// from how it was saved. Shared with the control channel's `open`.
-    pub(crate) fn say_opened(&mut self, path: &std::path::Path) {
+    /// from how it was saved.
+    fn say_opened(&mut self, path: &std::path::Path) {
         let status = opened_status(path, self.session.document.load_notes());
         if self.session.document.load_notes().is_empty() {
             self.alerts.say(status);

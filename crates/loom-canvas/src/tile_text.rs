@@ -292,6 +292,24 @@ pub fn for_each<'a>(module: &'a ModuleView, mut f: impl FnMut(TextItem<'a>)) {
 }
 
 impl TextItem<'_> {
+    /// Fits the MIDI mapping or focused value that replaces this caption.
+    /// A mapping shown in learn mode takes precedence over a value.
+    pub fn caption_replacement<'text>(
+        &self,
+        module: &ModuleView,
+        active: Option<(usize, &'text str)>,
+        learn: Option<&'text crate::LearnView>,
+    ) -> Option<Cow<'text, str>> {
+        if let Some(label) = crate::input::learned_label(learn, module.id, self.kind) {
+            return Some(fit_label(label, self.width, self.size));
+        }
+        let (index, value) = active?;
+        if self.kind == TextKind::Caption(index) && module.panel.widgets[index].value_replaces_caption() {
+            return Some(self.fit_value(module, value));
+        }
+        None
+    }
+
     /// Fits a value to its caption's space. The final positions of other
     /// labels may differ from their panel cells, so use the drawn bounds.
     pub fn fit_value<'text>(&self, module: &ModuleView, text: &'text str) -> Cow<'text, str> {

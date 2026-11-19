@@ -390,8 +390,7 @@ impl App {
                 Ok(Map::new())
             }
             Command::Open { path, .. } => {
-                if self.replace(crate::Source::File(&path)) {
-                    self.say_opened(&path);
+                if self.open_path(&path) {
                     Ok(Map::new())
                 } else {
                     Err(self.alerts.status().to_string())
@@ -671,8 +670,7 @@ impl App {
                 return (then, sent);
             }
             Command::New => {
-                if self.replace(crate::Source::Empty) {
-                    self.alerts.say("new patch".to_string());
+                if self.replace_with_empty_patch() {
                     Ok(Map::new())
                 } else {
                     Err(self.alerts.status().to_string())

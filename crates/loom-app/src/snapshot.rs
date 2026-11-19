@@ -367,15 +367,11 @@ impl Cut {
 /// The port labels and captions a tile cuts with "…", as drawn: the
 /// canvas's own text layout decides, so the snapshot cannot disagree with
 /// the tile.
-fn cut_labels(module: &ModuleView, active: Option<(usize, &str)>) -> Cut {
+fn cut_labels(module: &ModuleView, active: Option<(usize, &str)>, learn: Option<&loom_canvas::LearnView>) -> Cut {
     let mut cut = Cut(Vec::new());
     loom_canvas::for_each_tile_text(module, |item| {
-        if let (TextKind::Caption(index), Some((focused, text))) = (item.kind, active)
-            && index == focused
-            && module.panel.widgets[index].value_replaces_caption()
-        {
-            let shown = item.fit_value(module, text).into_owned();
-            cut.0.push((item.kind, shown));
+        if let Some(shown) = item.caption_replacement(module, active, learn) {
+            cut.0.push((item.kind, shown.into_owned()));
             return;
         }
         let label = match item.kind {
@@ -608,7 +604,7 @@ impl App {
                         .get(id, index)
                         .map(|value| (index, value.text.as_str()))
                 });
-                let cut = cut_labels(m, active);
+                let cut = cut_labels(m, active, self.session.learn.shown());
                 Tile {
                     id: m.id,
                     title: m.title.clone(),

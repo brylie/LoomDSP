@@ -108,6 +108,25 @@ fn hiding_the_focused_control_keeps_focus_on_its_tile() {
     );
 }
 
+/// The key that relocates hidden focus cannot start a draft on its replacement.
+#[test]
+fn typing_after_relocation_starts_on_the_next_key() {
+    let mut tile = module(1, 0.0);
+    tile.panel = panel();
+    tile.panel.widgets[0].hidden = true;
+    tile.panel.widgets[2].kind = WidgetViewKind::Knob { steps: 0 };
+    let scene = Scene::new(vec![tile], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let model = CanvasModel::new(&scene, &selected);
+    let mut state = CanvasInput::default();
+    state.focus.set(1, 0, true);
+    drive(&model, &mut state, &typed(Key::Character('7'), "7"), Point::ORIGIN);
+    assert_eq!(state.focus.control(), Some((1, 2)));
+    assert!(state.focus.typed().is_none());
+    drive(&model, &mut state, &typed(Key::Character('8'), "8"), Point::ORIGIN);
+    assert_eq!(state.focus.typed().unwrap().draft.text, "8");
+}
+
 /// Tab skips a control its module's mode hides (ADR-0030).
 #[test]
 fn tab_skips_hidden_controls() {

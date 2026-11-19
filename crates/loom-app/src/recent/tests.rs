@@ -469,17 +469,17 @@ fn overlays_stay_open_until_the_patch_opens() {
     )));
     let _ = app.send(AppMessage::Preferences(crate::settings::Message::PanicLearn));
     assert!(app.overlays.preferences().is_some());
-    assert!(app.rig.panic_learn.is_some());
+    assert_eq!(app.panic_line(), "Waiting for MIDI...");
     changed(&mut app);
     drop_files(&mut app, &files);
     let _ = app.send(AppMessage::Question(QuestionMessage::Answer(Answer::Cancel)));
     assert_eq!(app.preferences_model().unwrap().author, "Patch Player");
-    assert!(app.rig.panic_learn.is_some());
+    assert_eq!(app.panic_line(), "Waiting for MIDI...");
     drop_files(&mut app, &files);
     let _ = app.send(AppMessage::Question(QuestionMessage::Answer(Answer::DontSave)));
     assert!(app.overlays.preferences().is_none());
     assert_eq!(app.rig.store.saved().author, "Patch Player");
-    assert!(app.rig.panic_learn.is_none());
+    assert_eq!(app.panic_line(), "None");
 }
 
 /// A failed drop keeps the name draft and the panic prompt in Preferences.
@@ -494,18 +494,41 @@ fn a_failed_drop_leaves_preferences_open() {
     app.preferences(crate::settings::Message::PanicLearn);
     drop_files(&mut app, &[bad]);
     assert_eq!(app.preferences_model().unwrap().author, "Draft Player");
-    assert!(app.rig.panic_learn.is_some());
+    assert_eq!(app.panic_line(), "Waiting for MIDI...");
     assert_ne!(app.rig.store.saved().author, "Draft Player");
 }
 
-/// A new patch supersedes a file that is still in the drop collection window.
+/// New and Open acknowledge a drop still in the collection window alongside their normal status.
 #[test]
 fn replacing_a_patch_explains_a_pending_drop() {
-    let mut app = app();
-    app.file_dropped(PathBuf::from("waiting.ron"));
-    assert!(app.replace(crate::Source::Empty));
-    assert!(app.drops.is_empty());
-    assert!(app.alerts.status().contains("the patch changed first"));
+    let dir = TempDir::new("pending-drop");
+    let file = patches(&dir.0, 1).remove(0);
+    for action in [FileAction::New, FileAction::Open] {
+        for pending in [false, true] {
+            let mut app = app();
+            if pending {
+                app.file_dropped(PathBuf::from("waiting.ron"));
+            }
+            fake::answer_open(Some(file.clone()));
+            let _ = app.send(AppMessage::File(action));
+            fake::answer_open(None);
+            let _ = fake::asked();
+            assert!(app.drops.is_empty());
+            let normal = match action {
+                FileAction::Open => crate::file_commands::opened_status(&file, app.session.document.load_notes()),
+                _ => "new patch".to_string(),
+            };
+            if pending {
+                assert_eq!(
+                    app.alerts.status(),
+                    format!("{normal}. The dropped file was not opened: the patch changed first.")
+                );
+                assert_eq!(app.alerts.severity(), crate::alerts::Severity::Warning);
+            } else {
+                assert_eq!(app.alerts.status(), normal);
+            }
+        }
+    }
 }
 
 /// A default licence choice stays open across New. A patch licence choice closes.

@@ -86,6 +86,9 @@ impl CanvasModel<'_> {
             let Some(clip) = screen_tile.intersection(bounds) else {
                 continue;
             };
+            let active = active
+                .filter(|(id, _)| *id == module.id)
+                .and_then(|(id, index)| values.get(id, index).map(|value| (index, value.text.as_str())));
             tile_text::for_each(module, |item| {
                 let (size, colour) = match item.kind {
                     TextKind::Title => (title_px, self.palette.text),
@@ -130,32 +133,18 @@ impl CanvasModel<'_> {
                     }
                     _ => (label_px, self.palette.text_dim),
                 };
-                // A focused or turning knob shows its value instead of its
-                // caption.
-                // In MIDI learn mode, a mapped control shows its mapping.
-                let learned = learned_label(self.learn, module.id, item.kind);
-                let value = match item.kind {
-                    _ if learned.is_some() => learned,
-                    TextKind::Caption(widget) if active == Some((module.id, widget)) => values
-                        .get(module.id, widget)
-                        .filter(|_| module.panel.widgets[widget].value_replaces_caption())
-                        .map(|v| v.text.as_str()),
-                    _ => None,
-                };
-                let substitute = value.map(|text| {
-                    if learned.is_none() {
-                        item.fit_value(module, text)
-                    } else {
-                        crate::scene::fit_label(text, item.width, item.size)
-                    }
-                });
+                let substitute = item.caption_replacement(module, active, self.learn);
                 painter.text(&one_line(
                     substitute.as_deref().unwrap_or(&item.content),
                     size,
                     item.width * zoom,
                     item.align,
                     to_screen(item.anchor),
-                    if value.is_some() { self.palette.text } else { colour },
+                    if substitute.is_some() {
+                        self.palette.text
+                    } else {
+                        colour
+                    },
                     clip,
                 ));
             });

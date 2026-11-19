@@ -265,7 +265,12 @@ impl App {
                     // The file is checked after the answer: it can change
                     // while the question is open.
                     match self.try_replace(Source::Recovered(Box::new(patch))) {
-                        Ok(()) => self.restored(state, orphan, &start.source()),
+                        Ok(skipped_drop) => {
+                            self.restored(state, orphan, &start.source());
+                            if skipped_drop {
+                                self.warn_skipped_drop();
+                            }
+                        }
                         // A copy that reads but does not load is a failed
                         // restore too: the orphan is kept, not adopted.
                         Err(

@@ -532,7 +532,7 @@ impl CanvasModel<'_> {
         {
             state.focus.clear();
         }
-        if (relocated && matches!(*key, Key::Tab))
+        if (relocated && (matches!(*key, Key::Tab) || text.is_some_and(super::typed_field::starts_a_number)))
             || lost_to_mode
                 && matches!(
                     *key,
