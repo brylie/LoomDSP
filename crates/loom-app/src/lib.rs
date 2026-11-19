@@ -1418,9 +1418,7 @@ impl App {
         // Probe IDs are never reused, so a level of a removed probe is dead.
         let live: std::collections::HashSet<ProbeId> = self.session.engine.live.probes().collect();
         self.session.meter_levels.retain(|probe, _| live.contains(probe));
-        if let Err(e) = self.session.controller.commit() {
-            self.alerts.warn(e.to_string());
-        }
+        self.commit_maintenance();
     }
 
     fn report(&mut self) {
@@ -1770,7 +1768,7 @@ impl App {
             && self
                 .session
                 .retry_commit
-                .is_some_and(|before| self.command_drains() != before)
+                .is_some_and(|retry| self.command_drains() != retry.before)
         {
             self.retry_staged_commit();
             self.drain_idle_engine();

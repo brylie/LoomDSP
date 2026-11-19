@@ -105,7 +105,7 @@ midi: [
 - [x] Clicking an armed control disarms it. Escape or a second press of **MIDI learn** ends learn mode with no change.
 - [x] The status bar shows `Learning` for as long as learn mode is on, whatever the status message says (`App::ui_snapshot()` test).
 - [x] In learn mode, every mapped control in view shows its `CC` label.
-- [x] The tile knob and the inspector show the value set by the hardware at the first redraw after the watcher's next poll: at most one audio buffer, plus 15 ms, plus one frame. *Why not one frame:* a faster poll buys nothing a player would notice on a knob.
+- [x] The tile knob and the inspector show the value set by the hardware at the first redraw after the watcher's next poll: at most one audio buffer, plus 15 ms, plus one frame. The watcher also wakes when a mapping publishes a value in a later callback (`loom-app/src/tests.rs`). *Why not one frame:* a faster poll buys nothing a player would notice on a knob.
 - [x] A mapped control change still reaches a MIDI input module.
 - [x] A patch with mappings saves and loads with the same mappings. A patch without a `midi` list loads with none. A patch with two mappings on one parameter, or on one channel and controller number, fails to load with a clear error.
 - [x] Removing a mapping in the inspector stops the control from moving the parameter. Deleting a module removes its mappings.

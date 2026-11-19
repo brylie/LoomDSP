@@ -1,6 +1,7 @@
 use super::*;
 use loom_canvas::iced_convert::ToCore as _;
 use loom_core::{EngineConfig, LoomError, TRANSPORT_MODULE, create_engine};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 /// A staged graph drains without Tick or another edit on an idle engine.
@@ -48,14 +49,7 @@ fn the_playing_engine_wakes_a_staged_commit_and_keeps_undo() {
         ..EngineConfig::default()
     };
     let mut app = app_with_engine(config);
-    let tape = loom_host_desktop::Tape::new();
-    let parts = create_engine(registry(true), config);
-    let audio = loom_host_desktop::AudioOutput::stepped(48_000, 64, &tape)
-        .start(parts.engine)
-        .unwrap();
-    app.session.controller = parts.controller;
-    app.session.engine.stream.prepare(48_000.0);
-    app.session.engine.stream.started(audio, "Stepped".into());
+    let tape = start_stepped_engine(&mut app, create_engine(registry(true), config));
 
     let mut ids = Vec::new();
     app.edit(|app| {
@@ -77,12 +71,16 @@ fn the_playing_engine_wakes_a_staged_commit_and_keeps_undo() {
     app.sync_watchers(&waker);
     let staged = app.session.controller.staged_modules();
     let scene = app.session.scene.generation();
+    let stats = app.session.controller.stats().clone();
+    let swaps = stats.schedule_swaps.load(Ordering::Relaxed);
     app.undo();
     assert_eq!(app.session.edits.history.undo_step().unwrap().name(), name);
     app.apply(Message::Tick);
+    app.retry_staged_commit();
     assert_eq!(app.session.scene.generation(), scene, "a full queue did not retry");
     assert_eq!(app.session.controller.staged_modules(), staged);
     assert_eq!(app.command_drains(), 0);
+    assert_eq!(stats.schedule_swaps.load(Ordering::Relaxed), swaps);
     for message in messages.try_iter() {
         assert!(!matches!(message, Message::RetryCommit(_)));
         app.watched_message_taken(&message);
@@ -93,16 +91,7 @@ fn the_playing_engine_wakes_a_staged_commit_and_keeps_undo() {
                 return;
             }
             tape.step(64);
-            let deadline = std::time::Instant::now() + Duration::from_secs(5);
-            loop {
-                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-                let message = messages.recv_timeout(remaining).expect("command watcher");
-                if matches!(message, Message::RetryCommit(_)) {
-                    app.apply(message);
-                    break;
-                }
-                app.watched_message_taken(&message);
-            }
+            take_watcher_message(app, &messages, |message| matches!(message, Message::RetryCommit(_)));
             app.sync_watchers(&waker);
         }
         assert!(app.session.retry_commit.is_none(), "staged work drained");
@@ -125,6 +114,117 @@ fn the_playing_engine_wakes_a_staged_commit_and_keeps_undo() {
     assert_eq!(tape.left().last(), Some(&0.0));
     assert!(ids.iter().all(|id| app.session.controller.graph().node(*id).is_none()));
     assert_eq!(app.session.edits.history.redo_step().unwrap().name(), name);
+}
+
+/// A probe commit retires every removed slot even when the first swap only
+/// has room to send some removals. Housekeeping keeps the undo history.
+#[test]
+fn a_probe_commit_retries_outstanding_removals() {
+    let config = EngineConfig {
+        command_capacity: 3,
+        ..EngineConfig::default()
+    };
+    let mut app = app_with_engine(config);
+    let mut parts = create_engine(registry(true), config);
+    let mut ids = Vec::new();
+    for _ in 0..6 {
+        ids.push(parts.controller.add_module("loom.math.constant").unwrap());
+        parts.controller.commit().unwrap();
+        parts.engine.process(&mut [0.0; 64], &mut [0.0; 64]);
+    }
+    let tape = start_stepped_engine(&mut app, parts);
+    let sine = registry(true).resolve("loom.osc.sine").unwrap();
+    app.add_module(sine, Point::ORIGIN);
+    tape.step(64);
+    let history = app.session.edits.history.undo_step().unwrap().name().to_owned();
+
+    for id in &ids {
+        app.session.controller.remove_module(*id).unwrap();
+    }
+    app.sync_probes();
+    assert!(app.session.retry_commit.is_some_and(|retry| !retry.edit));
+    assert!(app.session.controller.has_uncommitted_changes());
+    assert_eq!(app.session.controller.free_module_slots(), config.max_modules - 5);
+
+    let (sender, messages) = std::sync::mpsc::channel();
+    let waker = loom_ui::Waker::new(sender, std::sync::Arc::new(|| {}));
+    app.watching = true;
+    for _ in 0..2 {
+        app.sync_watchers(&waker);
+        tape.step(64);
+        take_watcher_message(&mut app, &messages, |message| {
+            matches!(message, Message::RetryCommit(_))
+        });
+    }
+    assert!(app.session.retry_commit.is_none());
+    assert!(!app.session.controller.has_uncommitted_changes());
+    assert_eq!(app.session.controller.free_module_slots(), config.max_modules - 1);
+    assert_eq!(app.session.edits.history.undo_step().unwrap().name(), history);
+}
+
+/// A CC that lands on the next callback's grid line wakes the app again
+/// when the engine publishes the parameter value, with no further MIDI.
+#[test]
+fn deferred_midi_feedback_wakes_the_app_when_it_plays() {
+    use loom_core::{MidiControl, MidiEvent};
+    let config = EngineConfig::default();
+    let mut app = app_with_engine(config);
+    let mut parts = create_engine(registry(true), config);
+    let c = &mut parts.controller;
+    let id = c.add_module("loom.math.constant").unwrap();
+    let index = c.graph().node(id).unwrap().descriptor.param_index("value").unwrap();
+    c.map_midi(
+        MidiControl {
+            channel: 0,
+            controller: 74,
+        },
+        id,
+        index,
+    )
+    .unwrap();
+    c.commit().unwrap();
+    assert!(parts.midi.send(MidiEvent::control_change(40, 0, 74, 127)));
+    let tape = start_stepped_engine(&mut app, parts);
+    let (sender, messages) = std::sync::mpsc::channel();
+    let waker = loom_ui::Waker::new(sender, std::sync::Arc::new(|| {}));
+    app.watching = true;
+    app.sync_watchers(&waker);
+
+    let value = |app: &App| app.session.controller.graph().node(id).unwrap().params[index];
+    let initial = value(&app);
+    tape.step(64);
+    take_watcher_message(&mut app, &messages, |message| matches!(message, Message::Midi));
+    assert_eq!(value(&app), initial);
+
+    tape.step(64);
+    take_watcher_message(&mut app, &messages, |message| matches!(message, Message::Midi));
+    assert_eq!(value(&app), 1.0);
+}
+
+/// Plays the given engine in 64-frame callbacks with no external device.
+fn start_stepped_engine(app: &mut App, parts: loom_core::EngineParts) -> loom_host_desktop::Tape {
+    let tape = loom_host_desktop::Tape::new();
+    let audio = loom_host_desktop::AudioOutput::stepped(48_000, 64, &tape)
+        .start(parts.engine)
+        .unwrap();
+    app.session.controller = parts.controller;
+    app.session.engine.stream.prepare(48_000.0);
+    app.session.engine.stream.started(audio, "Stepped".into());
+    tape
+}
+
+/// Drives a watcher message through the app, releasing other watcher outlets.
+fn take_watcher_message(app: &mut App, messages: &std::sync::mpsc::Receiver<Message>, want: impl Fn(&Message) -> bool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        let message = messages.recv_timeout(remaining).expect("watcher message");
+        if want(&message) {
+            app.apply(message);
+            break;
+        }
+        app.watched_message_taken(&message);
+    }
 }
 
 pub(crate) fn app() -> App {

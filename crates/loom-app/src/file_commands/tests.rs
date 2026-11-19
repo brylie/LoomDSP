@@ -25,7 +25,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     app.commit();
 
     // What goes with the patch.
-    app.session.retry_commit = Some(0);
+    app.session.retry_commit = Some(crate::session::CommitRetry { before: 0, edit: true });
     app.session.positions.insert(added.0, (1.0, 2.0));
     app.session.unknown_positions.insert(99, (None, (0.0, 0.0)));
     app.session.sizes.insert(added.0, (4, 4));

@@ -17,7 +17,10 @@ A control script stops with exit status 2 when a variable it uses is not set ([c
 Run the hardware tests one at a time, so no two of them use a device at once:
 
 ```sh
-LOOM_DEVICE="<part of a name>" LOOM_LOOPBACK="<part of a name>" cargo test --workspace -- --ignored --test-threads=1
+export LOOM_DEVICE="<part of a name>" LOOM_LOOPBACK="<part of a name>"
+cargo test -p loom-host-desktop --lib -- --ignored --test-threads=1
+cargo test -p loom-app --lib -- --ignored --test-threads=1 system_input_adapter_uses_loopback_device turning_a_real_input_off_releases_its_notes_and_is_saved
+cargo test -p loom-cli --test capture -- --ignored --test-threads=1
 ```
 
 ## Kinds of device

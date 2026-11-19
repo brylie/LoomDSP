@@ -95,6 +95,7 @@ pub fn create_engine(registry: Arc<Registry>, config: EngineConfig) -> EnginePar
         commands: command_tx,
         garbage: garbage_rx,
         slots: Slots::new(config.max_modules),
+        pending_copy_params: BTreeMap::new(),
         midi: MidiSync::new(midi_feedback),
         probes: Probes::new(),
         live: LiveValues::new(displays, live, config.max_live_values),
@@ -170,6 +171,8 @@ pub struct Controller {
     garbage: Consumer<Garbage>,
     /// The engine's module slots: free, held by new modules, or retiring.
     slots: Slots,
+    /// Initial values of copies queued in an earlier attempt without a swap.
+    pending_copy_params: BTreeMap<usize, Vec<f32>>,
     /// MIDI mapping ids, and the order of screen edits and control changes.
     midi: MidiSync,
     /// The ports the UI watches.
@@ -365,6 +368,10 @@ impl Controller {
         let copies = starting.len();
         for (id, key) in starting.into_iter().take(room) {
             let (slot, fresh) = self.fresh_copy(id, key);
+            if room <= copies {
+                self.pending_copy_params
+                    .insert(slot, self.graph.nodes[&id].params.clone());
+            }
             self.send_module(slot, fresh);
         }
         if room <= copies {
@@ -410,6 +417,29 @@ impl Controller {
                 done,
             },
         );
+        // SetParam and MIDI reach only the copies in the current schedule.
+        // Bring copies queued on earlier attempts up to date in this swap.
+        if !self.pending_copy_params.is_empty() {
+            for node in self.graph.nodes.values() {
+                for &slot in node.copy_slots.values() {
+                    let Some(initial) = self.pending_copy_params.get(&slot) else {
+                        continue;
+                    };
+                    let edits: Vec<_> = initial
+                        .iter()
+                        .zip(&node.params)
+                        .enumerate()
+                        .filter(|&(index, (initial, value))| {
+                            initial.to_bits() != value.to_bits() && !node.descriptor.params[index].options.shapes_graph
+                        })
+                        .map(|(index, (_, &value))| (index, value))
+                        .collect();
+                    if !edits.is_empty() {
+                        schedule.copy_param_updates.push((slot, edits));
+                    }
+                }
+            }
+        }
         schedule.generation = generation;
         let fading = schedule.fade_keys();
         // Live value cells, kept from the last compile where the parameter
@@ -438,6 +468,7 @@ impl Controller {
         // The engine runs the schedule once it is sent, so what the next
         // compile fades from follows that push alone (rule 9).
         if swapped {
+            self.pending_copy_params.clear();
             self.cable_fades = CableFades {
                 wiring: Some(wiring),
                 generation,

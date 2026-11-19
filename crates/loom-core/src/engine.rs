@@ -774,6 +774,16 @@ impl Engine {
                             value,
                         );
                     }
+                    for (slot, edits) in &schedule.copy_param_updates {
+                        if let Some(module) = self.slots[*slot].as_mut() {
+                            for &(index, value) in edits {
+                                module.set_param(index, value);
+                            }
+                            // The copy has never run. Snap its initial values
+                            // before it plays or takes over a stereo partner's state.
+                            module.reset();
+                        }
+                    }
                     // A newly created right copy takes the running left
                     // instance's state at the swap boundary (ADR-0022).
                     for &(left, right) in &schedule.stereo_copies {

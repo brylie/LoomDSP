@@ -63,6 +63,8 @@ pub trait Module: Send + AsAny {
     /// and snaps parameter smoothing to its targets. The `Controller` calls
     /// it once after a new module's first values are set, so the module
     /// starts at them with no glide (live patching spec, rule 7).
+    /// The engine can also call it on the audio thread. The same rules as
+    /// for [`Module::process`] apply.
     fn reset(&mut self) {}
 
     /// Takes the running state of `other`, a module of the same type, so

@@ -383,17 +383,24 @@ JSON replies show their results. Listening and unplugging still need a person.
   Restart on the same file to check `safety-remembered`. Confirm
   `output_safety: "clean"` in the preferences file.
 - **`open-another`:** Start `examples/dev/check-dc.ron` with
-  `--output-safety off --record target/check-dc.wav --preferences target/check-fade.ron --control-script examples/dev/check-devices-part-3.jsonl`.
-  Run `loom analyze target/check-dc.wav --max-step 0.01` after it exits.
+  `--output-safety off --record target/check-dc.wav --preferences target/check-prefs.ron --control-script examples/dev/check-devices-part-3.jsonl`
+  after the Part 2 script, so the recording uses the saved interface and rate.
+  Check that the `open-drone` reply has `"ok": true` and that the recording
+  contains the drone tone after the DC segment and before silence. Run
+  `loom analyze target/check-dc.wav --max-step 0.01` after the app exits.
+  All three checks must pass.
 - **`choice-remembered`:** Start `examples/dev/check-drone.ron` with
   `--preferences target/check-prefs.ron --control-script examples/dev/check-devices-part-4.jsonl`
-  after the Part 2 script. Check `snapshot.audio` for the device, rate, buffer,
+  after the Part 2 script. Check the top-level `audio` field for the device, rate, buffer,
   and callback progress.
-- **`both-inputs` and `pad-stays-off`:** Start both MIDI controllers and set
-  `LOOM_MIDI_PAD` to the full name of Pad. Start the drone with
+- **`pad-stays-off`:** Start both MIDI controllers and set `LOOM_MIDI_PAD`
+  to the full name of Pad. Start `examples/patches/subtractive.ron` with
   `--preferences target/check-midi.ron --control-script examples/dev/check-devices-part-5.jsonl`.
-  Check each reply's `inputs`, then restart with the same preferences and
-  confirm Pad is off. Use the interactive check for a note held during the switch.
+  Check each reply's `inputs` for the ports' open state. Restart the same patch
+  without the script and with the same preferences. Confirm that Pad is off
+  and silent and that Keys still plays. Use the interactive `both-inputs`
+  and `pad-off-while-held` checks above with this patch to hear each controller
+  play and to check that turning off Pad releases a held note.
 
 For `rate-96k` and `smallest-buffer`, record one run at each sample rate.
 A mid-run rate change ends `--record` as the audio QA spec says. To check

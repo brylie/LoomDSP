@@ -599,7 +599,7 @@ impl App {
                 self.alerts.warn(format!("Cannot finish a swap: {e}"));
             }
         }
-        let _ = self.session.controller.commit();
+        self.commit_maintenance();
         self.refresh();
     }
 
@@ -613,7 +613,7 @@ impl App {
         if let Ok(renamed) = self.session.hierarchy.sync(&mut self.session.controller) {
             self.assignments_renumbered(&renamed);
         }
-        let _ = self.session.controller.commit();
+        self.commit_maintenance();
         self.refresh();
     }
 

@@ -458,13 +458,6 @@ impl App {
                 self.session.selection = kept;
                 if self.commit() {
                     self.alerts.say(format!("{verb}: {}", step.name()));
-                } else if self.session.retry_commit.is_none() {
-                    // A permanent failure cleared the history. A staged
-                    // undo still records the side the editor is showing.
-                    self.alerts.error(
-                        alerts::Cause::Other,
-                        format!("{verb} could not reach the engine: {}", self.alerts.status()),
-                    );
                 }
             }
             Err(e) => {
@@ -706,14 +699,55 @@ impl App {
             .load(std::sync::atomic::Ordering::Acquire)
     }
 
+    /// Publishes probe or fade bookkeeping without changing edit history.
+    pub(crate) fn commit_maintenance(&mut self) {
+        let before = self.command_drains();
+        let edit = self.session.retry_commit.is_some_and(|retry| retry.edit);
+        match self.session.controller.commit() {
+            Err(LoomError::QueueFull) => self.stage_commit(before, edit),
+            result => {
+                // Leave any pending player edit for the edit commit path to settle.
+                if !edit && self.session.retry_commit.take().is_some() {
+                    self.alerts.clear(alerts::Cause::Commit);
+                }
+                if let Err(error) = result {
+                    self.alerts.warn(error.to_string());
+                }
+            }
+        }
+    }
+
     /// Retries only after the engine has made room since the failed send.
     pub(crate) fn retry_staged_commit(&mut self) {
-        if self
+        if let Some(retry) = self
             .session
             .retry_commit
-            .is_some_and(|before| self.command_drains() != before)
+            .filter(|retry| self.command_drains() != retry.before)
         {
-            self.commit();
+            if retry.edit {
+                self.commit();
+            } else {
+                self.commit_maintenance();
+            }
+        }
+    }
+
+    /// Waits for a callback and keeps one warning about the queued work.
+    fn stage_commit(&mut self, before: u64, edit: bool) {
+        self.session.retry_commit = Some(crate::session::CommitRetry { before, edit });
+        let staged = self.session.controller.staged_modules();
+        let message = match staged {
+            0 => "Waiting for room in the audio command queue".to_string(),
+            1 => "1 module waiting for room in the audio command queue".to_string(),
+            n => format!("{n} modules waiting for room in the audio command queue"),
+        };
+        let already_shown = self
+            .alerts
+            .kept()
+            .iter()
+            .any(|problem| problem.cause == alerts::Cause::Commit && problem.text == message);
+        if !already_shown {
+            self.alerts.warn_kept(alerts::Cause::Commit, message);
         }
     }
 
@@ -721,21 +755,7 @@ impl App {
     /// clears it and keeps that loss visible as its own error.
     pub(crate) fn commit_failed(&mut self, error: &LoomError, before: u64) {
         if matches!(error, LoomError::QueueFull) {
-            self.session.retry_commit = Some(before);
-            let staged = self.session.controller.staged_modules();
-            let message = match staged {
-                0 => "Waiting for room in the audio command queue".to_string(),
-                1 => "1 module waiting for room in the audio command queue".to_string(),
-                n => format!("{n} modules waiting for room in the audio command queue"),
-            };
-            let already_shown = self
-                .alerts
-                .kept()
-                .iter()
-                .any(|problem| problem.cause == alerts::Cause::Commit && problem.text == message);
-            if !already_shown {
-                self.alerts.warn_kept(alerts::Cause::Commit, message);
-            }
+            self.stage_commit(before, true);
             return;
         }
         self.session.retry_commit = None;

@@ -171,7 +171,7 @@ impl App {
         let midi_ports = self.midi_port_watch();
         let bench = self.reporter.clone();
         let generation = self.generation;
-        let commit = self.session.retry_commit.map(|before| (generation, before));
+        let commit = self.session.retry_commit.map(|retry| (generation, retry.before));
         let stats = self.session.controller.stats().clone();
 
         let engine = &mut self.session.engine.watchers;
@@ -247,7 +247,7 @@ impl App {
                 key,
                 LATEST,
                 waker.clone(),
-                |_: u32| Message::Midi,
+                |()| Message::Midi,
                 move |outlet| {
                     learn::run(&watch, outlet);
                 },
