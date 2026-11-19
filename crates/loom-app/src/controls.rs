@@ -281,9 +281,7 @@ impl App {
     /// Sets a parameter as a knob turn does. A slider sends no start, so its
     /// first change opens the gesture and letting go closes it.
     pub(crate) fn turn_param(&mut self, module: u32, index: usize, value: f32) {
-        self.close_pending_arrow_group();
-        self.session.edits.start_slider_gesture();
-        self.begin_edit();
+        self.start_slider_edit();
         self.set_param(module, index, value);
     }
 
@@ -390,6 +388,7 @@ impl App {
     /// number replaces the value, as Enter on a canvas control does
     /// (panel-widgets.md, Typing a value).
     pub(crate) fn focus_moved(&mut self, focus: Option<UiId>) {
+        self.part_authors_focus_moved(focus.as_ref());
         // Only its own field, still shown, keeps a draft: a field that left
         // the inspector has no part to match.
         if let Some(draft) = &self.session.value_draft

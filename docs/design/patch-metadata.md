@@ -85,7 +85,7 @@ With a screen reader, the chooser is a dialog named by its title. Each question 
 A sub-patch keeps the authors of the patch it came from ([sub-patches](sub-patches.md#library)). Inserting a library item copies its authors into the sub-patch's definition, and a copy of the tile keeps them.
 
 - Patch info shows an **Includes parts by** line: every author of every sub-patch in the patch, at any depth, who is not already in the patch's own authors, in the order first found. It is computed, not stored. *Why:* the patch's author list stays the player's own choice, and part credit appears and disappears with the parts.
-- Editing inside a sub-patch does not change its authors. Select a sub-patch tile and edit the Authors box in its inspector to change its credit. The edit marks the patch unsaved and follows the ordinary undo and unlink rules for sub-patches.
+- Editing inside a sub-patch does not change its authors. Select a sub-patch tile and edit the Authors box in its inspector to change its credit. The edit marks the patch unsaved. Typing makes one [undo step](undo.md#what-is-undoable) when the box loses focus, the selection changes, or Undo or Save is requested. Changing the stored authors of a linked sub-patch unlinks it so a library update cannot overwrite the edit. The status bar says the sub-patch is now a copy, and undo restores the link with the previous authors.
 - Clipboard copies of plain modules still carry no authors.
 
 ### Defaults (preferences)
@@ -176,7 +176,7 @@ Settled on 2026-11-01 from the written leanings: the phase split above; patch in
 
 Points the spec left open, settled while building (M2). Each is small; say so in review if one should change.
 
-- **Patch info edits are not undo steps.** Authors, tags, and the licence change at once and mark the patch unsaved, but undo and redo do not cover them. The text fields have no undo of their own, so while one has focus the undo shortcuts do nothing, rather than undo a canvas edit behind it. Added to [undo: what is not undoable](undo.md#what-is-not-undoable).
+- **Root Patch info edits are not undo steps.** Authors, tags, and the licence change at once and mark the patch unsaved, but undo and redo do not cover them. The text fields have no undo of their own, so while one has focus the undo shortcuts do nothing, rather than undo a canvas edit behind it. Added to [undo: what is not undoable](undo.md#what-is-not-undoable).
 - **Author filter.** "Matches" means the author contains the typed text, ignoring case, so `ada` finds `Ada Lovelace`.
 - **Search** matches when every word typed is in the name, description, or tags, as the module browser does.
 - **Tags longer than 32 characters** are cut to 32 by tidying, not refused.

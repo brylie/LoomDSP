@@ -33,12 +33,15 @@ impl App {
     /// True when the patch differs from the file (`docs/design/files.md`).
     /// An edit in patch info counts too (patch-metadata.md).
     pub(crate) fn unsaved(&self) -> bool {
-        !self.session.edits.history.is_saved() || self.session.document.info_unsaved()
+        !self.session.edits.history.is_saved()
+            || self.session.document.info_unsaved()
+            || self.session.patch_info.part_authors_dirty()
     }
 
     /// Writes the patch to `path`. On success the path becomes the current
     /// file and the unsaved mark clears.
     pub(crate) fn write_to(&mut self, path: PathBuf) -> bool {
+        self.close_part_authors_edit();
         let patch = self.current_patch();
         match crate::patch_file::save(&patch, &path) {
             Ok(()) => {

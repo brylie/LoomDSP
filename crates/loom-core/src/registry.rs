@@ -345,6 +345,13 @@ impl Registry {
         self.browsable().filter(|d| d.fills(role_id).is_some()).collect()
     }
 
+    /// The browsable modules that fill a role, sorted by name, then id.
+    pub fn parts_by_name(&self, role_id: &str) -> Vec<&'static ModuleDescriptor> {
+        let mut parts = self.parts_of(role_id);
+        parts.sort_by_key(|d| (d.name, d.id));
+        parts
+    }
+
     /// Notes about registered modules, in the order they were registered.
     /// `loom check` prints them.
     pub fn notes(&self) -> &[RegistryNote] {

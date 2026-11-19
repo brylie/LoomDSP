@@ -437,7 +437,8 @@ fn a_credit_question_that_cannot_be_asked_yet_waits() {
 }
 
 /// Part credit follows nested definitions and editing a sub-patch's
-/// authors changes the saved definition and the top-level credit.
+/// authors changes the saved definition and the top-level credit. Typing
+/// makes one undo step when the box loses focus, including unlinking.
 #[test]
 fn part_credits_follow_nested_definitions_and_author_edits() {
     let dir = folder("part-authors");
@@ -448,16 +449,16 @@ fn part_credits_follow_nested_definitions_and_author_edits() {
         modules: [PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("voice"))],
         subpatches: {
             "voice": SubPatch(metadata: Metadata(name: "Voice", authors: ["lena", "Ada"]),
+                library: Some("Voice.ron"),
                 modules: [PatchModule(id: 2, kind: "loom.struct.subpatch@1", subpatch: Some("inner"))]),
             "inner": SubPatch(metadata: Metadata(name: "Inner", authors: ["ADA", "Sam"])),
         },
     )"#,
     )
     .unwrap();
-    let mut app = App::new(Args {
-        patch: Some(file.clone()),
-        ..crate::tests::app_args()
-    });
+    let mut args = args_with(&dir, &format!("(library: Some({dir:?}))"));
+    args.patch = Some(file.clone());
+    let mut app = App::new(args);
     assert_eq!(rows(&app).parts_by, ["Ada", "Sam"]);
     app.session.selection.insert(2);
     let mut ui = crate::ui_test::Ui::with_app(app);
@@ -480,12 +481,33 @@ fn part_credits_follow_nested_definitions_and_author_edits() {
     };
     assert_eq!(subpatch.authors, ["lena", "Ada", "Yara"]);
     assert_eq!(ui.a11y_tree().node_by_id(&authors).value(), Some("lena\nAda\nYara"));
-    let app = ui.app_mut();
-    app.session.selection.clear();
-    assert_eq!(rows(app).parts_by, ["Ada", "Yara", "Sam"]);
-    assert!(app.write_to(file.clone()));
+    assert!(ui.app().session.edits.history.undo_step().is_none());
+
+    ui.tap(
+        iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+        iced::keyboard::Modifiers::empty(),
+    );
+    assert_eq!(ui.focused_field(), None);
+    assert_eq!(ui.app().undo_hint().as_deref(), Ok("Undo: edit sub-patch authors"));
+    assert!(ui.app().session.edits.history.undo_step().is_some());
+    assert_eq!(
+        ui.app().ui_snapshot().status,
+        "Voice is now a copy. It no longer follows the library."
+    );
+    ui.send(AppMessage::Undo);
+    let patch = ui.app().current_patch();
+    assert_eq!(patch.subpatches["voice"].metadata.authors, ["lena", "Ada"]);
+    assert_eq!(patch.subpatches["voice"].library.as_deref(), Some("Voice.ron"));
+    assert_eq!(ui.app().undo_hint(), Err(crate::editing::HistoryBlock::Nothing));
+    ui.send(AppMessage::Redo);
+
+    ui.send(AppMessage::Canvas(loom_canvas::CanvasEvent::Select(Vec::new())));
+    assert_eq!(rows(ui.app()).parts_by, ["Ada", "Yara", "Sam"]);
+    ui.send(AppMessage::File(FileAction::Save));
+    assert!(!ui.app().unsaved());
     let saved = crate::patch_file::load(file).unwrap();
     assert_eq!(saved.metadata.authors, ["Lena"]);
     assert_eq!(saved.subpatches["voice"].metadata.authors, ["lena", "Ada", "Yara"]);
+    assert_eq!(saved.subpatches["voice"].library, None);
     std::fs::remove_dir_all(dir).unwrap();
 }

@@ -351,11 +351,7 @@ fn role_page(registry: &Registry, role: &RoleDescriptor) -> String {
         }
     }
     out.push_str("\n## Modules that fill this role\n\n");
-    let mut parts: Vec<_> = registry
-        .browsable()
-        .filter(|d| d.roles.iter().any(|fills| fills.role == role))
-        .collect();
-    parts.sort_by_key(|d| (d.name, d.id));
+    let parts = registry.parts_by_name(role.id);
     if parts.is_empty() {
         out.push_str("No registered modules fill this role yet.\n");
     }

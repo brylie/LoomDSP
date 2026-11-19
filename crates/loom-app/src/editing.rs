@@ -134,6 +134,7 @@ impl App {
     /// if one is already open, so a gesture's first call is the one that
     /// counts.
     pub(crate) fn begin_edit(&mut self) {
+        self.close_part_authors_edit();
         if self.session.linked_before.is_none() {
             self.session.linked_before = Some(self.linked_fingerprints());
         }
@@ -206,9 +207,13 @@ impl App {
         });
     }
 
-    /// Closes the open gesture, of either kind, and records it.
+    /// Closes the open gesture and records it.
     pub(crate) fn end_gesture(&mut self) {
-        let step_name = self.session.step_name.take();
+        let step_name = if self.session.patch_info.end_part_authors_edit() {
+            Some(crate::patch_info::EDIT_PART_AUTHORS.to_string())
+        } else {
+            self.session.step_name.take()
+        };
         self.unlink_edited();
         let (controller, hierarchy, level, positions, sizes) = (
             &self.session.controller,
@@ -234,8 +239,24 @@ impl App {
         }
     }
 
-    /// Closes an inspector slider or a released arrow group before another action.
+    /// Records the Authors box's edit before another action begins.
+    pub(crate) fn close_part_authors_edit(&mut self) {
+        if self.session.patch_info.part_authors_edit_open() {
+            self.end_gesture();
+        }
+    }
+
+    /// Opens and starts recording a slider gesture on its first change.
+    pub(crate) fn start_slider_edit(&mut self) {
+        self.close_part_authors_edit();
+        self.close_pending_arrow_group();
+        self.session.edits.start_slider_gesture();
+        self.begin_edit();
+    }
+
+    /// Closes groups that another action can finish before it runs.
     pub(crate) fn close_slider_gesture(&mut self) {
+        self.close_part_authors_edit();
         if self.session.edits.slider_gesture_open() {
             self.end_gesture();
         }
@@ -285,7 +306,7 @@ impl App {
     /// What toolbar Undo would do, or why it is disabled. The button and
     /// the control channel both ask this, so a script presses what a click
     /// could. An edit that Undo closes first, a released arrow group or an
-    /// inspector slider gesture, is not a step until it closes, so Undo
+    /// inspector slider gesture or an authors edit, is not a step until it closes, so Undo
     /// works then too and takes that edit. While an arrow key is held, Undo
     /// would do nothing, so it is disabled (undo.md).
     pub(crate) fn undo_hint(&self) -> Result<String, HistoryBlock> {
@@ -314,11 +335,12 @@ impl App {
     }
 
     /// The edit in progress that Undo and Redo close before they act, as
-    /// hover text names it: an inspector slider gesture or a released arrow
-    /// group (`close_slider_gesture`).
+    /// hover text names it (`close_slider_gesture`).
     fn edit_undo_closes(&self) -> Option<&'static str> {
         let edits = &self.session.edits;
-        if edits.slider_gesture_open() {
+        if self.session.patch_info.part_authors_dirty() {
+            Some(crate::patch_info::EDIT_PART_AUTHORS)
+        } else if edits.slider_gesture_open() {
             Some("the slider edit")
         } else if matches!(edits.arrow_group(), crate::edits::ArrowGroup::Released { .. }) {
             Some("the arrow key edit")
@@ -333,7 +355,9 @@ impl App {
     /// True while a gesture is open that Undo and Redo do not close first,
     /// such as a held arrow key or a drag, so they would do nothing.
     fn history_waits(&self) -> bool {
-        self.session.edits.gesture_open() && self.edit_undo_closes().is_none()
+        self.session.edits.gesture_open()
+            && !self.session.patch_info.part_authors_edit_open()
+            && self.edit_undo_closes().is_none()
     }
 
     pub(crate) fn undo(&mut self) {

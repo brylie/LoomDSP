@@ -17,6 +17,9 @@ use loom_patch::Metadata;
 use loom_patch::metadata::{self, Licence};
 use serde::Serialize;
 
+/// The history step for one session in a sub-patch's Authors box.
+pub(crate) const EDIT_PART_AUTHORS: &str = "edit sub-patch authors";
+
 /// The Authors box's part: `inspector/patch/authors`.
 pub(crate) fn authors_part() -> loom_ui_core::UiId {
     crate::inspector::ids::part(&crate::inspector::ids::patch(), "authors")
@@ -71,6 +74,7 @@ pub struct State {
 struct PartAuthors {
     tile: u32,
     saved: Vec<String>,
+    before_edit: Option<Vec<String>>,
     content: text_editor::Content<crate::Renderer>,
 }
 
@@ -91,6 +95,23 @@ impl State {
             .as_ref()
             .filter(|part| part.tile == tile)
             .map(|part| &part.content)
+    }
+
+    /// Whether the Authors box owns the current undo gesture.
+    pub(crate) fn part_authors_edit_open(&self) -> bool {
+        self.part.as_ref().is_some_and(|part| part.before_edit.is_some())
+    }
+
+    /// Whether the open edit changed the authors before reaching history.
+    pub(crate) fn part_authors_dirty(&self) -> bool {
+        self.part
+            .as_ref()
+            .is_some_and(|part| part.before_edit.as_ref().is_some_and(|before| *before != part.saved))
+    }
+
+    /// Releases the Authors box's undo gesture, if it owns one.
+    pub(crate) fn end_part_authors_edit(&mut self) -> bool {
+        self.part.as_mut().and_then(|part| part.before_edit.take()).is_some()
     }
 }
 
@@ -160,20 +181,26 @@ impl App {
                 .authors;
             Some((tile, authors))
         });
-        let draft = &mut self.session.patch_info.part;
-        match current {
-            Some((tile, saved))
-                if draft
-                    .as_ref()
-                    .is_some_and(|part| part.tile == tile && part.saved == *saved) => {}
-            Some((tile, saved)) => {
-                *draft = Some(PartAuthors {
-                    tile,
-                    saved: saved.clone(),
-                    content: text_editor::Content::with_text(&saved.join("\n")),
-                })
-            }
-            None => *draft = None,
+        let field = self.session.patch_info.part.as_ref();
+        if field.map(|part| (part.tile, &part.saved)) == current {
+            return;
+        }
+        let next = current.map(|(tile, saved)| PartAuthors {
+            tile,
+            saved: saved.clone(),
+            before_edit: None,
+            content: text_editor::Content::with_text(&saved.join("\n")),
+        });
+        self.close_part_authors_edit();
+        self.session.patch_info.part = next;
+    }
+
+    /// Records the sub-patch authors step when focus leaves its field.
+    pub(crate) fn part_authors_focus_moved(&mut self, focus: Option<&loom_ui_core::UiId>) {
+        if let Some(part) = &self.session.patch_info.part
+            && focus != Some(&part_authors_id(part.tile))
+        {
+            self.close_part_authors_edit();
         }
     }
 
@@ -196,18 +223,34 @@ impl App {
                 };
                 let edits = action.is_edit();
                 part.content.perform(action);
-                if edits {
-                    let authors = metadata::tidy_authors(part.content.text().lines());
-                    if authors != part.saved {
-                        part.saved.clone_from(&authors);
-                        self.session.step_name = Some("edit sub-patch authors".to_string());
-                        self.edit(|app| {
-                            app.session
-                                .hierarchy
-                                .set_part_authors(loom_core::ModuleId(tile), authors)
-                        });
-                    }
+                if !edits {
+                    return;
                 }
+                let authors = metadata::tidy_authors(part.content.text().lines());
+                if authors == part.saved {
+                    return;
+                }
+                let starting = if part.before_edit.is_none() {
+                    self.close_slider_gesture();
+                    self.begin_edit();
+                    !self.session.edits.gesture_open()
+                } else {
+                    false
+                };
+                let part = self
+                    .session
+                    .patch_info
+                    .part
+                    .as_mut()
+                    .expect("the field handled this action");
+                if starting {
+                    self.session.edits.start_gesture();
+                    part.before_edit = Some(part.saved.clone());
+                }
+                part.saved.clone_from(&authors);
+                self.session
+                    .hierarchy
+                    .set_part_authors(loom_core::ModuleId(tile), authors);
             }
             Message::TagDraft(text) => {
                 self.session.patch_info.tag_note = None;

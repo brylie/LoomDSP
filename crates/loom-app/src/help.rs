@@ -133,11 +133,7 @@ impl Help {
             description: p.description,
             details: format!("{}, {}", p.signal.name(), requirement(p.required)),
         };
-        let mut parts: Vec<_> = registry
-            .browsable()
-            .filter(|d| d.roles.iter().any(|fills| fills.role == role))
-            .collect();
-        parts.sort_by_key(|d| (d.name, d.id));
+        let parts = registry.parts_by_name(role.id);
         let links: Vec<_> = parts.iter().map(|d| format!("[{}]({}.md)", d.name, d.id)).collect();
         let parts = if links.is_empty() {
             "No registered modules fill this role yet.".to_string()

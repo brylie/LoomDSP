@@ -237,9 +237,7 @@ impl App {
     /// Sets the spread of exposed item `name` of stack tile `tile`, one
     /// undo step per slider drag.
     fn set_spread(&mut self, tile: u32, name: &str, amount: f32) {
-        self.close_pending_arrow_group();
-        self.session.edits.start_slider_gesture();
-        self.begin_edit();
+        self.start_slider_edit();
         let mut candidate = self.session.hierarchy.clone();
         candidate.set_spread(ModuleId(tile), name, amount);
         match candidate.sync(&mut self.session.controller) {
