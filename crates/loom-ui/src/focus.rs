@@ -105,12 +105,14 @@ impl Focus {
     /// its element was laid out, and owes the target its release, or moves
     /// a focus whose element is gone to the first stop of the panel that
     /// held it, or to none when that panel is gone too or has no stop
-    /// (section 6, rule 4).
-    pub(crate) fn settle(&mut self, window: &Window) {
+    /// (section 6, rule 4). A focus it takes is brought into view, as any
+    /// focus from an effect is (section 5, rule 12).
+    pub(crate) fn settle(&mut self, window: &mut Window) {
         if let Some(wanted) = self.wanted.take()
             && window.stops().contains(&wanted)
         {
             self.release_owed = true;
+            window.reveal = Some(wanted.clone());
             self.set(Some(wanted));
             self.ring = true;
             return;

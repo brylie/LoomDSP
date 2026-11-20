@@ -329,6 +329,8 @@ fn a_panel_draws_its_box_border_text_and_clip_on_the_gpu() {
                 width: 2.0,
                 offset: 2.0,
             },
+            quiet: Color::rgb(0.6, 0.6, 0.6),
+            mark: Color::rgb(0.9, 0.9, 0.9),
         },
         None,
     );

@@ -13,6 +13,11 @@
 //! 3. inside a panel, its elements in the order it builds them, with the
 //!    panel in a slot at the slot's place in that order.
 //!
+//! Every radio is a focus stop, so a press or an arrow can focus any of
+//! them, but **Tab meets a radio group once** (section 6, rule 9): on the
+//! focused radio while the focus is in the group, otherwise on the chosen
+//! one, or the first when none is chosen ([`Window::tab_stops`]).
+//!
 //! **The nodes** nest as the elements do: an element's node holds the
 //! nodes of the accessed elements inside it, and a slot's panel's nodes go
 //! in the node around the slot.
@@ -20,6 +25,7 @@
 use super::Window;
 use crate::field::run_id;
 use crate::focus::AccessNodes;
+use crate::layout::RadioPart;
 use crate::view::Layer;
 use accesskit::{Node, NodeId};
 use loom_ui_core::{IdTable, Point, Rect, UiId};
@@ -67,7 +73,88 @@ impl Window {
         for key in &keys {
             self.panel_stops(key, &mut stops);
         }
+        self.groups = stops
+            .iter()
+            .map(|stop| {
+                let panel = self.panel_of(stop)?;
+                let layout = &self.records[panel].layout;
+                match layout.records()[layout.index_of(stop)?].radio {
+                    Some(RadioPart::Radio {
+                        group: Some(group),
+                        selected,
+                    }) => Some((panel.clone(), group, selected)),
+                    _ => None,
+                }
+            })
+            .collect();
         self.stops = stops;
+    }
+
+    /// The stops Tab moves among, in focus order, with `focus` the element
+    /// that has it: every stop, with each radio group's radios but one
+    /// left out (section 6, rule 9). That one is the focused radio while
+    /// the focus is in the group, else the chosen one, else the first.
+    pub(crate) fn tab_stops(&self, focus: Option<&UiId>) -> Vec<&UiId> {
+        let group_of = |at: usize| self.groups.get(at).cloned().flatten();
+        let focused = focus.and_then(|focus| self.stops.iter().position(|stop| stop == focus));
+        let focused_group = focused.and_then(group_of).map(|(panel, group, _)| (panel, group));
+        self.stops
+            .iter()
+            .enumerate()
+            .filter(|(at, _)| {
+                let Some((panel, group, selected)) = group_of(*at) else {
+                    return true;
+                };
+                let same = |other: usize| group_of(other).is_some_and(|(p, g, _)| p == panel && g == group);
+                if focused_group.as_ref() == Some(&(panel.clone(), group)) {
+                    return Some(*at) == focused;
+                }
+                let any_chosen = (0..self.stops.len()).any(|other| same(other) && group_of(other).is_some_and(|g| g.2));
+                if any_chosen {
+                    selected
+                } else {
+                    (0..*at).all(|other| !same(other))
+                }
+            })
+            .map(|(_, stop)| stop)
+            .collect()
+    }
+
+    /// The radio after the one with UI ID `id` in its group, or before it
+    /// when `back` is set, wrapping at the ends, among the radios that are
+    /// stops (a turned-off one is passed over). `None` when `id` is no
+    /// radio in a group.
+    pub(crate) fn radio_step(&self, id: &UiId, back: bool) -> Option<UiId> {
+        let at = self.stops.iter().position(|stop| stop == id)?;
+        let (panel, group, _) = self.groups.get(at).cloned().flatten()?;
+        let radios: Vec<&UiId> = self
+            .stops
+            .iter()
+            .enumerate()
+            .filter(|(other, _)| {
+                self.groups
+                    .get(*other)
+                    .cloned()
+                    .flatten()
+                    .is_some_and(|(p, g, _)| p == panel && g == group)
+            })
+            .map(|(_, stop)| stop)
+            .collect();
+        let here = radios.iter().position(|radio| *radio == id)?;
+        let count = radios.len();
+        let next = if back {
+            (here + count - 1) % count
+        } else {
+            (here + 1) % count
+        };
+        Some(radios[next].clone())
+    }
+
+    /// Whether the radio with UI ID `id` is the chosen one of its group:
+    /// `None` when it is no radio in a group.
+    pub(crate) fn radio_chosen(&self, id: &UiId) -> Option<bool> {
+        let at = self.stops.iter().position(|stop| stop == id)?;
+        self.groups.get(at).cloned().flatten().map(|(_, _, selected)| selected)
     }
 
     /// Adds the focus stops of the panel keyed `key` to `stops`, in build
@@ -222,7 +309,22 @@ impl Window {
             };
             if let (Some(access), Some(id)) = (&element.access, &element.id) {
                 let mut node = access.node(element.focusable);
-                let bounds = element.bounds;
+                // What a scroll container cuts away is not where the part
+                // is for a screen reader either (section 7, rule 28).
+                let bounds = match element.clip {
+                    Some(clip) if !record.layout.containers_around(index).is_empty() => {
+                        crate::layout::cut(element.bounds, clip)
+                    }
+                    _ => element.bounds,
+                };
+                if let Some(scroll) = element.scroll {
+                    node.set_scroll_y(f64::from(scroll.offset));
+                    node.set_scroll_y_min(0.0);
+                    node.set_scroll_y_max(f64::from(scroll.most));
+                    node.add_action(accesskit::Action::ScrollUp);
+                    node.add_action(accesskit::Action::ScrollDown);
+                    node.add_action(accesskit::Action::SetScrollOffset);
+                }
                 let origin = record.origin;
                 let scale = f64::from(scale);
                 node.set_bounds(accesskit::Rect {
@@ -333,3 +435,6 @@ fn level(a: Option<Rect>, b: Option<Rect>) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests;

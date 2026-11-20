@@ -34,6 +34,7 @@ use crate::hit::Hit;
 use crate::layout::{Constraint, Layout, Measure, cut};
 use crate::view::Layer;
 use loom_ui_core::{Point, Rect, Size, TextMeasure, TextStyle, UiId, Vector};
+pub(crate) use scroll::ThumbDrag;
 use std::collections::HashMap;
 
 /// How many sizes a panel in a shrink slot keeps, by the space offered.
@@ -64,6 +65,16 @@ pub(crate) struct Window {
     /// The focus stops in focus order, after the last [`Window::lay_out`]
     /// (`order.rs`).
     stops: Vec<UiId>,
+    /// For each stop, in the same order: the panel and the group record of
+    /// its radio group, and whether it is the chosen radio, or `None` when
+    /// it is no radio in a group (`order.rs`).
+    groups: Vec<Option<(UiId, usize, bool)>>,
+    /// An element to bring into view once the layout is current: the one a
+    /// keyboard focus move or a scroll effect named (section 5, rule 12).
+    pub(crate) reveal: Option<UiId>,
+    /// A scroll container moved since the runtime last asked
+    /// ([`Window::take_scrolled`]), so what the tree reports changed.
+    scrolled: bool,
 }
 
 /// One panel, as the window keeps it.
@@ -184,6 +195,9 @@ impl Default for Window {
             panic_on_mistake: cfg!(debug_assertions),
             stops: Vec::new(),
             fields: crate::field::Fields::default(),
+            scrolled: false,
+            groups: Vec::new(),
+            reveal: None,
         }
     }
 }
@@ -678,5 +692,6 @@ impl Window {
 }
 
 mod order;
+pub(crate) mod scroll;
 #[cfg(test)]
 mod tests;

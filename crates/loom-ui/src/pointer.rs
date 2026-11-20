@@ -19,13 +19,25 @@
 //! the next turn, whichever path found it. Hover and pressed run no update
 //! (section 3, rule 4).
 //!
+//! A scroll container's bar and the wheel are the pointer's too (section 5,
+//! rule 12). The wheel scrolls the innermost container under the pointer,
+//! and what it cannot take passes out, then on to whatever is next; with
+//! Ctrl held over a slider, it is the slider's. A press on the thumb drags
+//! it until the release, wherever the pointer goes; a press above or below
+//! it moves one page toward the press.
+//!
 //! [`Routed::Later`]: crate::Routed::Later
 
 use crate::app::{App, InputState};
 use crate::draw::Panels;
 use crate::hit::Hit;
 use crate::view::Layer;
-use loom_ui_core::{Event, Point, PointerButton, PointerEvent, UiId};
+use crate::window::ThumbDrag;
+use loom_ui_core::{Event, Modifiers, Point, PointerButton, PointerEvent, ScrollDelta, UiId};
+
+/// How many lines of body text one step of a wheel scrolls (section 5,
+/// rule 12).
+const WHEEL_LINES: f32 = 3.0;
 
 /// The pointer's widget state among the runtime's elements.
 #[derive(Debug, Default)]
@@ -47,6 +59,12 @@ pub(crate) struct Pointer {
     /// Where the pointer last moved, in the window, to check the hover
     /// again after a layout moves what was under it.
     pub(crate) at: Option<Point>,
+    /// The press on a scroll container's bar that is held, until the
+    /// release: the thumb it drags, if it went down on the thumb.
+    pub(crate) thumb: Option<ThumbDrag>,
+    /// The modifier keys held, as last reported: Ctrl with the wheel over
+    /// a slider is the slider's.
+    pub(crate) modifiers: Modifiers,
 }
 
 impl Pointer {
@@ -66,6 +84,7 @@ impl Pointer {
     /// keyboard's and no focus moved. Returns true when the hover changed.
     pub(crate) fn clear(&mut self) -> bool {
         self.pressed = None;
+        self.thumb = None;
         self.at = None;
         self.set_hover(None)
     }
@@ -119,10 +138,12 @@ impl<A: App> Panels<'_, A> {
     /// True when one of the runtime's layers above the target takes a
     /// pointer at `point`: a driver whose toolkit routes before the turn
     /// asks this first, and keeps the event from the toolkit when it is
-    /// true (a move reaches it as the pointer leaving).
+    /// true (a move reaches it as the pointer leaving). A held press on a
+    /// scroll container's bar keeps every pointer event until its release.
     pub fn over_target(&self, event: &Event, point: Point) -> bool {
         let input = self.app.input().layer;
-        self.keeps_hint(event, point)
+        self.pointer.thumb.is_some()
+            || self.keeps_hint(event, point)
             || self
                 .window
                 .hit_in(point, |layer| Side::of(layer) == Side::Above && layer >= input)
@@ -235,6 +256,43 @@ impl<A: App> Panels<'_, A> {
         if matches!(pointer, PointerEvent::Moved | PointerEvent::Pressed(_)) {
             self.pointer.at = Some(point);
         }
+        let keep = |layer: Layer| Side::of(layer) == side && layer >= input.layer;
+        // A held press on a bar has the pointer until it is let go, at the
+        // first step that hears it, wherever the pointer is.
+        if let Some(drag) = self.pointer.thumb.clone() {
+            return match pointer {
+                PointerEvent::Moved => Heard {
+                    taken: true,
+                    redraw: self.window.drag_thumb(&drag, point),
+                },
+                PointerEvent::Released(PointerButton::Left) => {
+                    self.pointer.thumb = None;
+                    Heard {
+                        taken: true,
+                        redraw: false,
+                    }
+                }
+                _ => Heard {
+                    taken: true,
+                    redraw: false,
+                },
+            };
+        }
+        if let PointerEvent::Scrolled(delta) = pointer
+            && let Some(heard) = self.wheel(*delta, point, keep)
+        {
+            return heard;
+        }
+        if let PointerEvent::Pressed(PointerButton::Left) = pointer
+            && let Some(drag) = self.window.press_bar(point, keep)
+        {
+            self.pointer.space = None;
+            self.pointer.thumb = Some(drag);
+            return Heard {
+                taken: true,
+                redraw: true,
+            };
+        }
         if side == Side::Above && self.keeps_hint(event, point) {
             // Movement on the hint's source itself still counts as pointer input.
             let on_source = self
@@ -248,13 +306,10 @@ impl<A: App> Panels<'_, A> {
                 redraw: on_source && self.note_hover_motion(),
             };
         }
-        let hit = self
-            .window
-            .hit_in(point, |layer| Side::of(layer) == side && layer >= input.layer)
-            .map(|(layer, hit)| match hit {
-                Hit::Element(id) => (layer, Some(id.clone())),
-                Hit::Blocked => (layer, None),
-            });
+        let hit = self.window.hit_in(point, keep).map(|(layer, hit)| match hit {
+            Hit::Element(id) => (layer, Some(id.clone())),
+            Hit::Blocked => (layer, None),
+        });
         let Some((layer, id)) = hit else {
             if side == Side::Above {
                 return Heard::default();
@@ -298,6 +353,36 @@ impl<A: App> Panels<'_, A> {
             _ => {}
         }
         Heard { taken: true, redraw }
+    }
+
+    /// A wheel or a touch pad's scroll at `point`, in the layers `keep`
+    /// allows: the containers under it take what they can. Taken only when
+    /// one moved, so a wheel no container can use goes on. `None` with no
+    /// container under the point, or with Ctrl held over a slider, whose
+    /// turn it is: the event is then offered as any other is.
+    fn wheel(&mut self, delta: ScrollDelta, point: Point, keep: impl Fn(Layer) -> bool + Copy) -> Option<Heard> {
+        let over_slider = self.pointer.modifiers.control
+            && matches!(
+                self.window.hit_in(point, keep),
+                Some((_, Hit::Element(id))) if self
+                    .window
+                    .access_of(id)
+                    .is_some_and(|access| access.role() == crate::access::Role::Slider)
+            );
+        if over_slider {
+            return None;
+        }
+        // Positive is a scroll up, which moves the content down: a smaller
+        // offset.
+        let by = |line: f32| match delta {
+            ScrollDelta::Lines { y, .. } => -y * WHEEL_LINES * line,
+            ScrollDelta::Pixels { y, .. } => -y,
+        };
+        let moved = self.window.scroll_wheel(point, by, keep)?;
+        Some(Heard {
+            taken: moved,
+            redraw: moved,
+        })
     }
 
     /// Moves the hover to `at`. Returns true when it changed.

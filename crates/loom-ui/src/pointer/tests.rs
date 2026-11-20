@@ -978,6 +978,8 @@ fn ring_style() -> crate::paint::PanelStyle {
         text: loom_ui_core::Color::WHITE,
         caret: loom_ui_core::Color::WHITE,
         selection: loom_ui_core::Color::BLACK,
+        quiet: loom_ui_core::Color::WHITE,
+        mark: loom_ui_core::Color::WHITE,
         ring: crate::focus::RingStyle {
             color: RING,
             width: 2.0,

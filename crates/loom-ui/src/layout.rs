@@ -47,8 +47,12 @@ use std::collections::HashMap;
 use taffy::style_helpers::line;
 use taffy::{
     AlignContent, AlignItems, AvailableSpace, Dimension, Display, FlexDirection, FlexWrap, LengthPercentage,
-    LengthPercentageAuto, NodeId, Style, TaffyTree,
+    LengthPercentageAuto, NodeId, Overflow, Style, TaffyTree,
 };
+
+mod scroll;
+
+pub(crate) use scroll::{BarPart, ScrollState};
 
 /// How many sizes a wrapping text keeps: the narrowest it can be, its one
 /// line, and the width it was given.
@@ -78,6 +82,10 @@ pub struct Layout {
     /// Focus stops and accessed elements that break a rule, in tree order:
     /// its UI ID where it has one, and what is wrong.
     problems: Vec<(Option<UiId>, Problem)>,
+    /// How far each scroll container is scrolled, by its UI ID: widget
+    /// state the runtime keeps across rebuilds (ui-layer.md, section 5,
+    /// rule 12). It goes with the container.
+    offsets: HashMap<UiId, f32>,
 }
 
 /// The space offered along one axis.
@@ -179,6 +187,30 @@ pub(crate) struct Record {
     /// What of it shows, cut by every clipping element around it, in the
     /// panel. `None` when nothing around it clips.
     pub(crate) clip: Option<Rect>,
+    /// For a scroll container: its style, and how far it is scrolled.
+    pub(crate) scroll: Option<ScrollState>,
+    /// For a radio group, a radio, or a radio's mark: which.
+    pub(crate) radio: Option<RadioPart>,
+}
+
+/// The part of a radio group a record is (ui-layer.md, section 6, rule 9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RadioPart {
+    /// The group.
+    Group,
+    /// One radio: the record of the group around it, if any, and whether
+    /// it is the chosen one.
+    Radio {
+        /// The group's record.
+        group: Option<usize>,
+        /// It is chosen.
+        selected: bool,
+    },
+    /// A radio's round mark.
+    Mark {
+        /// Its radio is chosen.
+        selected: bool,
+    },
 }
 
 impl Record {
@@ -229,6 +261,8 @@ pub(crate) struct TextPaint<'a> {
     pub(crate) colour: Option<Color>,
     /// It is a text field's text, which the field paints from its editor.
     pub(crate) field: bool,
+    /// It is a radio's note, in the quiet colour unless it sets its own.
+    pub(crate) quiet: bool,
 }
 
 /// What a leaf's node holds: a text, or a slot.
@@ -299,6 +333,8 @@ pub(crate) struct TextLeaf {
     style: TextStyle,
     wrap: bool,
     colour: Option<Color>,
+    /// It is a radio's note.
+    quiet: bool,
     /// It is a text field's: one line, at least one em wide and one line
     /// tall, so an empty field still has room for its caret and a press.
     field: bool,
@@ -358,6 +394,9 @@ enum Parent {
     Row,
     /// A column: height is the main axis.
     Column,
+    /// A scroll container: a column whose child keeps its own height, so it
+    /// never shrinks to fit.
+    Scroll,
     /// A stack, or no parent: both sizes stretch.
     Stack,
 }
@@ -376,6 +415,7 @@ impl Layout {
             size: Size::ZERO,
             slots: Vec::new(),
             problems: Vec::new(),
+            offsets: HashMap::new(),
         }
     }
 
@@ -397,6 +437,10 @@ impl Layout {
         let scope = self.panel.clone();
         let node = self.add(root, None, &scope, Parent::Stack, false);
         self.root = Some(Root { node, width, height });
+        // A container's offset goes with it.
+        let (by_id, records) = (&self.by_id, &self.records);
+        self.offsets
+            .retain(|id, _| by_id.get(id).is_some_and(|index| records[*index].scroll.is_some()));
     }
 
     /// Lays the tree out in `available`, the space the panel has. The root
@@ -451,6 +495,14 @@ impl Layout {
                 )
             })
             .expect("every node is in the tree");
+        self.place();
+        self.size = self.records.first().map_or(Size::ZERO, |root| root.bounds.size());
+    }
+
+    /// Places every element from the computed layout, moving what is in a
+    /// scroll container up by the container's offset. A scroll needs only
+    /// this, not a new layout.
+    pub(crate) fn place(&mut self) {
         // Parents come before their children, so each parent's place is
         // known when its children are placed.
         for index in 0..self.records.len() {
@@ -458,8 +510,13 @@ impl Layout {
                 .tree
                 .layout(self.records[index].node)
                 .expect("every node is in the tree");
+            // What is in a scroll container moves up by its offset.
+            let shift = self.records[index]
+                .parent
+                .and_then(|parent| self.records[parent].scroll)
+                .map_or(0.0, |scroll| scroll.offset);
             let origin = match self.records[index].parent {
-                Some(parent) => self.records[parent].bounds.position(),
+                Some(parent) => self.records[parent].bounds.position() - Vector::new(0.0, shift),
                 None => Point::ORIGIN,
             };
             self.records[index].bounds = Rect::new(
@@ -472,7 +529,7 @@ impl Layout {
             // box is where a child at its edge sits.
             let exact = self.tree.unrounded_layout(self.records[index].node);
             let corner = match self.records[index].parent {
-                Some(parent) => self.records[parent].unrounded,
+                Some(parent) => self.records[parent].unrounded - Vector::new(0.0, shift),
                 None => Point::ORIGIN,
             } + Vector::new(exact.location.x, exact.location.y);
             let (border, padding, size) = (exact.border, exact.padding, exact.size);
@@ -492,8 +549,27 @@ impl Layout {
             self.records[index].clip = self.records[index]
                 .parent
                 .and_then(|parent| self.records[parent].inner_clip());
+            // A container's offset stays inside what its content allows,
+            // which may have shrunk since it was set.
+            if self.records[index].scroll.is_some() {
+                let most = self
+                    .tree
+                    .layout(self.records[index].node)
+                    .expect("every node is in the tree")
+                    .scroll_height()
+                    .round();
+                let id = self.records[index].id.clone();
+                let wanted = id.as_ref().and_then(|id| self.offsets.get(id)).copied().unwrap_or(0.0);
+                let offset = wanted.clamp(0.0, most);
+                if let Some(scroll) = &mut self.records[index].scroll {
+                    scroll.offset = offset;
+                    scroll.most = most;
+                }
+                if let Some(id) = id {
+                    self.offsets.insert(id, offset);
+                }
+            }
         }
-        self.size = self.records.first().map_or(Size::ZERO, |root| root.bounds.size());
     }
 
     /// The panel's key.
@@ -581,6 +657,7 @@ impl Layout {
                 wrap: leaf.wrap,
                 colour: leaf.colour,
                 field: leaf.field,
+                quiet: leaf.quiet,
             }),
             Leaf::Slot { .. } => None,
         }
@@ -621,9 +698,23 @@ impl Layout {
         let style = style(&element, around);
         let shrinks = (element.width == Length::Shrink, element.height == Length::Shrink);
         let inside = match element.kind {
-            Kind::Row => Parent::Row,
-            Kind::Column => Parent::Column,
+            Kind::Row | Kind::Radio => Parent::Row,
+            Kind::Column | Kind::RadioGroup => Parent::Column,
+            Kind::Scroll(_) => Parent::Scroll,
             _ => Parent::Stack,
+        };
+        let scrollbar = match element.kind {
+            Kind::Scroll(bar) => Some(bar),
+            _ => None,
+        };
+        let radio = match element.kind {
+            Kind::RadioGroup => Some(RadioPart::Group),
+            Kind::Radio => Some(RadioPart::Radio {
+                group: self.group_around(parent),
+                selected: matches!(&element.access, Some(access) if access.is_on()),
+            }),
+            Kind::RadioMark { selected } => Some(RadioPart::Mark { selected }),
+            _ => None,
         };
         let Element {
             kind,
@@ -646,12 +737,14 @@ impl Layout {
                 style: text_style,
                 wrap,
                 colour,
+                quiet,
             } => {
                 let leaf = Leaf::Text(TextLeaf {
                     text,
                     style: text_style,
                     wrap,
                     colour,
+                    quiet,
                     field: false,
                     line: None,
                     wrapped: [None; WRAPPED_SIZES],
@@ -667,6 +760,7 @@ impl Layout {
                     style: text_style,
                     wrap: false,
                     colour: None,
+                    quiet: false,
                     field: true,
                     line: None,
                     wrapped: [None; WRAPPED_SIZES],
@@ -705,7 +799,8 @@ impl Layout {
                 kept = Some(id.clone());
             }
         }
-        if (focusable || access.is_some()) && id.is_none() {
+        // A scroll container keeps its offset by its UI ID, so it needs one.
+        if (focusable || access.is_some() || scrollbar.is_some()) && id.is_none() {
             self.problem(None, Problem::NoKey);
         }
         let hover = hover.filter(|_| kept.is_some());
@@ -716,6 +811,8 @@ impl Layout {
             Some(text) if !access.has_description() && !access.repeats(text) => access.description(text.clone()),
             _ => access,
         });
+        // A scroll container is a stop only when nothing inside is, which
+        // is known once its children are added.
         let stop = kept.is_some() && is_stop(focusable, access.as_ref());
         if let Some(problem) = access.as_ref().and_then(|access| access.problem(stop)) {
             self.problem(kept.clone(), problem);
@@ -744,6 +841,12 @@ impl Layout {
             unrounded: Point::ORIGIN,
             wrap_width: 0.0,
             clip: None,
+            scroll: scrollbar.map(|style| ScrollState {
+                style,
+                offset: 0.0,
+                most: 0.0,
+            }),
+            radio,
         });
 
         if !children.is_empty() {
@@ -754,7 +857,31 @@ impl Layout {
                 .collect();
             self.tree.set_children(node, &nodes).expect("the nodes were just added");
         }
+        // A scroll container whose content has no focus stop is one itself,
+        // so a keyboard user can scroll it (WCAG 2.2, SC 2.1.1).
+        if scrollbar.is_some() && self.records[index].id.is_some() {
+            let inside = self.records[index + 1..].iter().any(|record| record.focusable);
+            let stop = !inside && is_stop(true, self.records[index].access.as_ref());
+            self.records[index].focusable = stop;
+            if stop && self.records[index].access.is_none() {
+                let id = self.records[index].id.clone();
+                self.problem(id, Problem::StopWithoutAccess);
+            }
+        }
         node
+    }
+
+    /// The record of the radio group around the record `parent`, or
+    /// itself: the nearest one.
+    fn group_around(&self, parent: Option<usize>) -> Option<usize> {
+        let mut at = parent;
+        while let Some(index) = at {
+            if self.records[index].radio == Some(RadioPart::Group) {
+                return Some(index);
+            }
+            at = self.records[index].parent;
+        }
+        None
     }
 }
 
@@ -803,7 +930,29 @@ fn style(element: &Element, around: Parent) -> Style {
             style.justify_items = element.align_x.map_or(AlignItems::NORMAL, items);
             style.align_items = element.align_y.map_or(AlignItems::NORMAL, items);
         }
-        Kind::Text { .. } | Kind::Field { .. } | Kind::Space | Kind::Slot(_) => {}
+        Kind::Scroll(bar) => {
+            // A column whose child keeps its own height: taffy lets it run
+            // past the container, keeps room at the right for the
+            // scrollbar, and gives how far it can scroll.
+            style.display = Display::Flex;
+            style.flex_direction = FlexDirection::Column;
+            style.overflow = taffy::Point {
+                x: Overflow::Hidden,
+                y: Overflow::Scroll,
+            };
+            style.scrollbar_width = bar.gutter();
+        }
+        Kind::RadioGroup => {
+            style.display = Display::Flex;
+            style.flex_direction = FlexDirection::Column;
+        }
+        Kind::Radio => {
+            // The mark at the top, beside the label's first line.
+            style.display = Display::Flex;
+            style.flex_direction = FlexDirection::Row;
+            style.align_items = AlignItems::START;
+        }
+        Kind::Text { .. } | Kind::Field { .. } | Kind::Space | Kind::Slot(_) | Kind::RadioMark { .. } => {}
     }
     if element.wrap {
         style.flex_wrap = FlexWrap::Wrap;
@@ -846,12 +995,15 @@ fn style(element: &Element, around: Parent) -> Style {
                 style.align_self = Some(AlignItems::STRETCH);
             }
         }
-        Parent::Column => {
+        Parent::Column | Parent::Scroll => {
             if let Length::Fill(share) = element.height {
                 style.flex_grow = f32::from(share.get());
             }
             if fills(element.width) {
                 style.align_self = Some(AlignItems::STRETCH);
+            }
+            if matches!(around, Parent::Scroll) {
+                style.flex_shrink = 0.0;
             }
         }
         Parent::Stack => {

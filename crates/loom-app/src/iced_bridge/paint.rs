@@ -178,7 +178,9 @@ impl PanelPass {
 /// How the runtime's panels look from `theme`, for the window and its
 /// still captures alike: text in the theme's text colour, and a field
 /// looking like one of Iced's while both draw, its caret in the text
-/// colour and its selection in the theme's weak primary.
+/// colour and its selection in the theme's weak primary, quiet text such
+/// as a radio's note in the app's quiet colour, and a radio's mark in the
+/// text colour.
 pub(crate) fn panel_style(theme: &iced::Theme) -> loom_ui::paint::PanelStyle {
     use loom_canvas::iced_convert::ToCore as _;
     loom_ui::paint::PanelStyle {
@@ -186,6 +188,8 @@ pub(crate) fn panel_style(theme: &iced::Theme) -> loom_ui::paint::PanelStyle {
         caret: theme.palette().text.to_core(),
         selection: theme.extended_palette().primary.weak.color.to_core(),
         ring: crate::style::focus_ring(),
+        quiet: crate::style::QUIET.to_core(),
+        mark: theme.palette().text.to_core(),
     }
 }
 

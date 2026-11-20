@@ -226,6 +226,8 @@ impl Layers<Countdown, Clicks> for Card {
                 width: 2.0,
                 offset: 2.0,
             },
+            quiet: Color::rgb(0.6, 0.6, 0.6),
+            mark: Color::rgb(0.9, 0.9, 0.9),
         };
         parts
             .panels
