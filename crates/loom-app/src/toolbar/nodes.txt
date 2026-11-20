@@ -6,7 +6,7 @@ Toolbar Some("Toolbar") orientation=Some(Horizontal)
   Button Some("Save As") description=None toggled=None disabled=false click=true
   Button Some("Browse") description=Some("Your patches: Cmd+Shift+O") toggled=None disabled=false click=true
   Button Some("Recent") description=Some("Recent is disabled: no patches opened or saved yet") toggled=None disabled=true click=false
-  Button Some("Add module") description=Some("Or press A over the canvas, or double-click empty canvas") toggled=None disabled=false click=true
+  Button Some("Add module") description=Some("Press A or double-click empty canvas") toggled=None disabled=false click=true
   Button Some("Hold note") description=Some("Hold note is disabled: no audio is playing the engine") toggled=None disabled=true click=false
   Button Some("Panic") description=Some("Silence everything: Cmd+.") toggled=None disabled=false click=true
   Button Some("Undo") description=Some("Nothing to undo") toggled=None disabled=true click=false
@@ -24,7 +24,7 @@ Toolbar Some("Toolbar") orientation=Some(Horizontal)
   Button Some("Save to library") description=None toggled=None disabled=false click=true
   Button Some("Browse") description=Some("Your patches: Cmd+Shift+O") toggled=None disabled=false click=true
   Button Some("Recent") description=Some("Recent is disabled: no patches opened or saved yet") toggled=None disabled=true click=false
-  Button Some("Add module") description=Some("Or press A over the canvas, or double-click empty canvas") toggled=None disabled=false click=true
+  Button Some("Add module") description=Some("Press A or double-click empty canvas") toggled=None disabled=false click=true
   Button Some("Hold note") description=Some("Hold note is disabled: no audio is playing the engine") toggled=None disabled=true click=false
   Button Some("Panic") description=Some("Silence everything: Cmd+.") toggled=None disabled=false click=true
   Button Some("Undo") description=Some("Nothing to undo") toggled=None disabled=true click=false

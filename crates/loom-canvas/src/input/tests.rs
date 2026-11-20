@@ -540,6 +540,7 @@ fn cable(from: u32, to: u32) -> CableView {
         to: (to, 0),
         colour_from: Color::WHITE,
         colour_to: Color::WHITE,
+        width: crate::CableWidth::Mono,
         delayed: false,
     }
 }
@@ -2280,11 +2281,7 @@ fn keyboard_focus_follows_tiles_and_controls() {
     assert!(drive(&canvas, &mut state, &shifted(Key::Tab), at).is_empty());
     assert_eq!(state.focus.control(), Some((2, 0)));
     let toggle = drive(&canvas, &mut state, &key_event(Key::Space, true), at);
-    assert_eq!(
-        toggle,
-        vec![CanvasEvent::ToggleRun],
-        "a focused knob does not use Space"
-    );
+    assert!(toggle.is_empty(), "a focused knob keeps Space away from Run");
 }
 
 /// A fixed time for arrow events, so tests can compare them. See
@@ -3369,6 +3366,7 @@ fn a_pulled_cable_dropped_on_a_control_does_not_assign() {
         to: (2, 0),
         colour_from: Color::WHITE,
         colour_to: Color::WHITE,
+        width: crate::CableWidth::Mono,
         delayed: false,
     };
     let target = ModuleView {
@@ -3813,8 +3811,7 @@ fn hiding_a_range_ends_the_inside() {
     );
 }
 
-/// Space on a focused XY pad passes on to Run, as on a knob, and a key with no
-/// use is not swallowed (panels.md, Keyboard without a mouse).
+/// Space on a focused XY pad keeps Run unchanged, as on a knob.
 #[test]
 fn a_focused_xy_pad_does_not_use_space() {
     let mut pad = module(1, 0.0);
@@ -3832,7 +3829,7 @@ fn a_focused_xy_pad_does_not_use_space() {
     };
     let at = scene.module(1).unwrap().bounds().center();
     let events = drive(&canvas, &mut state, &key_event(Key::Space, true), at);
-    assert_eq!(events, vec![CanvasEvent::ToggleRun]);
+    assert!(events.is_empty());
 }
 
 /// The second press of a double-click, with the command modifier held.

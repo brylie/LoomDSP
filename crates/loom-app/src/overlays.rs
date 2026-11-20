@@ -31,6 +31,11 @@ pub(crate) enum Overlay {
 pub(crate) enum ContextMenu {
     /// A right-clicked tile, and where the menu opens.
     Tile { module: u32, at: Point },
+    /// The cable picker, before or after its first port is chosen.
+    Cable {
+        module: u32,
+        start: Option<loom_canvas::PortRef>,
+    },
     /// The menu on an output.
     Probe(probe_menu::ProbeMenu),
 }
@@ -69,7 +74,7 @@ impl Overlays {
                 Some(Overlay::Browser(_)) => InputOwner::Browser,
                 Some(Overlay::RecentList(_)) => InputOwner::RecentList,
                 Some(Overlay::Menu(ContextMenu::Probe(_))) => InputOwner::ProbeMenu,
-                Some(Overlay::Menu(ContextMenu::Tile { .. })) => InputOwner::TileMenu,
+                Some(Overlay::Menu(ContextMenu::Tile { .. } | ContextMenu::Cable { .. })) => InputOwner::TileMenu,
                 None => InputOwner::Canvas,
             }
         }
@@ -216,8 +221,16 @@ impl Overlays {
 
     /// Closes the tile menu, if it is open.
     pub fn close_tile_menu(&mut self) {
-        if self.tile_menu().is_some() {
+        if self.tile_menu().is_some() || self.cable_menu().is_some() {
             self.panel = None;
+        }
+    }
+
+    /// The tile the cable picker started on and its chosen first port.
+    pub fn cable_menu(&self) -> Option<(u32, Option<loom_canvas::PortRef>)> {
+        match self.panel {
+            Some(Overlay::Menu(ContextMenu::Cable { module, start })) => Some((module, start)),
+            _ => None,
         }
     }
 

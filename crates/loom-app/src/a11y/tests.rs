@@ -3040,6 +3040,7 @@ fn the_matrix_rows_are_a_list_in_the_order_shown() {
         let model = ui.app().session.matrix.model(
             ui.app().session.controller.graph(),
             &ui.app().session.hierarchy,
+            &ui.app().session.level,
             &ui.app().session.selection,
             ui.app().right_tab,
         );
@@ -3097,7 +3098,7 @@ fn a_matrix_source_step_skips_a_taken_pair_and_is_its_own_undo_step() {
     let graph = ui.app().session.controller.graph();
     let (id, a) = graph.assignments().next().map(|(id, a)| (id, *a)).unwrap();
     let other = graph.assignments().nth(1).map(|(_, a)| a.source).unwrap();
-    let options = crate::matrix::sources(graph, &ui.app().session.hierarchy);
+    let options = crate::matrix::sources(graph, &ui.app().session.hierarchy, &ui.app().session.level);
     // The step lands on a source no other row joins to this target.
     let Some(Message::Matrix(crate::matrix::Event::Source(_, pick))) = ui.app().matrix_source_step(id, true, &options)
     else {
@@ -3165,7 +3166,11 @@ fn a_matrix_step_with_nothing_allowed_does_nothing() {
         let Some(message) = ui.app().matrix_source_step(
             id,
             false,
-            &crate::matrix::sources(ui.app().session.controller.graph(), &ui.app().session.hierarchy),
+            &crate::matrix::sources(
+                ui.app().session.controller.graph(),
+                &ui.app().session.hierarchy,
+                &ui.app().session.level,
+            ),
         ) else {
             break;
         };
@@ -3177,7 +3182,11 @@ fn a_matrix_step_with_nothing_allowed_does_nothing() {
             .matrix_source_step(
                 id,
                 false,
-                &crate::matrix::sources(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
+                &crate::matrix::sources(
+                    ui.app().session.controller.graph(),
+                    &ui.app().session.hierarchy,
+                    &ui.app().session.level
+                )
             )
             .is_none()
     );
@@ -3402,7 +3411,11 @@ fn a_screen_reader_target_step_follows_a_renumbered_row_inside_a_sub_patch() {
     ui.app_mut().show_level(&ModulePath::root());
     ui.send(Message::Matrix(Event::Tab(Tab::Matrix)));
 
-    let targets = crate::matrix::targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy);
+    let targets = crate::matrix::targets(
+        ui.app().session.controller.graph(),
+        &ui.app().session.hierarchy,
+        &ui.app().session.level,
+    );
     let goal = targets
         .iter()
         .position(|t| (t.module, t.param) == (svf, cutoff))

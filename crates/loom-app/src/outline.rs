@@ -615,6 +615,7 @@ impl App {
             key,
             physical_key,
             modifiers,
+            repeat,
             ..
         } = event
         else {
@@ -640,6 +641,22 @@ impl App {
         }
         if self.focus.is_some() || self.session.value_draft.is_some() || self.matrix_has_keys() {
             return false;
+        }
+        if !outline
+            && !self.session.outline.has_jump()
+            && !self.toolbar_has_focus()
+            && modifiers.is_empty()
+            && let Key::Character(letter) = &key
+        {
+            if loom_canvas::shortcuts::CABLE.matches_letter(letter) {
+                return self.open_cable_picker();
+            }
+            // The canvas uses the pointer when it has one over the patch.
+            // Elsewhere only a key the window's widgets left reaches here.
+            if !repeat && loom_canvas::shortcuts::ADD.matches_letter(letter) {
+                self.post(Message::OpenBrowser);
+                return true;
+            }
         }
         if !outline && matches!(key, Key::Character(c) if c.eq_ignore_ascii_case("o")) && modifiers.is_empty() {
             self.right_tab = crate::matrix::Tab::Outline;
@@ -1081,13 +1098,10 @@ fn jump_choices(map: &PatchMap, from: Target, downstream: Option<bool>) -> Vec<C
         } else {
             Target::Tile(peer.module)
         };
-        let from_label = structure.port_label(wire.from);
-        let to_label = structure.port_label(wire.to);
-        let far = structure.name(peer.module);
         let name = if peer.output {
-            format!("{far} {from_label} to {to_label}")
+            format!("{} to {}", structure.named_port(peer), structure.port_label(wire.to))
         } else {
-            format!("{from_label} to {far} {to_label}")
+            format!("{} to {}", structure.port_label(wire.from), structure.named_port(peer))
         };
         choices.entry(peer.module).or_insert(Choice { target, name });
     }

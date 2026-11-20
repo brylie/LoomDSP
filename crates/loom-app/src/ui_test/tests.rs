@@ -1416,9 +1416,13 @@ fn a_select_only_parameter_is_a_modulation_target() {
     };
     assert!(rows.params[long].accepts_drop, "its row accepts a drop");
     assert!(
-        crate::matrix::targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
-            .iter()
-            .any(|t| t.module == id && t.param == long),
+        crate::matrix::targets(
+            ui.app().session.controller.graph(),
+            &ui.app().session.hierarchy,
+            &ui.app().session.level
+        )
+        .iter()
+        .any(|t| t.module == id && t.param == long),
         "the matrix offers it as a target"
     );
 
@@ -2101,8 +2105,8 @@ fn a_range_reports_both_values_and_names_each_handle() {
     assert!(
         messages
             .iter()
-            .any(|m| matches!(m, Message::Canvas(CanvasEvent::ToggleRun))),
-        "Space reaches Run, as on a knob"
+            .all(|m| !matches!(m, Message::Canvas(CanvasEvent::ToggleRun))),
+        "a focused range keeps Space away from Run"
     );
     assert_eq!(running(&ui), before);
 
@@ -2634,9 +2638,13 @@ fn a_voice_count_edit_recompiles_and_undo_redo_follow() {
     ui.send(Message::Learn(crate::learn::Message::Arm((source.0, index))));
     assert!(!ui.app().session.learn.is_armed((source.0, index)));
     assert!(
-        !crate::matrix::targets(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
-            .iter()
-            .any(|target| target.module == source && target.param == index)
+        !crate::matrix::targets(
+            ui.app().session.controller.graph(),
+            &ui.app().session.hierarchy,
+            &ui.app().session.level
+        )
+        .iter()
+        .any(|target| target.module == source && target.param == index)
     );
     assert!(!ui.app().session.scene.is_live_control(source.0, 0));
 }

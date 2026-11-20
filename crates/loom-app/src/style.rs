@@ -10,6 +10,7 @@ use crate::Element;
 use iced::Theme;
 use iced::widget::button as iced_button;
 use iced::widget::markdown as iced_markdown;
+use loom_canvas::iced_convert::ToIced as _;
 
 /// Table cells, row details, and captions in the inspector and matrix.
 pub const SMALL: f32 = 11.0;
@@ -94,6 +95,28 @@ pub const HEADING_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
 /// secondary text colour is 4.27:1 on the panels, under the 4.5:1 that
 /// WCAG asks for, so the app uses this instead (a test checks it).
 pub const QUIET: iced::Color = iced::Color::from_rgb(0.66, 0.69, 0.75);
+/// An unchecked switch's edge, and a choice's border on hover.
+pub const CONTROL_EDGE: iced::Color = QUIET;
+
+/// A checkbox that keeps its outline and check mark readable on cards and panels.
+pub fn check_box(theme: &Theme, status: iced::widget::checkbox::Status) -> iced::widget::checkbox::Style {
+    use iced::widget::checkbox::{Status, primary};
+    let mut style = primary(theme, status);
+    match status {
+        Status::Active { is_checked: true } | Status::Hovered { is_checked: true } => {
+            let palette = loom_canvas::Palette::default();
+            style.background = palette.control_value.to_iced().into();
+            style.icon_color = palette.background.to_iced();
+            style.border.color = palette.control_value.to_iced();
+        }
+        Status::Active { is_checked: false } | Status::Hovered { is_checked: false } => {
+            style.border.color = CONTROL_EDGE;
+            style.border.width = 1.0;
+        }
+        Status::Disabled { .. } => {}
+    }
+    style
+}
 /// Status bar text for a warning, with the word `Warning:` beside it.
 pub const WARNING_TEXT: iced::Color = iced::Color::from_rgb8(0xF5, 0xA6, 0x23);
 /// Status bar text for an error, with the word `Error:` beside it.
@@ -436,11 +459,7 @@ pub fn quiet_pick_list(theme: &Theme, status: iced::widget::pick_list::Status) -
             iced::Color::TRANSPARENT.into()
         },
         border: iced::Border {
-            color: if active {
-                palette.background.strong.color
-            } else {
-                iced::Color::TRANSPARENT
-            },
+            color: if active { CONTROL_EDGE } else { iced::Color::TRANSPARENT },
             width: 1.0,
             radius: 3.0.into(),
         },

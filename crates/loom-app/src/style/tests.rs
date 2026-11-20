@@ -40,6 +40,57 @@ fn quiet_text_meets_contrast() {
     }
 }
 
+/// Marks that identify a control are readable on both panels and cards.
+#[test]
+fn active_control_marks_and_family_tints_meet_contrast() {
+    use iced::widget::checkbox::Status;
+    use loom_canvas::iced_convert::ToCore as _;
+    use loom_canvas::{Palette, contrast_ratio};
+    let theme = crate::tests::app().theme();
+    let app = theme.extended_palette();
+    let canvas = Palette::default();
+    for fill in [app.background.base.color, app.background.weak.color] {
+        for family in loom_core::Family::ALL {
+            assert!(
+                contrast_ratio(crate::browser::family_swatch(family), fill.to_core()) >= 3.0,
+                "{family:?}"
+            );
+        }
+        for status in [
+            Status::Active { is_checked: false },
+            Status::Hovered { is_checked: false },
+            Status::Active { is_checked: true },
+            Status::Hovered { is_checked: true },
+        ] {
+            let style = super::check_box(&theme, status);
+            assert!(
+                contrast_ratio(style.border.color.to_core(), fill.to_core()) >= 3.0,
+                "{status:?}"
+            );
+            if matches!(
+                status,
+                Status::Active { is_checked: true } | Status::Hovered { is_checked: true }
+            ) {
+                let iced::Background::Color(background) = style.background else {
+                    panic!("solid check box");
+                };
+                assert!(contrast_ratio(style.icon_color.to_core(), background.to_core()) >= 3.0);
+            }
+        }
+    }
+    for (mark, fill) in [
+        (canvas.tile_border, canvas.background),
+        (canvas.control_edge, canvas.control_body),
+        (canvas.control_edge, canvas.tile),
+        (canvas.background, canvas.control_value),
+        (canvas.light_off, canvas.tile),
+        (canvas.focus, canvas.tile),
+    ] {
+        assert!(contrast_ratio(mark, fill) >= 3.0, "{mark:?} on {fill:?}");
+    }
+    assert!(contrast_ratio(canvas.text, canvas.control_track) >= loom_canvas::MIN_TEXT_CONTRAST);
+}
+
 /// The app's Rust files under `dir`, in every folder, with `style.rs` and
 /// test files left out: tests may write a value to check it.
 fn app_sources(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {

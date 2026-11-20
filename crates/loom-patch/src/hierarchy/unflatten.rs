@@ -170,24 +170,7 @@ impl Hierarchy {
         // One from a swap fade is written from the new part's output behind
         // it, which is what finishing the fade makes it.
         for (_, assignment) in graph.assignments() {
-            let mut assignment = *assignment;
-            if let Some(source) = self.output_behind_fade(graph, assignment.source) {
-                assignment.source = source;
-            }
-            // Onto a select's Member: written on the instance, by name.
-            let member_target = matches!(self.added.get(&assignment.target), Some(Added::Member { .. }));
-            if skip.contains(&assignment.target) && !member_target {
-                continue;
-            }
-            // From a mode's sum or select: written from the instance's port.
-            let entry = match self.added.get(&assignment.source.module) {
-                Some(Added::Output { instance, port }) => {
-                    self.assignment_entry_at(graph, instance.clone(), port.clone(), &assignment)
-                }
-                _ if skip.contains(&assignment.source.module) => continue,
-                _ => self.assignment_entry(graph, &assignment),
-            };
-            let Some(entry) = entry else {
+            let Some(entry) = self.shown_assignment(graph, assignment, skip) else {
                 continue;
             };
             levels.entry(entry.0).or_default().modulation.push(entry.1);
@@ -296,6 +279,43 @@ impl Hierarchy {
             .collect();
         patch.canonicalise();
         patch
+    }
+
+    /// Assignments as a level shows and saves them, paired with their flat IDs and values.
+    pub fn level_assignments<'a>(
+        &'a self,
+        graph: &'a Graph,
+        level: &'a ModulePath,
+    ) -> impl Iterator<Item = (loom_core::AssignmentId, &'a loom_core::Assignment, PatchModulation)> + 'a {
+        let skip = self.transient_ids();
+        graph.assignments().filter_map(move |(id, assignment)| {
+            let (owner, shown) = self.shown_assignment(graph, assignment, &skip)?;
+            (owner == *level).then_some((id, assignment, shown))
+        })
+    }
+
+    /// Resolves the file's visible endpoints through slots, ports, and mode outputs.
+    fn shown_assignment(
+        &self,
+        graph: &Graph,
+        assignment: &loom_core::Assignment,
+        skip: &BTreeSet<ModuleId>,
+    ) -> Option<(ModulePath, PatchModulation)> {
+        let mut assignment = *assignment;
+        if let Some(source) = self.output_behind_fade(graph, assignment.source) {
+            assignment.source = source;
+        }
+        let member_target = matches!(self.added.get(&assignment.target), Some(Added::Member { .. }));
+        if skip.contains(&assignment.target) && !member_target {
+            return None;
+        }
+        match self.added.get(&assignment.source.module) {
+            Some(Added::Output { instance, port }) => {
+                self.assignment_entry_at(graph, instance.clone(), port.clone(), &assignment)
+            }
+            _ if skip.contains(&assignment.source.module) => None,
+            _ => self.assignment_entry(graph, &assignment),
+        }
     }
 
     /// The `params` of the instance at `path`: the live value of each

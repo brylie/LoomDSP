@@ -95,6 +95,7 @@ fn builds_one_instance_per_item() {
                 to: (2, 1),
                 colour_from: Color::WHITE,
                 colour_to: Color::WHITE,
+                width: crate::CableWidth::Mono,
                 delayed: false,
             },
             // Unknown port: skipped.
@@ -103,6 +104,7 @@ fn builds_one_instance_per_item() {
                 to: (2, 0),
                 colour_from: Color::WHITE,
                 colour_to: Color::WHITE,
+                width: crate::CableWidth::Mono,
                 delayed: false,
             },
         ],
@@ -286,4 +288,27 @@ fn a_box_text_bar_has_its_own_range() {
         geometry.bars(true, false).end <= middle.start,
         "the other bars come first"
     );
+}
+/// Stereo and bundle cables keep their stroke widths and delay mark when focused.
+#[test]
+fn installed_cable_widths_and_delay_dash_share_the_gpu_instance() {
+    use crate::{CableView, CableWidth};
+    for (width, scale) in [
+        (CableWidth::Mono, 1.0),
+        (CableWidth::Stereo, 1.5),
+        (CableWidth::Bundle, 2.0),
+        (CableWidth::StereoBundle, 2.5),
+    ] {
+        let cable = CableView {
+            from: (1, 0),
+            to: (2, 0),
+            colour_from: Color::WHITE,
+            colour_to: Color::WHITE,
+            width,
+            delayed: true,
+        };
+        let installed = Cable::installed(Point::ORIGIN, Point::new(100.0, 0.0), &cable);
+        assert_eq!(installed.params, [CABLE_WIDTH * scale, 1.0, CABLE_MIN_PX * scale, 0.0]);
+        assert_eq!(installed.focused().params[..3], installed.params[..3]);
+    }
 }

@@ -6,6 +6,7 @@ use crate::App;
 use loom_canvas::ModulationMark;
 use loom_core::ModuleNames;
 use loom_core::{Assignment, AssignmentId, Graph, ModuleId, OutputRef, ParamSpec, Polarity, WidgetKind};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -131,12 +132,16 @@ pub fn exists(graph: &Graph, source: OutputRef, target: ModuleId, param: usize) 
         .any(|(_, a)| a.source == source && a.target == target && a.param == param)
 }
 
+/// The first instance and count for each displayed instance name in a level.
+type InstanceNames = BTreeMap<String, (ModuleId, usize)>;
+
 /// Duplicate counts shared by the scene and every name in a panel model.
 pub(crate) struct Names<'a> {
     graph: &'a Graph,
     hierarchy: &'a loom_patch::Hierarchy,
     hidden: loom_patch::hierarchy::Hidden<'a>,
     counts: BTreeMap<(loom_patch::ModulePath, &'a str), usize>,
+    instance_names: RefCell<BTreeMap<loom_patch::ModulePath, InstanceNames>>,
 }
 
 impl<'a> Names<'a> {
@@ -152,6 +157,7 @@ impl<'a> Names<'a> {
             hierarchy,
             hidden,
             counts,
+            instance_names: RefCell::default(),
         }
     }
 
@@ -190,6 +196,53 @@ impl<'a> Names<'a> {
             .and_then(|n| n.parameter_label(param))
             .unwrap_or("?");
         format!("{}: {label}", self.module(target))
+    }
+
+    /// True for a module shown directly at this level.
+    pub(crate) fn on_level(&self, module: ModuleId, level: &loom_patch::ModulePath) -> bool {
+        self.hierarchy.level_of(module) == *level && !self.hidden.contains(module)
+    }
+
+    /// The control on the shown level that stands for a flat parameter.
+    pub(crate) fn surface_target(
+        &self,
+        level: &loom_patch::ModulePath,
+        target: ModuleId,
+        param: usize,
+    ) -> Option<(ModuleId, usize, String)> {
+        let name = self.graph.node(target)?.descriptor.params.get(param)?.name;
+        let (tile, index) = self.hierarchy.surface_for(level, &(target, name.to_string()))?;
+        let label = &self.hierarchy.definition_of(tile)?.exposed.get(index)?.name;
+        Some((tile, index, self.structural_endpoint(level, tile, label)?))
+    }
+
+    /// The name of a visible endpoint on a sub-patch or slot tile.
+    pub(crate) fn structural_endpoint(
+        &self,
+        level: &loom_patch::ModulePath,
+        tile: ModuleId,
+        label: &str,
+    ) -> Option<String> {
+        let name = self.hierarchy.tile_name(tile)?;
+        let mut levels = self.instance_names.borrow_mut();
+        let names = levels.entry(level.clone()).or_insert_with(|| {
+            let mut names = InstanceNames::new();
+            for (id, kind) in self.hierarchy.structural_tiles(level) {
+                if matches!(kind, loom_patch::Tile::Instance(_))
+                    && let Some(name) = self.hierarchy.tile_name(id)
+                {
+                    names.entry(name).or_insert((id, 0)).1 += 1;
+                }
+            }
+            names
+        });
+        let duplicates = names.get(&name).is_some_and(|&(id, count)| count > 1 || id != tile);
+        let name = if duplicates {
+            format!("{name} {}", self.hierarchy.path_of(tile).last())
+        } else {
+            name
+        };
+        Some(format!("{name}: {label}"))
     }
 }
 
@@ -398,6 +451,16 @@ pub fn mark(kind: WidgetKind, spec: &ParamSpec, base: f32, reaches: &[Reach]) ->
     if !kind.has_range() {
         return ModulationMark::Dot;
     }
+    let (low, high) = range_positions(spec, base, reaches);
+    if high > low {
+        ModulationMark::Range { low, high }
+    } else {
+        ModulationMark::Dot
+    }
+}
+
+/// Clamped endpoints in the control's position space, shared by the canvas and Matrix.
+pub(crate) fn range_positions(spec: &ParamSpec, base: f32, reaches: &[Reach]) -> (f32, f32) {
     let (mut low, mut high) = (0.0_f32, 0.0_f32);
     for r in reaches.iter().filter(|r| r.enabled) {
         match r.polarity {
@@ -420,12 +483,7 @@ pub fn mark(kind: WidgetKind, spec: &ParamSpec, base: f32, reaches: &[Reach]) ->
             t
         }
     };
-    let (low, high) = (end(low), end(high));
-    if high > low {
-        ModulationMark::Range { low, high }
-    } else {
-        ModulationMark::Dot
-    }
+    (end(low), end(high))
 }
 
 #[cfg(test)]

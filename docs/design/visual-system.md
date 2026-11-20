@@ -100,6 +100,12 @@ Ratios are by the WCAG 2.2 formula (`loom_canvas::contrast_ratio`), against the 
 
 Tile and probe menus share a solid panel and the same row style. Menu text, including a disabled row, has at least 4.5:1 contrast with its fill. The edge of a row and the outline on hover or keyboard focus have at least 3:1 contrast. The panel edge also stands out against a tile and the canvas.
 
+Active checkboxes use the control edge for the unchecked outline and the
+canvas value colour with a dark check mark for the checked state. The browser
+uses family tints inside its rows, where both the plain and selected fills are
+dark. Tile edges, inactive knob tracks, and unlit light markers keep at least
+3:1 against their adjacent canvas or control fills.
+
 ### Toolbar
 
 The toolbar shows the patch name, then its buttons in groups, with wider space between groups than inside them:
@@ -119,6 +125,15 @@ Inside a sub-patch, the breadcrumb sits under the toolbar: "Patch", then one ent
 ### Knobs
 
 A knob's value arc always shows a short orange start cap, even at its minimum. The cap is the first 4% of the arc's sweep. The white pointer dot still marks the exact value, so the knob's position never depends on colour (NFR-UX-03).
+
+### Cable widths
+
+A cable's stroke uses its compiled output width (FR-CANVAS-12). At 100%
+zoom it is 2.4 units for a mono voice, 3.6 for a stereo voice, 4.8 for a
+mono bundle, and 6 for a stereo bundle. At distant zoom each has a minimum
+stroke in the same proportion. The inspector names the exact voice count
+and stereo sides. The dashed stroke continues to mark an inserted
+one-sample delay, and the signal colours continue to show the port types.
 
 ### Module families
 

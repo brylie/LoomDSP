@@ -740,9 +740,37 @@ pub struct CableView {
     pub colour_from: Color,
     /// Colour at the destination end.
     pub colour_to: Color,
+    /// The drawing weight for the signal leaving the source.
+    pub width: CableWidth,
     /// True if the engine runs this cable through a one-sample delay to
     /// break a feedback loop. Drawn dashed.
     pub delayed: bool,
+}
+
+/// The four cable stroke weights in the visual system.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum CableWidth {
+    /// One voice, one side.
+    #[default]
+    Mono,
+    /// One voice, two sides.
+    Stereo,
+    /// Several voices, one side each.
+    Bundle,
+    /// Several voices, two sides each.
+    StereoBundle,
+}
+
+impl CableWidth {
+    /// The width relative to one mono voice, in world and distant screen units.
+    pub(crate) const fn scale(self) -> f32 {
+        match self {
+            Self::Mono => 1.0,
+            Self::Stereo => 1.5,
+            Self::Bundle => 2.0,
+            Self::StereoBundle => 2.5,
+        }
+    }
 }
 
 /// One modulation assignment, as the canvas draws its line
@@ -1084,8 +1112,9 @@ impl Scene {
 
     /// The topmost cable within `tolerance` of a world point.
     fn cable_at(&self, point: Point, tolerance: f32) -> Option<usize> {
-        let t2 = tolerance * tolerance;
         self.cables.iter().enumerate().rev().find_map(|(index, cable)| {
+            let tolerance = tolerance.max(crate::gpu::CABLE_WIDTH * cable.width.scale() * 0.5);
+            let t2 = tolerance * tolerance;
             let from = self.port_position(PortRef {
                 module: cable.from.0,
                 output: true,

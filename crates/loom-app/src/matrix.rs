@@ -68,6 +68,9 @@ pub struct SourcePick {
     #[serde(skip)]
     pub output: OutputRef,
     pub label: String,
+    /// The visible surface output of the assignment already being edited.
+    #[serde(skip)]
+    edit_only: bool,
 }
 
 impl fmt::Display for SourcePick {
@@ -99,7 +102,13 @@ pub struct MatrixRow {
     pub on: bool,
     pub source: String,
     pub target: String,
+    /// Flat parameter behind a visible surface control, for search and context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_detail: Option<String>,
     pub depth: f32,
+    /// The span of this assignment by itself, in the control's units.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range: Option<String>,
     pub polarity: String,
     /// The source's natural polarity, used for the Follow choice.
     #[serde(skip)]
@@ -139,6 +148,9 @@ pub struct Edit {
     pub column: Column,
     pub depth: String,
     pub choice: usize,
+    /// An explicitly chosen source, kept by identity across model rebuilds.
+    #[serde(skip)]
+    source: Option<OutputRef>,
 }
 
 /// The two picks for a new assignment.
@@ -167,32 +179,64 @@ impl State {
         &self,
         graph: &Graph,
         hierarchy: &loom_patch::Hierarchy,
+        level: &loom_patch::ModulePath,
         selected_modules: &std::collections::BTreeSet<u32>,
         tab: Tab,
     ) -> MatrixModel {
         let names = modulation::Names::new(graph, hierarchy);
         let filter = self.filter.to_lowercase();
-        let mut rows: Vec<_> = graph
-            .assignments()
-            .filter(|(_, a)| {
-                (!self.selected_only
-                    || selected_modules.contains(&a.source.module.0)
-                    || selected_modules.contains(&a.target.0))
-                    && (filter.is_empty()
-                        || names.source(a.source).to_lowercase().contains(&filter)
-                        || names.target(a.target, a.param).to_lowercase().contains(&filter))
-            })
-            .map(|(id, a)| {
+        let mut rows: Vec<_> = hierarchy
+            .level_assignments(graph, level)
+            .filter_map(|(id, a, shown)| {
+                let source_id = hierarchy.id_at(level, shown.source.0)?;
+                let target_id = hierarchy.id_at(level, shown.target.0)?;
+                if self.selected_only
+                    && !selected_modules.contains(&source_id.0)
+                    && !selected_modules.contains(&target_id.0)
+                {
+                    return None;
+                }
+                let source = if source_id == a.source.module {
+                    names.source(a.source)
+                } else {
+                    names.structural_endpoint(level, source_id, &shown.source.1)?
+                };
+                let inner = names.target(a.target, a.param);
+                let surface_control = hierarchy.definition_of(target_id).and_then(|definition| {
+                    definition
+                        .exposed
+                        .iter()
+                        .position(|exposed| exposed.name == shown.target.1)
+                        .map(|index| (target_id, index))
+                });
+                let (target, target_detail) = if target_id == a.target {
+                    (inner, None)
+                } else {
+                    (
+                        names.structural_endpoint(level, target_id, &shown.target.1)?,
+                        Some(inner),
+                    )
+                };
+                if !filter.is_empty()
+                    && ![Some(source.as_str()), Some(target.as_str()), target_detail.as_deref()]
+                        .into_iter()
+                        .flatten()
+                        .any(|label| label.to_lowercase().contains(&filter))
+                {
+                    return None;
+                }
                 let source_polarity = modulation::source_polarity(graph, a.source);
-                MatrixRow {
+                Some(MatrixRow {
                     id: id.0,
                     on: a.enabled,
-                    source: names.source(a.source),
-                    target: names.target(a.target, a.param),
+                    source,
+                    target,
+                    target_detail,
                     depth: a.depth,
+                    range: assignment_range(graph, hierarchy, a, surface_control),
                     polarity: PolarityChoice::of(a.polarity, source_polarity).to_string(),
                     source_polarity,
-                }
+                })
             })
             .collect();
         if let Some((column, reverse)) = self.sort {
@@ -209,6 +253,31 @@ impl State {
             });
         }
         let picking = |column| self.add.is_some() || self.edit.as_ref().is_some_and(|edit| edit.column == column);
+        let mut sources = if picking(Column::Source) {
+            source_picks(graph, &names, level)
+        } else {
+            Vec::new()
+        };
+        let mut edit = self.edit.clone();
+        if let Some(edit) = edit.as_mut().filter(|edit| edit.column == Column::Source)
+            && let Some(row) = rows.iter().find(|row| row.id == edit.id.0)
+            && let Some(assignment) = graph.assignment(edit.id)
+        {
+            let output = assignment.source;
+            if let Err(at) = sources.binary_search_by_key(&output, |pick| pick.output) {
+                sources.insert(
+                    at,
+                    SourcePick {
+                        output,
+                        label: row.source.clone(),
+                        edit_only: true,
+                    },
+                );
+            }
+            edit.choice = sources
+                .binary_search_by_key(&edit.source.unwrap_or(output), |pick| pick.output)
+                .unwrap_or(sources.len());
+        }
         MatrixModel {
             tab,
             sort: self.sort,
@@ -218,15 +287,11 @@ impl State {
             cell: self.cell,
             editing: self.edit.is_some(),
             rows,
-            edit: self.edit.clone(),
+            edit,
             add: self.add.clone(),
-            sources: if picking(Column::Source) {
-                source_picks(graph, &names)
-            } else {
-                Vec::new()
-            },
+            sources,
             targets: if picking(Column::Target) {
-                target_picks(graph, &names)
+                target_picks(graph, &names, level)
             } else {
                 Vec::new()
             },
@@ -242,29 +307,65 @@ impl State {
     }
 }
 
+/// The contribution from a single assignment at the current base value.
+fn assignment_range(
+    graph: &Graph,
+    hierarchy: &loom_patch::Hierarchy,
+    assign: &loom_core::Assignment,
+    surface: Option<(ModuleId, usize)>,
+) -> Option<String> {
+    let node = graph.node(assign.target)?;
+    let mut spec = node.control_spec(assign.param)?;
+    let mut base = *node.params.get(assign.param)?;
+    if let Some((tile, index)) = surface
+        && let Some((min, max)) = hierarchy.exposed_target(tile, index)?.range
+    {
+        spec = spec.in_range(loom_core::ParamRange::new(min, max));
+        base = spec.clamp(base);
+    }
+    let reach = modulation::reach(graph, assign)?;
+    let (low, high) = modulation::range_positions(&spec, base, &[reach]);
+    let text = |position| crate::param::format(&spec, spec.denormalize(position));
+    Some(if low == high {
+        text(low)
+    } else {
+        format!("{} to {}", text(low), text(high))
+    })
+}
+
 /// Sources offered by the matrix at this patch level.
-pub(crate) fn sources(graph: &Graph, hierarchy: &loom_patch::Hierarchy) -> Vec<SourcePick> {
-    source_picks(graph, &modulation::Names::new(graph, hierarchy))
+pub(crate) fn sources(
+    graph: &Graph,
+    hierarchy: &loom_patch::Hierarchy,
+    level: &loom_patch::ModulePath,
+) -> Vec<SourcePick> {
+    source_picks(graph, &modulation::Names::new(graph, hierarchy), level)
 }
 
 /// Targets offered by the matrix at this patch level.
-pub(crate) fn targets(graph: &Graph, hierarchy: &loom_patch::Hierarchy) -> Vec<TargetPick> {
-    target_picks(graph, &modulation::Names::new(graph, hierarchy))
+pub(crate) fn targets(
+    graph: &Graph,
+    hierarchy: &loom_patch::Hierarchy,
+    level: &loom_patch::ModulePath,
+) -> Vec<TargetPick> {
+    target_picks(graph, &modulation::Names::new(graph, hierarchy), level)
 }
 
 /// Sources offered by the matrix, in module and port order.
-fn source_picks(graph: &Graph, names: &modulation::Names<'_>) -> Vec<SourcePick> {
+fn source_picks(graph: &Graph, names: &modulation::Names<'_>, level: &loom_patch::ModulePath) -> Vec<SourcePick> {
     modulation::sources(graph)
         .into_iter()
+        .filter(|output| names.on_level(output.module, level))
         .map(|output| SourcePick {
             output,
             label: names.source(output),
+            edit_only: false,
         })
         .collect()
 }
 
 /// Parameters with a knob, toggle, or radio control, in module order.
-fn target_picks(graph: &Graph, names: &modulation::Names<'_>) -> Vec<TargetPick> {
+fn target_picks(graph: &Graph, names: &modulation::Names<'_>, level: &loom_patch::ModulePath) -> Vec<TargetPick> {
     graph
         .nodes()
         .flat_map(|(module, node)| {
@@ -281,11 +382,15 @@ fn target_picks(graph: &Graph, names: &modulation::Names<'_>) -> Vec<TargetPick>
                             .widgets
                             .iter()
                             .any(|w| w.binds(spec.name) && w.kind.takes_modulation());
-                    eligible.then(|| TargetPick {
-                        module,
-                        param,
-                        label: names.target(module, param),
-                    })
+                    if !eligible {
+                        return None;
+                    }
+                    let label = if names.on_level(module, level) {
+                        names.target(module, param)
+                    } else {
+                        names.surface_target(level, module, param)?.2
+                    };
+                    Some(TargetPick { module, param, label })
                 })
         })
         .collect()
@@ -369,6 +474,7 @@ pub fn view(model: MatrixModel, listening: bool) -> Element<'static, Message> {
             named(
                 &part("selected-only"),
                 checkbox(model.selected_only)
+                    .style(style::check_box)
                     .label("Selected module only")
                     .on_toggle(|v| Message::Matrix(Event::SelectedOnly(v)))
                     .size(style::SWITCH)
@@ -414,9 +520,16 @@ pub fn view(model: MatrixModel, listening: bool) -> Element<'static, Message> {
             column![
                 named(
                     &part("new/source"),
-                    pick_list(model.sources.clone(), add.source, |s| Message::Matrix(
-                        Event::AddSource(s)
-                    ))
+                    pick_list(
+                        model
+                            .sources
+                            .iter()
+                            .filter(|s| !s.edit_only)
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                        add.source,
+                        |s| Message::Matrix(Event::AddSource(s))
+                    )
                     .placeholder("Source output")
                     .text_size(style::SMALL),
                 ),
@@ -463,6 +576,7 @@ pub fn view(model: MatrixModel, listening: bool) -> Element<'static, Message> {
                 .into()
         };
         let on = checkbox(a.on)
+            .style(style::check_box)
             .on_toggle(move |v| Message::Matrix(Event::Enabled(id, v)))
             .size(style::SWITCH);
         let source: Element<'static, Message> = if editing.is_some_and(|e| e.column == Column::Source) {
@@ -482,6 +596,16 @@ pub fn view(model: MatrixModel, listening: bool) -> Element<'static, Message> {
                 .into()
         } else {
             cell(a.target, Column::Target)
+        };
+        let target = if let Some(detail) = a.target_detail {
+            iced::widget::tooltip(
+                target,
+                text(detail).size(style::SMALL),
+                iced::widget::tooltip::Position::Top,
+            )
+            .into()
+        } else {
+            target
         };
         let depth_value: Element<'static, Message> = if let Some(e) = editing.filter(|e| e.column == Column::Depth) {
             text_input(&modulation::depth_text(a.depth), &e.depth)
@@ -508,7 +632,7 @@ pub fn view(model: MatrixModel, listening: bool) -> Element<'static, Message> {
         } else {
             cell(a.polarity, Column::Polarity)
         };
-        let card = column![
+        let mut card = column![
             row![
                 named(&access::cell(id, Column::On), on),
                 named(&access::cell(id, Column::Source), source),
@@ -538,6 +662,9 @@ pub fn view(model: MatrixModel, listening: bool) -> Element<'static, Message> {
             .align_y(iced::Alignment::Center),
         ]
         .spacing(2);
+        if let Some(range) = a.range {
+            card = card.push(container(text(range).size(style::SMALL).color(DIM)).padding([0, 4]));
+        }
         // The card's own container is named by the row's UI ID; the one
         // around it keeps the ID the reveal looks for.
         let card = mouse_area(
@@ -640,21 +767,13 @@ impl App {
         if self.right_tab != Tab::Matrix {
             return None;
         }
-        let id = self.session.matrix.selected?;
-        let a = self.session.controller.graph().assignment(id)?;
-        let descriptor = self.session.controller.graph().node(a.target)?.descriptor;
-        let name = descriptor.params.get(a.param)?.name;
-        Some(loom_canvas::ModulationView {
-            id: id.0,
-            from: (a.source.module.0, a.source.port),
-            to: a.target.0,
-            widget: descriptor
-                .panel
-                .widgets
-                .iter()
-                .position(|w| w.is_control() && w.binds(name)),
-            enabled: a.enabled,
-        })
+        let id = self.session.matrix.selected?.0;
+        self.session
+            .scene
+            .modulations()
+            .iter()
+            .find(|line| line.id == id)
+            .cloned()
     }
 
     /// Handles a matrix widget without adding view state to undo history.
@@ -737,13 +856,21 @@ impl App {
         }
     }
 
-    /// Selects a row and its target module, leaving the badge pin alone.
+    /// Selects a row and its visible target tile, leaving the badge pin alone.
     fn matrix_select(&mut self, id: AssignmentId, column: Column) {
-        if let Some(a) = self.session.controller.graph().assignment(id) {
+        let graph = self.session.controller.graph();
+        if let Some(a) = graph.assignment(id) {
             self.session.matrix.selected = Some(id);
             self.session.matrix.cell = column;
             self.session.matrix.focused = true;
-            self.session.selection = std::collections::BTreeSet::from([a.target.0]);
+            let target = self
+                .session
+                .scene
+                .modulations()
+                .iter()
+                .find(|line| line.id == id.0)
+                .map_or(a.target.0, |line| line.to);
+            self.session.selection = std::collections::BTreeSet::from([target]);
         }
     }
 
@@ -758,14 +885,14 @@ impl App {
             return;
         }
         let choice = match column {
-            Column::Source => sources(self.session.controller.graph(), &self.session.hierarchy)
-                .iter()
-                .position(|s| s.output == a.source)
-                .unwrap_or(0),
-            Column::Target => targets(self.session.controller.graph(), &self.session.hierarchy)
-                .iter()
-                .position(|t| (t.module, t.param) == (a.target, a.param))
-                .unwrap_or(0),
+            Column::Target => targets(
+                self.session.controller.graph(),
+                &self.session.hierarchy,
+                &self.session.level,
+            )
+            .iter()
+            .position(|t| (t.module, t.param) == (a.target, a.param))
+            .unwrap_or(0),
             Column::Polarity => match a.polarity {
                 None => 0,
                 Some(loom_core::Polarity::Unipolar) => 1,
@@ -778,6 +905,7 @@ impl App {
             column,
             depth: String::new(),
             choice,
+            source: None,
         });
     }
 
@@ -795,6 +923,10 @@ impl App {
         };
         let source = source.unwrap_or(old.source);
         let (module, param) = target.unwrap_or((old.target, old.param));
+        if (source, module, param) == (old.source, old.target, old.param) {
+            self.session.matrix.edit = None;
+            return;
+        }
         if self.refuses_assignment(source, module, param) {
             self.session.matrix.edit = None;
             return;
@@ -888,13 +1020,18 @@ impl App {
                 None => self.alerts.warn("Depth must be between -100% and 100%".to_string()),
             },
             Column::Source => {
-                if let Some(source) = sources(self.session.controller.graph(), &self.session.hierarchy).get(edit.choice)
-                {
-                    self.matrix_retarget(edit.id, Some(source.output), None);
+                self.session.matrix.edit = None;
+                if let Some(source) = edit.source {
+                    self.matrix_retarget(edit.id, Some(source), None);
                 }
             }
             Column::Target => {
-                if let Some(target) = targets(self.session.controller.graph(), &self.session.hierarchy).get(edit.choice)
+                if let Some(target) = targets(
+                    self.session.controller.graph(),
+                    &self.session.hierarchy,
+                    &self.session.level,
+                )
+                .get(edit.choice)
                 {
                     self.matrix_retarget(edit.id, None, Some((target.module, target.param)));
                 }
@@ -938,8 +1075,16 @@ impl App {
             return;
         }
         if let Some(add) = self.session.matrix.add.as_mut() {
-            let options_sources = sources(self.session.controller.graph(), &self.session.hierarchy);
-            let options_targets = targets(self.session.controller.graph(), &self.session.hierarchy);
+            let options_sources = sources(
+                self.session.controller.graph(),
+                &self.session.hierarchy,
+                &self.session.level,
+            );
+            let options_targets = targets(
+                self.session.controller.graph(),
+                &self.session.hierarchy,
+                &self.session.level,
+            );
             match key {
                 keyboard::Key::Named(Named::ArrowLeft) => self.session.matrix.cell = Column::Source,
                 keyboard::Key::Named(Named::ArrowRight) => self.session.matrix.cell = Column::Target,
@@ -980,10 +1125,34 @@ impl App {
         }
         if let Some(edit) = &mut self.session.matrix.edit {
             match key {
+                keyboard::Key::Named(Named::ArrowUp | Named::ArrowDown) if edit.column == Column::Source => {
+                    let graph = self.session.controller.graph();
+                    if let Some(assignment) = graph.assignment(edit.id) {
+                        let hierarchy = &self.session.hierarchy;
+                        let names = modulation::Names::new(graph, hierarchy);
+                        let mut outputs = modulation::sources(graph);
+                        outputs.retain(|output| {
+                            *output == assignment.source || names.on_level(output.module, &self.session.level)
+                        });
+                        if let Ok(at) = outputs.binary_search(&edit.source.unwrap_or(assignment.source)) {
+                            let len = outputs.len();
+                            let next = if key == keyboard::Key::Named(Named::ArrowDown) {
+                                (at + 1) % len
+                            } else {
+                                (at + len - 1) % len
+                            };
+                            edit.source = Some(outputs[next]);
+                        }
+                    }
+                }
                 keyboard::Key::Named(Named::ArrowUp | Named::ArrowDown) if edit.column != Column::Depth => {
                     let len = match edit.column {
-                        Column::Source => sources(self.session.controller.graph(), &self.session.hierarchy).len(),
-                        Column::Target => targets(self.session.controller.graph(), &self.session.hierarchy).len(),
+                        Column::Target => targets(
+                            self.session.controller.graph(),
+                            &self.session.hierarchy,
+                            &self.session.level,
+                        )
+                        .len(),
                         Column::Polarity => 3,
                         _ => 0,
                     };
@@ -1003,6 +1172,7 @@ impl App {
         let model = self.session.matrix.model(
             self.session.controller.graph(),
             &self.session.hierarchy,
+            &self.session.level,
             &self.session.selection,
             self.right_tab,
         );

@@ -65,11 +65,12 @@ pub use input::{
 };
 pub use reaction::Reaction;
 pub use scene::{
-    CLOCK_MARK_RADIUS, CableView, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView,
+    CLOCK_MARK_RADIUS, CableView, CableWidth, GRID, HEADER, Hit, HoverText, LABEL_COLUMNS, ModulationView, ModuleView,
     PORT_HIT_RADIUS, PanelView, PartText, PortRef, PortShape, PortView, ROW, Scene, TILE_WIDTH, TransportSignal,
     WidgetView, WidgetViewKind, fit_label, snap, tile_size,
 };
 pub use slot::{CanvasDrawing, CanvasSlot};
+pub mod shortcuts;
 pub use theme::{MIN_TEXT_CONTRAST, Palette, contrast_ratio};
 pub use tile_text::{TextItem, TextKind, for_each as for_each_tile_text};
 pub use trace::{MAX_POINTS as MAX_TRACE_POINTS, ScopeTraces, Trace, trace_draw_area};

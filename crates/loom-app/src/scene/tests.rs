@@ -15,6 +15,7 @@ fn stereo_cable_hover_follows_the_compile_report() {
     c.connect_named(join, "out", out, "in").unwrap();
     c.commit().unwrap();
     let scene = build_flat(c, &BTreeMap::new(), &BTreeMap::new());
+    assert_eq!(scene.cables()[0].width, loom_canvas::CableWidth::Stereo);
     assert!(
         scene.module(join.0).unwrap().outputs[0]
             .hover
@@ -36,6 +37,35 @@ fn stereo_cable_hover_follows_the_compile_report() {
             .hover
             .description
             .contains("Stereo")
+    );
+}
+
+/// A voice bundle uses its compiled stroke and the inspector names its exact width.
+#[test]
+fn bundle_cable_and_inspector_use_compiled_voice_width() {
+    let mut ui = crate::ui_test::Ui::open("polysynth.ron");
+    let graph = ui.app().session.controller.graph();
+    let (note, _) = graph
+        .nodes()
+        .find(|(_, node)| node.descriptor.id == "loom.midi.note")
+        .unwrap();
+    assert!(
+        ui.app()
+            .session
+            .scene
+            .cables()
+            .iter()
+            .any(|wire| wire.from.0 == note.0 && wire.width == loom_canvas::CableWidth::Bundle)
+    );
+    ui.send(crate::Message::Canvas(loom_canvas::CanvasEvent::Select(vec![note.0])));
+    let crate::inspector::Inspector::Module(model) = ui.app().inspector_model() else {
+        panic!("note inspector")
+    };
+    assert!(
+        model
+            .ports
+            .iter()
+            .any(|port| port.direction == "Output" && port.details.ends_with("8 voices"))
     );
 }
 
