@@ -2,7 +2,8 @@
 //! with no display.
 
 use super::{
-    BACKEND_READ_LIMIT, Backend, Clipboard, MAX_STUCK_READS, Native, READ_NOW_LIMIT, READS_BEFORE_RETRY, System, answer,
+    BACKEND_READ_LIMIT, Backend, Clipboard, MAX_STUCK_READS, Native, READ_NOW_LIMIT, READS_BEFORE_RETRY, Reader,
+    System, answer,
 };
 use crate::effect::ClipboardText;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -264,8 +265,10 @@ fn read_until_text(clipboard: &Clipboard) -> ClipboardText {
 }
 
 /// A stuck read never takes our copy: the handle that wrote is not the one
-/// the read holds, so it is never dropped and the text stays. Once the
-/// stuck read comes back, its handle is used again, so nothing new opens.
+/// the read holds, so it does every write, is never dropped, and the text
+/// stays. A later read may get the old reader back or open a new one, by
+/// how soon the released read ends; either is right, so this test allows
+/// both (reuse has its own test).
 #[test]
 fn a_stuck_read_keeps_the_handle_that_wrote() {
     let shared = Arc::new(Shared::default());
@@ -284,17 +287,46 @@ fn a_stuck_read_keeps_the_handle_that_wrote() {
     clipboard.write("filter".to_owned());
     release.send(()).unwrap();
     assert_eq!(read_until_text(&clipboard), ClipboardText::Text("filter".to_owned()));
-    assert_eq!(shared.opened.load(Ordering::SeqCst), 2, "the reader came back");
-    assert!(
-        !shared.log().iter().any(|entry| entry.starts_with("drop")),
-        "no handle was dropped: {:?}",
-        shared.log()
-    );
+    let log = shared.log();
+    let writes: Vec<_> = log.iter().filter(|entry| entry.starts_with("write")).collect();
+    assert_eq!(writes, ["write 0", "write 0"], "every write through the writer");
+    assert!(!log.iter().any(|entry| entry == "drop 0"), "the writer stays: {log:?}");
 }
 
-/// At most one read is stuck at a time: while it is, every read answers
-/// `Refused` at once, with no new helper or handle, and a write still goes
-/// through.
+/// A late read hands its handle back: once it ends, the next read goes
+/// through the same handle, and nothing new opens. Driven on the reader
+/// itself, which waits for the late answer to arrive before it reads, so
+/// the test does not race the helper.
+#[test]
+fn a_late_read_hands_its_handle_back() {
+    let shared = Arc::new(Shared::default());
+    let release = hold_next(&shared);
+    let opener = Arc::clone(&shared);
+    let mut open = move || Handle {
+        id: opener.opened.fetch_add(1, Ordering::SeqCst),
+        shared: Arc::clone(&opener),
+    };
+    let mut reader = Reader::default();
+    assert_eq!(
+        reader.read(&mut open, Duration::from_millis(1)),
+        ClipboardText::Refused,
+        "held, so late"
+    );
+    release.send(()).unwrap();
+    let deadline = std::time::Instant::now() + WAIT;
+    while reader.ready.is_none() {
+        assert!(std::time::Instant::now() < deadline, "the late read never ended");
+        reader.collect_late();
+        std::thread::yield_now();
+    }
+    *shared.text.lock().unwrap() = Some("osc".to_owned());
+    assert_eq!(reader.read(&mut open, WAIT), ClipboardText::Text("osc".to_owned()));
+    assert_eq!(shared.opened.load(Ordering::SeqCst), 1, "the same handle, used again");
+    assert!(reader.stuck.is_empty());
+}
+
+/// While a read is stuck, the next reads answer `Refused` at once, with no
+/// new helper or handle, and a write still goes through.
 #[test]
 fn reads_against_a_stuck_clipboard_hold_one_helper() {
     let shared = Arc::new(Shared::default());
@@ -358,6 +390,32 @@ fn no_more_than_the_limit_of_reads_are_stuck_at_once() {
     let waited = started.elapsed();
     assert!(waited < BACKEND_READ_LIMIT, "at once, with no new helper: {waited:?}");
     assert_eq!(reads(&shared), MAX_STUCK_READS, "one helper each, no more");
+}
+
+/// With every slot taken, reads come back once a stuck read ends: its
+/// handle is taken in and the next read finds the clipboard as it is now.
+/// While both are stuck, the cap opens no new helper, so retrying here
+/// does not race.
+#[test]
+fn reads_recover_once_a_stuck_read_ends() {
+    let shared = Arc::new(Shared::default());
+    let (clipboard, first) = held(&shared);
+    let _second = hold_next(&shared);
+    for _ in 0..MAX_STUCK_READS {
+        assert_eq!(read(&clipboard), ClipboardText::Refused, "stuck");
+        for _ in 0..READS_BEFORE_RETRY {
+            assert_eq!(read(&clipboard), ClipboardText::Refused);
+        }
+    }
+    assert_eq!(read(&clipboard), ClipboardText::Refused, "both slots are taken");
+    clipboard.write("filter".to_owned());
+    first.send(()).unwrap();
+    assert_eq!(read_until_text(&clipboard), ClipboardText::Text("filter".to_owned()));
+    assert_eq!(
+        reads(&shared),
+        MAX_STUCK_READS + 1,
+        "the two stuck, then the one that worked"
+    );
 }
 
 /// What the next opens of [`Scripted`] do, in order: `true` opens, `false`
