@@ -95,7 +95,7 @@ cargo run --release -p loom-cli -- play examples/patches/subtractive.ron
 
 ### Git hooks (recommended)
 
-The repository uses [prek](https://prek.j178.dev) to run the checks before each commit and push, so you hear about problems while the change is fresh, not minutes later from CI:
+The repository uses [prek](https://prek.j178.dev) to run the quick checks before each commit and push, so you hear about problems while the change is fresh, not minutes later from CI:
 
 ```sh
 prek install    # installs the pre-commit and pre-push hooks
@@ -103,12 +103,14 @@ prek install    # installs the pre-commit and pre-push hooks
 
 | When | Checks |
 |---|---|
-| Every commit (a few seconds) | Whitespace, line endings, TOML/YAML syntax, large files, private keys, `cargo fmt`, `mise run clippy`, `typos` on the changed files, ADR status lines, tests in their own files, and no direct commits to `main` |
-| Before push | `mise run coverage` (every test, and the coverage minimum), `mise run doctest` (examples in the API docs, which coverage does not run), `mise run docs`, `mise run wasm`, `mise run deny` |
+| Every commit and push (a few seconds) | Whitespace, line endings, TOML/YAML syntax, large files, private keys, `cargo fmt`, `mise run clippy`, `typos` on the changed files, ADR status lines, tests in their own files, and no direct commits to `main` |
+| By hand (manual stage) | `mise run coverage` (every test, and the coverage minimum), `mise run doctest` (examples in the API docs, which coverage does not run), `mise run docs`, `mise run wasm`, `mise run deny` |
 
-`cargo fmt` and the whitespace hooks fix files for you. When they do, the commit stops: review the changes, stage them, and commit again. Run everything by hand with `prek run --all-files` and `prek run --hook-stage pre-push --all-files`. The configuration is in `prek.toml`.
+The quick checks run again before push, because commits made by a rebase or a merge never ran the commit hooks. The slow checks (coverage, doc tests, docs, the WebAssembly build, and cargo-deny) do not run on push: CI checks every one of them on the pull request, and `mise run check` runs them all locally. Why: several agent sessions on one machine each ran the full check and then ran it again in the push hook, and parallel full checks starve the CPU.
 
-The first coverage run before a push builds the workspace again with coverage instrumentation, which takes a few minutes. Later runs only rebuild what changed.
+`cargo fmt` and the whitespace hooks fix files for you. When they do, the commit stops: review the changes, stage them, and commit again. Run the quick checks by hand with `prek run --all-files`, and the slow ones with `prek run --hook-stage manual --all-files`. The configuration is in `prek.toml`.
+
+The first coverage run builds the workspace again with coverage instrumentation, which takes a few minutes. Later runs only rebuild what changed.
 
 ### What CI checks
 
@@ -132,7 +134,7 @@ Every pull request runs these jobs. All must pass before merging: the main branc
 
 To change a check, change its task in `mise.toml`. The hooks and CI both pick it up.
 
-`mise run deny` runs both cargo-deny checks at once, as the pre-push hook does when a dependency file changed.
+`mise run deny` runs both cargo-deny checks at once, as `mise run check` and the manual `cargo-deny` hook do.
 
 **When the advisories check fails.** A new advisory is published against the RustSec database, not against your change, so CI checks advisories only where fixing one is part of the work: on `main`, in the weekly run, and in a pull request that changes the dependencies. Why: otherwise one new advisory fails every open pull request, docs-only ones too (#143). To fix a failure:
 
@@ -148,7 +150,7 @@ Besides "CI success", the main branch ruleset has a coverage gate from [GitHub C
 **Line coverage.** A pull request is blocked when its line coverage is under 80%, or more than 1 percentage point below `main`. The Coverage job uploads a Cobertura report (`target/cobertura.xml`) with [`actions/upload-code-coverage`](https://github.com/actions/upload-code-coverage), and a bot comments on the pull request with the total and the files that changed. It also sends the coverage (`target/lcov.info`) and the test results to [Codecov](https://codecov.io/gh/brylie/LoomDSP), which comments on the pull request too. Codecov adds two statuses: the lines a pull request changes need 80% coverage (`codecov/patch`), and total coverage may not fall by more than 5% (`codecov/project`).
 
 - The Coverage job itself fails under 80%, so the minimum holds even when the upload does not happen. *Open point:* GitHub Code Quality is only on GitHub Team and Enterprise Cloud plans. On this repository's plan the upload returns "404 Not Found", so the step only warns, and the "1 point below `main`" rule and the pull request comment do not work yet.
-- `mise run coverage` checks the minimum on your machine, and the pre-push hook runs it. The minimum is `LOOM_COVERAGE_MIN` in `mise.toml`. It must stay equal to the ruleset's value.
+- `mise run coverage` checks the minimum on your machine, and `mise run check` runs it. The push hook does not; CI checks it on the pull request. The minimum is `LOOM_COVERAGE_MIN` in `mise.toml`. It must stay equal to the ruleset's value.
 - The "no more than 1 point below `main`" rule is checked only on GitHub, because it needs the coverage of `main` to compare with. If your change adds code, add tests for it in the same pull request.
 - Code that needs audio or MIDI hardware cannot be reached by tests. Keep it thin, and put the logic it calls where tests can reach it, as the app does with the `devices::Host` trait.
 
