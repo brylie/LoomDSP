@@ -619,6 +619,114 @@ impl Message {
         )
     }
 
+    /// The view whose text field sent this message, for a message only a
+    /// focused text field sends (its typing, or Enter in it): the main
+    /// view's inspector and patch info (`InputOwner::Canvas`), Preferences,
+    /// Your patches, the module browser, or the licence chooser. `None` for
+    /// every other message.
+    ///
+    /// A text field keeps its focus when an overlay opens over it without a
+    /// left press (a right-click that opens the probe menu, a screen
+    /// reader's Click on Choose), and typing then reached it: Enter even
+    /// committed a value into the patch under the probe menu (found
+    /// 2026-11-20). [`App::apply_at`] drops such a message unless its view
+    /// owns the input, so a covered field changes nothing. Row 3 of the
+    /// plan for leaving Iced moves the focus into the overlay, and keeps
+    /// this as the second guard.
+    ///
+    /// Each view's own messages are matched in full, so a field message
+    /// added there must choose a side.
+    fn field_view(&self) -> Option<input_owner::InputOwner> {
+        use input_owner::InputOwner;
+        let from = |field: bool, view: InputOwner| field.then_some(view);
+        match self {
+            Self::Inspector(message) => {
+                use inspector::Message as M;
+                let field = match message {
+                    M::ValueText { .. }
+                    | M::ValueSubmit { .. }
+                    | M::UnknownLabelDraft { .. }
+                    | M::UnknownLabelApply { .. }
+                    | M::SubPatchNameDraft { .. }
+                    | M::SubPatchNameApply { .. } => true,
+                    M::Param { .. }
+                    | M::ParamValue { .. }
+                    | M::ValueDraftClear
+                    | M::Choice { .. }
+                    | M::Range { .. }
+                    | M::SelectModule(_)
+                    | M::DropRow(_)
+                    | M::Expose { .. }
+                    | M::Unexpose { .. }
+                    | M::Scrolled => false,
+                };
+                from(field, InputOwner::Canvas)
+            }
+            Self::PatchInfo(message) => {
+                use patch_info::Message as M;
+                let field = match message {
+                    M::Authors(_) | M::PartAuthors(..) | M::TagDraft(_) | M::TagSubmit => true,
+                    M::RemoveTag(_) | M::ChooseLicence => false,
+                };
+                from(field, InputOwner::Canvas)
+            }
+            Self::Preferences(message) => {
+                use settings::Message as M;
+                let field = match message {
+                    M::Author(_) | M::SaveAuthor => true,
+                    M::ClockSource(_)
+                    | M::SendClock(..)
+                    | M::Open
+                    | M::Close
+                    | M::Refresh
+                    | M::Safety(_)
+                    | M::Activity(_)
+                    | M::Map(_)
+                    | M::Audio(_)
+                    | M::Input(_)
+                    | M::Midi(..)
+                    | M::PanicLearn
+                    | M::PanicClear
+                    | M::ChooseLicence => false,
+                };
+                from(field, InputOwner::Preferences)
+            }
+            Self::Patches(message) => {
+                use patches::Message as M;
+                let field = match message {
+                    M::Search(_) | M::Author(_) | M::Tag(_) | M::Submit => true,
+                    M::Found { .. } | M::Licence(..) | M::Hover(_) | M::Pick(_) | M::Step(_) | M::Close => false,
+                };
+                from(field, InputOwner::Patches)
+            }
+            Self::Browser(message) => {
+                use browser::Message as M;
+                let field = match message {
+                    M::Query(_) | M::Submit => true,
+                    M::Hover(_)
+                    | M::Pick(_)
+                    | M::Menu { .. }
+                    | M::InsertLinked(_)
+                    | M::Library(_)
+                    | M::Scrolled(_)
+                    | M::Key(_)
+                    | M::Close => false,
+                };
+                from(field, InputOwner::Browser)
+            }
+            Self::Licence(message) => {
+                use licence_chooser::Message as M;
+                let field = match message {
+                    M::OtherText(_) | M::Use => true,
+                    M::Answer(_) | M::Commercial(_) | M::Clear | M::Cancel => false,
+                };
+                from(field, InputOwner::Chooser)
+            }
+            // No other message comes from a view's text field.
+            _ => None,
+        }
+    }
+
     /// True for what still runs while a question is open: the question
     /// itself, and everything that keeps the music going and the screen
     /// honest. A hardware knob keeps working, and a stray click or key does
@@ -1631,6 +1739,10 @@ impl App {
         };
         loom_canvas::stats::request_frame(cause);
         if self.overlays.question.is_some() && !message.allowed_during_question() {
+            return;
+        }
+        // A covered text field changes nothing (`Message::field_view`).
+        if message.field_view().is_some_and(|view| view != self.overlays.owner()) {
             return;
         }
         // What this message means for a screen reader's tree.
