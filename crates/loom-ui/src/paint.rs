@@ -43,7 +43,7 @@ pub mod testing;
 mod typesetter;
 
 #[cfg(feature = "gpu")]
-pub use gpu::{InstanceBuffer, PaintCounts, PaintRenderer, SHAPE_ATTRIBUTES};
+pub use gpu::{INSTANCE_ATTRIBUTES, InstanceBuffer, PaintCounts, PaintRenderer, SHAPE_ATTRIBUTES};
 pub use list::{ListPainter, PaintList};
 #[cfg(feature = "gpu")]
 pub use plan::{Shape, Target, packed};
@@ -171,6 +171,20 @@ pub struct Segment {
     pub colour: Color,
 }
 
+/// A soft shadow: a rounded box whose edge fades out over `blur`, half
+/// inside and half outside `rect` (ui-layer.md, section 5, rule 14).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shadow {
+    /// The box before blurring, already moved by the shadow's offset.
+    pub rect: Rect,
+    /// The radius of its corners.
+    pub radius: f32,
+    /// Its colour, alpha included.
+    pub colour: Color,
+    /// How wide the fade at its edge is, in logical pixels.
+    pub blur: f32,
+}
+
 /// Takes what an element paints, in the order it is to appear: a later
 /// piece is over an earlier one in the same layer, whether it is text or a
 /// box. So a selection highlight goes before its text, and a caret after.
@@ -181,6 +195,8 @@ pub trait Painter {
     fn quad(&mut self, quad: Quad);
     /// Paints one straight mark.
     fn segment(&mut self, segment: Segment);
+    /// Paints one soft shadow.
+    fn shadow(&mut self, shadow: Shadow);
     /// Starts a layer: everything until [`end_layer`](Self::end_layer) is
     /// over everything painted before, text included, and is cut to
     /// `clip`. A floating part uses it, so its box covers the text under

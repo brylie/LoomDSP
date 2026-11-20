@@ -86,7 +86,7 @@ pub use app::{App, Context, Deadline, InputState, TabStep, WindowSpec};
 pub use draw::Panels;
 pub use driver::{Driver, Paste};
 pub use effect::{ClipboardText, Effect, Effects};
-pub use element::{Align, Element, Length, Looks, Padding, Placement, ScrollStyle, StateLook};
+pub use element::{Align, Element, Length, Looks, Padding, Placement, ScrollStyle, ShadowStyle, StateLook};
 pub use event::{AccessEvent, DriverEvent, Ime, WindowEvent, WindowState};
 pub use field::FieldEvent;
 pub use focus::{AccessNodes, FocusStep, RingStyle};

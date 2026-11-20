@@ -567,3 +567,27 @@ fn own_text_colour_wins_and_no_state_is_normal() {
         (Color::rgb(0.1, 0.1, 0.1), Color::rgb(0.1, 0.0, 0.0))
     );
 }
+
+/// Section 5, rule 14: an element's shadow paints first, under its box,
+/// moved by its offset, with the box's corners and the token's colour and
+/// blur.
+#[test]
+fn a_shadow_paints_under_its_box_moved_by_its_offset() {
+    let shadow = crate::element::ShadowStyle {
+        colour: Color::rgba(0.0, 0.0, 0.0, 0.35),
+        offset: loom_ui_core::Vector::new(0.0, 4.0),
+        blur: 12.0,
+    };
+    let root = Element::column([Element::text("ab", STYLE)])
+        .background(RED)
+        .radius(6.0)
+        .padding(4.0)
+        .shadow(shadow);
+    let painted = painted(root, Point::new(10.0, 20.0));
+    let [Painted::Shadow(cast), Painted::Quad(quad), Painted::Text { .. }] = painted.as_slice() else {
+        panic!("the shadow, the box, then the text: {painted:?}");
+    };
+    assert_eq!(quad.rect, rect(10.0, 20.0, 24.0, 24.0));
+    assert_eq!(cast.rect, rect(10.0, 24.0, 24.0, 24.0), "moved by its offset");
+    assert_eq!((cast.radius, cast.colour, cast.blur), (6.0, shadow.colour, 12.0));
+}

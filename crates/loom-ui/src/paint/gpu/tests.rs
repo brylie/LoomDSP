@@ -377,3 +377,40 @@ fn a_panel_draws_its_box_border_text_and_clip_on_the_gpu() {
         "nothing of it past the clip"
     );
 }
+
+/// Section 5, rule 14: a soft shadow is solid inside its box, fades across
+/// its edge over its blur, half inside and half outside, and is gone half
+/// the blur past the edge. Red on black, so the red channel is the cover.
+#[test]
+fn a_shadow_fades_over_its_blur_on_the_gpu() {
+    let (Some((device, queue)), Some(text)) = (device(), text()) else {
+        assert!(
+            !gpu_required(),
+            "LOOM_REQUIRE_GPU is set, but there is no GPU adapter or no font"
+        );
+        eprintln!("skipped: no GPU adapter or no system font");
+        return;
+    };
+    let whole = Rect::new(Point::ORIGIN, Size::new(WIDTH as f32, HEIGHT as f32));
+    let mut list = PaintList::new(whole);
+    {
+        let mut painter = ListPainter::new(&text, &mut list);
+        crate::paint::Painter::shadow(
+            &mut painter,
+            crate::paint::Shadow {
+                rect: Rect::new(Point::new(100.0, 28.0), Size::new(40.0, 40.0)),
+                radius: 0.0,
+                colour: Color::rgb(1.0, 0.0, 0.0),
+                blur: 12.0,
+            },
+        );
+    }
+    let pixels = draw(&device, &queue, list);
+    let red = |x| pixel(&pixels, x, 48)[0];
+    assert_eq!(red(120), 255, "solid in the middle");
+    assert_eq!(red(110), 255, "solid half the blur inside the edge");
+    let edge = red(100);
+    assert!((96..=160).contains(&edge), "about half at the edge: {edge}");
+    assert!(red(97) < edge && red(97) > 0, "fading outside the edge: {}", red(97));
+    assert_eq!(red(93), 0, "gone past half the blur");
+}

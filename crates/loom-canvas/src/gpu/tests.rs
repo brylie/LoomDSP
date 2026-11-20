@@ -65,8 +65,9 @@ fn shader_names() {
 
 #[test]
 fn instance_sizes_match_the_shader() {
-    // Four vec4 attributes each.
-    assert_eq!(std::mem::size_of::<Shape>(), 64);
+    // Four vec4 attributes each, and five for a shape, whose last is a
+    // soft shadow's blur (ui-layer.md, section 5, rule 14).
+    assert_eq!(std::mem::size_of::<Shape>(), 80);
     assert_eq!(std::mem::size_of::<Cable>(), 64);
     assert_eq!(std::mem::size_of::<Arc>(), 64);
     assert_eq!(std::mem::size_of::<Segment>(), 64);

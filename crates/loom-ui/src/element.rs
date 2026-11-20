@@ -142,6 +142,21 @@ pub(crate) struct Look {
     /// when it is painted, so a hover or a press redraws it without
     /// building its panel again.
     pub(crate) states: Option<Looks>,
+    /// A soft shadow under its box (section 5, rule 14).
+    pub(crate) shadow: Option<ShadowStyle>,
+}
+
+/// A soft shadow under an element's box, from an app's token (section 5,
+/// rule 14): its colour, how far it is moved from the box, and how wide
+/// its edge fades.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShadowStyle {
+    /// Its colour, alpha included.
+    pub colour: Color,
+    /// How far it is moved from the box, in logical pixels.
+    pub offset: loom_ui_core::Vector,
+    /// How wide its edge fades, in logical pixels.
+    pub blur: f32,
 }
 
 impl Look {
@@ -686,6 +701,13 @@ impl Element {
     /// so nothing under it is hit: a panel over the layer below.
     pub fn opaque(mut self) -> Self {
         self.opaque = true;
+        self
+    }
+
+    /// Casts a soft shadow under the element's box, drawn first and cut
+    /// only by its panel's clip (section 5, rule 14).
+    pub fn shadow(mut self, shadow: ShadowStyle) -> Self {
+        self.look.shadow = Some(shadow);
         self
     }
 

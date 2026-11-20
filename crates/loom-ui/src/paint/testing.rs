@@ -20,6 +20,8 @@ pub enum Painted {
     Quad(Quad),
     /// A straight mark.
     Segment(Segment),
+    /// A soft shadow.
+    Shadow(super::Shadow),
     /// A layer began, cut to this rectangle.
     Begin(Rect),
     /// The layer ended.
@@ -65,6 +67,10 @@ impl Painter for Recorder {
 
     fn segment(&mut self, segment: Segment) {
         self.painted.push(Painted::Segment(segment));
+    }
+
+    fn shadow(&mut self, shadow: super::Shadow) {
+        self.painted.push(Painted::Shadow(shadow));
     }
 
     fn begin_layer(&mut self, clip: Rect) {

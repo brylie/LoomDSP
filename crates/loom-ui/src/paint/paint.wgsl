@@ -55,6 +55,8 @@ struct ShapeIn {
     @location(2) border: vec4<f32>,
     // corner radius and border width (host units), minimum border (physical px), and angle (radians).
     @location(3) params: vec4<f32>,
+    // x: the blur of a soft shadow's edge (host units), 0 for a crisp edge.
+    @location(4) soft: vec4<f32>,
 };
 
 struct ShapeOut {
@@ -67,6 +69,8 @@ struct ShapeOut {
     @location(3) border: vec4<f32>,
     // Corner radius and border width in physical pixels.
     @location(4) radius_border: vec2<f32>,
+    // The blur of a soft shadow's edge in physical pixels, 0 for a crisp edge.
+    @location(5) blur: f32,
 };
 
 @vertex
@@ -75,8 +79,10 @@ fn vs_shape(@builtin(vertex_index) vi: u32, shape: ShapeIn) -> ShapeOut {
     let corner = vec2<f32>(f32(vi & 1u), f32(vi >> 1u)) * 2.0 - 1.0;
     let px = px_per_world();
     let half_size = shape.rect.zw * 0.5 * px;
-    // One extra pixel on every side for the anti-aliased edge.
-    let local = corner * (half_size + vec2<f32>(1.0));
+    // One extra pixel on every side for the anti-aliased edge, and half the
+    // blur for a soft one, which fades out past the box.
+    let blur = shape.soft.x * px;
+    let local = corner * (half_size + vec2<f32>(1.0 + blur * 0.5));
     let centre = shape.rect.xy + shape.rect.zw * 0.5;
 
     var result: ShapeOut;
@@ -96,6 +102,7 @@ fn vs_shape(@builtin(vertex_index) vi: u32, shape: ShapeIn) -> ShapeOut {
         border = max(border, shape.params.z);
     }
     result.radius_border = vec2<f32>(min(shape.params.x * px, min(half_size.x, half_size.y)), border);
+    result.blur = blur;
     return result;
 }
 
@@ -104,7 +111,11 @@ fn fs_shape(v: ShapeOut) -> @location(0) vec4<f32> {
     let r = v.radius_border.x;
     let q = abs(v.local) - v.half_size + vec2<f32>(r);
     let d = length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
-    let coverage = clamp(0.5 - d, 0.0, 1.0);
+    var coverage = clamp(0.5 - d, 0.0, 1.0);
+    if (v.blur > 0.0) {
+        // A soft edge: from full inside to none outside, over the blur.
+        coverage = 1.0 - smoothstep(-0.5 * v.blur, 0.5 * v.blur, d);
+    }
     if (coverage <= 0.0) {
         discard;
     }

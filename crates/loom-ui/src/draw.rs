@@ -336,6 +336,14 @@ impl Layout {
                 tints.push((index, shown.text));
             }
             let tint = tints.last().and_then(|(_, colour)| *colour);
+            if let Some(shadow) = look.shadow {
+                painter.shadow(crate::paint::Shadow {
+                    rect: Rect::new(bounds.position() + shadow.offset, bounds.size()),
+                    radius: look.radius,
+                    colour: shadow.colour,
+                    blur: shadow.blur,
+                });
+            }
             if look.draws_box() {
                 let (border_width, border) = look.border.unwrap_or((0.0, Color::TRANSPARENT));
                 painter.quad(Quad {
