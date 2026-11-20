@@ -103,7 +103,7 @@ impl TypedField {
 
 /// True for the first character of a typed number: a digit, a minus sign, or
 /// a decimal point, which a comma also is (panel-widgets.md, Typing a value).
-fn starts_a_number(text: &str) -> bool {
+pub(super) fn starts_a_number(text: &str) -> bool {
     text.chars()
         .next()
         .is_some_and(|c| c.is_ascii_digit() || matches!(c, '-' | '.' | ','))

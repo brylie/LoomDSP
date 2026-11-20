@@ -46,6 +46,8 @@ pub(crate) struct Overlays {
     pub chooser: Option<licence_chooser::Chooser>,
     /// Open module help.
     pub help: Option<help::Help>,
+    /// The text field whose focus help temporarily took.
+    pub help_focus: Option<loom_ui_core::UiId>,
     /// The question over everything else, while one is open. While it is,
     /// most messages are dropped (`Message::allowed_during_question`).
     pub question: Option<question::Question>,
@@ -101,6 +103,10 @@ impl Overlays {
         let preferences = matches!(self.panel, Some(Overlay::Preferences(_)));
         *self = Self {
             panel: self.panel.take().filter(|_| preferences),
+            chooser: self
+                .chooser
+                .take()
+                .filter(|chooser| preferences && chooser.target() == licence_chooser::Target::Default),
             ..Self::default()
         };
     }
@@ -193,6 +199,10 @@ impl Overlays {
     pub fn close_preferences(&mut self) {
         if self.preferences().is_some() {
             self.panel = None;
+            self.chooser = self
+                .chooser
+                .take()
+                .filter(|chooser| chooser.target() != licence_chooser::Target::Default);
         }
     }
 

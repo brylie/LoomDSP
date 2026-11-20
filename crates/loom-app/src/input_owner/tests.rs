@@ -110,11 +110,7 @@ fn each_overlay_has_the_input_while_it_is_open() {
         let mut ui = Ui::open("subtractive.ron");
         select_first_module(&mut ui);
         open_overlay(&mut ui, owner);
-        assert_eq!(
-            ui.app().no_overlay(),
-            matches!(owner, InputOwner::Canvas | InputOwner::ProbeMenu | InputOwner::TileMenu),
-            "{owner:?}"
-        );
+        assert_eq!(ui.app().no_overlay(), owner == InputOwner::Canvas, "{owner:?}");
         let policy = ui.app().canvas_focus_policy();
         assert_eq!(policy.interactive, owner == InputOwner::Canvas, "{owner:?}");
         assert!(
@@ -308,6 +304,36 @@ fn help_opens_over_a_chooser_opened_from_preferences() {
     assert_eq!(ui.app().input_owner(), InputOwner::Chooser, "help closed");
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
     assert_eq!(ui.app().input_owner(), InputOwner::Preferences, "the chooser closed");
+}
+
+/// Help takes the search field's input and restores it when it closes.
+#[test]
+fn help_suspends_search_in_both_browsers() {
+    for (owner, field) in [
+        (InputOwner::Browser, crate::browser::search_id()),
+        (InputOwner::Patches, patches::text_fields()[0].clone()),
+    ] {
+        let mut ui = Ui::open("subtractive.ron");
+        open_overlay(&mut ui, owner);
+        let at = ui.field(&field);
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        assert_eq!(ui.app().focus.as_ref(), Some(&field));
+        let search = |ui: &Ui| match owner {
+            InputOwner::Browser => ui.app().overlays.browser().unwrap().model().query.clone(),
+            _ => ui.app().overlays.patches().unwrap().model().search.clone(),
+        };
+        ui.typewrite("a");
+        assert_eq!(search(&ui), "a");
+        ui.tap(Key::Named(Named::F1), Modifiers::empty());
+        ui.typewrite("b");
+        assert_eq!(search(&ui), "a", "{owner:?}");
+        ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+        assert_eq!(ui.focused_field(), Some(field));
+        ui.typewrite("c");
+        assert_eq!(search(&ui), "ac", "{owner:?}");
+    }
 }
 
 /// While help is on top, the patch list behind it hears no keys.

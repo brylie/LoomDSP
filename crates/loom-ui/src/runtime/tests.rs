@@ -40,7 +40,7 @@ enum Msg {
     /// Reads the clipboard.
     Paste,
     /// The clipboard's text.
-    Pasted(Option<String>),
+    Pasted(crate::ClipboardText),
     /// Focuses the search field, selecting all of it.
     FocusSearch,
     /// Scrolls the search field into view.
@@ -516,7 +516,7 @@ fn answers_arrive_on_the_next_turn() {
             Msg::Ask,
             Msg::Answered(Some(1)),
             Msg::Paste,
-            Msg::Pasted(Some("osc".into()))
+            Msg::Pasted(crate::ClipboardText::Text("osc".into()))
         ]
     );
     assert_eq!(harness.driver().questions()[0].title, "Unsaved");

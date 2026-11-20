@@ -31,14 +31,32 @@ use iced_wgpu::graphics::Shell;
 use loom_ui::shell::{Frame, Ime, Layers, Opened, Parts, Pointer, Redraw, Report};
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::rc::Rc;
 use std::time::Instant;
 use winit::event::WindowEvent as WinitEvent;
 use winit::keyboard::ModifiersState;
 
-/// The window's clipboard, shared by the layers (for Iced's widgets) and
-/// the services (for the app's effects), once the window has opened.
-pub(crate) type SharedClipboard = Rc<RefCell<Option<iced_winit::Clipboard>>>;
+/// Iced's widgets' clipboard: the shell's own (`loom_ui::clipboard`), the
+/// one the app's effects and the runtime's fields use, so every path shares
+/// one backend (ui-layer.md, section 8, rule 2). A bridge, gone in phase 4.
+/// Iced reads synchronously, so a read waits for the clipboard's thread,
+/// as Iced's own clipboard read waited on the system. The primary
+/// selection is out of scope, so it reads nothing and writes nothing.
+pub(crate) struct IcedClipboard(loom_ui::clipboard::Clipboard);
+
+impl iced::advanced::Clipboard for IcedClipboard {
+    fn read(&self, kind: iced::advanced::clipboard::Kind) -> Option<String> {
+        match kind {
+            iced::advanced::clipboard::Kind::Standard => self.0.read_now().text().map(str::to_owned),
+            iced::advanced::clipboard::Kind::Primary => None,
+        }
+    }
+
+    fn write(&mut self, kind: iced::advanced::clipboard::Kind, contents: String) {
+        if kind == iced::advanced::clipboard::Kind::Standard {
+            self.0.write(contents);
+        }
+    }
+}
 
 /// Iced's layers in the shell's window.
 pub(crate) struct WindowLayers {
@@ -66,7 +84,7 @@ pub(crate) struct WindowLayers {
     /// The window's scale, for converting events.
     scale: f32,
     /// The clipboard, for Iced's widgets.
-    clipboard: SharedClipboard,
+    clipboard: IcedClipboard,
     /// Focus answers waiting to run alone, in the order asked.
     answers: VecDeque<FocusAnswer>,
     /// The pointer Iced last asked for, and whether it was reported.
@@ -80,8 +98,9 @@ pub(crate) struct WindowLayers {
 }
 
 impl WindowLayers {
-    /// The layers, with the clipboard the services share.
-    pub(crate) fn new(clipboard: SharedClipboard) -> Self {
+    /// The layers, on the system clipboard the shell's driver uses too.
+    pub(crate) fn new() -> Self {
+        let clipboard = IcedClipboard(loom_ui::clipboard::Clipboard::system());
         Self {
             renderer: None,
             canvas: None,
@@ -114,11 +133,7 @@ impl WindowLayers {
         let renderer = self.renderer.as_mut()?;
         let cache = self.cache.take().unwrap_or_default();
         let mut ui = UserInterface::build(app.view(), size, cache, renderer);
-        let mut clipboard = self.clipboard.borrow_mut();
-        let result = match clipboard.as_mut() {
-            Some(clipboard) => f(&mut ui, renderer, self.cursor, clipboard),
-            None => f(&mut ui, renderer, self.cursor, &mut iced::advanced::clipboard::Null),
-        };
+        let result = f(&mut ui, renderer, self.cursor, &mut self.clipboard);
         self.cache = Some(ui.into_cache());
         Some(result)
     }
@@ -238,8 +253,7 @@ fn size(parts: &Parts<'_, Hosted, IcedTarget>) -> iced::Size {
 }
 
 impl Layers<Hosted, IcedTarget> for WindowLayers {
-    /// Builds the renderer and connects the clipboard, before the window is
-    /// shown. The screen reader's adapter is the shell's own.
+    /// Builds the renderer, before the window is shown. The screen reader's adapter is the shell's own.
     fn open(&mut self, _parts: Parts<'_, Hosted, IcedTarget>, opened: &Opened<'_>) {
         let engine = iced_wgpu::Engine::new(
             opened.adapter,
@@ -260,7 +274,6 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
         )));
         self.canvas = Some(super::paint::CanvasPass::new(opened.device, opened.format));
         self.panels = Some(super::paint::PanelPass::new(opened.device, opened.format));
-        *self.clipboard.borrow_mut() = Some(iced_winit::Clipboard::connect(opened.window.clone()));
         self.scale = opened.window.scale_factor() as f32;
     }
 
@@ -569,14 +582,15 @@ impl Sink for WindowSink<'_> {
     }
 
     fn clipboard_read(&mut self) -> Option<String> {
-        let clipboard = self.layers.clipboard.borrow();
-        clipboard.as_ref()?.read(iced::advanced::clipboard::Kind::Standard)
+        iced::advanced::Clipboard::read(&self.layers.clipboard, iced::advanced::clipboard::Kind::Standard)
     }
 
     fn clipboard_write(&mut self, contents: String) {
-        if let Some(clipboard) = self.layers.clipboard.borrow_mut().as_mut() {
-            clipboard.write(iced::advanced::clipboard::Kind::Standard, contents);
-        }
+        iced::advanced::Clipboard::write(
+            &mut self.layers.clipboard,
+            iced::advanced::clipboard::Kind::Standard,
+            contents,
+        );
     }
 }
 

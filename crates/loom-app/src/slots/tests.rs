@@ -105,6 +105,59 @@ fn with_slot() -> (App, u32, u32) {
     (app, slot, svf)
 }
 
+/// A mapped part uses the slot's field IDs, and a relative mapping has no range fields.
+#[test]
+fn midi_range_fields_follow_the_slot_part_and_mapping_mode() {
+    use crate::inspector::ids;
+    use loom_core::{MidiControl, MidiEncoding, MidiMappingOptions, MidiMode};
+
+    let (mut app, slot, svf) = with_slot();
+    let part = ModuleId(svf);
+    let cutoff = app
+        .session
+        .controller
+        .graph()
+        .node(part)
+        .unwrap()
+        .parameter_index("cutoff")
+        .unwrap();
+    app.session
+        .controller
+        .map_midi(
+            MidiControl {
+                channel: 0,
+                controller: 21,
+            },
+            part,
+            cutoff,
+        )
+        .unwrap();
+    app.session.learn.toggle_options((svf, cutoff));
+    app.session.selection = [slot].into();
+    let Inspector::Slot(rows) = app.inspector_model() else {
+        panic!("the slot is selected");
+    };
+    let (_, _, row) = rows
+        .role_params
+        .into_iter()
+        .find(|(_, module, row)| *module == svf && row.index == cutoff)
+        .unwrap();
+    assert_eq!(
+        app.midi_range_fields(),
+        Some(["midi/low", "midi/high"].map(|name| ids::part(&row.ui, name)))
+    );
+
+    app.session
+        .controller
+        .set_midi_options(
+            part,
+            cutoff,
+            MidiMappingOptions::DEFAULT.with_mode(MidiMode::Relative(MidiEncoding::Offset64)),
+        )
+        .unwrap();
+    assert_eq!(app.midi_range_fields(), None);
+}
+
 /// Make slot from the tile menu: the SVF tile becomes a Filter slot tile
 /// with the role's ports and the SVF's panel, where the SVF stood; the
 /// highpass cable is removed and named; the exposure follows onto the
@@ -398,7 +451,10 @@ fn a_pasted_slot_swaps_independently_and_undoes_as_one_step() {
     let (app, slot, svf) = with_slot();
     let mut ui = crate::ui_test::Ui::with_app(app);
     let text = ui.app_mut().copy().unwrap();
-    ui.app_mut().paste(loom_ui_core::Point::new(600.0, 240.0), Some(text));
+    ui.app_mut().paste(
+        loom_ui_core::Point::new(600.0, 240.0),
+        loom_ui::ClipboardText::Text(text),
+    );
     let snapshot = ui.app().ui_snapshot();
     assert_eq!(snapshot.undo.as_deref(), Some("paste Filter"), "{:?}", snapshot.status);
     let [copy] = snapshot.selection.as_slice() else {

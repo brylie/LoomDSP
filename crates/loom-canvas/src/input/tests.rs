@@ -88,6 +88,45 @@ fn panel() -> PanelView {
     }
 }
 
+/// When a mode hides a focused knob, the next active control on its tile takes focus.
+#[test]
+fn hiding_the_focused_control_keeps_focus_on_its_tile() {
+    let mut tile = module(1, 0.0);
+    tile.panel = panel();
+    tile.panel.widgets[0].hidden = true;
+    let scene = Scene::new(vec![tile], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let canvas = CanvasModel::new(&scene, &selected);
+    let mut state = CanvasInput::default();
+    state.focus.set(1, 0, true);
+    let events = drive(&canvas, &mut state, &key_event(Key::Right, true), Point::ORIGIN);
+    assert_eq!(state.focus.control(), Some((1, 2)));
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, CanvasEvent::SetControl { .. } | CanvasEvent::Move { .. }))
+    );
+}
+
+/// The key that relocates hidden focus cannot start a draft on its replacement.
+#[test]
+fn typing_after_relocation_starts_on_the_next_key() {
+    let mut tile = module(1, 0.0);
+    tile.panel = panel();
+    tile.panel.widgets[0].hidden = true;
+    tile.panel.widgets[2].kind = WidgetViewKind::Knob { steps: 0 };
+    let scene = Scene::new(vec![tile], Vec::new());
+    let selected = BTreeSet::from([1]);
+    let model = CanvasModel::new(&scene, &selected);
+    let mut state = CanvasInput::default();
+    state.focus.set(1, 0, true);
+    drive(&model, &mut state, &typed(Key::Character('7'), "7"), Point::ORIGIN);
+    assert_eq!(state.focus.control(), Some((1, 2)));
+    assert!(state.focus.typed().is_none());
+    drive(&model, &mut state, &typed(Key::Character('8'), "8"), Point::ORIGIN);
+    assert_eq!(state.focus.typed().unwrap().draft.text, "8");
+}
+
 /// Tab skips a control its module's mode hides (ADR-0030).
 #[test]
 fn tab_skips_hidden_controls() {
@@ -304,6 +343,39 @@ fn a_port_label_over_a_header_hovers_as_the_port() {
     let scene = Scene::new(vec![below, cover], Vec::new());
     let header = scene.module(2).unwrap().bounds();
     assert!(label.y < header.y + HEADER, "the label is in the cover's header");
+    let none = BTreeSet::new();
+    let canvas = CanvasModel::new(&scene, &none);
+    let state = CanvasInput {
+        hover: Some(Hit::Module(2)),
+        cursor: Some(label),
+        ..CanvasInput::default()
+    };
+    assert_eq!(canvas.hover_target(&state), Some(HoverTarget::Port(port)));
+}
+
+/// A port label is painted over a light, so its hover wins there.
+#[test]
+fn a_port_label_over_a_light_hovers_as_the_port() {
+    let port = PortRef {
+        module: 1,
+        output: true,
+        index: 0,
+    };
+    let below = module(1, 0.0);
+    let mut label = None;
+    tile_text::for_each(&below, |item| {
+        if item.kind == TextKind::Port(port) {
+            label = Some(item.bounds().center());
+        }
+    });
+    let label = label.unwrap();
+    let mut cover = module(2, 0.0);
+    cover.panel = panel();
+    cover.panel.widgets[1].hover = HoverText::new("Gate", "Lit while high.", "gate");
+    let light = cover.widget_bounds(1).unwrap().center();
+    cover.position = label - (light - cover.position);
+    let scene = Scene::new(vec![below, cover], Vec::new());
+    assert_eq!(scene.module(2).unwrap().display_at(label), Some(1));
     let none = BTreeSet::new();
     let canvas = CanvasModel::new(&scene, &none);
     let state = CanvasInput {
@@ -971,7 +1043,19 @@ fn a_long_select_list_scrolls() {
 
     // It stops at either end.
     drive(&canvas, &mut state, &wheel(-100.0), inside);
-    assert_eq!(state.focus.popup().copied().unwrap().scroll, 18);
+    let popup = state.focus.popup().copied().unwrap();
+    assert_eq!((popup.scroll, popup.highlight), (18, 18));
+    let mut enter = CanvasInput {
+        focus: state.focus.clone(),
+        ..CanvasInput::default()
+    };
+    let picked = drive(&canvas, &mut enter, &key_event(Key::Enter, true), inside);
+    assert!(picked.contains(&CanvasEvent::SetControl {
+        module: 1,
+        widget: 0,
+        position: 18.0,
+        part: ControlPart::Main
+    }));
     drive(&canvas, &mut state, &wheel(100.0), inside);
     assert_eq!(state.focus.popup().copied().unwrap().scroll, 0);
 
@@ -3897,6 +3981,27 @@ fn a_level_change_adopts_its_camera_or_frames_the_scene() {
     framed.frame_readable(scene.bounds().unwrap(), Size::new(800.0, 600.0), READABLE_ZOOM);
     assert_eq!(state.camera, framed);
     assert_eq!(cameras(events), vec![CanvasEvent::Camera(framed)]);
+}
+
+/// Replacing a patch reports the trace detail even when the zoom still calls for reduced traces.
+#[test]
+fn a_new_patch_reports_unchanged_trace_detail() {
+    // With nothing to frame, the new scene keeps the old zoom.
+    let scene = Scene::new(Vec::new(), Vec::new());
+    let none = BTreeSet::new();
+    let canvas = CanvasModel::new(&scene, &none).frame_key(2);
+    let mut state = CanvasInput {
+        camera: Camera {
+            zoom: 0.5,
+            ..Camera::default()
+        },
+        framed_key: Some(1),
+        reported_full_traces: Some(false),
+        ..CanvasInput::default()
+    };
+    let events = drive(&canvas, &mut state, &Event::Redraw, Point::ORIGIN);
+    assert!(events.contains(&CanvasEvent::TraceDetail(false)), "{events:?}");
+    assert!(!drive(&canvas, &mut state, &Event::Redraw, Point::ORIGIN).contains(&CanvasEvent::TraceDetail(false)));
 }
 
 /// Ctrl+Enter (Cmd+Enter on macOS) is the app's shortcut to open a

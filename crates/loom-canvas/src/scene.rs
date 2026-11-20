@@ -341,6 +341,18 @@ impl WidgetView {
         }
     }
 
+    /// Whether a focused control's value replaces its caption on the tile.
+    pub fn value_replaces_caption(&self) -> bool {
+        self.is_control()
+            && matches!(
+                self.kind,
+                WidgetViewKind::Knob { .. }
+                    | WidgetViewKind::Fader { .. }
+                    | WidgetViewKind::Range { .. }
+                    | WidgetViewKind::XyPad { .. }
+            )
+    }
+
     /// Whether Enter opens the exact-value editor on this widget.
     pub fn accepts_typed_value(&self) -> bool {
         !self.hidden && !self.inert && self.kind.is_one_number()

@@ -305,10 +305,9 @@ fn a_new_patch_closes_help() {
     assert_eq!(ui.app().input_owner(), InputOwner::Canvas);
 }
 
-/// Cmd+Shift+O opens Your patches from a menu on the canvas, because a menu
-/// does not count as an overlay. One panel is open at a time, so the menu goes.
+/// The canvas menus hold the Your patches shortcut and Tab.
 #[test]
-fn your_patches_opens_from_a_menu_and_closes_it() {
+fn a_canvas_menu_keeps_the_browser_shortcut_from_opening_your_patches() {
     let tmp = TempDir::new("patches-over-menu");
     for owner in [InputOwner::TileMenu, InputOwner::ProbeMenu] {
         let mut ui = Ui::open("subtractive.ron");
@@ -318,11 +317,30 @@ fn your_patches_opens_from_a_menu_and_closes_it() {
         open_overlay(&mut ui, owner);
 
         ui.tap(Key::Character("o".into()), Modifiers::COMMAND | Modifiers::SHIFT);
-        assert_eq!(ui.app().input_owner(), InputOwner::Patches, "{owner:?}");
-
-        ui.app_mut().overlays.close_patches();
-        assert_eq!(ui.app().input_owner(), InputOwner::Canvas, "the menu is gone");
+        assert_eq!(ui.app().input_owner(), owner);
+        ui.tap(Key::Named(iced::keyboard::key::Named::Tab), Modifiers::empty());
+        assert_eq!(ui.app().input_owner(), owner);
+        assert_eq!(ui.focused_field(), None);
     }
+}
+
+/// The patch form reuses field IDs across New. Its reported focus must
+/// still agree with the widget before another key reaches the canvas.
+#[test]
+fn replacing_a_patch_rechecks_the_reused_field_focus() {
+    let mut ui = Ui::open("subtractive.ron");
+    let field = crate::patch_info::tags_part();
+    let at = ui.field(&field);
+    ui.move_to(at);
+    ui.press();
+    ui.release();
+    assert_eq!(ui.app().focus.as_ref(), Some(&field));
+    let generation = ui.app().generation;
+    ui.send(crate::Message::File(crate::FileAction::New));
+    ui.redraw();
+    assert!(ui.app().generation > generation);
+    let actual = ui.focused_field();
+    assert_eq!(ui.app().focus, actual);
 }
 
 /// A patch that does not load shows the reason in the window, and the status

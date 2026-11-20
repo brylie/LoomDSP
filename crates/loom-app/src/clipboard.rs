@@ -30,6 +30,10 @@ pub const DUPLICATE_OFFSET: f32 = 2.0 * GRID;
 /// The status bar text when the clipboard holds nothing to paste.
 pub const NOTHING_TO_PASTE: &str = "The clipboard holds no LoomDSP modules";
 
+/// The warning when the clipboard could not be read: the system refused,
+/// or another app held it (ui-layer.md, section 8, rule 2).
+pub const COULD_NOT_READ: &str = "Couldn't read the clipboard";
+
 /// A trailing RON comment retains placeholder ports that have no copied link.
 const PORTS_COMMENT: &str = "// LoomDSP placeholder ports: ";
 

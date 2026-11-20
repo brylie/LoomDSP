@@ -946,3 +946,64 @@ fn toolbar_region_keys_move_the_runtime_focus() {
     assert!(!ui.app().toolbar_has_focus(), "Escape leaves the toolbar");
     assert!(!focused(&mut ui).is_under(&crate::a11y::tree::toolbar_id()));
 }
+
+/// Ctrl+Shift+Tab from the toolbar into an Inspector whose stop is an
+/// action, not a field, lets the toolbar's focus go, so the arrows, Enter,
+/// and Space no longer reach a toolbar button (CodeRabbit, #850). Tried
+/// with each module of the patch selected; at least one has such a stop.
+#[test]
+fn ctrl_tab_from_the_toolbar_to_an_action_only_inspector_lets_the_toolbar_go() {
+    let modules: Vec<u32> = crate::ui_test::open_app("subtractive.ron")
+        .ui_snapshot()
+        .tiles
+        .iter()
+        .map(|tile| tile.id)
+        .collect();
+    let mut tried = 0;
+    for module in modules {
+        let mut ui = Ui::open("subtractive.ron");
+        ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![module])));
+        // Back from the canvas to the toolbar, then back to the right column.
+        region(&mut ui, true);
+        if !ui.app().toolbar_has_focus() {
+            continue;
+        }
+        region(&mut ui, true);
+        if ui.app().session.outline.inspector_action.is_none() {
+            continue;
+        }
+        tried += 1;
+        assert!(!ui.app().toolbar_has_focus(), "module {module}: the toolbar let go");
+        assert_eq!(ui.runtime().focused(), None, "module {module}");
+    }
+    assert!(tried > 0, "a module whose Inspector stop is an action");
+}
+
+/// Ctrl+Shift+Tab from the toolbar into an Inspector with a field (no
+/// module selected: patch info's Authors) focuses that field, and nothing
+/// lets it go after (CodeRabbit, #855).
+#[test]
+fn ctrl_tab_from_the_toolbar_to_an_inspector_field_focuses_it() {
+    let mut ui = Ui::open("subtractive.ron");
+    region(&mut ui, true);
+    assert!(ui.app().toolbar_has_focus(), "in the toolbar");
+    region(&mut ui, true);
+    ui.redraw();
+    assert_eq!(ui.app().focus, Some(crate::patch_info::authors_part()));
+    assert_eq!(focused(&mut ui), crate::patch_info::authors_part());
+    assert!(!ui.app().toolbar_has_focus());
+}
+
+/// A screen reader's Focus on a toolbar button, while an outline row has
+/// the keys, is the tree's focus: the outline lets go, since the tree
+/// reports its row before the runtime's focus (CodeRabbit, #850).
+#[test]
+fn a_reader_focus_on_the_toolbar_takes_it_from_the_outline() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.tap(Key::Character("o".into()), NONE);
+    assert!(focused(&mut ui).is_under(&tree_id()), "an outline row");
+    let new = crate::a11y::tree::toolbar_id().with("new");
+    ui.a11y_action(&new, accesskit::Action::Focus);
+    assert_eq!(focused(&mut ui), new);
+    assert!(!ui.app().session.outline.active);
+}

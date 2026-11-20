@@ -276,13 +276,11 @@ pub fn run() -> Result<(), loom_ui::shell::Error> {
     }
     let mut app = App::new(args.clone());
     app.remember_opened_at_start(&args);
-    // The window and its services share the clipboard once it opens.
-    let clipboard = iced_bridge::SharedClipboard::default();
     let result = loom_ui::shell::run(
         iced_bridge::Hosted(app, None, iced_bridge::Extra::default()),
         iced_bridge::IcedTarget::default(),
-        iced_bridge::WindowLayers::new(clipboard.clone()),
-        iced_bridge::AppServices::new(clipboard),
+        iced_bridge::WindowLayers::new(),
+        iced_bridge::AppServices,
         loom_ui::shell::Options {
             size: loom_ui_core::Size::new(WINDOW.width, WINDOW.height),
             // The window is open: the watchers start on the first turn.
@@ -498,7 +496,9 @@ enum Message {
     /// focus, which a change alone would miss.
     FocusMoved(Option<loom_ui_core::UiId>),
     /// Tab was pressed. It closes a text field on the main view.
-    TextFieldTab,
+    TextFieldTab {
+        backwards: bool,
+    },
     /// Moves the runtime's focus to a toolbar button, or with `None` out of
     /// the toolbar and back to the canvas: the toolbar's arrow keys and
     /// Escape (ui-layer.md, section 6, rule 7). Posted for a turn of its
@@ -552,7 +552,7 @@ enum Message {
     /// arrives after another patch opened is dropped.
     Pasted {
         world: Point,
-        text: Option<String>,
+        text: loom_ui::ClipboardText,
         generation: u64,
     },
     /// The accessibility tree for screen readers (`a11y.rs`).
@@ -713,7 +713,7 @@ impl Message {
             | Self::Shortcut { .. }
             | Self::Redo
             | Self::TextFocusCheck
-            | Self::TextFieldTab
+            | Self::TextFieldTab { .. }
             | Self::TabFrom { .. }
             | Self::EnterFields { .. }
             | Self::ToolbarFocus(_)
@@ -728,8 +728,12 @@ impl Message {
             | Self::Licence(_)
             | Self::OpenRecent
             | Self::Recent(_)
-            | Self::DismissError(_)
-            | Self::Pasted { .. } => false,
+            | Self::DismissError(_) => false,
+            // A refused read says so even under a question, since a read
+            // that began before the question opened can end during it, and
+            // a refusal must never pass silently; it changes no patch. A read
+            // with text waits out the question, as other edits do.
+            Self::Pasted { text, .. } => *text == loom_ui::ClipboardText::Refused,
         }
     }
 }
@@ -1662,6 +1666,7 @@ impl App {
         }
         let was_open = self.overlays.browser().is_some();
         let was_help_open = self.overlays.help.is_some();
+        let before_help = self.input_owner();
         match message {
             Message::Browser(message) => self.browser_message(message),
             Message::Patches(message) => self.patches_message(message),
@@ -1669,10 +1674,8 @@ impl App {
                 self.question_message(message);
             }
             Message::File(FileAction::Browse) => self.open_patches(),
-            // An open menu has its own keys (`menus.rs`): Enter sends what its
-            // item sends, which may return work of its own. Any other key goes
-            // where it went before, so a shortcut still works over a menu.
             Message::Key(event) if self.navigation_key(&event, now) => {}
+            // An open menu has its own keys (`menus.rs`): Enter sends what its item sends.
             Message::Key(event)
                 if menus::is_menu_key(&event)
                     && matches!(
@@ -1734,8 +1737,8 @@ impl App {
             Message::Matrix(event) => self.matrix_message(event),
             Message::MatrixKey(key) => self.matrix_key_message(key),
             Message::ControlFrame(now) => self.control_frame(now),
-            Message::TextFieldTab => {
-                self.text_field_tab(self.focus.clone().as_ref());
+            Message::TextFieldTab { backwards } => {
+                self.text_field_tab(self.focus.clone().as_ref(), backwards);
             }
             Message::FocusMoved(focus) => {
                 self.focus_moved(focus);
@@ -1771,6 +1774,10 @@ impl App {
             message => {
                 self.handle(message);
             }
+        }
+        // A range editor can disappear before the window's focus answer.
+        if self.session.learn.has_range_draft() && !cause.is_live() && self.midi_range_fields().is_none() {
+            self.session.learn.set_range_draft(None);
         }
         // The bridge asks the window where focus is after this turn.
         if ask_focus {
@@ -1809,7 +1816,32 @@ impl App {
             // A clean exit: the recovery folder goes (autosave.md, Clean exit).
             self.run_files.finish();
             self.effect(loom_ui::Effects::quit());
-        } else if self.overlays.browser().is_some() && (!was_open || (was_help_open && self.overlays.help.is_none())) {
+        } else if !was_help_open && self.overlays.help.is_some() {
+            if matches!(
+                before_help,
+                input_owner::InputOwner::Browser | input_owner::InputOwner::Patches
+            ) {
+                self.overlays.help_focus = self.focus.clone();
+                if self.overlays.help_focus.is_some() {
+                    self.effect(loom_ui::Effects::unfocus());
+                }
+            }
+        } else if was_help_open && self.overlays.help.is_none() {
+            let owner = self.input_owner();
+            let field = self
+                .overlays
+                .help_focus
+                .take()
+                .filter(|field| match owner {
+                    input_owner::InputOwner::Browser => *field == browser::search_id(),
+                    input_owner::InputOwner::Patches => patches::text_fields().contains(field),
+                    _ => false,
+                })
+                .or_else(|| (owner == input_owner::InputOwner::Browser).then(browser::search_id));
+            if let Some(field) = field {
+                self.effect(loom_ui::Effects::focus(field));
+            }
+        } else if !was_open && self.overlays.browser().is_some() {
             self.effect(loom_ui::Effects::focus(browser::search_id()));
         }
     }
@@ -1992,7 +2024,7 @@ impl App {
             | Message::StartWatching
             | Message::RetryCommit(_)
             | Message::ControlFrame(_)
-            | Message::TextFieldTab
+            | Message::TextFieldTab { .. }
             | Message::TabFrom { .. }
             | Message::EnterFields { .. }
             | Message::ToolbarFocus(_)

@@ -249,6 +249,20 @@ fn scale_keeps_the_image_in_range() {
     assert!(physical_size(size, 100.0).is_err());
 }
 
+/// An image starts with the opening canvas's readable framing.
+#[test]
+fn screenshots_start_at_the_opening_zoom() {
+    let app = example_app("subtractive.ron");
+    let scene = &app.session.scene;
+    let size = loom_ui_core::Size::new(1000.0, 800.0);
+    let mut opening = Camera::default();
+    opening.frame_readable(scene.bounds().unwrap(), size, loom_canvas::READABLE_ZOOM);
+    let still = camera(scene, size, None, None);
+    assert_eq!(still, opening);
+    assert!(still.zoom >= loom_canvas::READABLE_ZOOM);
+}
+
+/// Explicit centre and zoom override the framing.
 #[test]
 fn camera_centres_the_given_point_at_the_given_zoom() {
     let scene = Scene::new(Vec::new(), Vec::new());

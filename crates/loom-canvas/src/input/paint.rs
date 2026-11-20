@@ -87,6 +87,9 @@ impl CanvasModel<'_> {
             let Some(clip) = screen_tile.intersection(bounds) else {
                 continue;
             };
+            let active = active
+                .filter(|(id, _)| *id == module.id)
+                .and_then(|(id, index)| values.get(id, index).map(|value| (index, value.text.as_str())));
             tile_text::for_each(module, |item| {
                 let (size, colour) = match item.kind {
                     TextKind::Title => (title_px, self.palette.text),
@@ -131,36 +134,18 @@ impl CanvasModel<'_> {
                     }
                     _ => (label_px, self.palette.text_dim),
                 };
-                // A focused or turning knob shows its value instead of its
-                // caption.
-                // In MIDI learn mode, a mapped control shows its mapping.
-                let learned = learned_label(self.learn, module.id, item.kind);
-                let value = match item.kind {
-                    _ if learned.is_some() => learned,
-                    TextKind::Caption(widget) if active == Some((module.id, widget)) => values
-                        .get(module.id, widget)
-                        .filter(|_| {
-                            // An inert control shows no value, so its
-                            // caption stays.
-                            module.panel.widgets[widget].is_control()
-                                && matches!(
-                                    module.panel.widgets[widget].kind,
-                                    WidgetViewKind::Knob { .. }
-                                        | WidgetViewKind::Fader { .. }
-                                        | WidgetViewKind::XyPad { .. }
-                                        | WidgetViewKind::Range { .. }
-                                )
-                        })
-                        .map(|v| v.text.as_str()),
-                    _ => None,
-                };
+                let substitute = item.caption_replacement(module, active, self.learn);
                 painter.text(&one_line(
-                    value.unwrap_or(&item.content),
+                    substitute.as_deref().unwrap_or(&item.content),
                     size,
                     item.width * zoom,
                     item.align,
                     to_screen(item.anchor),
-                    if value.is_some() { self.palette.text } else { colour },
+                    if substitute.is_some() {
+                        self.palette.text
+                    } else {
+                        colour
+                    },
                     clip,
                 ));
             });
@@ -315,12 +300,16 @@ impl CanvasModel<'_> {
         let inner = FIELD_WIDTH_PX - 2.0 * FIELD_PADDING_PX;
         // Measured before painting starts, since one object does both.
         let mut width_of = |content: &str| painter.measure(content, style, None).width;
+        let text_width = width_of(&field.draft.text);
         let caret_width = width_of(&field.draft.text[..field.caret]);
+        let scroll = (caret_width - inner + 1.0).max(0.0);
         let selection = field.selection();
-        let selection_start = width_of(&field.draft.text[..selection.start]).min(inner);
-        let selection_end = width_of(&field.draft.text[..selection.end]).min(inner);
+        let selection_start = (width_of(&field.draft.text[..selection.start]) - scroll).clamp(0.0, inner);
+        let selection_end = (width_of(&field.draft.text[..selection.end]) - scroll).clamp(0.0, inner);
         let reason_width = error.map(&mut width_of);
-        let text_at = Point::new(area.x + FIELD_PADDING_PX, area.center_y());
+        let left = area.x + FIELD_PADDING_PX;
+        let text_at = Point::new(left - scroll, area.center_y());
+        let text_clip = Rect::new(Point::new(left, area.y), Size::new(inner, area.height));
         painter.begin_layer(bounds);
         {
             let outline = if error.is_some() {
@@ -335,19 +324,24 @@ impl CanvasModel<'_> {
                 border_width: outline.1,
                 radius: 4.0,
             });
-            if !selection.is_empty() {
+            if selection_end > selection_start {
                 painter.quad(Quad::filled(
                     Rect::new(
-                        Point::new(text_at.x + selection_start - 1.0, area.y + 3.0),
+                        Point::new(left + selection_start - 1.0, area.y + 3.0),
                         Size::new(selection_end - selection_start + 2.0, FIELD_HEIGHT_PX - 6.0),
                     ),
                     self.palette.control_track,
                     0.0,
                 ));
             }
-            painter.text(&line(&field.draft.text, inner, text_at, area));
+            painter.text(&line(
+                &field.draft.text,
+                text_width.max(inner) + 1.0,
+                text_at,
+                text_clip,
+            ));
             if selection.is_empty() {
-                let x = text_at.x + caret_width.min(inner);
+                let x = text_at.x + caret_width;
                 painter.quad(Quad::filled(
                     Rect::new(Point::new(x, area.y + 4.0), Size::new(1.0, FIELD_HEIGHT_PX - 8.0)),
                     self.palette.text,

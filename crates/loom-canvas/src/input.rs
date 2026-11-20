@@ -74,7 +74,7 @@ pub(crate) const TITLE_MIN_PX: f32 = 6.5;
 pub(crate) const LABEL_MIN_PX: f32 = 7.5;
 /// The smallest zoom where port labels and captions are drawn. Opening a
 /// patch and framing it (F, Home) never zoom out past it (#455).
-const READABLE_ZOOM: f32 = LABEL_MIN_PX / LABEL_SIZE;
+pub const READABLE_ZOOM: f32 = LABEL_MIN_PX / LABEL_SIZE;
 
 /// Opacity of cables that are not in focus. It never changes with hover or
 /// selection, so moving the pointer only changes the cables it points at,
@@ -644,9 +644,9 @@ pub struct CanvasFocusPolicy {
     /// except Tab, which moves focus as usual. The pointer still works
     /// (panel-widgets.md, Typing a value).
     pub text_field_keys: bool,
-    /// The focused text field moves to the next field on Tab, so the canvas
-    /// leaves Tab alone too (panels.md, Keyboard without a mouse).
-    pub text_field_keeps_tab: bool,
+    /// Whether the focused text field also takes Tab and Shift+Tab, in
+    /// that order (panels.md, Keyboard without a mouse).
+    pub text_field_keeps_tab: [bool; 2],
 }
 
 impl Default for CanvasFocusPolicy {
@@ -658,7 +658,7 @@ impl Default for CanvasFocusPolicy {
             jump_keyboard: false,
             matrix_escape: false,
             text_field_keys: false,
-            text_field_keeps_tab: false,
+            text_field_keeps_tab: [false; 2],
         }
     }
 }

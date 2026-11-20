@@ -273,6 +273,9 @@ impl SelectPopup {
         // Up on the wheel shows earlier rows.
         let wanted = self.scroll as isize - whole as isize;
         self.scroll = wanted.clamp(0, last) as usize;
+        if rows > 0 {
+            self.highlight = self.highlight.clamp(self.scroll, self.scroll + rows - 1);
+        }
         // Movement past an end is lost, so it cannot delay the way back.
         if wanted != self.scroll as isize {
             self.wheel = 0.0;

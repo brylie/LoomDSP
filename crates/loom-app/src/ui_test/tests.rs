@@ -433,6 +433,96 @@ fn finds_controls_and_text_by_name() {
     assert!(!canvas.bounds.intersects(row), "the row {row:?} is beside the canvas");
 }
 
+/// The paired MIDI range fields retain text across Tab and clear it on
+/// Escape, leaving the row, or undoing an options change.
+#[test]
+fn a_midi_range_draft_lives_only_in_the_pair_of_fields() {
+    use crate::learn::Message as Learn;
+    let mut ui = Ui::open("subtractive.ron");
+    let module = 4;
+    let index = 0;
+    let ctl = &mut ui.app_mut().session.controller;
+    ctl.map_midi(
+        loom_core::MidiControl {
+            channel: 0,
+            controller: 21,
+        },
+        loom_core::ModuleId(module),
+        index,
+    )
+    .unwrap();
+    ui.app_mut().commit();
+    ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
+    ui.send(Message::Learn(Learn::MidiOptionsRows { module, index }));
+    let [low, high] = ui.app().midi_range_fields().unwrap();
+    let none = keyboard::Modifiers::empty();
+    let draft = || {
+        Message::Learn(Learn::MidiRangeText {
+            module,
+            index,
+            low: "0.2".into(),
+            high: "0.8".into(),
+        })
+    };
+    let at = ui.field(&low);
+    ui.move_to(at);
+    ui.press();
+    ui.release();
+    assert_eq!(ui.app().focus.as_ref(), Some(&low));
+    ui.send(draft());
+    ui.tap(keyboard::Key::Named(keyboard::key::Named::Tab), none);
+    assert_eq!(ui.focused_field(), Some(high.clone()));
+    assert!(ui.app().session.learn.has_range_draft());
+    ui.tap(
+        keyboard::Key::Named(keyboard::key::Named::Tab),
+        keyboard::Modifiers::SHIFT,
+    );
+    assert_eq!(ui.focused_field(), Some(low.clone()));
+    assert!(ui.app().session.learn.has_range_draft());
+    ui.tap(keyboard::Key::Named(keyboard::key::Named::Escape), none);
+    assert!(!ui.app().session.learn.has_range_draft());
+
+    for (field, modifiers) in [(&high, none), (&low, keyboard::Modifiers::SHIFT)] {
+        ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
+        ui.focus(field);
+        ui.send(draft());
+        let messages = ui.tap(keyboard::Key::Named(keyboard::key::Named::Tab), modifiers);
+        assert_eq!(ui.focused_field(), None);
+        assert!(!ui.app().session.learn.has_range_draft());
+        assert!(messages.iter().any(|message| matches!(message, Message::Canvas(_))));
+    }
+
+    ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
+    ui.focus(&low);
+    ui.send(draft());
+    ui.send(Message::Inspector(crate::inspector::Message::SelectModule(3)));
+    ui.redraw();
+    assert!(!ui.app().session.learn.has_range_draft());
+
+    ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
+    ui.focus(&high);
+    ui.send(draft());
+    let options = loom_core::MidiMappingOptions {
+        low: 0.4,
+        ..loom_core::MidiMappingOptions::DEFAULT
+    };
+    ui.send(Message::Learn(Learn::MidiOptions { module, index, options }));
+    assert!(!ui.app().session.learn.has_range_draft());
+    ui.send(draft());
+    ui.app_mut().undo();
+    assert!(!ui.app().session.learn.has_range_draft());
+    let graph = ui.app().session.controller.graph();
+    assert_eq!(
+        graph
+            .midi_mapping_of(loom_core::ModuleId(module), index)
+            .unwrap()
+            .1
+            .options
+            .low,
+        0.0
+    );
+}
+
 /// A mapping's options rows are closed until asked, show what its mode
 /// has, and the range fields keep bad text with its reason (midi-learn.md,
 /// Mapping modes).
@@ -2422,8 +2512,9 @@ fn tab_from_a_value_field_moves_the_canvas() {
     use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let (id, _) = focus_cutoff_field(&mut ui);
-    assert!(
-        !ui.app().tab_moves_between_fields(ui.app().focus.as_ref()),
+    assert_eq!(
+        ui.app().text_field_tabs(ui.app().focus.as_ref()),
+        [false; 2],
         "a value field is in no list"
     );
     let messages = ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
@@ -2668,7 +2759,7 @@ fn a_paste_reads_the_clipboard_the_test_set() {
     let log = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
     assert!(
         log.iter()
-            .any(|message| matches!(message, Message::Pasted { text: Some(text), .. } if text == "drums")),
+            .any(|message| matches!(message, Message::Pasted { text: loom_ui::ClipboardText::Text(text), .. } if text == "drums")),
         "{log:?}"
     );
 }
@@ -3108,4 +3199,32 @@ fn a_ui_on_another_ui_s_copy_leaves_that_folder() {
     assert!(folder.is_dir(), "the first Ui's folder stays");
     drop(first);
     assert!(!folder.exists(), "and goes with its own Ui");
+}
+
+/// A relative name that climbs out and back in (`../patches/...`) still
+/// opens a copy inside the folder made for it, and a save writes that
+/// copy, never the example (CodeRabbit, #850).
+#[test]
+fn a_relative_example_name_copies_inside_its_folder() {
+    use iced::keyboard::{Key, Modifiers};
+    let real = example_path("subtractive.ron");
+    let before = std::fs::read(&real).unwrap();
+    let mut ui = Ui::open("../patches/subtractive.ron");
+    let copy = ui.app().session.document.file().expect("a file is open").to_path_buf();
+    let unsaved = std::fs::read(&copy).unwrap();
+    let folder = copy.parent().expect("the copy has a folder").to_path_buf();
+    assert!(is_copy_folder(&folder), "inside a copy folder: {copy:?}");
+    assert_eq!(copy.file_name(), real.file_name());
+    let _ = ui.app_mut().send(Message::Inspector(crate::inspector::Message::Param {
+        module: 4,
+        index: 0,
+        position: 0.321,
+    }));
+    let _ = ui.app_mut().send(Message::SliderReleased);
+    ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
+    ui.redraw();
+    assert_ne!(std::fs::read(&copy).unwrap(), unsaved, "the save wrote the copy");
+    assert_eq!(std::fs::read(&real).unwrap(), before, "the example is unchanged");
+    drop(ui);
+    assert!(!folder.exists(), "and the folder goes with its Ui");
 }

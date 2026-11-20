@@ -39,7 +39,7 @@ pub use pacing::Redraw;
 use crate::app::{App, WindowSpec};
 use crate::draw::Panels;
 use crate::driver::Driver;
-use crate::effect::{Choice, FileRequest, Image, Job, NoGpu, Question, Reply};
+use crate::effect::{Choice, ClipboardText, FileRequest, Image, Job, NoGpu, Question, Reply};
 use crate::event::{AccessEvent, DriverEvent, WindowState};
 use crate::routing::Target;
 use crate::runtime::{Next, Runtime};
@@ -245,36 +245,22 @@ pub trait Layers<A: App, T> {
 }
 
 /// The desktop's services that the runtime's driver needs and the shell
-/// does not own. Each answer goes back through the waker, for a later turn.
+/// does not own: the system's dialogs. Each answer goes back through the
+/// waker, for a later turn. The clipboard is the shell's own
+/// ([`crate::clipboard`]), so it is not here.
 pub trait Services<M> {
-    /// Puts `text` on the clipboard.
-    fn clipboard_write(&mut self, text: String);
-    /// Reads the clipboard.
-    fn clipboard_read(&mut self, reply: Reply<Option<String>, M>, waker: &Waker<M>);
-    /// Reads the clipboard for a text field's paste, through the same
-    /// clipboard as `clipboard_read`, and answers `paste`. The default
-    /// answers that it is empty.
-    fn clipboard_paste(&mut self, paste: crate::Paste) {
-        paste.give(None);
-    }
     /// Shows a file dialog.
     fn file_dialog(&mut self, request: FileRequest, reply: Reply<Option<PathBuf>, M>, waker: &Waker<M>);
     /// Asks a question.
     fn ask(&mut self, question: Question, reply: Reply<Choice, M>, waker: &Waker<M>);
 }
 
-/// Services for an app that uses none: the clipboard keeps nothing and
-/// reads empty, and every dialog is dismissed. For examples and tests.
+/// Services for an app that uses none: every dialog is dismissed. For
+/// examples and tests.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoServices;
 
 impl<M> Services<M> for NoServices {
-    fn clipboard_write(&mut self, _text: String) {}
-
-    fn clipboard_read(&mut self, reply: Reply<Option<String>, M>, waker: &Waker<M>) {
-        waker.send(reply.give(None));
-    }
-
     fn file_dialog(&mut self, _request: FileRequest, reply: Reply<Option<PathBuf>, M>, waker: &Waker<M>) {
         waker.send(reply.give(None));
     }
@@ -337,6 +323,7 @@ where
         layers,
         driver: ShellDriver {
             services,
+            clipboard: crate::clipboard::Clipboard::system(),
             access: None,
             window: None,
             captures: Vec::new(),
@@ -877,8 +864,10 @@ fn monitor_frame(window: &Window) -> std::time::Duration {
 /// The runtime's driver in the window: the shell's own effects, and the
 /// app's [`Services`] for the rest.
 struct ShellDriver<M, S> {
-    /// The clipboard and dialogs.
+    /// The dialogs.
     services: S,
+    /// The clipboard: the system's, one for the process.
+    clipboard: crate::clipboard::Clipboard,
     /// The screen reader's adapter and the last whole tree, once the window
     /// exists.
     access: Option<(accesskit_winit::Adapter, access::SharedTree)>,
@@ -899,15 +888,20 @@ impl<M: Send + 'static, S: Services<M>> Driver<M> for ShellDriver<M, S> {
     }
 
     fn clipboard_write(&mut self, text: String) {
-        self.services.clipboard_write(text);
+        self.clipboard.write(text);
     }
 
-    fn clipboard_read(&mut self, reply: Reply<Option<String>, M>, waker: &Waker<M>) {
-        self.services.clipboard_read(reply, waker);
+    /// Answered from the clipboard's thread, through the waker, on a later
+    /// turn.
+    fn clipboard_read(&mut self, reply: Reply<ClipboardText, M>, waker: &Waker<M>) {
+        let waker = waker.clone();
+        self.clipboard.read(move |text| {
+            waker.send(reply.give(text));
+        });
     }
 
     fn clipboard_paste(&mut self, paste: crate::Paste) {
-        self.services.clipboard_paste(paste);
+        self.clipboard.read(move |text| paste.give(text));
     }
 
     fn file_dialog(&mut self, request: FileRequest, reply: Reply<Option<PathBuf>, M>, waker: &Waker<M>) {

@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-A triangle wave with few harmonics, at the pitch or shaped from a phase cable. Its corners are smoothed so high notes stay clean.
+A triangle wave at the pitch, with few harmonics and smoothed corners for clean high notes. Connect a Phase module to the Phase input to drive it with a cable.
 
 | | |
 |---|---|

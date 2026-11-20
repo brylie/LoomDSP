@@ -1141,7 +1141,7 @@ fn copy_and_paste_keep_tile_size() {
     app.session.selection = BTreeSet::from([id.0]);
     app.commit();
     let text = app.copy().unwrap();
-    app.paste(Point::new(100.0, 100.0), Some(text));
+    app.paste(Point::new(100.0, 100.0), loom_ui::ClipboardText::Text(text));
     let pasted = *app.session.selection.iter().next().unwrap();
     assert_ne!(pasted, id.0);
     assert_eq!(app.session.sizes.get(&pasted), Some(&(24, 16)));
@@ -1165,7 +1165,7 @@ fn a_paste_lands_at_the_snapped_point_is_selected_and_is_one_undo_step() {
     assert!(app.session.edits.history.undo_step().is_none(), "copy is not an edit");
 
     let before = app.session.controller.graph().nodes().count();
-    app.paste(Point::new(605.0, 299.0), Some(text));
+    app.paste(Point::new(605.0, 299.0), loom_ui::ClipboardText::Text(text));
     assert_eq!(app.session.controller.graph().nodes().count(), before + 2);
     assert_eq!(app.alerts.status(), "Pasted 2 modules");
     assert_eq!(step_name(&app).as_deref(), Some("paste 2 modules"));
@@ -1221,20 +1221,64 @@ fn cut_copies_and_deletes_as_one_step() {
 }
 
 #[test]
-fn a_refused_paste_adds_nothing_and_no_step() {
+fn an_empty_or_unusable_paste_adds_nothing_and_no_step() {
     let mut app = app();
     let before = app.session.controller.graph().nodes().count();
-    app.paste(Point::ORIGIN, None);
+    app.paste(Point::ORIGIN, loom_ui::ClipboardText::Empty);
     assert_eq!(app.alerts.status(), clipboard::NOTHING_TO_PASTE);
-    app.paste(Point::ORIGIN, Some("not a patch".to_string()));
+    app.paste(Point::ORIGIN, loom_ui::ClipboardText::Text("not a patch".to_string()));
     assert_eq!(app.alerts.status(), clipboard::NOTHING_TO_PASTE);
     app.paste(
         Point::ORIGIN,
-        Some("Patch(version: 1, modules: [(id: 1, kind: \"loom.none.such\")])".to_string()),
+        loom_ui::ClipboardText::Text("Patch(version: 1, modules: [(id: 1, kind: \"loom.none.such\")])".to_string()),
     );
     assert!(app.alerts.status().contains("invalid") && app.alerts.status().contains("loom.none.such"));
     assert_eq!(app.session.controller.graph().nodes().count(), before);
     assert!(app.session.edits.history.undo_step().is_none());
+}
+
+/// A clipboard read that could not complete says so in the status line,
+/// which a screen reader announces, and is never shown as an empty
+/// clipboard (ui-layer.md, section 8, rule 2). Nothing is added and no step
+/// is kept.
+#[test]
+fn a_refused_clipboard_read_says_so() {
+    let mut app = app();
+    let before = app.session.controller.graph().nodes().count();
+    app.paste(Point::ORIGIN, loom_ui::ClipboardText::Refused);
+    assert_eq!(app.alerts.status(), clipboard::COULD_NOT_READ);
+    assert_ne!(clipboard::COULD_NOT_READ, clipboard::NOTHING_TO_PASTE);
+    assert_eq!(app.session.controller.graph().nodes().count(), before);
+    assert!(app.session.edits.history.undo_step().is_none());
+}
+
+/// A refusal is said even while a drag is open, since it changes nothing,
+/// and even under a question, since a read begun before the question opened
+/// can end during it. A read with text still waits out both.
+#[test]
+fn a_refusal_is_said_during_a_drag_and_under_a_question() {
+    let mut app = app();
+    app.session.edits.start_gesture();
+    app.paste(Point::ORIGIN, loom_ui::ClipboardText::Refused);
+    assert_eq!(app.alerts.status(), clipboard::COULD_NOT_READ);
+
+    let mut app = self::app();
+    app.overlays.question = Some(crate::question::Question::error("Waiting".to_string()));
+    let generation = app.generation;
+    let refused = Message::Pasted {
+        world: Point::ORIGIN,
+        text: loom_ui::ClipboardText::Refused,
+        generation,
+    };
+    let text = Message::Pasted {
+        world: Point::ORIGIN,
+        text: loom_ui::ClipboardText::Text("osc".into()),
+        generation,
+    };
+    assert!(refused.allowed_during_question(), "a refusal is heard under a question");
+    assert!(!text.allowed_during_question(), "text waits out the question");
+    let _ = app.send(refused);
+    assert_eq!(app.alerts.status(), clipboard::COULD_NOT_READ);
 }
 
 #[test]
@@ -1275,13 +1319,13 @@ fn a_paste_for_a_closed_patch_is_dropped() {
     let before = app.session.controller.graph().nodes().count();
     let _ = app.send(Message::Pasted {
         world: Point::ORIGIN,
-        text: Some(text.clone()),
+        text: loom_ui::ClipboardText::Text(text.clone()),
         generation: app.generation + 1,
     });
     assert_eq!(app.session.controller.graph().nodes().count(), before);
     let _ = app.send(Message::Pasted {
         world: Point::ORIGIN,
-        text: Some(text),
+        text: loom_ui::ClipboardText::Text(text),
         generation: app.generation,
     });
     assert_eq!(app.session.controller.graph().nodes().count(), before + 2);
@@ -1399,7 +1443,7 @@ fn a_momentary_hold_is_not_part_of_the_patch() {
     let before: BTreeSet<u32> = app.session.controller.graph().nodes().map(|(m, _)| m.0).collect();
     let _ = app.send(Message::Pasted {
         world: Point::new(400.0, 0.0),
-        text: Some(copied),
+        text: loom_ui::ClipboardText::Text(copied),
         generation: app.generation,
     });
     let (pasted, node) = app
@@ -1726,7 +1770,7 @@ fn unknown_module_rejects_new_connections_and_undo_restores_it() {
     app.session.selection = BTreeSet::from([missing.0]);
     app.session.edits.history.clear();
     let copied = app.copy().unwrap();
-    app.paste(Point::new(400.0, 200.0), Some(copied));
+    app.paste(Point::new(400.0, 200.0), loom_ui::ClipboardText::Text(copied));
     let pasted = ModuleId(*app.session.selection.iter().next().unwrap());
     assert_ne!(pasted, missing);
     assert_eq!(

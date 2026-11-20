@@ -279,6 +279,32 @@ impl CanvasModel<'_> {
             popup.scroll = popup.scroll.min(count.saturating_sub(select_rows(height, count)));
         }
     }
+    /// Moves focus within the selected tile when a mode hides its control.
+    /// Ties favour the next control in panel order.
+    pub(super) fn relocate_hidden_focus(&self, state: &mut CanvasInput) -> bool {
+        let Some((module, widget)) = state.focus.control() else {
+            return false;
+        };
+        let Some(tile) = self
+            .scene
+            .module(module)
+            .filter(|_| self.selection.len() == 1 && self.selection.contains(&module))
+        else {
+            return false;
+        };
+        if !tile.panel.widgets.get(widget).is_some_and(|w| w.hidden) {
+            return false;
+        }
+        let next = super::panel_input::focusable(&tile.panel)
+            .into_iter()
+            .min_by_key(|&other| (other.abs_diff(widget), other < widget));
+        state.focus.clear();
+        if let Some(next) = next {
+            state.focus.set(module, next, true);
+            state.focus_first = true;
+        }
+        true
+    }
 }
 
 #[cfg(test)]

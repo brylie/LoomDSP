@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-White, pink, or brown noise. The seed makes every render the same.
+White, pink, or brown noise. The same Seed value repeats the same noise sequence.
 
 | | |
 |---|---|

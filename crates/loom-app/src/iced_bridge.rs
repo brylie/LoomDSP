@@ -856,4 +856,4 @@ pub(crate) use services::AppServices;
 pub(crate) type AppBridge = Bridge<headless::UiDriver>;
 #[cfg(test)]
 use services::choice;
-pub(crate) use window::{SharedClipboard, WindowLayers};
+pub(crate) use window::WindowLayers;

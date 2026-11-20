@@ -50,7 +50,7 @@ fn the_top_layer_has_the_input() {
     assert_eq!(overlays.owner(), InputOwner::Question);
 }
 
-/// A new patch closes everything, slots included, and a panel other than
+/// A new patch closes patch-specific overlays and a panel other than
 /// Preferences.
 #[test]
 fn a_new_patch_closes_what_is_about_the_patch() {

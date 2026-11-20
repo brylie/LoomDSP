@@ -60,8 +60,8 @@ pub use draft::{DraftSubmit, TypedDraft};
 pub use gpu::{CanvasFrame, CanvasRenderer};
 pub use input::{
     BrowserPlacement, CanvasEvent, CanvasFocusPolicy, CanvasInput, CanvasModel, CanvasPointer, CanvasTyped, CanvasView,
-    ControlPart, EditGroupView, FrameCache, LearnView, MapGraph, MapLine, MapView, Moment, PointerDrag, Still,
-    StillDrag, TypedEdit, TypedRequest,
+    ControlPart, EditGroupView, FrameCache, LearnView, MapGraph, MapLine, MapView, Moment, PointerDrag, READABLE_ZOOM,
+    Still, StillDrag, TypedEdit, TypedRequest,
 };
 pub use reaction::Reaction;
 pub use scene::{
