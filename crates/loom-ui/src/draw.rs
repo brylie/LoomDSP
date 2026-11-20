@@ -213,6 +213,34 @@ impl<A: App> Panels<'_, A> {
         );
         self.counts.panels_painted += painted.panels;
         self.counts.elements_painted += painted.elements;
+        // The focus ring, over every panel of the focused element's layer,
+        // so a panel painted later in the layer does not cover it, and cut
+        // only by the window (section 6, rule 3).
+        if let Some((id, bounds)) = crate::runtime::shown_ring(self.window, self.app, self.focus)
+            && self.window.layer_of(&id) == Some(layer)
+        {
+            painter.begin_layer(Rect::new(Point::ORIGIN, self.size));
+            painter.quad(ring(bounds, self.window.radius_of(&id), style.ring));
+            painter.end_layer();
+        }
+    }
+}
+
+/// The focus ring around an element with `bounds` and corner `radius`: an
+/// outline `style.width` wide, `style.offset` outside the bounds, with
+/// corners that follow the element's. The outline is drawn inside the
+/// quad's box, so the box grows by the offset and the width.
+pub(crate) fn ring(bounds: Rect, radius: f32, style: crate::focus::RingStyle) -> Quad {
+    let grow = style.offset + style.width;
+    Quad {
+        rect: Rect::new(
+            Point::new(bounds.x - grow, bounds.y - grow),
+            Size::new(bounds.width + 2.0 * grow, bounds.height + 2.0 * grow),
+        ),
+        fill: Color::TRANSPARENT,
+        border: style.color,
+        border_width: style.width,
+        radius: radius + grow,
     }
 }
 

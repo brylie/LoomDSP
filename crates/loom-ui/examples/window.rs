@@ -221,6 +221,11 @@ impl Layers<Countdown, Clicks> for Card {
             text: Color::rgb(0.93, 0.94, 0.96),
             caret: Color::rgb(0.93, 0.94, 0.96),
             selection: Color::rgb(0.25, 0.4, 0.65),
+            ring: loom_ui::RingStyle {
+                color: Color::rgb(0.4, 0.7, 1.0),
+                width: 2.0,
+                offset: 2.0,
+            },
         };
         parts
             .panels

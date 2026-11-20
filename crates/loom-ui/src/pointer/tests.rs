@@ -968,3 +968,103 @@ fn a_press_the_other_toolkit_takes_reports_the_lost_press() {
     assert!(panels.shown_pressed().is_none(), "the press cancelled the Space");
     assert!(heard.redraw, "the pressed look went");
 }
+
+/// The ring colour the ring tests paint with, unlike anything else.
+const RING: loom_ui_core::Color = loom_ui_core::Color::rgb(0.0, 1.0, 0.0);
+
+/// A panel style whose ring is [`RING`], 2 wide and 2 outside.
+fn ring_style() -> crate::paint::PanelStyle {
+    crate::paint::PanelStyle {
+        text: loom_ui_core::Color::WHITE,
+        caret: loom_ui_core::Color::WHITE,
+        selection: loom_ui_core::Color::BLACK,
+        ring: crate::focus::RingStyle {
+            color: RING,
+            width: 2.0,
+            offset: 2.0,
+        },
+    }
+}
+
+/// The rings painted in `layer`: each quad outlined in [`RING`].
+fn rings(harness: &mut Harness<Layers, Fake>, layer: Layer) -> Vec<crate::paint::Quad> {
+    harness.lay_out(&mut Mono::default());
+    let mut recorder = crate::paint::testing::Recorder::default();
+    let (_, _, mut panels) = harness.parts();
+    panels.paint(layer, &mut recorder, &ring_style());
+    recorder
+        .painted
+        .iter()
+        .filter_map(|painted| match painted {
+            crate::paint::testing::Painted::Quad(quad) if quad.border == RING => Some(*quad),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Tab, as a key press.
+fn tab_key() -> DriverEvent {
+    DriverEvent::Input {
+        event: Event::Key(loom_ui_core::KeyEvent::Pressed {
+            key: loom_ui_core::Key::Tab,
+            modifiers: loom_ui_core::Modifiers::NONE,
+            repeat: false,
+            text: None,
+        }),
+        pointer: None,
+    }
+}
+
+/// Section 6, rule 3: focus from the keyboard paints one ring around the
+/// focused element, its offset and its width outside the bounds, in the
+/// element's layer and in no other. Rows 1 and 2 kept the ring's state and
+/// painted nothing, so keyboard focus could not be seen.
+#[test]
+fn keyboard_focus_paints_a_ring_in_its_layer() {
+    let mut harness = harness(false, Routed::Passed);
+    assert!(rings(&mut harness, Layer::Panels).is_empty(), "no focus, no ring");
+    harness.step(tab_key());
+    let a = UiId::panel("bar").with("a");
+    assert_eq!(harness.runtime().focused(), Some(&a));
+    let bounds = harness.runtime().bounds(&a).expect("laid out");
+    let painted = rings(&mut harness, Layer::Panels);
+    assert_eq!(painted.len(), 1, "one ring");
+    let ring = painted[0];
+    assert_eq!(ring.rect.x, bounds.x - 4.0);
+    assert_eq!(ring.rect.y, bounds.y - 4.0);
+    assert_eq!(ring.rect.width, bounds.width + 8.0);
+    assert_eq!(ring.rect.height, bounds.height + 8.0);
+    assert_eq!(ring.border_width, 2.0);
+    assert_eq!(ring.fill, loom_ui_core::Color::TRANSPARENT);
+    assert!(rings(&mut harness, Layer::Overlays).is_empty(), "only in its own layer");
+}
+
+/// Section 6, rule 3: an element below the input layer keeps its focus
+/// but shows no ring, and `focus_ring` agrees with what is painted; the
+/// ring comes back when the layer drops.
+#[test]
+fn no_ring_shows_below_the_input_layer() {
+    let mut harness = harness(false, Routed::Passed);
+    harness.step(tab_key());
+    harness.send(Message::Input(Layer::Overlays));
+    assert_eq!(harness.runtime().focused(), Some(&UiId::panel("bar").with("a")), "kept");
+    assert_eq!(harness.runtime().focus_ring(), None);
+    assert!(rings(&mut harness, Layer::Panels).is_empty(), "under a raised layer");
+    harness.send(Message::Input(Layer::Canvas));
+    assert!(harness.runtime().focus_ring().is_some());
+    assert_eq!(rings(&mut harness, Layer::Panels).len(), 1, "back when it drops");
+}
+
+/// The ring of an element in an overlay is painted with the overlay's
+/// layer, above Iced, not with the panels below it.
+#[test]
+fn an_overlays_focus_rings_in_the_overlays_layer() {
+    let mut menu = harness(true, Routed::Passed);
+    // Tab from nothing enters while the panels take input; then the
+    // overlay takes it, and its focused item keeps its ring.
+    menu.step(tab_key());
+    assert_eq!(menu.runtime().focused(), Some(&UiId::panel("menu").with("item")));
+    menu.send(Message::Input(Layer::Overlays));
+    assert!(rings(&mut menu, Layer::Panels).is_empty());
+    assert_eq!(rings(&mut menu, Layer::Overlays).len(), 1);
+}

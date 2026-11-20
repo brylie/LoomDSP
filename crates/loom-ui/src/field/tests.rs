@@ -42,6 +42,11 @@ const PANEL: PanelStyle = PanelStyle {
     text: Color::rgb(0.9, 0.9, 0.9),
     caret: Color::rgb(1.0, 1.0, 1.0),
     selection: Color::rgb(0.2, 0.3, 0.6),
+    ring: crate::focus::RingStyle {
+        color: Color::WHITE,
+        width: 2.0,
+        offset: 2.0,
+    },
 };
 
 /// A field and the contexts it edits with.

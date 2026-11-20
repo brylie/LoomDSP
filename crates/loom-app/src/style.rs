@@ -359,13 +359,6 @@ pub fn cell(focused: bool) -> impl Fn(&Theme, iced_button::Status) -> iced_butto
 /// on a tile and in a panel, 2 logical pixels wide and 2 outside the part.
 /// It stands out at 3:1 or more against every panel background
 /// (WCAG 2.2, 1.4.11 and 2.4.13), which a test checks.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "drawn once the first view moves to loom-ui (leaving-iced plan, step 3.2)"
-    )
-)]
 pub fn focus_ring() -> loom_ui::RingStyle {
     loom_ui::RingStyle {
         color: loom_canvas::Palette::default().focus,

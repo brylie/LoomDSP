@@ -324,6 +324,11 @@ fn a_panel_draws_its_box_border_text_and_clip_on_the_gpu() {
             text: Color::WHITE,
             caret: Color::WHITE,
             selection: Color::BLACK,
+            ring: crate::focus::RingStyle {
+                color: Color::WHITE,
+                width: 2.0,
+                offset: 2.0,
+            },
         },
         None,
     );

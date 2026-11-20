@@ -23,6 +23,11 @@ fn a_still_paints_each_layer_of_the_view() {
         text: Color::WHITE,
         caret: Color::WHITE,
         selection: Color::BLACK,
+        ring: crate::focus::RingStyle {
+            color: Color::WHITE,
+            width: 2.0,
+            offset: 2.0,
+        },
     };
     let mut panels = PaintList::new(whole);
     still.paint(Layer::Panels, &mut ListPainter::new(&text, &mut panels), &style);

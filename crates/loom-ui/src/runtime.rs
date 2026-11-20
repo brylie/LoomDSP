@@ -409,12 +409,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.pointer.hovered.as_ref().map(|(_, id)| id)
     }
 
-    /// The element with focus and where its ring goes, in logical pixels,
-    /// when the keyboard put the focus there. `None` after a press, or with
-    /// no focus.
+    /// The element with focus and its bounds, in logical pixels, when its
+    /// ring shows: the keyboard put the focus there, and the element is in
+    /// a layer that takes input. `None` after a press, with no focus, or
+    /// under an open question or panel (section 6, rule 3). What paints the
+    /// ring reads the same answer.
     pub fn focus_ring(&self) -> Option<(UiId, Rect)> {
-        let focus = self.focus.id().filter(|_| self.focus.ring)?;
-        Some((focus.clone(), self.panels.bounds(focus)?))
+        shown_ring(&self.panels, &self.app, &self.focus)
     }
 
     /// Tells the routing target to let go of its focus, because one of the
@@ -1274,6 +1275,18 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // differently even when no model changed.
         changed > 0 || synced.composition
     }
+}
+
+/// The focused element and its bounds when its focus ring shows (section
+/// 6, rule 3): the keyboard put the focus there, and the element is in a
+/// layer that takes input, so no ring shows under an open question or
+/// panel. One answer for [`Runtime::focus_ring`] and for painting.
+pub(crate) fn shown_ring<A: App>(window: &Window, app: &A, focus: &crate::focus::Focus) -> Option<(UiId, Rect)> {
+    let id = focus.id().filter(|_| focus.ring)?;
+    if !in_input_layer(window, app, id) {
+        return None;
+    }
+    Some((id.clone(), window.bounds(id)?))
 }
 
 /// True when the element with UI ID `id` in `window` is in a layer that

@@ -185,6 +185,17 @@ fn the_focus_ring_stands_out() {
         let ratio = contrast_ratio(ring.color, fill.to_core());
         assert!(ratio >= 3.0, "on {name}: {ratio:.2}:1");
     }
+    // The ring is drawn `offset` outside the element, so a strip of the
+    // panel's colour lies between it and a button's fill: its neighbours
+    // on both sides are the panel's colour, checked above, whatever the
+    // button's role (WCAG 2.2, SC 2.4.13 measures a focus indicator
+    // against what is next to it). Against the fills themselves it is
+    // 1.1:1 to 2.3:1 for the filled roles, which the gap makes harmless.
+    assert!(
+        ring.offset >= 1.0,
+        "a gap between the ring and a fill: {} px",
+        ring.offset
+    );
 }
 
 /// No app source writes a size or a colour inline: every `.size(...)`,

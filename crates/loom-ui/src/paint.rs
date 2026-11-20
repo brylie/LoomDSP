@@ -72,6 +72,9 @@ pub struct PanelStyle {
     pub caret: Color,
     /// The colour behind a text field's selected text.
     pub selection: Color,
+    /// How the focus ring looks, around the element the keyboard focused
+    /// (ui-layer.md, section 6, rule 3).
+    pub ring: crate::focus::RingStyle,
 }
 
 /// How text sits on its anchor, left to right.

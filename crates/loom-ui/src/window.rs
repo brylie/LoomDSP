@@ -551,6 +551,24 @@ impl Window {
         })
     }
 
+    /// The corner radius of the element with UI ID `id`, as last laid out,
+    /// or 0 when no laid-out element has the ID.
+    pub(crate) fn radius_of(&self, id: &UiId) -> f32 {
+        self.records
+            .iter()
+            .filter(|(key, _)| id == *key || id.is_under(key))
+            .max_by_key(|(key, _)| key.keys().len())
+            .and_then(|(_, record)| {
+                record
+                    .layout
+                    .records()
+                    .iter()
+                    .find(|element| element.id.as_ref() == Some(id))
+                    .map(|element| element.look.radius)
+            })
+            .unwrap_or(0.0)
+    }
+
     /// Paints the panels of `layer` in draw order, each inside a layer cut
     /// to the part of it that shows.
     pub(crate) fn paint(

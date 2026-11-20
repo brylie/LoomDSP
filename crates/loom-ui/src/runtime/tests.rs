@@ -827,6 +827,11 @@ fn paint_counts_what_it_painted() {
         text: loom_ui_core::Color::WHITE,
         caret: loom_ui_core::Color::WHITE,
         selection: loom_ui_core::Color::BLACK,
+        ring: crate::focus::RingStyle {
+            color: loom_ui_core::Color::WHITE,
+            width: 2.0,
+            offset: 2.0,
+        },
     };
     let mut recorder = crate::paint::testing::Recorder::default();
     runtime.paint(Layer::Panels, &mut recorder, &style);
@@ -851,6 +856,11 @@ fn paint_before_lay_out_panics() {
         text: loom_ui_core::Color::WHITE,
         caret: loom_ui_core::Color::WHITE,
         selection: loom_ui_core::Color::BLACK,
+        ring: crate::focus::RingStyle {
+            color: loom_ui_core::Color::WHITE,
+            width: 2.0,
+            offset: 2.0,
+        },
     };
     runtime.paint(Layer::Panels, &mut crate::paint::testing::Recorder::default(), &style);
 }

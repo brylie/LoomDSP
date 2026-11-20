@@ -14,6 +14,11 @@ const PANEL: PanelStyle = PanelStyle {
     text: Color::rgb(0.5, 0.5, 0.5),
     caret: Color::rgb(0.9, 0.9, 0.9),
     selection: Color::rgb(0.2, 0.3, 0.6),
+    ring: crate::focus::RingStyle {
+        color: Color::WHITE,
+        width: 2.0,
+        offset: 2.0,
+    },
 };
 
 /// A red the tests set on boxes and text.

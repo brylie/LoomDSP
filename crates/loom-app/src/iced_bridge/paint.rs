@@ -185,6 +185,7 @@ pub(crate) fn panel_style(theme: &iced::Theme) -> loom_ui::paint::PanelStyle {
         text: theme.palette().text.to_core(),
         caret: theme.palette().text.to_core(),
         selection: theme.extended_palette().primary.weak.color.to_core(),
+        ring: crate::style::focus_ring(),
     }
 }
 
