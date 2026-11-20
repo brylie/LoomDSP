@@ -1,9 +1,10 @@
 name: CI
 
 # Every Rust check runs a task from mise.toml, with tools installed by mise
-# at the versions mise.toml names. The git hooks (prek.toml) run the same
-# tasks, so a push that passes locally passes here. To change a check,
-# change its task in mise.toml, not the command here.
+# at the versions mise.toml names. `mise run check` and the git hooks
+# (prek.toml) run the same tasks, so a tree that passes `mise run check`
+# locally passes here. The push hook runs only the quick ones. To change a
+# check, change its task in mise.toml, not the command here.
 
 on:
   push:
