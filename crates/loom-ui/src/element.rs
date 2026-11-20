@@ -41,7 +41,7 @@
 //! ([`PanelStyle`](crate::paint::PanelStyle)).
 
 use crate::access::Access;
-use loom_ui_core::{Color, IdKey, TextStyle, UiId};
+use loom_ui_core::{Color, IdKey, Point, TextStyle, UiId};
 use std::num::NonZeroU16;
 
 /// How large an element is along one axis.
@@ -302,6 +302,17 @@ pub(crate) enum Kind {
     Slot(UiId),
 }
 
+/// Where an overlay's root panel goes (ui-layer.md, section 5, rule 12),
+/// in place of filling the window from its top-left corner.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Placement {
+    /// Its top-left corner at this point in the window.
+    At(Point),
+    /// Under the element with this UI ID, in another panel, its left edge
+    /// at that element's, read from the layout already made.
+    Under(UiId),
+}
+
 /// One node of a panel's tree. Build it with [`Element::row`],
 /// [`Element::column`], [`Element::stack`], [`Element::text`], or
 /// [`Element::space`], then set what differs from the defaults.
@@ -324,6 +335,12 @@ pub struct Element {
     pub(crate) access: Option<Access>,
     pub(crate) hover: Option<String>,
     pub(crate) children: Vec<Element>,
+    /// Where a root panel goes; `None` fills the window. Only a panel's
+    /// root reads it.
+    pub(crate) placement: Option<Placement>,
+    /// A root panel hears a press outside it (section 5, rule 13). Only a
+    /// panel's root reads it.
+    pub(crate) closes_outside: bool,
 }
 
 impl Element {
@@ -347,6 +364,8 @@ impl Element {
             access: None,
             hover: None,
             children,
+            placement: None,
+            closes_outside: false,
         }
     }
 
@@ -667,6 +686,24 @@ impl Element {
     /// so nothing under it is hit: a panel over the layer below.
     pub fn opaque(mut self) -> Self {
         self.opaque = true;
+        self
+    }
+
+    /// On a panel's root: places the panel at `placement`, at its content
+    /// size, moved in to stay inside the window, instead of filling the
+    /// window (section 5, rule 12). A root under an element that is gone
+    /// shows nothing until the element is back.
+    pub fn placed(mut self, placement: Placement) -> Self {
+        self.placement = Some(placement);
+        self
+    }
+
+    /// On a panel's root: a press of any mouse button outside the panel,
+    /// while its layer takes input, is taken and told to the app through
+    /// [`App::pressed_outside`](crate::App::pressed_outside) (section 5,
+    /// rule 13).
+    pub fn closes_on_press_outside(mut self) -> Self {
+        self.closes_outside = true;
         self
     }
 }

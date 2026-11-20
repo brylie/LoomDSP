@@ -144,10 +144,26 @@ impl<A: App> Panels<'_, A> {
         let input = self.app.input().layer;
         self.pointer.thumb.is_some()
             || self.keeps_hint(event, point)
+            || !self.pressed_outside(input, event, point).is_empty()
             || self
                 .window
                 .hit_in(point, |layer| Side::of(layer) == Side::Above && layer >= input)
                 .is_some()
+    }
+
+    /// The panels a press at `point` is outside of, when `event` is a press
+    /// of any button and the input layer, above the target, has panels that
+    /// close on one (section 5, rule 13): each such panel, if the press is
+    /// inside none of them. Empty otherwise, and for a press inside one.
+    fn pressed_outside(&self, input: Layer, event: &Event, point: Point) -> Vec<UiId> {
+        if !matches!(event, Event::Pointer(PointerEvent::Pressed(_))) || Side::of(input) != Side::Above {
+            return Vec::new();
+        }
+        let roots = self.window.closing_roots(input);
+        if roots.iter().any(|(_, at)| at.contains(point)) {
+            return Vec::new();
+        }
+        roots.into_iter().map(|(root, _)| root).collect()
     }
 
     /// True for a move onto the hover text showing, or between it and its
@@ -305,6 +321,25 @@ impl<A: App> Panels<'_, A> {
             return Heard {
                 taken: true,
                 redraw: on_source && self.note_hover_motion(),
+            };
+        }
+        // Section 5, rule 13: a press outside a panel of the input layer
+        // that closes on one is taken, and told to the app.
+        let outside = if side == Side::Above {
+            self.pressed_outside(input.layer, event, point)
+        } else {
+            Vec::new()
+        };
+        if !outside.is_empty() {
+            self.pointer.space = None;
+            for root in &outside {
+                if let Some(message) = self.app.pressed_outside(root) {
+                    self.waker.send(message);
+                }
+            }
+            return Heard {
+                taken: true,
+                redraw: false,
             };
         }
         let hit = self.window.hit_in(point, keep).map(|(layer, hit)| match hit {

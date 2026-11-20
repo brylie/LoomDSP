@@ -149,6 +149,10 @@ struct Root {
     node: NodeId,
     width: Length,
     height: Length,
+    /// Where the panel goes, when not over the whole window.
+    placement: Option<crate::element::Placement>,
+    /// It hears a press outside it.
+    closes_outside: bool,
 }
 
 /// One element, as the layout keeps it.
@@ -434,13 +438,30 @@ impl Layout {
         self.problems.clear();
         self.duplicates = 0;
         let (width, height) = (root.width, root.height);
+        let (placement, closes_outside) = (root.placement.clone(), root.closes_outside);
         let scope = self.panel.clone();
         let node = self.add(root, None, &scope, Parent::Stack, false);
-        self.root = Some(Root { node, width, height });
+        self.root = Some(Root {
+            node,
+            width,
+            height,
+            placement,
+            closes_outside,
+        });
         // A container's offset goes with it.
         let (by_id, records) = (&self.by_id, &self.records);
         self.offsets
             .retain(|id, _| by_id.get(id).is_some_and(|index| records[*index].scroll.is_some()));
+    }
+
+    /// Where the panel goes, when its root says (section 5, rule 13).
+    pub(crate) fn placement(&self) -> Option<&crate::element::Placement> {
+        self.root.as_ref().and_then(|root| root.placement.as_ref())
+    }
+
+    /// True when the panel's root hears a press outside it.
+    pub(crate) fn closes_outside(&self) -> bool {
+        self.root.as_ref().is_some_and(|root| root.closes_outside)
     }
 
     /// Lays the tree out in `available`, the space the panel has. The root

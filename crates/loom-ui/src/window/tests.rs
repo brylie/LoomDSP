@@ -592,3 +592,73 @@ fn text_cut_to_its_padding_is_not_found() {
     screen.lay_out(Size::new(300.0, 200.0));
     assert_eq!(screen.window.text_bounds("inside"), None, "only padding shows");
 }
+
+/// A keyed square `size` across, keyed `square`, as a placed panel's root
+/// at the point the model gives, or under `toolbar/label`.
+fn placed_square(model: &(u8, Option<(f32, f32)>)) -> Element {
+    let size = f32::from(model.0);
+    let placement = match model.1 {
+        Some((x, y)) => crate::element::Placement::At(Point::new(x, y)),
+        None => crate::element::Placement::Under("toolbar/label".parse().expect("a UI ID")),
+    };
+    Element::space(Length::Fixed(size), Length::Fixed(size))
+        .key("square")
+        .placed(placement)
+}
+
+/// Section 5, rule 12: a root placed at a point takes its content size
+/// there, is hit there and nowhere else, and is moved in to stay inside the
+/// window; in a window smaller than it, its top-left corner stays inside.
+#[test]
+fn a_root_placed_at_a_point_stays_inside_the_window() {
+    let place = |at: (f32, f32), window: Size| {
+        let mut screen = Screen::new();
+        let mut view = View::new();
+        view.panel_with(panel("menu"), Layer::Overlays, &(40u8, Some(at)), placed_square);
+        screen.show_view(view);
+        screen.lay_out(window);
+        (screen.at("menu/square"), screen)
+    };
+    let (at, screen) = place((100.0, 50.0), Size::new(300.0, 200.0));
+    assert_eq!(at, Some(rect(100.0, 50.0, 40.0, 40.0)));
+    let hit = |x, y| match screen.window.hit(Point::new(x, y)) {
+        Some((_, Hit::Element(id))) => Some(id.to_string()),
+        _ => None,
+    };
+    assert_eq!(hit(110.0, 60.0).as_deref(), Some("menu/square"));
+    assert_eq!(hit(5.0, 5.0), None, "only where it is");
+    assert_eq!(
+        place((290.0, 190.0), Size::new(300.0, 200.0)).0,
+        Some(rect(260.0, 160.0, 40.0, 40.0))
+    );
+    assert_eq!(
+        place((10.0, 10.0), Size::new(30.0, 20.0)).0.map(|at| at.position()),
+        Some(Point::ORIGIN)
+    );
+}
+
+/// Section 5, rule 12: a root placed under an element opens at that
+/// element's bottom-left corner, read from the panels laid out before it,
+/// and a root under an element that is gone is not placed: no bounds, no
+/// hit.
+#[test]
+fn a_root_placed_under_an_element_follows_it() {
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(panel("toolbar"), Layer::Panels, &"Open".to_string(), shrink_label);
+    view.panel_with(panel("menu"), Layer::Overlays, &(20u8, None), placed_square);
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    let anchor = screen.at("toolbar/label").expect("the anchor");
+    assert_eq!(
+        screen.at("menu/square"),
+        Some(rect(anchor.x, anchor.y + anchor.height, 20.0, 20.0))
+    );
+
+    let mut view = View::new();
+    view.panel_with(panel("menu"), Layer::Overlays, &(20u8, None), placed_square);
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    assert_eq!(screen.at("menu/square"), None, "its anchor is gone");
+    assert!(screen.window.hit(Point::new(5.0, 20.0)).is_none());
+}

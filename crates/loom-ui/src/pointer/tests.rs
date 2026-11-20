@@ -28,6 +28,8 @@ enum Message {
     Canvas(bool),
     /// Tab left the first run of stops for the target's stops after it.
     IntoTarget,
+    /// A press outside this panel, which closes on one.
+    Outside(UiId),
 }
 
 /// An app that shows a bar of two buttons in the panels layer, across the
@@ -69,7 +71,7 @@ impl App for Layers {
         });
         if self.overlay {
             view.panel_with(UiId::panel("menu"), Layer::Overlays, &(), |_| {
-                Element::row([menu_item("item", 20.0)])
+                Element::row([menu_item("item", 20.0)]).closes_on_press_outside()
             });
         }
     }
@@ -88,6 +90,10 @@ impl App for Layers {
 
     fn clicked(&self, id: &UiId) -> Option<Message> {
         Some(Message::Clicked(id.clone()))
+    }
+
+    fn pressed_outside(&self, root: &UiId) -> Option<Message> {
+        Some(Message::Outside(root.clone()))
     }
 
     fn tab_from(&self, from: &UiId, next: Option<&UiId>, back: bool) -> crate::app::TabStep<Message> {
@@ -1115,4 +1121,49 @@ fn enter_and_space_click_a_focused_menu_item() {
     menu.step(release_key(Key::Space));
     menu.step(DriverEvent::Woken);
     assert_eq!(clicks(&menu), [item.clone(), item], "Space on key up");
+}
+
+/// Section 5, rule 13: with the menu's layer taking input, a press of any
+/// button outside the menu is taken, so neither the target nor the bar
+/// under it hears it, and the app hears it on the next turn; a press on the
+/// menu is the menu's own. With the panels taking input, the menu does not
+/// close on a press outside it.
+#[test]
+fn a_press_outside_a_closing_menu_is_taken_and_told() {
+    let menu = UiId::panel("menu");
+    let outside = |of: &Harness<Layers, Fake>| {
+        of.app()
+            .heard
+            .iter()
+            .filter(|heard| matches!(heard, Message::Outside(_)))
+            .count()
+    };
+    let mut menu_open = harness(true, Routed::Passed);
+    menu_open.send(Message::Input(Layer::Overlays));
+    for button in [PointerButton::Left, PointerButton::Right] {
+        let heard = menu_open.runtime().target().heard.len();
+        menu_open.step(at(200.0, 100.0, PointerEvent::Pressed(button)));
+        assert_eq!(
+            menu_open.runtime().target().heard.len(),
+            heard,
+            "{button:?}: the target heard nothing"
+        );
+    }
+    assert_eq!(outside(&menu_open), 2, "both presses were told");
+    assert!(menu_open.app().heard.contains(&Message::Outside(menu.clone())));
+    {
+        let (_, _, panels) = menu_open.parts();
+        let press = Event::Pointer(PointerEvent::Pressed(PointerButton::Left));
+        assert!(
+            panels.over_target(&press, Point::new(200.0, 100.0)),
+            "a driver keeps it from the toolkit"
+        );
+    }
+    menu_open.step(at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    assert_eq!(outside(&menu_open), 2, "a press on the menu is its own");
+
+    let mut below = harness(true, Routed::Passed);
+    below.send(Message::Input(Layer::Canvas));
+    below.step(at(200.0, 100.0, PointerEvent::Pressed(PointerButton::Left)));
+    assert_eq!(outside(&below), 0, "only while its layer takes input");
 }

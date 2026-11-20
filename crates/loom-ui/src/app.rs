@@ -68,6 +68,17 @@ pub trait App {
         None
     }
 
+    /// The message for a press outside the panel `root`, whose root asks
+    /// for it ([`Element::closes_on_press_outside`](crate::Element::closes_on_press_outside)),
+    /// while its layer takes input: usually, close it (section 5, rule
+    /// 13). The runtime takes the press, so nothing under the panel sees it.
+    /// Any mouse button counts. The message runs on the next turn, as a
+    /// click's does. It reads state and changes none.
+    fn pressed_outside(&self, root: &UiId) -> Option<Self::Message> {
+        let _ = root;
+        None
+    }
+
     /// How hover text looks (ui-layer.md, section 5, rule 11), from the
     /// app's style tokens. The default is plain and readable.
     fn hint_style(&self) -> crate::HintStyle {
