@@ -1,7 +1,9 @@
 //! Tests for the clipboard thread, over a fake backend, so they run in CI
 //! with no display.
 
-use super::{BACKEND_READ_LIMIT, Backend, Clipboard, Native, READ_NOW_LIMIT, System, answer};
+use super::{
+    BACKEND_READ_LIMIT, Backend, Clipboard, MAX_STUCK_READS, Native, READ_NOW_LIMIT, READS_BEFORE_RETRY, System, answer,
+};
 use crate::effect::ClipboardText;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -189,7 +191,7 @@ fn a_backend_that_fails_hard_answers_refused_and_the_thread_goes_on() {
 struct Shared {
     text: Mutex<Option<String>>,
     log: Mutex<Vec<String>>,
-    hold: Mutex<Option<mpsc::Receiver<()>>>,
+    holds: Mutex<std::collections::VecDeque<mpsc::Receiver<()>>>,
     opened: AtomicUsize,
 }
 
@@ -209,7 +211,7 @@ struct Handle {
 impl Backend for Handle {
     fn get(&mut self) -> ClipboardText {
         self.shared.log.lock().unwrap().push(format!("read {}", self.id));
-        let hold = self.shared.hold.lock().unwrap().take();
+        let hold = self.shared.holds.lock().unwrap().pop_front();
         if let Some(hold) = hold {
             let _ = hold.recv();
         }
@@ -228,11 +230,18 @@ impl Drop for Handle {
     }
 }
 
+/// Holds the next read that reaches a backend until the returned sender
+/// sends or goes.
+fn hold_next(shared: &Shared) -> mpsc::Sender<()> {
+    let (release, hold) = mpsc::channel();
+    shared.holds.lock().unwrap().push_back(hold);
+    release
+}
+
 /// A clipboard over `shared`, whose first read is held until the returned
 /// sender sends or goes.
 fn held(shared: &Arc<Shared>) -> (Clipboard, mpsc::Sender<()>) {
-    let (release, hold) = mpsc::channel();
-    *shared.hold.lock().unwrap() = Some(hold);
+    let release = hold_next(shared);
     let opener = Arc::clone(shared);
     let clipboard = Clipboard::new(move || Handle {
         id: opener.opened.fetch_add(1, Ordering::SeqCst),
@@ -301,6 +310,54 @@ fn reads_against_a_stuck_clipboard_hold_one_helper() {
     assert_eq!(shared.log(), ["read 0", "write 1"], "one read reached a backend");
     assert_eq!(shared.opened.load(Ordering::SeqCst), 2, "a reader and a writer");
     assert_eq!(*shared.text.lock().unwrap(), Some("later".to_owned()));
+}
+
+/// The reads that reached a backend, in order.
+fn reads(shared: &Shared) -> usize {
+    shared.log().iter().filter(|entry| entry.starts_with("read")).count()
+}
+
+/// A read stuck for good is given up: after the reads that answer
+/// `Refused` at once, the next one opens a new handle and reads what is on
+/// the clipboard now.
+#[test]
+fn a_read_stuck_for_good_is_given_up_and_a_later_read_works() {
+    let shared = Arc::new(Shared::default());
+    let (clipboard, _never) = held(&shared);
+    assert_eq!(read(&clipboard), ClipboardText::Refused, "stuck");
+    for _ in 0..READS_BEFORE_RETRY {
+        assert_eq!(read(&clipboard), ClipboardText::Refused, "at once, while it is out");
+    }
+    clipboard.write("osc".to_owned());
+    assert_eq!(read(&clipboard), ClipboardText::Text("osc".to_owned()));
+    assert_eq!(reads(&shared), 2, "the stuck read, then the one that worked");
+    assert_eq!(
+        shared.opened.load(Ordering::SeqCst),
+        3,
+        "the stuck reader, the writer, a new reader"
+    );
+}
+
+/// No more than [`MAX_STUCK_READS`] reads are stuck at once: past that,
+/// every read answers `Refused` at once and reaches no backend.
+#[test]
+fn no_more_than_the_limit_of_reads_are_stuck_at_once() {
+    let shared = Arc::new(Shared::default());
+    let (clipboard, _never) = held(&shared);
+    let _more: Vec<_> = (1..MAX_STUCK_READS).map(|_| hold_next(&shared)).collect();
+    for _ in 0..MAX_STUCK_READS {
+        assert_eq!(read(&clipboard), ClipboardText::Refused, "stuck");
+        for _ in 0..READS_BEFORE_RETRY {
+            assert_eq!(read(&clipboard), ClipboardText::Refused);
+        }
+    }
+    let started = std::time::Instant::now();
+    for _ in 0..5 {
+        assert_eq!(read(&clipboard), ClipboardText::Refused);
+    }
+    let waited = started.elapsed();
+    assert!(waited < BACKEND_READ_LIMIT, "at once, with no new helper: {waited:?}");
+    assert_eq!(reads(&shared), MAX_STUCK_READS, "one helper each, no more");
 }
 
 /// What the next opens of [`Scripted`] do, in order: `true` opens, `false`

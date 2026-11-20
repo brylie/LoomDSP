@@ -87,7 +87,7 @@ impl Clipboard {
             .name("loom-ui clipboard".to_owned())
             .spawn(move || {
                 let mut writer: Option<B> = None;
-                let mut reader = Reader::Ready(None);
+                let mut reader = Reader::default();
                 for job in queue {
                     match job {
                         Job::Write(text) => writer.get_or_insert_with(&mut open).set(text),
@@ -201,40 +201,66 @@ impl<N: Native> Backend for System<N> {
     }
 }
 
+/// How many reads answer `Refused` at once while the reading handle is out
+/// with a stuck read, before the next one gives that read up and tries
+/// again with a new handle. *Why:* a clipboard that was stuck may answer
+/// again, such as after the app that held it quits, and the user must not
+/// be refused for good. It counts reads, not time, because the crate never
+/// reads the clock.
+pub const READS_BEFORE_RETRY: usize = 3;
+
+/// How many reads may be stuck at once. A stuck read cannot be cancelled,
+/// so each keeps its thread and handle until it ends; past this many, every
+/// read answers `Refused` until one does. *Why:* a clipboard that stays
+/// stuck must not gather one blocked thread per paste.
+pub const MAX_STUCK_READS: usize = 2;
+
 /// The handle the clipboard's thread reads through, apart from the one it
-/// writes through.
+/// writes through, so a stuck read never takes the writing one, which
+/// holds our copy on Linux.
 ///
 /// Each read runs on a helper thread that holds the handle. A read that
-/// does not finish in time leaves it out with its helper, and every read
-/// until it comes back answers `Refused` at once, with no new thread.
-/// *Why:* a clipboard that stays stuck must not gather one blocked thread
-/// and handle per paste, and a separate handle means a stuck read never
-/// takes the writing one, which holds our copy on Linux.
-enum Reader<B> {
-    /// Here, or not opened yet, or lost to a read that failed hard.
-    Ready(Option<B>),
-    /// Out with a read that did not finish in time: it comes back here.
-    Out(Receiver<(ClipboardText, B)>),
+/// does not finish in time leaves it out with its helper. While it is out,
+/// reads answer `Refused` at once, with no new thread, until it comes back
+/// or [`READS_BEFORE_RETRY`] of them have, when the next read gives the
+/// stuck one up and opens a new handle, if fewer than [`MAX_STUCK_READS`]
+/// are stuck.
+struct Reader<B> {
+    /// Here, or not opened yet, or lost to a read that failed hard or was
+    /// given up.
+    ready: Option<B>,
+    /// Reads that did not finish in time, oldest first: each answer comes
+    /// back on its channel, with its handle.
+    stuck: Vec<Receiver<(ClipboardText, B)>>,
+    /// Reads refused at once since the last read reached a backend.
+    refused: usize,
+}
+
+impl<B> Default for Reader<B> {
+    fn default() -> Self {
+        Self {
+            ready: None,
+            stuck: Vec::new(),
+            refused: 0,
+        }
+    }
 }
 
 impl<B: Backend> Reader<B> {
     /// One read, waiting at most `limit` for its helper. `Refused` when the
     /// handle is still out, the read is late, or it failed hard.
     fn read(&mut self, open: &mut impl FnMut() -> B, limit: Duration) -> ClipboardText {
-        let backend = match std::mem::replace(self, Self::Ready(None)) {
-            Self::Ready(backend) => backend,
-            Self::Out(late) => match late.try_recv() {
-                // The late read finished: its answer is stale, its handle
-                // is good.
-                Ok((_, backend)) => Some(backend),
-                Err(TryRecvError::Empty) => {
-                    *self = Self::Out(late);
-                    return ClipboardText::Refused;
-                }
-                Err(TryRecvError::Disconnected) => None,
-            },
-        };
-        let mut backend = backend.unwrap_or_else(open);
+        self.collect_late();
+        // While the handle is out, refuse at once, until enough reads have
+        // that this one gives the stuck read up: it keeps its thread and
+        // handle until it ends, and this read goes on with a new handle.
+        let out = self.ready.is_none() && !self.stuck.is_empty();
+        if out && (self.refused < READS_BEFORE_RETRY || self.stuck.len() >= MAX_STUCK_READS) {
+            self.refused += 1;
+            return ClipboardText::Refused;
+        }
+        self.refused = 0;
+        let mut backend = self.ready.take().unwrap_or_else(open);
         let (sender, answer) = mpsc::channel();
         let spawned = std::thread::Builder::new()
             .name("loom-ui clipboard read".to_owned())
@@ -247,16 +273,32 @@ impl<B: Backend> Reader<B> {
         }
         match answer.recv_timeout(limit) {
             Ok((text, backend)) => {
-                *self = Self::Ready(Some(backend));
+                self.ready = Some(backend);
                 text
             }
             Err(RecvTimeoutError::Timeout) => {
-                *self = Self::Out(answer);
+                self.stuck.push(answer);
                 ClipboardText::Refused
             }
             // It failed hard: the next read opens another handle.
             Err(RecvTimeoutError::Disconnected) => ClipboardText::Refused,
         }
+    }
+
+    /// Takes in the stuck reads that ended. Their answers are stale; the
+    /// first good handle is kept to read through, and the rest go.
+    fn collect_late(&mut self) {
+        let ready = &mut self.ready;
+        self.stuck.retain(|late| match late.try_recv() {
+            Ok((_, backend)) => {
+                if ready.is_none() {
+                    *ready = Some(backend);
+                }
+                false
+            }
+            Err(TryRecvError::Empty) => true,
+            Err(TryRecvError::Disconnected) => false,
+        });
     }
 }
 
