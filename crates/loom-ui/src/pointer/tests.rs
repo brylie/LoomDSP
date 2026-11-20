@@ -1068,3 +1068,21 @@ fn an_overlays_focus_rings_in_the_overlays_layer() {
     assert!(rings(&mut menu, Layer::Panels).is_empty());
     assert_eq!(rings(&mut menu, Layer::Overlays).len(), 1);
 }
+
+/// An update that raises the input layer over the focused element hides
+/// its ring with no panel built again, so it asks for a frame: otherwise
+/// the last frame would keep showing the ring (CodeRabbit, #861). Dropping
+/// the layer shows it again, with a frame too.
+#[test]
+fn a_ring_shown_or_hidden_asks_for_a_frame() {
+    let mut harness = harness(false, Routed::Passed);
+    harness.step(tab_key());
+    assert!(harness.runtime().focus_ring().is_some());
+    let before = harness.driver().redraws();
+    harness.send(Message::Input(Layer::Overlays));
+    assert_eq!(harness.runtime().focus_ring(), None);
+    assert!(harness.driver().redraws() > before, "hiding the ring draws a frame");
+    let hidden = harness.driver().redraws();
+    harness.send(Message::Input(Layer::Canvas));
+    assert!(harness.driver().redraws() > hidden, "showing it again draws one");
+}

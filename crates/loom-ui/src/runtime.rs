@@ -968,8 +968,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // What shows as pressed is painted from the runtime's own state,
         // so a change of it needs a frame, though no panel is built again
         // (visual-system.md, Role tokens): an input event, or an update
-        // that raises the input layer or turns the element off.
+        // that raises the input layer or turns the element off. So does
+        // whether the focus ring shows, which a raised input layer hides
+        // with no panel built again (section 6, rule 3).
         let pressed = self.panels().shown_pressed();
+        let ringed = self.focus_ring().map(|(id, _)| id);
         let mut redraw = self.follow_target();
         self.field_left(&mut batch, now);
         let mut reported = self.panels.fields.take_changed();
@@ -1068,6 +1071,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
 
         redraw |= self.target.needs_redraw(updates);
         redraw |= self.panels().shown_pressed() != pressed;
+        redraw |= self.focus_ring().map(|(id, _)| id) != ringed;
 
         // 5. Draw only when something visible changed.
         let draw = redraw && !self.exited;
