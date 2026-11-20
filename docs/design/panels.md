@@ -339,6 +339,18 @@ A right-click opens a menu for what is under the pointer. Right-clicking a tile 
 - [ ] Shift+F10 opens the menu for the selection, and the arrows and Enter pick an item (`Ui` harness).
 - [ ] The Add scope and Add meter tests still pass.
 
+### Insert onto a cable
+
+**Status:** Draft ([#835](https://github.com/brylie/LoomDSP/issues/835), FR-CANVAS-08).
+
+Open **Insert module…** on one cable, or open the context menu of its focused connected input with Shift+F10 or the Menu key and choose the same action. The connected input identifies one cable even when its source feeds several destinations. Use the keyboard port navigation from [#524](https://github.com/brylie/LoomDSP/issues/524) to reach that input. Both paths open the module browser for the chosen cable.
+
+Offer built-in processors with one matching input and one matching output. Match each port's declared signal type to the endpoint it faces and apply the ordinary graph checks, including bundle widths. This is a filter for insertion. Ordinary cable connections still follow their existing rules. Leave modules with several matching pairs out of this first slice. After the player picks a module, show its snapped position, both named ports, and the highlighted cable. Click to place the preview on that cable, or press Enter at the preview's default snapped position beside it. The preview's accessible name includes both endpoints and the proposed pair. Escape cancels.
+
+At confirmation, recheck the chosen endpoints and port pair. If the cable changed, close the preview and report why the patch was left intact. On success, stage the module and both replacement cables together, replacing only the chosen cable. Select the new module and record one undo step. The engine gets the completed graph at one swap, following [live patching rule 9](live-patching.md#rules). A staged retry keeps the old graph playing until it can send the entire edit.
+
+**Acceptance:** in the UI harness, use both entry paths on Saw Out → SVF In in Subtractive, with a second branch from Saw Out. Confirm the preview names both ports, then check insertion, undo, and redo. Try Escape, an ambiguous module, a changed cable, and the module limit. Compare the stored connections and history with the state before each cancelled or refused edit. For a live check, hold a note while inserting an eligible processor. Capture the audio and verify that the engine swaps straight from the original graph to the inserted graph with the rule 9 transition.
+
 ### Acceptance criteria: scope module
 
 - [x] The scope module passes its input through, bit for bit. It has a reference test and a block-size check.
