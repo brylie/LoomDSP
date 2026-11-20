@@ -69,7 +69,7 @@ impl App for Layers {
         });
         if self.overlay {
             view.panel_with(UiId::panel("menu"), Layer::Overlays, &(), |_| {
-                Element::row([button("item", 20.0)])
+                Element::row([menu_item("item", 20.0)])
             });
         }
     }
@@ -106,6 +106,17 @@ impl App for Layers {
             (_, _, next) => next.map_or(TabStep::Leave, |next| TabStep::To(next.clone())),
         }
     }
+}
+
+/// A menu item `width` wide and 16 high, keyed `key`: a button in a
+/// list, to a screen reader and to the keyboard.
+fn menu_item(key: &str, width: f32) -> Element {
+    Element::text(key, STYLE)
+        .key(key)
+        .width(Length::Fixed(width))
+        .min_width(width)
+        .focusable()
+        .access(Access::new(Role::MenuItem, key).action(Action::Click))
 }
 
 /// A button `width` wide and 16 high, keyed `key`.
@@ -1087,4 +1098,21 @@ fn a_ring_shown_or_hidden_asks_for_a_frame() {
     let hidden = harness.driver().redraws();
     harness.send(Message::Input(Layer::Canvas));
     assert!(harness.driver().redraws() > hidden, "showing it again draws one");
+}
+
+/// Section 3, rule 4 (plan 3.2, row 3a): a focused menu item is activated
+/// as a button is, Enter on key down and Space on key up, each once.
+#[test]
+fn enter_and_space_click_a_focused_menu_item() {
+    use loom_ui_core::Key;
+    let item = UiId::panel("menu").with("item");
+    let mut menu = harness(true, Routed::Passed);
+    menu.step(tab_key());
+    assert_eq!(menu.runtime().focused(), Some(&item));
+    menu.step(press_key(Key::Enter, false));
+    assert_eq!(clicks(&menu), std::slice::from_ref(&item), "Enter on key down");
+    menu.step(press_key(Key::Space, false));
+    menu.step(release_key(Key::Space));
+    menu.step(DriverEvent::Woken);
+    assert_eq!(clicks(&menu), [item.clone(), item], "Space on key up");
 }

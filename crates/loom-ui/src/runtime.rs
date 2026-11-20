@@ -1511,7 +1511,8 @@ pub(crate) fn activatable<A: App>(window: &Window, app: &A, id: &UiId) -> Option
         return None;
     }
     match access.role() {
-        crate::access::Role::Button => Some(true),
+        // A menu item is a button in a list (section 3, rule 4).
+        crate::access::Role::Button | crate::access::Role::MenuItem => Some(true),
         crate::access::Role::Switch => Some(false),
         _ => None,
     }
