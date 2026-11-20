@@ -3,7 +3,7 @@ use crate::ui_test::Ui;
 use iced::keyboard::key::Named;
 use loom_ui_core::Point;
 
-/// Collapsing a modulation source keeps the row and line on the outside level.
+/// A collapsed source keeps its visible name, edit value, and place in the source order.
 #[test]
 fn matrix_keeps_a_modulation_from_a_subpatch_output() {
     let mut ui = Ui::open("modulation.ron");
@@ -22,8 +22,44 @@ fn matrix_keeps_a_modulation_from_a_subpatch_output() {
     assert_eq!(rows.len(), 1);
     let output = &ui.app().session.scene.module(tile.0).unwrap().outputs[0];
     assert_eq!(rows[0].source, format!("{title}: {}", output.label));
-    ui.send(Message::Matrix(Event::Select(AssignmentId(rows[0].id), Column::Target)));
+    let id = AssignmentId(rows[0].id);
+    ui.send(Message::Matrix(Event::Select(id, Column::Source)));
     assert_eq!(ui.app().matrix_line().unwrap().from, (tile.0, 0));
+    let original = *ui.app().session.controller.graph().assignment(id).unwrap();
+    let history = ui.app().session.edits.history.len();
+    let enter = |ui: &mut Ui| {
+        ui.tap(
+            iced::keyboard::Key::Named(Named::Enter),
+            iced::keyboard::Modifiers::empty(),
+        );
+    };
+    enter(&mut ui);
+    let model = ui.app().ui_snapshot().matrix;
+    let pick = &model.sources[model.edit.unwrap().choice];
+    assert_eq!(pick.output, original.source);
+    assert_eq!(pick.label, rows[0].source);
+    enter(&mut ui);
+    assert_eq!(ui.app().session.controller.graph().assignment(id), Some(&original));
+    assert_eq!(ui.app().session.edits.history.len(), history);
+    assert!(ui.app().ui_snapshot().matrix.edit.is_none());
+
+    let graph = ui.app().session.controller.graph();
+    let options = sources(graph, &ui.app().session.hierarchy, &ui.app().session.level);
+    assert!(options[0].output < original.source);
+    let expected = options.iter().find(|pick| {
+        pick.output > original.source
+            && ui.app().allows_assignment(pick.output, original.target, original.param)
+            && !modulation::exists(graph, pick.output, original.target, original.param)
+    });
+    let expected = expected.map_or(original.source, |pick| pick.output);
+    ui.a11y_action(&access::cell(id, Column::Source), accesskit::Action::Increment);
+    let selected = ui.app().session.matrix.selected.unwrap();
+    let graph = ui.app().session.controller.graph();
+    assert_eq!(graph.assignment(selected).unwrap().source, expected);
+
+    ui.send(Message::Matrix(Event::AddOpen));
+    let model = ui.app().ui_snapshot().matrix;
+    assert!(!model.sources.iter().any(|pick| pick.output == original.source));
 }
 
 /// The outside Matrix names, filters and selects the same surface the cable reaches.

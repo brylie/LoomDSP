@@ -456,6 +456,11 @@ impl Structure {
             .and_then(|tile| (if port.output { &tile.outputs } else { &tile.inputs }).get(port.index))
             .map_or("?", |port| port.label.as_str())
     }
+
+    /// The module and port together, as the cable picker and jump list name them.
+    pub(crate) fn named_port(&self, port: PortRef) -> String {
+        format!("{} {}", self.name(port.module), self.port_label(port))
+    }
 }
 
 /// Lists names in a short phrase for the outline and canvas descriptions.

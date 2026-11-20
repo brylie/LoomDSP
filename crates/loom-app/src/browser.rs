@@ -1050,8 +1050,7 @@ pub(crate) fn row_style(theme: &Theme, highlighted: bool) -> container::Style {
 
 /// A family tint that stays distinct on the browser's normal and highlighted rows.
 pub(crate) fn family_swatch(family: Family) -> loom_ui_core::Color {
-    let palette = loom_canvas::Palette::default();
-    palette.swatches()[palette.families.len() + family.index()]
+    loom_canvas::Palette::default().family_tint(family.index())
 }
 
 pub(crate) mod access;

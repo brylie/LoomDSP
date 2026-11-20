@@ -6,6 +6,7 @@ use crate::App;
 use loom_canvas::ModulationMark;
 use loom_core::ModuleNames;
 use loom_core::{Assignment, AssignmentId, Graph, ModuleId, OutputRef, ParamSpec, Polarity, WidgetKind};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -131,12 +132,16 @@ pub fn exists(graph: &Graph, source: OutputRef, target: ModuleId, param: usize) 
         .any(|(_, a)| a.source == source && a.target == target && a.param == param)
 }
 
+/// The first instance and count for each displayed instance name in a level.
+type InstanceNames = BTreeMap<String, (ModuleId, usize)>;
+
 /// Duplicate counts shared by the scene and every name in a panel model.
 pub(crate) struct Names<'a> {
     graph: &'a Graph,
     hierarchy: &'a loom_patch::Hierarchy,
     hidden: loom_patch::hierarchy::Hidden<'a>,
     counts: BTreeMap<(loom_patch::ModulePath, &'a str), usize>,
+    instance_names: RefCell<BTreeMap<loom_patch::ModulePath, InstanceNames>>,
 }
 
 impl<'a> Names<'a> {
@@ -152,6 +157,7 @@ impl<'a> Names<'a> {
             hierarchy,
             hidden,
             counts,
+            instance_names: RefCell::default(),
         }
     }
 
@@ -218,11 +224,19 @@ impl<'a> Names<'a> {
         label: &str,
     ) -> Option<String> {
         let name = self.hierarchy.tile_name(tile)?;
-        let duplicates = self.hierarchy.structural_tiles(level).into_iter().any(|(id, kind)| {
-            id != tile
-                && matches!(kind, loom_patch::Tile::Instance(_))
-                && self.hierarchy.tile_name(id).as_deref() == Some(&name)
+        let mut levels = self.instance_names.borrow_mut();
+        let names = levels.entry(level.clone()).or_insert_with(|| {
+            let mut names = InstanceNames::new();
+            for (id, kind) in self.hierarchy.structural_tiles(level) {
+                if matches!(kind, loom_patch::Tile::Instance(_))
+                    && let Some(name) = self.hierarchy.tile_name(id)
+                {
+                    names.entry(name).or_insert((id, 0)).1 += 1;
+                }
+            }
+            names
         });
+        let duplicates = names.get(&name).is_some_and(|&(id, count)| count > 1 || id != tile);
         let name = if duplicates {
             format!("{name} {}", self.hierarchy.path_of(tile).last())
         } else {

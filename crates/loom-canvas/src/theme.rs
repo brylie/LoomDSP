@@ -87,6 +87,11 @@ impl Default for Palette {
 }
 
 impl Palette {
+    /// The lighter swatch for a module family.
+    pub fn family_tint(&self, family_index: usize) -> Color {
+        tint(self.families[family_index])
+    }
+
     /// The 16 swatches users and families pick from (visual-system.md,
     /// Module families): each family colour, then its tint. A tint is the
     /// colour mixed halfway to white and takes the dark

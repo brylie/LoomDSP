@@ -135,7 +135,7 @@ stroke in the same proportion. The inspector names the exact voice count
 and stereo sides. The dashed stroke continues to mark an inserted
 one-sample delay, and the signal colours continue to show the port types.
 
-## Module families
+### Module families
 
 Every module belongs to one of eight families ([ADR-0029](../adr/0029-module-families-and-a-shared-palette.md)). Its tile header takes the family's colour, and the module browser lists modules by family.
 

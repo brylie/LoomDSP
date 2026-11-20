@@ -36,6 +36,7 @@ impl App {
     pub(crate) fn cable_menu_model(&self, module: u32, start: Option<PortRef>, highlight: Option<usize>) -> MenuModel {
         let id = UiId::panel("menu").with("cable");
         let scene = &self.session.scene;
+        let structure = &self.session.patch_map.structure;
         let mut items = Vec::new();
         if let Some(port) = start.filter(|port| self.input_has_cable(*port)) {
             items.push(MenuItem {
@@ -55,7 +56,7 @@ impl App {
                     continue;
                 }
                 let direction = if output { "output" } else { "input" };
-                for (index, info) in ports.iter().enumerate() {
+                for index in 0..ports.len() {
                     let port = PortRef {
                         module: tile.id,
                         output,
@@ -63,7 +64,7 @@ impl App {
                     };
                     items.push(MenuItem {
                         id: id.clone().with(tile.id).with(direction).with(index as u32),
-                        label: format!("{} {}", tile.title, info.label),
+                        label: structure.named_port(port),
                         description: Some(direction.to_string()),
                         message: Message::CablePort {
                             start,
@@ -73,7 +74,9 @@ impl App {
                 }
             }
         }
-        let name = start.and_then(|port| scene.port(port).map(|info| &info.label));
+        let name = start
+            .filter(|port| scene.port(*port).is_some())
+            .map(|port| structure.port_label(port));
         let label = name.map_or_else(
             || "Choose a port".to_string(),
             |name| format!("Choose a port for {name}"),

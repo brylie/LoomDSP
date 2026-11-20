@@ -93,7 +93,25 @@ fn cable_picker_cancels_and_disconnects() {
     ui.send(crate::Message::CloseHelp);
 
     ui.tap(Key::Character("c".into()), Modifiers::empty());
+    let input = loom_canvas::PortRef {
+        module: filter,
+        output: false,
+        index: 0,
+    };
+    let jump_label = ui.app().session.patch_map.structure.named_port(input);
+    assert_eq!(ui.app().menu_model().unwrap().items[0].label, jump_label);
     choose(&mut ui, "SVF In");
+    let structure = &ui.app().session.patch_map.structure;
+    let wire = structure.cables.iter().find(|wire| wire.to == input).unwrap();
+    let jump_label = structure.named_port(wire.from);
+    assert!(
+        ui.app()
+            .menu_model()
+            .unwrap()
+            .items
+            .iter()
+            .any(|row| row.label == jump_label)
+    );
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
     assert_eq!(ui.app().session.scene.cables().len(), count);
     ui.tap(Key::Character("c".into()), Modifiers::empty());

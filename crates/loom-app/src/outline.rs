@@ -1098,13 +1098,10 @@ fn jump_choices(map: &PatchMap, from: Target, downstream: Option<bool>) -> Vec<C
         } else {
             Target::Tile(peer.module)
         };
-        let from_label = structure.port_label(wire.from);
-        let to_label = structure.port_label(wire.to);
-        let far = structure.name(peer.module);
         let name = if peer.output {
-            format!("{far} {from_label} to {to_label}")
+            format!("{} to {}", structure.named_port(peer), structure.port_label(wire.to))
         } else {
-            format!("{from_label} to {far} {to_label}")
+            format!("{} to {}", structure.port_label(wire.from), structure.named_port(peer))
         };
         choices.entry(peer.module).or_insert(Choice { target, name });
     }
