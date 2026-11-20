@@ -2,7 +2,7 @@
 
 <!-- Generated from the module's descriptor by `loom modules --markdown`. Edit the descriptor, not this part. -->
 
-A sawtooth wave, with every harmonic, at the pitch or shaped from a phase cable. Its sharp edges are smoothed so high notes stay clean.
+A sawtooth wave at the pitch, with every harmonic and smoothed edges for clean high notes. Connect a Phase module to the Phase input to drive it with a cable.
 
 | | |
 |---|---|

@@ -230,6 +230,11 @@ impl Learn {
         self.armed = Some(Armed { param, serial });
     }
 
+    /// The parameter whose mapping options rows are open.
+    pub fn open_options(&self) -> Option<Param> {
+        self.options_open
+    }
+
     /// True if `param`'s mapping options rows are open.
     pub fn options_open(&self, param: Param) -> bool {
         self.options_open == Some(param)
@@ -245,6 +250,11 @@ impl Learn {
     /// The draft in `param`'s range fields, if any.
     pub fn range_draft(&self, param: Param) -> Option<&RangeDraft> {
         self.range_draft.as_ref().filter(|draft| draft.param == param)
+    }
+
+    /// Whether the open MIDI range has text being edited.
+    pub fn has_range_draft(&self) -> bool {
+        self.range_draft.is_some()
     }
 
     /// Sets or clears the draft in the range fields.

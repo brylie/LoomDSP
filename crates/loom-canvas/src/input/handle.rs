@@ -77,7 +77,8 @@ impl CanvasModel<'_> {
                     && matches!(key, Key::Up | Key::Down | Key::Enter | Key::Escape))
                     || (self.focus_policy.matrix_keyboard && !modifiers.shortcut())
                     || (self.focus_policy.text_field_keys
-                        && (self.focus_policy.text_field_keeps_tab || !matches!(key, Key::Tab)))
+                        && (!matches!(key, Key::Tab)
+                            || self.focus_policy.text_field_keeps_tab[usize::from(modifiers.shift)]))
             }
             _ => false,
         };
@@ -202,6 +203,7 @@ impl CanvasModel<'_> {
                     // A new frame key means a new patch: its lights have to
                     // be reported again, even if the list looks the same.
                     state.reported_lights = None;
+                    state.reported_full_traces = None;
                     state.animation = None;
                     // Module IDs repeat between patches, so an old pin could
                     // land on an unrelated output.
@@ -209,6 +211,7 @@ impl CanvasModel<'_> {
                     out.redraw();
                     self.emit(out, CanvasEvent::Camera(state.camera));
                 }
+                self.relocate_hidden_focus(state);
                 // A focus request waits while something else has the
                 // input: the app would drop the events it makes, and the
                 // request would be used up. It is applied on the first

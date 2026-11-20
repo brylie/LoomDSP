@@ -360,6 +360,28 @@ fn no_built_in_tile_text_is_cut_or_overlaps() {
             }
             boxes.push((item.content.to_string(), text));
         });
+        loom_canvas::for_each_tile_text(&module, |mut item| {
+            let loom_canvas::TextKind::Caption(index) = item.kind else {
+                return;
+            };
+            let widget = &module.panel.widgets[index];
+            if !widget.value_replaces_caption() {
+                return;
+            }
+            let caption = item.bounds();
+            // An unusually long value exercises the full available width
+            // regardless of the parameter's default or a user-defined range.
+            item.content = item.fit_value(&module, "100000000000.0 kHz");
+            let value = item.bounds();
+            for (name, bounds) in boxes.iter().filter(|(_, bounds)| *bounds != caption) {
+                if value
+                    .intersection(*bounds)
+                    .is_some_and(|i| i.width > 0.01 && i.height > 0.01)
+                {
+                    problems.push(format!("{}: the value for {} overlaps {name}", d.id, widget.label));
+                }
+            }
+        });
     }
     assert!(problems.is_empty(), "{problems:#?}");
 }

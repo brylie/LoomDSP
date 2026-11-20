@@ -125,7 +125,7 @@ The library browser (M4) is specified with the library (FR-SHARE-04). Your patch
 FR-SHARE-06, [#246](https://github.com/brylie/LoomDSP/issues/246).
 
 - **Where patches are found:** the library folder ([preferences](preferences.md), by default `LoomDSP/Library` in Documents), with its subfolders. It holds the player's patches and saved sub-patches alike. Save and Save As start in the last folder used in a dialog when the patch has no file yet, and otherwise here ([files](files.md)). A patch elsewhere still opens with File > Open, but is not listed. *Why:* one folder to back up and one place to look.
-- **Opening:** File > Browse patches, or **Ctrl+Shift+O** (Cmd+Shift+O), opens an overlay over the canvas, like the [module browser](module-browser.md).
+- **Opening:** File > Browse patches, or **Ctrl+Shift+O** (Cmd+Shift+O), opens an overlay over the canvas, like the [module browser](module-browser.md). The shortcut applies when the canvas owns input.
 - **What it shows:** a search field, the author, tag, and licence filters above, and a list. Each row shows the name, authors, tags as chips, the licence's short name, and the date changed. Newest first. A file that does not load shows its file name and "Could not read", and cannot be opened from here.
 - **Search** matches the name, description, and tags, ignoring case. It combines with the filters (all must match).
 - **Keys:** typing goes to the search field. Up and Down move in the list. Enter opens the highlighted patch, asking first about unsaved changes as Open does. Escape closes the overlay. Tab moves between the search and Author fields (NFR-UX-01). The licence filters still need a pointer: see **Tab to the filters** below.

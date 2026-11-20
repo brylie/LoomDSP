@@ -501,6 +501,79 @@ pub struct DrivesLine {
 }
 
 impl App {
+    /// Whether MIDI clock owns this parameter, leaving no editor on its row.
+    fn midi_clock_owns(&self, node: &loom_core::Node, spec: &ParamSpec) -> bool {
+        node.descriptor.role.is_transport()
+            && self.session.controller.follows_midi_clock()
+            && matches!(spec.name, "tempo" | "run" | "reset")
+    }
+
+    /// The parent of a slot's parameter rows, keyed by its current part so
+    /// a swap makes new elements (ui-layer.md, section 4).
+    fn slot_param_parent(&self, slot: u32, part: ModuleId) -> Option<UiId> {
+        let panel = ids::panel(slot);
+        let graph = self.session.controller.graph();
+        let hierarchy = &self.session.hierarchy;
+        match graph.node(part) {
+            Some(node) => Some(panel.with(node.descriptor.id)),
+            None => hierarchy
+                .key_at(&hierarchy.path_of(part))
+                .map(|key| panel.with("subpatch").with(key)),
+        }
+    }
+
+    /// The selected inspector row that edits this parameter, without building
+    /// the inspector model. On a slot, role rows come before other rows.
+    pub(crate) fn inspected_param_id(&self, module: ModuleId, index: usize) -> Option<UiId> {
+        let mut selected = self.session.selection.iter();
+        let (Some(&tile), None) = (selected.next(), selected.next()) else {
+            return None;
+        };
+        if self.right_tab != crate::RightTab::Inspector {
+            return None;
+        }
+        let graph = self.session.controller.graph();
+        let hierarchy = &self.session.hierarchy;
+        let node = graph.node(module)?;
+        let spec = node.control_spec(index)?;
+        if self.midi_clock_owns(node, &spec) {
+            return None;
+        }
+        let own = || ids::row(module.0, ids::Kind::Param, spec.name);
+        let slot = hierarchy.slot(ModuleId(tile));
+        let part = if slot.is_some() {
+            hierarchy.part_of_slot(ModuleId(tile))?
+        } else {
+            ModuleId(tile)
+        };
+        if part == module {
+            if spec.is_transient() || (slot.is_none() && node.unknown.is_some()) {
+                return None;
+            }
+            return Some(
+                slot.and_then(|_| self.slot_param_parent(tile, part))
+                    .map_or_else(own, |parent| parent.with(ids::Kind::Param.key()).with(spec.name)),
+            );
+        }
+        let definition = hierarchy.definition_of(part)?;
+        let (_, exposed) = definition
+            .exposed
+            .iter()
+            .enumerate()
+            .filter(|(surface_index, _)| {
+                self.control_target(part.0, *surface_index, loom_canvas::ControlPart::Main)
+                    .is_some_and(|target| target.module == module && target.index == index)
+            })
+            .min_by_key(|(_, exposed)| slot.is_some_and(|slot| slot.role.param(&exposed.name).is_none()))?;
+        let kind = ids::Kind::Exposed;
+        Some(match slot {
+            Some(_) => self
+                .slot_param_parent(tile, part)
+                .map_or_else(own, |parent| parent.with(kind.key()).with(exposed.name.as_str())),
+            None => ids::row(tile, kind, &exposed.name),
+        })
+    }
+
     /// Handles a message from the inspector. A submitted value also moves
     /// focus, as an effect.
     pub(crate) fn inspector_message(&mut self, message: Message) {
@@ -608,9 +681,7 @@ impl App {
         };
         let spec = &filtered;
         let stored = *node.params.get(index)?;
-        let clock = d.role.is_transport()
-            && self.session.controller.follows_midi_clock()
-            && matches!(spec.name, "tempo" | "run" | "reset");
+        let clock = self.midi_clock_owns(node, spec);
         let value = match spec.name {
             "tempo" if clock => self
                 .session
@@ -827,18 +898,8 @@ impl App {
         };
         let names = modulation::Names::new(graph, hierarchy);
         let part = hierarchy.part_of_slot(ModuleId(id));
-        // A slot's rows are its part's, keyed under the part as its tile
-        // controls are, so a swap makes new elements (ui-layer.md,
-        // section 4). A part with no key keeps the rows' own IDs.
-        let under = part.and_then(|part| {
-            let slot = ids::panel(id);
-            match graph.node(part) {
-                Some(node) => Some(slot.with(node.descriptor.id)),
-                None => hierarchy
-                    .key_at(&hierarchy.path_of(part))
-                    .map(|key| slot.with("subpatch").with(key)),
-            }
-        });
+        // A part with no key keeps the rows' own IDs.
+        let under = part.and_then(|part| self.slot_param_parent(id, part));
         let keyed = |mut row: ParamRow, kind: ids::Kind, name: &str| {
             if let Some(under) = &under {
                 row.ui = under.clone().with(kind.key()).with(name);

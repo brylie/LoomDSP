@@ -146,6 +146,7 @@ These rules hold for every widget. Each widget section below says only what diff
 - **Bad text:** text that is not a number in that unit gives the field an outline in the warning style with a short reason on a line below it, or above it at the canvas's bottom edge ("Not a number in Hz"). Enter then does nothing, and the text stays to be corrected. *Why:* a typo must never become a value.
 - **MIDI learn and modulation** are unchanged. A typed value sets the base value, as a drag does.
 - **The field:** the canvas draws it at a fixed screen size. It has a caret, with Left, Right, Backspace, and Delete. There is no paste. While it is open it takes every key except the panic shortcut. The caret does not blink, because a blink would wake the UI (rule 7).
+- **Long text:** Scroll the text within the field to keep the caret visible.
 - **Moving focus away:** Tab, a press outside, a pan, a zoom, the window losing focus, or the widget being removed or hidden closes the field with no change. Tab then moves focus as usual.
 - **Unchanged text:** Enter closes the field with no edit and no undo step. *Why:* the text shown is rounded, so committing it would change the value.
 - **MIDI learn:** no field opens. Digits do nothing, and Enter arms the control.
@@ -238,6 +239,8 @@ A row of joined buttons, one per choice name. The chosen one is filled in the va
 - **MIDI learn:** a controller sweeps through the choices.
 - **Middle zoom:** the segments as shapes, the chosen one filled, and a bar for each name.
 - *Why a new widget, not radio buttons in a row:* a segment is a button the size of its name, which is easier to hit than a small dot, and the filled segment reads as the current choice from across a room.
+
+Wheel scrolling keeps the highlighted row visible. When it would leave the list's visible rows, move the highlight to the nearest visible row, so Enter always picks a visible option.
 
 ### Radio buttons or a select list?
 

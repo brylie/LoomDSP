@@ -195,14 +195,9 @@ impl App {
         self.overlays.owner()
     }
 
-    /// True when no overlay or dialog panel is open over the canvas. A small
-    /// menu on the canvas does not count. That is why the menus come last in
-    /// [`InputOwner`].
+    /// Whether the canvas owns input, including its editor and shortcuts.
     pub(crate) fn no_overlay(&self) -> bool {
-        matches!(
-            self.input_owner(),
-            InputOwner::Canvas | InputOwner::ProbeMenu | InputOwner::TileMenu
-        )
+        self.input_owner() == InputOwner::Canvas
     }
 
     /// True while a pointer press reaches the window's own parts: a tile
@@ -235,7 +230,7 @@ impl App {
             jump_keyboard: self.session.outline.has_jump(),
             matrix_escape: matrix && self.session.matrix.edit.is_none() && self.session.matrix.add.is_none(),
             text_field_keys: self.focus.is_some(),
-            text_field_keeps_tab: self.tab_moves_between_fields(self.focus.as_ref()),
+            text_field_keeps_tab: self.text_field_tabs(self.focus.as_ref()),
         }
     }
 

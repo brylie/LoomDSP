@@ -74,27 +74,41 @@ impl App {
     /// The text fields Tab moves between in the view on top now. None when
     /// that view has fewer than two.
     pub(crate) fn tab_fields(&self) -> Vec<UiId> {
-        if self.overlays.patches().is_some() {
+        if self.input_owner() == crate::input_owner::InputOwner::Patches {
             crate::patches::text_fields().to_vec()
-        } else if self.no_overlay() && self.right_tab == RightTab::Inspector && self.session.selection.is_empty() {
-            crate::patch_info::text_fields().to_vec()
+        } else if self.no_overlay() && self.right_tab == RightTab::Inspector {
+            if self.session.selection.is_empty() {
+                crate::patch_info::text_fields().to_vec()
+            } else {
+                self.midi_range_fields().map_or_else(Vec::new, |fields| fields.to_vec())
+            }
         } else {
             Vec::new()
         }
     }
 
-    /// True when the focused text field is one Tab moves on from, to the next
-    /// field of its view. Any other field closes on Tab instead
+    /// Whether Tab and Shift+Tab stay within the focused field's view, in
+    /// that order. Any other field closes on Tab instead
     /// (panel-widgets.md, Typing a value).
-    pub(crate) fn tab_moves_between_fields(&self, focused: Option<&UiId>) -> bool {
-        focused.is_some_and(|focused| self.tab_fields().contains(focused))
+    pub(crate) fn text_field_tabs(&self, focused: Option<&UiId>) -> [bool; 2] {
+        let Some(focused) = focused else { return [false; 2] };
+        if self.no_overlay() && !self.session.selection.is_empty() {
+            // In the inspector, only a step within the pair stays in the field.
+            return self
+                .midi_range_fields()
+                .map_or([false; 2], |[low, high]| [*focused == low, *focused == high]);
+        }
+        [self.tab_fields().contains(focused); 2]
     }
 
     /// True while the window's own Tab order has fields among the
     /// runtime's stops: patch info's, with no overlay open, and the runtime
     /// has a stop to hand Tab on to (ui-layer.md, section 6, rule 3).
     pub(crate) fn fields_among_ours(&self) -> bool {
-        self.no_overlay() && !self.tab_fields().is_empty() && !self.our_stops().is_empty()
+        self.no_overlay()
+            && self.session.selection.is_empty()
+            && !self.tab_fields().is_empty()
+            && !self.our_stops().is_empty()
     }
 
     /// Tab or Shift+Tab between the fields of the view on top: the next one
@@ -102,10 +116,13 @@ impl App {
     /// stats bar's first stop, or the top run's first when the bar has
     /// none; before its first, to the top run's last stop (Brylie's
     /// decision, 2026-11-18), or the bar's last when the top run has none.
-    /// With no stop of the runtime's, and in an overlay, the fields loop as
-    /// before. With no field of the view in focus it changes nothing: Tab
-    /// from nothing is the canvas's (section 6, rule 3).
+    /// Patch info loops with no runtime stop, and overlay fields loop.
+    /// At either end of the MIDI range pair or with no field focused, the
+    /// canvas takes Tab (section 6, rule 3).
     pub(crate) fn tab_between_fields(&mut self, focused: Option<&UiId>, backwards: bool) {
+        if !self.text_field_tabs(focused)[usize::from(backwards)] {
+            return;
+        }
         let fields = self.tab_fields();
         let at = focused.and_then(|focused| fields.iter().position(|field| field == focused));
         let next = match at {
@@ -422,6 +439,7 @@ impl App {
         };
         // An armed parameter is a mode, not an edit: undo disarms it first.
         self.session.learn.disarm();
+        self.session.learn.set_range_draft(None);
         let applied = self.apply_step(&step, forward, room);
         if let Err(StepRefusal::NoRoom) = applied {
             // Taken back whole, before anything reached the engine: the

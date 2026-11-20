@@ -461,7 +461,10 @@ fn physical_size(logical: Size, scale: f32) -> Result<Size<u32>, String> {
 fn camera(scene: &Scene, size: loom_ui_core::Size, zoom: Option<f32>, centre: Option<Point>) -> Camera {
     let mut framed = Camera::default();
     if let Some(world) = scene.bounds() {
-        framed.frame(world, size);
+        framed.frame_readable(world, size, loom_canvas::READABLE_ZOOM);
+    }
+    if zoom.is_none() && centre.is_none() {
+        return framed;
     }
     let zoom = zoom.unwrap_or(framed.zoom).clamp(MIN_ZOOM, MAX_ZOOM);
     let centre = centre.unwrap_or_else(|| framed.to_world(Point::new(size.width / 2.0, size.height / 2.0)));

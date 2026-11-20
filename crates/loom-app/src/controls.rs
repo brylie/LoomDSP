@@ -4,7 +4,7 @@
 //! `docs/design/modulation.md`).
 
 use crate::{App, Message, learn, modulation};
-use loom_core::{MidiMappingOptions, ModuleId, ModuleNames, OutputRef};
+use loom_core::{MidiMappingOptions, MidiMode, ModuleId, ModuleNames, OutputRef};
 use loom_ui_core::UiId;
 use std::time::Instant;
 
@@ -238,6 +238,9 @@ impl App {
                 .set_midi_options(ModuleId(module), index, options)
             {
                 Ok(Some(_)) => {
+                    if app.session.learn.range_draft((module, index)).is_some() {
+                        app.session.learn.set_range_draft(None);
+                    }
                     app.commit();
                 }
                 Ok(None) => {}
@@ -407,6 +410,13 @@ impl App {
         {
             self.session.value_draft = None;
         }
+        if self.session.learn.has_range_draft()
+            && !focus
+                .as_ref()
+                .is_some_and(|part| self.midi_range_fields().is_some_and(|fields| fields.contains(part)))
+        {
+            self.session.learn.set_range_draft(None);
+        }
         let gained = focus
             .clone()
             .filter(|part| self.focus.as_ref() != Some(part) && self.is_value_field(part));
@@ -429,13 +439,25 @@ impl App {
         }
     }
 
-    /// Every row with a value field the inspector shows now, with the
+    /// The two fields of the visible, open MIDI mapping, if it has a range.
+    pub(crate) fn midi_range_fields(&self) -> Option<[UiId; 2]> {
+        let (module, index) = self.session.learn.open_options()?;
+        let graph = self.session.controller.graph();
+        let (_, mapping) = graph.midi_mapping_of(ModuleId(module), index)?;
+        if matches!(mapping.options.mode, MidiMode::Relative(_)) {
+            return None;
+        }
+        let row = self.inspected_param_id(ModuleId(module), index)?;
+        Some(["midi/low", "midi/high"].map(|part| crate::inspector::ids::part(&row, part)))
+    }
+
+    /// Every parameter row of the inspector, with the
     /// module whose parameter it edits: a module's own parameters, a
     /// sub-patch tile's exposed rows, and a slot's parameters, each under
     /// the inner module that owns the parameter, as its draft is.
-    fn value_rows(&self) -> Vec<(u32, crate::inspector::ParamRow)> {
+    fn parameter_rows(&self) -> Vec<(u32, crate::inspector::ParamRow)> {
         use crate::inspector::Inspector;
-        let rows: Vec<_> = match self.inspector_model() {
+        match self.inspector_model() {
             Inspector::Module(rows) => {
                 let id = rows.id;
                 rows.params.into_iter().map(|p| (id, p)).collect()
@@ -448,15 +470,15 @@ impl App {
                 .map(|(_, module, p)| (module, p))
                 .collect(),
             _ => Vec::new(),
-        };
-        rows.into_iter().filter(|(_, row)| row.field.is_some()).collect()
+        }
     }
 
     /// Every value field the inspector shows now, as (module, parameter
-    /// index, the field's part), from [`Self::value_rows`].
+    /// index, the field's part), from [`Self::parameter_rows`].
     fn value_fields(&self) -> Vec<(u32, usize, UiId)> {
-        self.value_rows()
+        self.parameter_rows()
             .into_iter()
+            .filter(|(_, row)| row.field.is_some())
             .map(|(module, row)| (module, row.index, crate::inspector::ids::part(&row.ui, "field")))
             .collect()
     }
@@ -469,8 +491,9 @@ impl App {
     /// share them (control-ranges.md, Showing the value).
     fn shown_value_text(&self, module: u32, index: usize) -> Option<String> {
         if let Some((_, row)) = self
-            .value_rows()
+            .parameter_rows()
             .into_iter()
+            .filter(|(_, row)| row.field.is_some())
             .find(|(m, row)| (*m, row.index) == (module, index))
         {
             return Some(row.value);
@@ -509,8 +532,12 @@ impl App {
     /// Tab in a text field on the main view: it closes the field, as on the
     /// canvas. The canvas has taken the same key and moved its focus. The matrix
     /// and the windows over the canvas have their own use of the keys.
-    pub(crate) fn text_field_tab(&mut self, focused: Option<&UiId>) {
-        if focused.is_none() || self.matrix_has_keys() || !self.no_overlay() || self.tab_moves_between_fields(focused) {
+    pub(crate) fn text_field_tab(&mut self, focused: Option<&UiId>, backwards: bool) {
+        if focused.is_none()
+            || self.matrix_has_keys()
+            || !self.no_overlay()
+            || self.text_field_tabs(focused)[usize::from(backwards)]
+        {
             return;
         }
         self.session.value_draft = None;
@@ -770,7 +797,9 @@ pub(crate) fn text_focus_event(
             key: keyboard::Key::Named(Named::Tab),
             modifiers,
             ..
-        }) if !(modifiers.control() && !modifiers.alt()) => Some(Message::TextFieldTab),
+        }) if !modifiers.command() && !modifiers.control() && !modifiers.alt() => Some(Message::TextFieldTab {
+            backwards: modifiers.shift(),
+        }),
         iced::Event::Keyboard(keyboard::Event::KeyPressed {
             key: keyboard::Key::Named(Named::Escape),
             ..

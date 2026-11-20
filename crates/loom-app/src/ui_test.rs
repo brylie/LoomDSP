@@ -175,7 +175,9 @@ fn example_copy_owned(patch: &str) -> (PathBuf, Option<PathBuf>) {
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("{COPY_PREFIX}{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("a folder for the copy");
-    let copy = dir.join(patch);
+    // Named by the source file alone, so a relative name with `..` in it
+    // still puts the copy inside the folder made for it.
+    let copy = dir.join(source.file_name().expect("an example is a file"));
     std::fs::copy(&source, &copy).unwrap_or_else(|why| panic!("copy {patch}: {why}"));
     (copy, Some(dir))
 }

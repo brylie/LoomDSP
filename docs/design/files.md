@@ -139,6 +139,9 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 - **Dropping files on the window.** One `.ron` file opens, with the unsaved-changes question. Several files open the first `.ron` among them, whatever comes before it, and say `Opened "<name>". Drop one patch at a time.`, keeping any notes about what loaded differently. When no file is `.ron`, the app says `Only LoomDSP patches (.ron) can be opened here.` A drop while a question is open is ignored, with a status line. Other overlays close only after a successful open, so Cancel changes nothing. *Why open and not insert:* inserting is the module browser's job ([sub-patches](sub-patches.md#library)). On Wayland, the window system library does not report dropped files yet ([#572](https://github.com/brylie/LoomDSP/issues/572)), so use Open or Recent there.
 - **Acceptance:** the list holds 10, newest first, and survives a restart; a missing file is dimmed and removed when chosen; the dialog starts in the remembered folder; dropping one file opens it after the question, several open the first, others show the message (tests, and a manual check of dropping on each platform).
 
+- If New or Open replaces the patch while a drop is still being collected, discard the pending drop and say “The dropped file was not opened: the patch changed first.”
+- A successful drop closes Preferences through its usual close action, saving the name and cancelling panic learn. Cancel and failed opens leave Preferences as it was. New and Open keep the default licence chooser open over Preferences. The patch's own licence chooser closes with its patch.
+
 ## Out of scope
 
 - Several patches in several windows (later; needs one engine per window).
