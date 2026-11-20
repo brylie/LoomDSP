@@ -83,6 +83,8 @@ loom-analysis.workspace = true
 loom-patch = { workspace = true, features = ["test-follows"] }
 # `test-ui`: lets the tests in `tests/` import `Ui`.
 loom-app = { path = ".", features = ["test-ui"] }
+# `testing`: the recording painter, so a test reads what the runtime paints.
+loom-ui = { workspace = true, features = ["shell", "testing"] }
 
 [lints]
 workspace = true

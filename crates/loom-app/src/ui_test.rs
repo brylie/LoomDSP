@@ -440,6 +440,38 @@ impl Ui {
         self.bridge.take_log()
     }
 
+    /// Every text the runtime paints in `layer` now, with the box it is
+    /// placed in, in logical pixels: the room its element gives it, which
+    /// holds its ink. For tests that check what sits next to what.
+    pub(crate) fn painted_texts(&mut self, layer: loom_ui::Layer) -> Vec<(String, Rect)> {
+        use loom_ui::paint::{Align, Vertical, testing::Painted};
+        self.lay_out_panels();
+        let style = crate::iced_bridge::paint::panel_style(&self.app().theme());
+        let mut recorder = loom_ui::paint::testing::Recorder::default();
+        let (_, _, mut panels) = self.bridge.runtime_mut().parts();
+        panels.paint(layer, &mut recorder, &style);
+        recorder
+            .painted
+            .iter()
+            .filter_map(|painted| match painted {
+                Painted::Text { text, run } => {
+                    let (w, h) = (run.bounds.width, run.bounds.height);
+                    let x = match run.align {
+                        Align::Left => run.anchor.x,
+                        Align::Center => run.anchor.x - w / 2.0,
+                        Align::Right => run.anchor.x - w,
+                    };
+                    let y = match run.vertical {
+                        Vertical::Center => run.anchor.y - h / 2.0,
+                        Vertical::Top => run.anchor.y,
+                    };
+                    Some((text.clone(), Rect::new(Point::new(x, y), loom_ui_core::Size::new(w, h))))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Lays out the runtime's own panels, as the window does before each
     /// frame, so hits and focus read what was drawn.
     pub(crate) fn lay_out_panels(&mut self) {

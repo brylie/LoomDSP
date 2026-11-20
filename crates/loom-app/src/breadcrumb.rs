@@ -122,8 +122,10 @@ fn breadcrumb(panel: &Panel) -> Element {
         }
         parts.push(entry(crumb));
     }
+    // As wide as the toolbar's, so a focused entry's ring clears the "›"
+    // beside it (Brylie's decision, 2026-11-20).
     let row = Element::row(parts)
-        .spacing(2.0)
+        .spacing(style::BUTTON_SPACING)
         .padding(Padding::symmetric(2.0, 8.0))
         .align_y(Align::Center)
         .width(Length::FILL)

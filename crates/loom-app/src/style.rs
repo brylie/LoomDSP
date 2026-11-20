@@ -54,6 +54,13 @@ pub const fn top_height(inside: bool) -> f32 {
 /// as Iced's buttons had.
 pub const BUTTON_PADDING: loom_ui::Padding = loom_ui::Padding::symmetric(5.0, 10.0);
 
+/// The space between buttons side by side: within a toolbar group, and
+/// between the breadcrumb's entries and their separators. At least the
+/// focus ring's reach (its offset and its width) plus a margin, so a ring
+/// never covers a neighbour's fill or its text (ui-layer.md, section 6,
+/// rule 3; `no_focus_ring_reaches_a_neighbour`).
+pub const BUTTON_SPACING: f32 = 6.0;
+
 /// The width of a rule between parts of the window.
 pub const RULE: f32 = 1.0;
 
