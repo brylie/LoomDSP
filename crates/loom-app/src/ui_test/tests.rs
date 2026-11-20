@@ -3228,3 +3228,104 @@ fn a_relative_example_name_copies_inside_its_folder() {
     drop(ui);
     assert!(!folder.exists(), "and the folder goes with its Ui");
 }
+
+/// Opens the probe menu with a right-click on the first cable's output,
+/// while the inspector's cutoff field on module 4 has the keys: a right
+/// press leaves a text field focused.
+fn menu_over_a_focused_value_field(ui: &mut Ui) {
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.redraw();
+    let field = ui.value_field(4, 0);
+    ui.move_to(field);
+    ui.press();
+    ui.release();
+    ui.redraw();
+    assert!(ui.text_field_focused(), "the field has the keys");
+    let (from, _) = ui.app().session.controller.graph().cables().next().expect("a cable");
+    let name = ui
+        .app()
+        .session
+        .controller
+        .graph()
+        .node(from.module)
+        .expect("its module")
+        .descriptor
+        .outputs[from.port]
+        .name;
+    let out = ui.output(from.module.0, name);
+    ui.move_to(out);
+    ui.step(&[iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+        iced::mouse::Button::Right,
+    ))]);
+    ui.step(&[iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+        iced::mouse::Button::Right,
+    ))]);
+    ui.redraw();
+    assert!(ui.app().overlays.probe_menu().is_some(), "the menu is open");
+}
+
+/// Typing and Enter in an inspector field the probe menu covers change
+/// nothing: before the guard, "777" and Enter set the filter's cutoff from
+/// 300 to 777 under the open menu (found 2026-11-20). A field's messages
+/// are heard only while its view owns the input (`Message::field_view`).
+#[test]
+fn a_field_under_the_probe_menu_changes_nothing() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let mut ui = Ui::open("subtractive.ron");
+    let cutoff = |ui: &Ui| {
+        ui.app()
+            .session
+            .controller
+            .graph()
+            .node(loom_core::ModuleId(4))
+            .expect("the filter")
+            .params[0]
+    };
+    let before = cutoff(&ui);
+    let unsaved = ui.app().unsaved();
+    menu_over_a_focused_value_field(&mut ui);
+    ui.typewrite("777");
+    ui.tap(Key::Named(Named::Enter), Modifiers::default());
+    ui.redraw();
+    assert_eq!(cutoff(&ui), before, "the patch is unchanged");
+    assert!(ui.app().session.value_draft.is_none(), "no draft under the menu");
+    assert_eq!(ui.app().unsaved(), unsaved, "nothing to save");
+}
+
+/// Typing in patch info's Authors field under the licence chooser, which a
+/// screen reader's Click on Choose opened with the field still focused,
+/// changes nothing (found 2026-11-20).
+#[test]
+fn a_field_under_the_licence_chooser_changes_nothing() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.focus(&crate::patch_info::authors_part());
+    ui.redraw();
+    let authors = |ui: &Ui| ui.app().session.document.info().authors.clone();
+    let before = authors(&ui);
+    let choose = crate::inspector::ids::part(&crate::inspector::ids::patch(), "choose_licence");
+    ui.a11y_action(&choose, accesskit::Action::Click);
+    ui.redraw();
+    assert!(ui.app().overlays.chooser.is_some(), "the chooser is open");
+    ui.typewrite("Zq");
+    ui.redraw();
+    assert_eq!(authors(&ui), before, "the authors are unchanged");
+}
+
+/// A field's messages still work in the view that owns the input: the
+/// same field, with nothing over the canvas, takes a value.
+#[test]
+fn a_field_in_the_view_that_owns_the_input_still_works() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.redraw();
+    ui.type_a_value(4, 0, "777");
+    let cutoff = ui
+        .app()
+        .session
+        .controller
+        .graph()
+        .node(loom_core::ModuleId(4))
+        .expect("the filter")
+        .params[0];
+    assert_eq!(cutoff, 777.0);
+}
