@@ -478,7 +478,7 @@ impl<D: BridgeDriver> Bridge<D> {
         &mut self,
         run: impl FnOnce(&mut Runtime<Hosted, IcedTarget>, Instant, &mut D) -> loom_ui::Next,
     ) -> Task<Bridged> {
-        let now = Instant::now();
+        let now = self.runtime.app().0.clock.now();
         let next = run(&mut self.runtime, now, &mut self.driver);
         let mut tasks = self.driver.take_tasks();
         // The window's work, one after another: focus and scroll first,
