@@ -243,7 +243,16 @@ impl<A: App> Panels<'_, A> {
             let whole = Rect::new(Point::ORIGIN, self.size);
             let shows = self.window.ring_clip(&id).map_or(whole, |clip| cut(whole, clip));
             painter.begin_layer(shows);
-            painter.quad(ring(bounds, self.window.radius_of(&id), style.ring));
+            // A link that wraps has a ring around its words on each line,
+            // not one around both lines and the words between.
+            let pieces = self.window.pieces(&id);
+            let radius = self.window.radius_of(&id);
+            if pieces.is_empty() {
+                painter.quad(ring(bounds, radius, style.ring));
+            }
+            for piece in pieces {
+                painter.quad(ring(piece, radius, style.ring));
+            }
             painter.end_layer();
         }
     }
@@ -382,7 +391,7 @@ impl Layout {
                     }
                     continue;
                 }
-                painter.text(&TextRun {
+                let run = TextRun {
                     text: text.text,
                     anchor: content.position(),
                     // A wrapping text breaks its lines at the width it was
@@ -401,7 +410,12 @@ impl Layout {
                         .or(tint)
                         .unwrap_or(style.text),
                     clip: shows,
-                });
+                };
+                if text.spans.is_empty() {
+                    painter.text(&run);
+                } else {
+                    painter.text_spans(&run, text.spans);
+                }
             }
             if look.clip {
                 painter.begin_layer(bounds);

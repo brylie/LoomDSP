@@ -106,7 +106,7 @@ fn kinds(recorder: &Recorder, from: usize) -> String {
             Painted::Begin(_) => 'B',
             Painted::Quad(_) => 'Q',
             Painted::Segment(_) => 'S',
-            Painted::Text { .. } => 'T',
+            Painted::Text { .. } | Painted::Spans { .. } => 'T',
             Painted::End => 'E',
         })
         .collect()

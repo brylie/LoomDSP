@@ -918,3 +918,38 @@ fn a_report_waiting_in_the_queue_runs_before_the_next_key() {
         ]
     );
 }
+
+/// A link inside a rich text has a node of its own, a link with Click and
+/// Focus and the bounds of its words, held by the paragraph's node when
+/// the paragraph has one, and the tree reports focus on it.
+#[test]
+fn a_link_has_a_node_of_its_own() {
+    use crate::access::{Access, Action, Role};
+    use crate::element::Inline;
+    let mut window = crate::window::Window::default();
+    let link = Inline::new("Saw").link("saw", Access::new(Role::Link, "Saw").action(Action::Click));
+    let notes = Element::rich([Inline::new("See "), link], STYLE)
+        .key("notes")
+        .access(Access::label("See Saw"));
+    window.sync(vec![(
+        UiId::panel("help"),
+        Layer::Panels,
+        Some(Element::column([notes])),
+    )]);
+    window.lay_out(Size::new(400.0, 200.0), &mut Mono::default());
+    let saw = UiId::panel("help").with("notes").with("saw");
+    assert_eq!(window.stops(), std::slice::from_ref(&saw));
+    let mut ids = IdTable::new();
+    let nodes = window.access_nodes(&mut ids, 1.0, Some(&saw));
+    let link_id = accesskit::NodeId(ids.number(&saw));
+    let notes_id = accesskit::NodeId(ids.number(&UiId::panel("help").with("notes")));
+    assert_eq!(nodes.focus, Some(link_id));
+    let node = |id| &nodes.nodes.iter().find(|(node, _)| *node == id).expect("a node").1;
+    let link = node(link_id);
+    assert_eq!(link.role(), accesskit::Role::Link);
+    assert!(link.supports_action(accesskit::Action::Click) && link.supports_action(accesskit::Action::Focus));
+    let bounds = link.bounds().expect("its words' place");
+    // STYLE is 16 pixels at the fake's 8 a character: "See " is 32 wide.
+    assert_eq!((bounds.x0, bounds.y0, bounds.x1, bounds.y1), (32.0, 0.0, 56.0, 16.0));
+    assert!(node(notes_id).children().contains(&link_id), "inside its paragraph");
+}
