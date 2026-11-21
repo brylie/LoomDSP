@@ -7,11 +7,7 @@
 //! (`Message::allowed_during_question` in `lib.rs`), and each question
 //! carries what to do after its answer.
 
-use crate::Element;
 use crate::files;
-use crate::style::{self, button};
-use iced::Length;
-use iced::widget::{column, container, opaque, row, space, text};
 use loom_patch::Patch;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -223,41 +219,6 @@ impl Question {
             primary: self.primary.name(),
         }
     }
-
-    /// The question, as a panel over everything else. The highlight has an
-    /// outline as well as a colour, so it does not rest on colour alone.
-    pub fn view(&self) -> Element<'_, Message> {
-        let (title, words) = self.words();
-        let mut buttons = row![space::horizontal()].spacing(8);
-        for (i, &answer) in self.answers().iter().enumerate() {
-            let press = button(text(answer.label()).size(style::CONTROL)).on_press(Message::Answer(answer));
-            let press = if answer == self.primary {
-                press.style(style::primary)
-            } else {
-                press
-            };
-            // Each answer is named by its UI ID, so the window says where it
-            // is (`overlays/access.rs`).
-            let press = crate::inspector::ids::named(&crate::overlays::access::answer_id(answer.name()), press);
-            buttons = buttons.push(container(press).padding(2).style(style::card(i == self.highlight)));
-        }
-        let panel = column![
-            text(title).size(style::TITLE),
-            text(words).size(style::BODY),
-            buttons.align_y(iced::Alignment::Center),
-        ]
-        .spacing(12);
-        opaque(
-            container(crate::inspector::ids::named(
-                &crate::overlays::access::question_id(),
-                container(panel).padding(16).width(460).style(container::rounded_box),
-            ))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center(Length::Fill)
-            .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
-        )
-    }
 }
 
 /// What a key press means while the question owns the input, from the
@@ -286,6 +247,8 @@ pub(crate) fn key_of(key: &loom_ui_core::KeyEvent) -> Option<crate::Message> {
     };
     Some(crate::Message::Question(message))
 }
+
+mod panel;
 
 #[cfg(test)]
 mod tests;

@@ -318,7 +318,6 @@ fn shortcuts_do_nothing_behind_the_question() {
     assert_eq!(modules(ui.app()), count, "New did nothing");
     ui.tap(Key::Named(Named::Backspace), Modifiers::empty());
     assert_eq!(modules(ui.app()), count, "Delete did nothing");
-    ui.tap(Key::Named(Named::Space), Modifiers::empty());
     ui.tap(Key::Named(Named::F1), Modifiers::empty());
     assert!(ui.app().overlays.help.is_none(), "help stays closed");
     assert_eq!(model(&ui), before, "the question stays as it was");
@@ -480,4 +479,19 @@ fn keys_under_the_question_never_reach_the_app() {
         clipboard,
         "the clipboard is the same"
     );
+}
+
+/// Space clicks the focused answer when it comes up, as on any button
+/// (ui-layer.md, section 3, rule 4; row 3b): the question opens with its
+/// safe answer focused, so Space gives that answer.
+#[test]
+fn space_gives_the_focused_answer() {
+    let mut ui = changed();
+    ui.send(AppMessage::File(FileAction::Close));
+    ui.redraw();
+    assert_eq!(model(&ui).highlight, "save", "the safe answer has the focus");
+    ui.tap(Key::Named(Named::Tab), Modifiers::empty());
+    assert_eq!(model(&ui).highlight, "dont-save", "Tab moved it");
+    ui.tap(Key::Named(Named::Space), Modifiers::empty());
+    assert!(ui.app().quit, "Space gave Don't Save");
 }

@@ -134,6 +134,10 @@ pub(crate) enum Delivery {
     Unused,
     /// Iced handled the event. The runtime still cancels conflicting holds.
     Captured,
+    /// Iced never heard it: one of the runtime's overlays owns the input
+    /// (the question or a runtime menu, row 3b), so the event goes to the
+    /// runtime's layers above Iced, as a real one would.
+    Above,
 }
 
 impl Pointer {
@@ -635,6 +639,19 @@ impl Widget<Message, iced::Theme, crate::Renderer> for Injector<'_> {
                     {
                         shell.publish(message);
                     }
+                    continue;
+                }
+                // While one of the runtime's overlays owns the input, a
+                // pointer event is the runtime's layers' above Iced, as a
+                // real one is (Panels::over_target): Iced never hears it.
+                if self.app.runtime_overlay_open()
+                    && let (Event::Mouse(_), Some(at)) = (&injected, at)
+                {
+                    self.pointer
+                        .0
+                        .borrow_mut()
+                        .for_runtime
+                        .push((injected.clone(), at, Delivery::Above));
                     continue;
                 }
                 // A shell of its own, to tell whether a widget took it.

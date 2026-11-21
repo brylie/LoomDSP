@@ -688,6 +688,15 @@ impl crate::App {
             jump: self.jump_items(),
             overlay,
             overlay_focus,
+            ours_overlay: match (&self.overlays.question, self.runtime_menu()) {
+                (Some(question), _) => Some((
+                    accesskit::Role::AlertDialog,
+                    question.model().title,
+                    crate::overlays::access::question_id(),
+                )),
+                (None, Some(menu)) => Some((accesskit::Role::Menu, menu.label, menu.id)),
+                (None, None) => None,
+            },
         }
     }
 
@@ -800,6 +809,33 @@ impl crate::App {
         // acts as its item says.
         if let Some(messages) = self.a11y_panel_action(request, at) {
             return messages;
+        }
+        // The runtime's question owns the input over everything (row 3b):
+        // a Click on an answer gives it, and Focus moves the runtime's
+        // focus there, as Tab would.
+        if let Some(id) = self
+            .a11y
+            .ids
+            .id(request.target_node.0)
+            .filter(|id| {
+                id.is_under(&crate::overlays::access::question_id())
+                    || self.runtime_menu().is_some_and(|menu| id.is_under(&menu.id))
+            })
+            .cloned()
+        {
+            self.reader_event(ReaderEvent::Close);
+            return match request.action {
+                accesskit::Action::Click => self
+                    .question_click(&id)
+                    .or_else(|| self.menu_click(&id))
+                    .into_iter()
+                    .collect(),
+                accesskit::Action::Focus if self.our_stops().contains(&id) => {
+                    self.effect(loom_ui::Effects::focus(id));
+                    Vec::new()
+                }
+                _ => Vec::new(),
+            };
         }
         // An open panel owns input, as it does for the pointer: the
         // canvas behind it does not change.

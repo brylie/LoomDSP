@@ -82,6 +82,44 @@ pub const CONTROL_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
     weight: loom_ui_core::Weight::Regular,
 };
 
+/// [`TITLE`] text, for `loom-ui` elements: a dialog's title.
+pub const TITLE_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
+    size: TITLE,
+    line_height: LINE_HEIGHT,
+    weight: loom_ui_core::Weight::Regular,
+};
+
+/// The wash over the window behind a dialog (visual-system.md, Overlays):
+/// black at 40%, as Iced's question had.
+pub const SCRIM: loom_ui_core::Color = loom_ui_core::Color::rgba(0.0, 0.0, 0.0, 0.4);
+
+/// The corner radius of a dialog's box, as Iced's box had
+/// (visual-system.md, Overlays).
+pub const OVERLAY_RADIUS: f32 = 2.0;
+
+/// The width of the question's box, in logical pixels.
+pub const QUESTION_WIDTH: f32 = 460.0;
+
+/// The corner radius of a menu's box (visual-system.md, Overlays,
+/// `MENU_PANEL`).
+pub const MENU_RADIUS: f32 = 6.0;
+
+/// The width of a menu's border (visual-system.md, Overlays,
+/// `MENU_PANEL`).
+pub const MENU_BORDER: f32 = 1.0;
+
+/// The corner radius of a menu item (visual-system.md, Overlays,
+/// `MENU_ITEM`).
+pub const MENU_ITEM_RADIUS: f32 = 3.0;
+
+/// The shadow under a menu (visual-system.md, Overlays): black at 35%,
+/// 4 logical pixels down, with a 12 pixel blur, as Iced's menu had.
+pub const MENU_SHADOW: loom_ui::ShadowStyle = loom_ui::ShadowStyle {
+    colour: loom_ui_core::Color::rgba(0.0, 0.0, 0.0, 0.35),
+    offset: loom_ui_core::Vector { x: 0.0, y: 4.0 },
+    blur: 12.0,
+};
+
 /// [`HEADING`] text, for `loom-ui` elements: the patch name in the
 /// toolbar.
 pub const HEADING_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {

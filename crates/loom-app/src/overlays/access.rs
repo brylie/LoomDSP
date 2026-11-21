@@ -11,7 +11,7 @@
 use crate::a11y::items::{Item, Kind};
 use crate::input_owner::InputOwner;
 use crate::menus::MenuModel;
-use crate::{App, Message, help, question};
+use crate::{App, Message, help};
 use loom_ui_core::UiId;
 
 /// The UI ID of the open question.
@@ -36,19 +36,16 @@ impl App {
     /// or while an overlay not yet reported has it.
     pub(crate) fn overlay_items(&self) -> (Vec<Item>, Option<UiId>) {
         match self.input_owner() {
-            InputOwner::Question => match &self.overlays.question {
-                Some(open) => {
-                    let model = open.model();
-                    let focus = answer_id(model.highlight);
-                    (vec![question_item(open, &model)], Some(focus))
-                }
-                None => (Vec::new(), None),
-            },
+            // The question is the runtime's (row 3b): its nodes come from
+            // its panel, and its focus is the runtime's on an answer.
+            InputOwner::Question => (Vec::new(), None),
             InputOwner::Help => match &self.overlays.help {
                 Some(open) => (vec![help_item(&open.model)], Some(help_id())),
                 None => (Vec::new(), None),
             },
-            InputOwner::TileMenu | InputOwner::ProbeMenu | InputOwner::RecentList => match self.menu_model() {
+            // The probe menu and Recent are the runtime's (row 3b).
+            InputOwner::ProbeMenu | InputOwner::RecentList => (Vec::new(), None),
+            InputOwner::TileMenu => match self.menu_model() {
                 Some(menu) => {
                     let focus = menu
                         .highlighted()
@@ -86,26 +83,6 @@ impl App {
             },
             InputOwner::Canvas => (Vec::new(), None),
         }
-    }
-}
-
-/// The question: an alert dialog named by its title, with its sentence as
-/// a text inside it, and one button per answer. The sentence is a text's
-/// value, not the dialog's description, because it must be heard: an
-/// error's title is only "LoomDSP" (section 7, rule 26).
-fn question_item(open: &question::Question, model: &question::Model) -> Item {
-    let mut parts = vec![Item::text(question_id().with("text"), model.text.clone())];
-    parts.extend(open.answers().iter().map(|&answer| {
-        Item::button(
-            answer_id(answer.name()),
-            answer.label(),
-            Some(Message::Question(question::Message::Answer(answer))),
-        )
-    }));
-    Item {
-        label: Some(model.title.clone()),
-        children: parts,
-        ..Item::new(question_id(), Kind::AlertDialog)
     }
 }
 

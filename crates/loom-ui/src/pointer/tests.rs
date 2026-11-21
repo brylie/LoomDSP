@@ -1235,3 +1235,21 @@ fn an_overlay_gives_back_the_focus_it_opened_over() {
     nothing.send(Message::Input(Layer::Canvas));
     assert_eq!(nothing.runtime().focused(), None, "nothing to give back");
 }
+
+/// Section 6, rule 8 (plan 3.2, row 3b): the pointer moving over a menu
+/// item focuses it with no ring, so the keys go on from there; moving over
+/// a button focuses nothing.
+#[test]
+fn hovering_a_menu_item_focuses_it_without_a_ring() {
+    let item = UiId::panel("menu").with("item");
+    let mut menu = harness(true, Routed::Passed);
+    menu.send(Message::Input(Layer::Overlays));
+    menu.step(at(5.0, 5.0, PointerEvent::Moved));
+    assert_eq!(menu.runtime().focused(), Some(&item));
+    assert_eq!(menu.runtime().focus_ring(), None, "no ring from the pointer");
+
+    let mut bar = harness(false, Routed::Passed);
+    bar.send(Message::Input(Layer::Canvas));
+    bar.step(at(5.0, 5.0, PointerEvent::Moved));
+    assert_eq!(bar.runtime().focused(), None, "a button takes no focus from hover");
+}

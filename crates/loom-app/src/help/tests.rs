@@ -181,6 +181,9 @@ fn example_button_honors_unsaved_changes() {
     assert!(ui.app().overlays.help.is_some(), "cancellation keeps the help open");
     assert!(ui.app().unsaved());
 
+    // The answer came as a message, not through the window: a frame lays
+    // the window out without the question's panel, as one would.
+    let _ = ui.redraw();
     ui.press();
     ui.release();
     assert!(ui.app().overlays.question.is_some(), "it asks again");

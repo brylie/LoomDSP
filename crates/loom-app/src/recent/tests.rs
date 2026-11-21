@@ -608,3 +608,37 @@ fn open_makes_no_library_folder_it_does_not_need() {
     assert_eq!(fake::asked(), [Asked::Open(Some(dir.0.clone()))]);
     assert!(!library.exists());
 }
+
+/// Opened from the keyboard (Enter on the focused Recent button), the list
+/// starts on its first item and shows each file's folder as a second line;
+/// Tab closes it and moves on, as the WAI-ARIA menu pattern does
+/// (ui-layer.md, section 6, rule 8; plan 3.2, row 3b).
+#[test]
+fn from_the_keyboard_the_list_starts_on_its_first_item_and_tab_leaves_it() {
+    let dir = TempDir::new("recent-keys");
+    let files = patches(&dir.0, 2);
+    let mut ui = Ui::with_app(app());
+    assert!(ui.app_mut().open_path(&files[0]));
+    assert!(ui.app_mut().open_path(&files[1]));
+    ui.redraw();
+    let button = crate::toolbar::toolbar_id().with("recent");
+    ui.a11y_action(&button, accesskit::Action::Focus);
+    ui.redraw();
+    assert_eq!(ui.runtime().focused(), Some(&button), "the Recent button has the keys");
+    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    ui.redraw();
+    let rows = ui.app().ui_snapshot().recent.expect("the list is open");
+    let first = crate::menus::recent_id().with(rows[0].path.display().to_string().as_str());
+    assert_eq!(ui.runtime().focused(), Some(&first), "it starts on its first item");
+    assert!(ui.runtime().focus_ring().is_some(), "with a ring, from the keyboard");
+    assert!(ui.text(&rows[0].folder).is_some(), "the folder is a second line");
+    ui.tap(Key::Named(Named::Tab), Modifiers::empty());
+    ui.redraw();
+    assert_eq!(ui.app().ui_snapshot().recent, None, "Tab closed it");
+    assert!(
+        !ui.runtime()
+            .focused()
+            .is_some_and(|focus| focus.is_under(&crate::menus::recent_id())),
+        "and the focus moved on"
+    );
+}

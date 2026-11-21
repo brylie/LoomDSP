@@ -230,13 +230,18 @@ impl App {
             _ => {
                 if let Some(at) = step(menu.highlight, menu.items.len(), key) {
                     self.overlays.set_menu_highlight(Some(at));
+                    // In a runtime menu the highlight is the focus, with a
+                    // ring, as the keys put it there (row 3b).
+                    if matches!(menu.kind, MenuKind::Probe | MenuKind::Recent) {
+                        self.effect(loom_ui::Effects::focus(menu.items[at].id.clone()));
+                    }
                 }
             }
         }
     }
 
     /// Closes the open menu of kind `kind`.
-    fn close_menu(&mut self, kind: MenuKind) {
+    pub(crate) fn close_menu(&mut self, kind: MenuKind) {
         match kind {
             MenuKind::Tile(_) => self.overlays.close_tile_menu(),
             MenuKind::Probe => self.overlays.close_probe_menu(),
@@ -249,6 +254,8 @@ impl App {
         self.session.scene.module(module).map(|tile| tile.title.clone())
     }
 }
+
+mod panel;
 
 #[cfg(test)]
 mod tests;

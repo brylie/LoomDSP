@@ -427,6 +427,17 @@ impl App {
             self.session.outline.last_inspector = Some(part.clone());
             self.session.outline.inspector_action = None;
         }
+        // The question's highlight is the runtime's focus on an answer
+        // (row 3b), so a Tab the runtime moved takes it along.
+        if let (Some(part), Some(question)) = (focus.as_ref(), self.overlays.question.as_mut()) {
+            question.follow_focus(part);
+        }
+        // A runtime menu's highlight is the runtime's focus on its item.
+        if let Some(part) = focus.as_ref()
+            && let Some(at) = self.menu_stops().iter().position(|stop| stop == part)
+        {
+            self.overlays.set_menu_highlight(Some(at));
+        }
         if let Some(part) = focus
             .as_ref()
             .filter(|part| part.is_under(&crate::toolbar::toolbar_id()))

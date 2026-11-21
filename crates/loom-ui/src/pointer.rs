@@ -245,6 +245,13 @@ impl<A: App> Panels<'_, A> {
         over.then(|| pressed.clone())
     }
 
+    /// True when the element with UI ID `id` is a menu item.
+    fn is_menu_item(&self, id: &UiId) -> bool {
+        self.window
+            .access_of(id)
+            .is_some_and(|access| access.role() == crate::access::Role::MenuItem)
+    }
+
     /// True when the element with UI ID `id` is a button, a switch, or a
     /// menu item, which a pointer press does not focus.
     fn takes_no_press_focus(&self, id: &UiId) -> bool {
@@ -252,6 +259,17 @@ impl<A: App> Panels<'_, A> {
             use crate::access::Role;
             matches!(access.role(), Role::Button | Role::Switch | Role::MenuItem)
         })
+    }
+
+    /// Offers a pointer event to the runtime's layers above the target, as
+    /// the runtime's own routing does first, for a driver that delivers an
+    /// event itself outside a turn, such as a script's: a press outside a
+    /// closing menu is taken and told, and one on a dialog's scrim is held.
+    pub fn pointer_above_target(&mut self, event: &Event, point: Point) -> Heard {
+        let input = self.app.input();
+        let heard = self.pointer_above(input, event, point);
+        self.report_focus();
+        heard
     }
 
     /// Offers a pointer event to the runtime's layers above the target.
@@ -367,7 +385,22 @@ impl<A: App> Panels<'_, A> {
         let at = id.map(|id| (layer, id));
         let mut redraw = false;
         match pointer {
-            PointerEvent::Moved => redraw = self.hover(at),
+            PointerEvent::Moved => {
+                redraw = self.hover(at.clone());
+                // Section 6, rule 8: the pointer moving over a menu item
+                // focuses it, with no ring, as native menus move their
+                // highlight; the keys then go on from there.
+                if let Some((_, id)) = &at
+                    && self.is_menu_item(id)
+                    && self.focus.id() != Some(id)
+                {
+                    self.focus.wanted = None;
+                    self.focus.set(Some(id.clone()));
+                    self.focus.ring = false;
+                    self.focus.release_owed = true;
+                    redraw = true;
+                }
+            }
             PointerEvent::Pressed(button) => {
                 self.pointer.space = None;
                 redraw = self.hover(at.clone());

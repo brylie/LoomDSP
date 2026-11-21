@@ -321,6 +321,9 @@ impl App {
         if let QuestionMessage::Move(by) = message {
             if let Some(question) = self.overlays.question.as_mut() {
                 question.step(by);
+                // The highlight is the runtime's focus (row 3b).
+                let answer = question.highlighted_id();
+                self.effect(loom_ui::Effects::focus(answer));
             }
             return true;
         }
@@ -570,8 +573,19 @@ impl App {
             self.overlays.close_recent_list();
         } else {
             let rows = crate::recent::rows(self.rig.recent.files());
+            // Opened from the keyboard (the Recent button had the focus,
+            // which a press never gives it), it starts on its first item,
+            // as the WAI-ARIA menu pattern does (section 6, rule 8).
+            let by_key = self.focus.as_ref() == Some(&crate::toolbar::toolbar_id().with("recent"));
+            let first = rows
+                .first()
+                .map(|row| crate::menus::recent_id().with(row.path.display().to_string()));
             self.overlays.open(Overlay::RecentList(rows));
             self.session.matrix.focused = false;
+            if by_key && let Some(first) = first {
+                self.overlays.set_menu_highlight(Some(0));
+                self.effect(loom_ui::Effects::focus(first));
+            }
         }
     }
 
