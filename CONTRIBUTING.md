@@ -110,7 +110,7 @@ The quick checks run again before push, because commits made by a rebase or a me
 
 `cargo fmt` and the whitespace hooks fix files for you. When they do, the commit stops: review the changes, stage them, and commit again. Run the quick checks by hand with `prek run --all-files`, and the slow ones with `prek run --hook-stage manual --all-files`. The configuration is in `prek.toml`.
 
-The first coverage run builds the workspace again with coverage instrumentation, which takes a few minutes. Later runs only rebuild what changed.
+Every coverage run builds the workspace and its dependencies again with coverage instrumentation, which takes a few minutes, because the task starts by removing earlier instrumented builds (see [Coverage gate](#coverage-gate)).
 
 ### What CI checks
 
