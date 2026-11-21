@@ -71,6 +71,21 @@ The view builds its description, port and parameter information from the module 
 
 When a module has an example, **Open example** opens it as a new patch. It uses the usual unsaved-changes prompt before replacing the current patch. A module without an example has no Open example action. The view has a plain-data model exposed through `App::ui_snapshot()` and `--dump-ui`. Use `--select ID --show-help` with `--dump-ui` or `--screenshot-window` to inspect it without a window. Links to other module pages open their bundled help; links to other documents report that they are not bundled.
 
+### Keys, links, and focus
+
+**Status:** Agreed (plan 3.2, row 6, 2026-11-21); built when help moves to `loom-ui`.
+
+Help is a modal dialog, by the WAI-ARIA dialog pattern ([APG Dialog (Modal)](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/)).
+
+- **Focus on open** goes to the dialog itself, with no ring, not to its first control. The APG allows this for a dialog whose content is long, so the top of the page is where reading starts. The first Tab goes to **Close**.
+- **Tab** and Shift+Tab cycle the dialog's stops in reading order and stay inside it: Close, the links of the notes, **Open example**, the links of the example section, then Close again.
+- **Escape** closes help, as **Close** and a press on the backdrop do. Focus returns to what had it before help opened, if it is still there; otherwise to the first stop of its panel, or to the canvas ([UI layer](ui-layer.md), section 6, rule 4).
+- **Links** follow the WAI-ARIA link pattern ([APG Link](https://www.w3.org/WAI/ARIA/apg/patterns/link/)): each is a Tab stop, Enter follows it, and Space does not. A press follows it and takes no focus. A link is underlined in the link colour, so it is told apart by more than colour (WCAG 2.2, SC 1.4.1). Following a link shows the new page from its top, with focus on the dialog again.
+- **Links to pages that are not bundled** (a `../learn/` explainer, a design document, an example patch file) show as plain text in the app: no underline, no node, no stop, since the app cannot follow them. The pages in `docs/modules/` keep them as links. *Why:* a link that only warns, in a status line the open dialog hides, is a dead end for a keyboard or screen reader user.
+- **Scrolling** by keyboard: Up, Down, Page Up, Page Down, Home, End, Space, and Shift+Space scroll the body while the focus is on the dialog, on Close, on a link, or on Open example, as a browser scrolls a page from a focused link. *Why:* without it, text after the last stop could not be reached by keyboard (WCAG 2.2, SC 2.1.1).
+- **Code blocks wrap** inside the dialog, in the monospace face, rather than scroll sideways (WCAG 2.2, SC 1.4.10, Reflow).
+- **On the web and in a plugin**, Tab stays inside the dialog as in the stand-alone app, and Escape is the way out (WCAG 2.2, SC 2.1.2), as for the question.
+
 ### Acceptance criteria
 
 - [x] F1 opens help for the highlighted browser item, even with search focused, and for the selected tile. The inspector action and tile menu open the same view. Escape closes it.
@@ -79,6 +94,10 @@ When a module has an example, **Open example** opens it as a new patch. It uses 
 - [x] With nothing selected, the inspector shows two short lines and a **Keyboard shortcuts** button; it and F1 open the shortcuts page (test, [#457](https://github.com/brylie/LoomDSP/issues/457)).
 - [x] Help details read as words with units, with no "unconnected:" and no stray spaces (test).
 - [x] Help text stays inside the overlay; a click on the backdrop closes it and a click inside does not (test).
+- [ ] Tab cycles Close, the links, and Open example, and stays inside; focus starts on the dialog; Escape returns focus to what had it (test).
+- [ ] Enter follows a focused link and Space does not; a link to a page that is not bundled is plain text with no node (test).
+- [ ] The scroll keys move the body with a link focused, and a code block wraps (test).
+- [ ] VoiceOver reads each link by its words, and moves to it by Tab and by its own cursor (manual, Brylie).
 - [x] UI snapshots and `--dump-ui` report the open help view and its content.
 - [x] Help and examples work without access to the repository or network.
 
