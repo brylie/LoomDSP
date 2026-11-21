@@ -431,3 +431,34 @@ fn the_list_scrolls_the_highlighted_row_just_into_view() {
         "the end of the list shows"
     );
 }
+
+/// Page Up and Page Down step the highlight by a page of rows, as in the
+/// module browser, and the other keys keep their meaning
+/// (patch-metadata.md, Keys).
+#[test]
+fn page_keys_step_a_page() {
+    use iced::keyboard::{Event, Key, Location, Modifiers, key::Named};
+    let message = |named: Named| {
+        let event = iced::Event::Keyboard(Event::KeyPressed {
+            key: Key::Named(named),
+            modified_key: Key::Named(named),
+            physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
+            location: Location::Standard,
+            modifiers: Modifiers::empty(),
+            text: None,
+            repeat: false,
+        });
+        super::key(event, iced::event::Status::Ignored, iced::window::Id::unique())
+    };
+    let step = |named: Named| match message(named) {
+        Some(crate::Message::Patches(Message::Step(by))) => Some(by),
+        _ => None,
+    };
+    assert_eq!(step(Named::PageDown), Some(PAGE_ROWS));
+    assert_eq!(step(Named::PageUp), Some(-PAGE_ROWS));
+    assert_eq!(step(Named::ArrowDown), Some(1));
+    assert!(matches!(
+        message(Named::Escape),
+        Some(crate::Message::Patches(Message::Close))
+    ));
+}
