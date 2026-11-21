@@ -1212,6 +1212,17 @@ impl FieldState {
                     (_, true) => driver.select_to_text_end(),
                 });
             }
+            // Off a Mac, Page Up and Page Down move by the box's height in
+            // lines. The box grows with its lines, so that is the whole
+            // text: they go to its start and end.
+            Key::PageUp | Key::PageDown if many && !mac && !shortcut => {
+                self.moved(fonts, layouts, |driver| match (key, shift) {
+                    (Key::PageUp, false) => driver.move_to_text_start(),
+                    (Key::PageUp, true) => driver.select_to_text_start(),
+                    (_, false) => driver.move_to_text_end(),
+                    (_, true) => driver.select_to_text_end(),
+                });
+            }
             // On a Mac, Ctrl+A and Ctrl+E go to the start and the end of the
             // line, as in the platform's text views.
             Key::Character(letter)

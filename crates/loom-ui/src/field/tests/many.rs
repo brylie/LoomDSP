@@ -193,6 +193,41 @@ fn the_word_key_with_up_and_down_goes_by_paragraph() {
     }
 }
 
+/// Off a Mac, Page Up and Page Down go to the text's start and end, since
+/// the box grows with its lines and one page is all of it. On a Mac the
+/// field leaves them, for the panel to scroll.
+#[test]
+fn page_up_and_down_go_to_the_ends_off_a_mac() {
+    let other = Platform::Other;
+    let Some(mut bench) = area_in("ab\ncd\nef", 200.0) else {
+        return;
+    };
+    bench.caret_to(4);
+    bench.hit(other, Key::PageUp, Modifiers::NONE);
+    assert_eq!(bench.caret(), 0);
+    bench.hit(other, Key::PageDown, SHIFT);
+    assert_eq!(bench.field.selection_bytes(), (0, 8), "Shift extends to the end");
+    assert!(!bench.hit(Platform::Mac, Key::PageUp, Modifiers::NONE).taken);
+    assert!(!bench.hit(Platform::Mac, Key::PageDown, Modifiers::NONE).taken);
+}
+
+/// The row shown for a field's start is its top pixel, and for its end
+/// its bottom one, so Home and End scroll only as far as that edge needs.
+#[test]
+fn the_row_shown_for_an_edge_is_its_top_or_bottom_pixel() {
+    use crate::window::scroll::edge_row;
+    use loom_ui_core::{Point, Rect};
+    let bounds = Rect::new(Point::new(10.0, 20.0), Size::new(100.0, 50.0));
+    assert_eq!(
+        edge_row(bounds, Edge::Start),
+        Rect::new(Point::new(10.0, 20.0), Size::new(100.0, 1.0))
+    );
+    assert_eq!(
+        edge_row(bounds, Edge::End),
+        Rect::new(Point::new(10.0, 69.0), Size::new(100.0, 1.0))
+    );
+}
+
 /// A paste and a screen reader's text keep their line breaks, made LF.
 #[test]
 fn a_paste_and_a_screen_readers_text_keep_their_breaks() {
@@ -254,6 +289,8 @@ fn runs_stop_at_a_hard_break_and_the_selection_finds_its_run() {
 /// One app with one text area keyed `notes/area`, keeping its edits.
 #[derive(Default)]
 struct Notes {
+    /// The area sits in a scroll container 40 px high.
+    scrolled: bool,
     text: String,
     heard: Vec<FieldEvent>,
     ids: IdTable,
@@ -272,12 +309,23 @@ fn area() -> UiId {
     UiId::panel("notes").with("area")
 }
 
+impl Notes {
+    /// Its area's UI ID, under the scroll container when there is one.
+    fn area(&self) -> UiId {
+        if self.scrolled {
+            UiId::panel("notes").with("pane").with("area")
+        } else {
+            area()
+        }
+    }
+}
+
 impl App for Notes {
     type Message = Note;
 
     fn update(&mut self, message: Note, cx: &Context<'_, Note>) -> Effects<Note> {
         match message {
-            Note::Focus => return Effects::focus(area()),
+            Note::Focus => return Effects::focus(self.area()),
             Note::Field(event) => {
                 if let FieldEvent::Edited(text) = &event {
                     self.text.clone_from(text);
@@ -290,12 +338,25 @@ impl App for Notes {
     }
 
     fn view(&self, view: &mut View) {
-        view.panel_with(UiId::panel("notes"), Layer::Panels, &self.text, |text: &String| {
-            Element::column([Element::text_area(text.clone(), STYLE)
-                .key("area")
-                .width(Length::Fixed(160.0))
-                .access(Access::new(Role::TextInput, "Authors, one per line"))])
-        });
+        let model = (self.text.clone(), self.scrolled);
+        view.panel_with(
+            UiId::panel("notes"),
+            Layer::Panels,
+            &model,
+            |(text, scrolled): &(String, bool)| {
+                let area = Element::column([Element::text_area(text.clone(), STYLE)
+                    .key("area")
+                    .width(Length::Fixed(160.0))
+                    .access(Access::new(Role::TextInput, "Authors, one per line"))]);
+                if !*scrolled {
+                    return area;
+                }
+                Element::scroll(area, crate::window::scroll::tests::SCROLL)
+                    .key("pane")
+                    .height(Length::Fixed(40.0))
+                    .access(Access::new(Role::ScrollView, "Patch info"))
+            },
+        );
     }
 
     fn window(&self) -> WindowSpec {
@@ -317,6 +378,11 @@ impl App for Notes {
 /// The notes app with `text`, its area focused and laid out, or `None`
 /// with no font.
 fn notes(text: &str) -> Option<(Harness<Notes, Keys>, Typesetter)> {
+    notes_in(text, false)
+}
+
+/// The notes app with `text`, in a scroll container if `scrolled`.
+fn notes_in(text: &str, scrolled: bool) -> Option<(Harness<Notes, Keys>, Typesetter)> {
     let mut typesetter = Typesetter::new();
     if typesetter.measure("x", STYLE, None).width <= 0.0 {
         eprintln!("skipped: no system font");
@@ -324,6 +390,7 @@ fn notes(text: &str) -> Option<(Harness<Notes, Keys>, Typesetter)> {
     }
     let app = Notes {
         text: text.to_owned(),
+        scrolled,
         ..Notes::default()
     };
     let window = WindowState::new(Size::new(400.0, 300.0));
@@ -332,7 +399,8 @@ fn notes(text: &str) -> Option<(Harness<Notes, Keys>, Typesetter)> {
     harness.lay_out(&mut typesetter);
     harness.send(Note::Focus);
     harness.lay_out(&mut typesetter);
-    assert_eq!(harness.runtime().focused(), Some(&area()));
+    let focused = harness.app().area();
+    assert_eq!(harness.runtime().focused(), Some(&focused));
     Some((harness, typesetter))
 }
 
@@ -401,4 +469,45 @@ fn its_node_is_multi_line_and_runs_link_only_along_a_line() {
     let (first, second) = (run(runs[0]), run(runs[1]));
     let top = |node: &accesskit::Node| node.bounds().expect("bounds").y0;
     assert!(top(&second) > top(&first), "the second line's run is lower");
+}
+
+/// How far the notes app's scroll container is scrolled, as its node says.
+fn scrolled_by(harness: &mut Harness<Notes, Keys>, text: &mut Typesetter) -> f64 {
+    harness.lay_out(text);
+    harness.send(Note::Describe);
+    let nodes = &harness.app().nodes.as_ref().expect("nodes").nodes;
+    nodes
+        .iter()
+        .find(|(_, node)| node.role() == KitRole::ScrollView)
+        .and_then(|(_, node)| node.scroll_y())
+        .unwrap_or(0.0)
+}
+
+/// On a Mac, End in a text area taller than its scroll container scrolls
+/// to show the box's end, and Home back to its start, and the caret never
+/// moves. The keys run on this machine's platform, so the test runs on a
+/// Mac only.
+#[test]
+fn on_a_mac_home_and_end_scroll_the_container_and_leave_the_caret() {
+    if Platform::current() != Platform::Mac {
+        eprintln!("skipped: Home and End move the caret off a Mac");
+        return;
+    }
+    let Some((mut harness, mut text)) = notes_in("a\nb\nc\nd\ne\nf\ng", true) else {
+        return;
+    };
+    assert_eq!(scrolled_by(&mut harness, &mut text), 0.0);
+    harness.step(key_in(Key::End, Modifiers::NONE, None));
+    let down = scrolled_by(&mut harness, &mut text);
+    assert!(down > 0.0, "End shows the box's end");
+    harness.step(key_in(Key::Home, Modifiers::NONE, None));
+    assert_eq!(scrolled_by(&mut harness, &mut text), 0.0, "Home shows its start");
+    assert!(
+        !harness
+            .app()
+            .heard
+            .iter()
+            .any(|event| matches!(event, FieldEvent::Edited(_))),
+        "neither key edits"
+    );
 }

@@ -641,7 +641,12 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if used.committed {
             batch.extend(self.app.field_event(&id, &FieldEvent::Committed(text())));
         }
-        (used.taken, used.redraw)
+        // Home or End in a multi-line field on a Mac: the containers around
+        // it scroll to show its start or end, and the caret stays.
+        let shown = used
+            .reveal
+            .is_some_and(|edge| self.panels.scroll_to_show_edge(&id, edge));
+        (used.taken, used.redraw || shown)
     }
 
     /// Whether the input method is composing in the focused field, while
