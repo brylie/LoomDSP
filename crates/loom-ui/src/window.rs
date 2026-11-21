@@ -376,11 +376,24 @@ impl Window {
                 if let (Some(id), Some(text)) = (&element.id, layout.text(index))
                     && text.field
                 {
+                    // A multi-line field wraps at the width its text was
+                    // measured at, before rounding, so it breaks its lines
+                    // where the layout did.
+                    let lines = if text.wrap {
+                        crate::field::Lines::Many
+                    } else {
+                        crate::field::Lines::One
+                    };
                     seen.push(crate::field::Seen {
                         id: id.clone(),
                         text: text.text.to_owned(),
                         style: text.style,
-                        width: element.content.width,
+                        width: if text.wrap {
+                            element.wrap_width
+                        } else {
+                            element.content.width
+                        },
+                        lines,
                     });
                 }
             }

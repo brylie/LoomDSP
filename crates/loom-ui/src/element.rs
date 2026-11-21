@@ -228,13 +228,15 @@ pub(crate) enum Kind {
         /// The colour of its letters, or the panel style's.
         colour: Option<Color>,
     },
-    /// A single-line text field: the app's text, edited in place
-    /// ([`crate::field`]).
+    /// A text field: the app's text, edited in place ([`crate::field`]),
+    /// on one line, or on many for a text area.
     Field {
         /// The text the app holds.
         text: String,
         /// How it is set.
         style: TextStyle,
+        /// It shows many lines: it wraps to its width and grows with them.
+        many: bool,
     },
     /// Empty space.
     Space,
@@ -334,12 +336,39 @@ impl Element {
             Kind::Field {
                 text: text.into(),
                 style,
+                many: false,
             },
             Vec::new(),
         );
         field.focusable = true;
         field.look.clip = true;
         field
+    }
+
+    /// A multi-line text field showing `text`, the text the app holds, set
+    /// in `style` (ui-layer.md, section 8, rule 7). It is a field in every
+    /// other way: a focus stop, edited in place, telling the app each
+    /// change through [`App::field_event`](crate::App::field_event), and
+    /// taking the app's text at each layout. Give it its name with
+    /// [`Element::access`] and `Role::TextInput`; a screen reader meets it
+    /// as a multi-line text input. It needs a key.
+    ///
+    /// It wraps to its width and grows with its lines, so give it a width
+    /// and leave its height to shrink. Enter inserts a line break, Tab
+    /// leaves it, and the arrow keys move by line. A pasted text keeps its
+    /// line breaks. It never commits: only focus leaving it ends editing.
+    pub fn text_area(text: impl Into<String>, style: TextStyle) -> Self {
+        let mut area = Self::new(
+            Kind::Field {
+                text: text.into(),
+                style,
+                many: true,
+            },
+            Vec::new(),
+        );
+        area.focusable = true;
+        area.look.clip = true;
+        area
     }
 
     /// Empty space, `width` by `height`.

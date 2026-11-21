@@ -10,7 +10,7 @@
 //! by word walks the shaped layout, and skip with none, as the
 //! typesetter's tests do.
 
-use super::{CARET_MARGIN, FieldEvent, FieldState, TYPING_PAUSE};
+use super::{CARET_MARGIN, FieldEvent, FieldState, Lines, TYPING_PAUSE};
 use crate::access::{Access, Role, States};
 use crate::app::{App, Context, WindowSpec};
 use crate::effect::Effects;
@@ -67,7 +67,7 @@ fn field_in(text: &str, width: f32) -> Option<Bench> {
     }
     let (mut fonts, mut layouts) = editing_contexts();
     let mut field = FieldState::new(text, STYLE, &mut fonts, &mut layouts);
-    field.take(text, STYLE, width, &mut fonts, &mut layouts);
+    field.take(text, STYLE, Lines::One, width, &mut fonts, &mut layouts);
     Some(Bench {
         field,
         fonts,
@@ -405,7 +405,7 @@ fn the_apps_text_is_taken() {
     let Bench {
         field, fonts, layouts, ..
     } = &mut bench;
-    field.take("hi", STYLE, 300.0, fonts, layouts);
+    field.take("hi", STYLE, Lines::One, 300.0, fonts, layouts);
     assert_eq!(field.text(), "hi");
     assert_eq!(field.selection_bytes(), (2, 2));
     assert_eq!(field.steps(), (0, 0));
@@ -1131,7 +1131,9 @@ fn a_run_has_one_character_per_cluster() {
     assert_eq!(runs[0].text, "日本a");
     assert_eq!(runs[0].lengths, [3, 3, 1]);
     let Some(bench) = field_in("", 300.0) else { return };
-    assert_eq!(bench.field.runs(), [super::ReaderRun::default()]);
+    let empty = bench.field.runs();
+    assert_eq!(empty.len(), 1, "an empty field has one run");
+    assert!(empty[0].text.is_empty() && empty[0].lengths.is_empty());
 }
 
 /// Positions go up along the line, and every width is positive.
@@ -1933,7 +1935,7 @@ fn an_unchanged_app_text_keeps_the_composition() {
         .ime(&preedit("に"), bench.now, &mut bench.fonts, &mut bench.layouts);
     bench
         .field
-        .take("ab", STYLE, 300.0, &mut bench.fonts, &mut bench.layouts);
+        .take("ab", STYLE, Lines::One, 300.0, &mut bench.fonts, &mut bench.layouts);
     assert!(bench.field.composing());
     assert_eq!(bench.text(), "abに");
 }
@@ -2259,7 +2261,9 @@ fn a_composition_over_a_selection_deletes_it_as_its_own_step() {
     assert!(used.edited, "the app hears the deletion");
     assert_eq!(bench.field.committed(), "");
     assert_eq!(bench.text(), "に");
-    bench.field.take("", STYLE, 300.0, &mut bench.fonts, &mut bench.layouts);
+    bench
+        .field
+        .take("", STYLE, Lines::One, 300.0, &mut bench.fonts, &mut bench.layouts);
     assert!(
         bench.field.composing(),
         "the app's text matches, so the composition stays"
@@ -2373,3 +2377,22 @@ fn tab_while_composing_never_asks_where_tab_goes() {
     assert_eq!(harness.app().tabs.get(), 1, "after the commit, Tab asks");
     assert_eq!(harness.runtime().focused(), Some(&UiId::panel("form").with("ok")));
 }
+
+/// A single-line field's runs are cut every 255 characters, as before runs
+/// could end at a line: 600 characters make runs of 255, 255, and 90, and
+/// the caret at the end is at the end of the last run.
+#[test]
+fn a_single_line_fields_runs_are_cut_every_255_characters() {
+    let Some(bench) = field_in(&"x".repeat(600), 300.0) else {
+        return;
+    };
+    let lengths: Vec<usize> = bench.field.runs().iter().map(|run| run.lengths.len()).collect();
+    assert_eq!(lengths, [255, 255, 90]);
+    assert!(
+        bench.field.runs().iter().all(|run| run.line == 0),
+        "all on its one line"
+    );
+    assert_eq!(bench.field.reader_selection(), ((2, 90), (2, 90)));
+}
+
+mod many;
