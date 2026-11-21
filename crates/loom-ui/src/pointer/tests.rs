@@ -1198,3 +1198,40 @@ fn a_question_keeps_every_key_from_the_target() {
     harness.step(release_key(Key::Enter));
     assert_eq!(harness.runtime().target().heard.len(), heard + 1, "the release goes on");
 }
+
+/// Section 6, rule 4 (plan 3.2, row 3a): an overlay saves the focus it
+/// opens over and gives it back, with its ring, when it closes, one level
+/// at a time: a question over the menu gives the menu its item back, then
+/// the menu gives the bar its button back. With no focus before, there is
+/// none to give back.
+#[test]
+fn an_overlay_gives_back_the_focus_it_opened_over() {
+    let (a, item) = (UiId::panel("bar").with("a"), UiId::panel("menu").with("item"));
+    let mut menu = harness(true, Routed::Passed);
+    menu.step(tab_key());
+    menu.step(tab_key());
+    assert_eq!(
+        menu.runtime().focused(),
+        Some(&a),
+        "the bar's button, from the keyboard"
+    );
+    menu.send(Message::Input(Layer::Overlays));
+    menu.send(Message::Refocus(vec![item.clone()]));
+    assert_eq!(menu.runtime().focused(), Some(&item), "the menu took it");
+    menu.send(Message::Input(Layer::Question));
+    menu.send(Message::Refocus(Vec::new()));
+    menu.send(Message::Input(Layer::Overlays));
+    assert_eq!(
+        menu.runtime().focused(),
+        Some(&item),
+        "the question gave the menu its item"
+    );
+    menu.send(Message::Input(Layer::Canvas));
+    assert_eq!(menu.runtime().focused(), Some(&a), "the menu gave the bar its button");
+    assert!(menu.runtime().focus_ring().is_some(), "with its ring");
+
+    let mut nothing = harness(true, Routed::Passed);
+    nothing.send(Message::Input(Layer::Overlays));
+    nothing.send(Message::Input(Layer::Canvas));
+    assert_eq!(nothing.runtime().focused(), None, "nothing to give back");
+}
