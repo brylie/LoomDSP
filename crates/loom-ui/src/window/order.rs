@@ -309,6 +309,14 @@ impl Window {
             };
             if let (Some(access), Some(id)) = (&element.access, &element.id) {
                 let mut node = access.node(element.focusable);
+                // Only a node the tree holds (section 7, rule 13's rule
+                // for relations).
+                if let Some(active) = access.active().filter(|active| {
+                    self.panel_of(active)
+                        .is_some_and(|panel| self.records[panel].layout.has_node(active))
+                }) {
+                    node.set_active_descendant(NodeId(ids.number(active)));
+                }
                 // What a scroll container cuts away is not where the part
                 // is for a screen reader either (section 7, rule 28).
                 let bounds = match element.clip {

@@ -953,3 +953,98 @@ fn a_link_has_a_node_of_its_own() {
     assert_eq!((bounds.x0, bounds.y0, bounds.x1, bounds.y1), (32.0, 0.0, 56.0, 16.0));
     assert!(node(notes_id).children().contains(&link_id), "inside its paragraph");
 }
+
+/// A search field with a list box of `rows`, the field naming `active` as
+/// its active descendant, laid out in a window.
+fn search(rows: &[&str], active: &str) -> crate::window::Window {
+    let mut window = crate::window::Window::default();
+    let field = Element::field("", STYLE)
+        .key("search")
+        .access(Access::new(Role::TextInput, "Search modules").active_descendant(id("browser", "list").with(active)));
+    let options = rows.iter().enumerate().map(|(at, row)| {
+        Element::text(*row, STYLE).key(*row).access(
+            Access::new(Role::ListBoxOption, *row)
+                .action(Action::Click)
+                .position_in_set(at)
+                .states(States {
+                    selected: *row == active,
+                    ..States::default()
+                }),
+        )
+    });
+    let list = Element::column(options)
+        .key("list")
+        .access(Access::new(Role::ListBox, "Modules").size_of_set(rows.len()));
+    window.sync(vec![(
+        UiId::panel("browser"),
+        Layer::Overlays,
+        Some(Element::column([field, list])),
+    )]);
+    window.lay_out(Size::new(400.0, 300.0), &mut Mono::default());
+    window
+}
+
+/// The field's active descendant is the highlighted row's node, the rows
+/// say where each is in the list, and the list how many it holds
+/// (section 7, rule 27, and the browsers' rows in the role table).
+#[test]
+fn a_field_names_its_highlighted_row_as_its_active_descendant() {
+    let window = search(&["saw", "sine", "square"], "sine");
+    let mut ids = IdTable::new();
+    let nodes = window.access_nodes(&mut ids, 1.0, None);
+    let mut node = |id: &UiId| {
+        let number = NodeId(ids.number(id));
+        let found = nodes.nodes.iter().find(|(node, _)| *node == number).expect("a node");
+        (number, found.1.clone())
+    };
+    let list = id("browser", "list");
+    let (sine, sine_node) = node(&list.clone().with("sine"));
+    assert_eq!(node(&id("browser", "search")).1.active_descendant(), Some(sine));
+    assert_eq!(node(&list).1.size_of_set(), Some(3));
+    assert_eq!(node(&list.clone().with("square")).1.position_in_set(), Some(2));
+    assert_eq!(sine_node.is_selected(), Some(true));
+}
+
+/// An active descendant that names no laid-out element is left out, so the
+/// tree never names a node it does not hold.
+#[test]
+fn an_active_descendant_that_is_gone_is_left_out() {
+    let window = search(&["saw"], "sine");
+    let mut ids = IdTable::new();
+    let nodes = window.access_nodes(&mut ids, 1.0, None);
+    let field = NodeId(ids.number(&id("browser", "search")));
+    let field = &nodes.nodes.iter().find(|(node, _)| *node == field).expect("a node").1;
+    assert_eq!(field.active_descendant(), None);
+}
+
+/// AccessKit's convention, which the adapters undo for each platform: a
+/// position counts from 0, and the size is on the container, not on each
+/// item (`accesskit` 0.25.2, `lib.rs`, the doc comments of `size_of_set`
+/// and `position_in_set`). `accesskit_windows` 0.35.2 adds 1 for UIA's
+/// PositionInSet and reads SizeOfSet from the container (`node.rs`,
+/// `position_in_set` and `size_of_set`, through
+/// `size_of_set_from_container`), and `accesskit_atspi_common` 0.21.1 does
+/// the same for `posinset` and `setsize`. So the first row reports 0 and
+/// the third 2, heard as "1 of 3" and "3 of 3", and no row has a size.
+#[test]
+fn positions_count_from_zero_with_the_size_on_the_list() {
+    let window = search(&["saw", "sine", "square"], "saw");
+    let mut ids = IdTable::new();
+    let nodes = window.access_nodes(&mut ids, 1.0, None);
+    let list = id("browser", "list");
+    let mut node = |id: &UiId| {
+        let number = NodeId(ids.number(id));
+        nodes
+            .nodes
+            .iter()
+            .find(|(node, _)| *node == number)
+            .expect("a node")
+            .1
+            .clone()
+    };
+    let (first, third) = (node(&list.clone().with("saw")), node(&list.clone().with("square")));
+    assert_eq!(first.position_in_set(), Some(0), "the first item is 0");
+    assert_eq!(third.position_in_set(), Some(2), "the third item is 2");
+    assert_eq!(first.size_of_set(), None, "an item holds no size");
+    assert_eq!(node(&list).size_of_set(), Some(3), "the list holds it");
+}
