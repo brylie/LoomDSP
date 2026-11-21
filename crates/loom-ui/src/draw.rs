@@ -22,7 +22,12 @@
 //!   wide, snapped to whole physical pixels so it stays sharp at any scale,
 //!   and steady, so a still window draws nothing;
 //! - an element that clips starts a layer cut to its bounds, and ends it
-//!   after its last child. The cut is a rectangle, even on round corners.
+//!   after its last child. The cut is a rectangle, even on round corners;
+//! - a scroll container's thumb is painted after its layer ends, so the
+//!   content never covers it (section 5, rule 12);
+//! - a radio's mark is a ring in the panel style's mark colour, with a dot
+//!   inside when the radio is chosen, and a radio's note is in its quiet
+//!   colour (section 6, rule 9).
 //!
 //! Each panel is painted inside a layer cut to its slot, and to every clip
 //! around the slot, so what overflows a slot shows nowhere, as it is hit
@@ -36,7 +41,7 @@ use crate::app::App;
 use crate::element::State;
 use crate::field::{FieldState, Fields};
 use crate::focus::Focus;
-use crate::layout::{Layout, Record, cut};
+use crate::layout::{Layout, RadioPart, Record, cut};
 use crate::paint::{Align, PanelStyle, Quad, TextPainter, TextRun, Vertical};
 use crate::pointer::Pointer;
 use crate::runtime::Counts;
@@ -108,8 +113,22 @@ impl<A: App> Panels<'_, A> {
         self.counts.panels_laid_out += laid.panels;
         self.counts.elements_laid_out += laid.elements;
         self.focus.settle(self.window);
+        self.reveal();
         self.place_hint(text);
         self.report_focus();
+    }
+
+    /// Brings the element a keyboard focus move or a scroll effect named
+    /// into view, once the layout is current (section 5, rule 12). Returns
+    /// true when a container moved.
+    pub(crate) fn reveal(&mut self) -> bool {
+        if !self.window.is_settled(self.size) {
+            return false;
+        }
+        let Some(id) = self.window.reveal.take() else {
+            return false;
+        };
+        self.window.scroll_to_show(&id)
     }
 
     /// Finds a named element or visible text in the current layout.
@@ -215,11 +234,15 @@ impl<A: App> Panels<'_, A> {
         self.counts.elements_painted += painted.elements;
         // The focus ring, over every panel of the focused element's layer,
         // so a panel painted later in the layer does not cover it, and cut
-        // only by the window (section 6, rule 3).
+        // only by the window and the scroll containers around the element,
+        // so a part scrolled out of view leaves no ring outside its
+        // container (section 6, rule 3; section 5, rule 12).
         if let Some((id, bounds)) = crate::runtime::shown_ring(self.window, self.app, self.focus)
             && self.window.layer_of(&id) == Some(layer)
         {
-            painter.begin_layer(Rect::new(Point::ORIGIN, self.size));
+            let whole = Rect::new(Point::ORIGIN, self.size);
+            let shows = self.window.ring_clip(&id).map_or(whole, |clip| cut(whole, clip));
+            painter.begin_layer(shows);
             painter.quad(ring(bounds, self.window.radius_of(&id), style.ring));
             painter.end_layer();
         }
@@ -295,6 +318,7 @@ impl Layout {
                 }
                 open.pop();
                 painter.end_layer();
+                paint_thumb(&records[clipping], by, painter);
             }
             while let Some(&(tinting, _)) = tints.last() {
                 if is_around(records, tinting, index) {
@@ -324,6 +348,9 @@ impl Layout {
                     border_width,
                     radius: look.radius,
                 });
+            }
+            if let Some(RadioPart::Mark { selected }) = record.radio {
+                paint_mark(bounds, selected, painter, style);
             }
             if let Some(text) = self.text(index) {
                 let content = moved(record.content, by);
@@ -368,7 +395,11 @@ impl Layout {
                     vertical: Vertical::Top,
                     style: text.style,
                     wrap: text.wrap,
-                    colour: text.colour.or(tint).unwrap_or(style.text),
+                    colour: text
+                        .colour
+                        .or(text.quiet.then_some(style.quiet))
+                        .or(tint)
+                        .unwrap_or(style.text),
                     clip: shows,
                 });
             }
@@ -377,10 +408,58 @@ impl Layout {
                 open.push(index);
             }
         }
-        for _ in open {
+        for clipping in open.into_iter().rev() {
             painter.end_layer();
+            paint_thumb(&records[clipping], by, painter);
         }
         records.len() as u64
+    }
+}
+
+/// The thickness of a radio mark's ring, in logical pixels.
+const MARK_RING: f32 = 1.5;
+
+/// The size of the dot in a chosen radio's mark, in logical pixels.
+const MARK_DOT: f32 = 6.0;
+
+/// Paints a scroll container's thumb, moved by `by`, when its content
+/// overflows: over its own clip's layer, which has ended, so the content
+/// never covers it. A record that is no container paints nothing.
+fn paint_thumb(record: &Record, by: Vector, painter: &mut dyn TextPainter) {
+    let (Some(scroll), Some(thumb)) = (record.scroll, record.thumb()) else {
+        return;
+    };
+    painter.quad(Quad {
+        rect: moved(thumb, by),
+        fill: scroll.style.thumb,
+        border: Color::TRANSPARENT,
+        border_width: 0.0,
+        radius: scroll.style.radius,
+    });
+}
+
+/// Paints a radio's mark in `bounds`: a ring, and a dot inside it when the
+/// radio is `selected`.
+fn paint_mark(bounds: Rect, selected: bool, painter: &mut dyn TextPainter, style: &PanelStyle) {
+    painter.quad(Quad {
+        rect: bounds,
+        fill: Color::TRANSPARENT,
+        border: style.mark,
+        border_width: MARK_RING,
+        radius: bounds.width.min(bounds.height) / 2.0,
+    });
+    if selected {
+        let centre = Point::new(bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0);
+        painter.quad(Quad {
+            rect: Rect::new(
+                Point::new(centre.x - MARK_DOT / 2.0, centre.y - MARK_DOT / 2.0),
+                Size::new(MARK_DOT, MARK_DOT),
+            ),
+            fill: style.mark,
+            border: Color::TRANSPARENT,
+            border_width: 0.0,
+            radius: MARK_DOT / 2.0,
+        });
     }
 }
 

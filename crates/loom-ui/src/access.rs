@@ -69,6 +69,9 @@ pub enum Role {
     Tree,
     /// One row of a tree.
     TreeItem,
+    /// A scroll container (rule 28): its offset and its scroll actions come
+    /// from the container, not from its [`Access`].
+    ScrollView,
 }
 
 impl Role {
@@ -120,6 +123,7 @@ impl Role {
             Self::Link => KitRole::Link,
             Self::Tree => KitRole::Tree,
             Self::TreeItem => KitRole::TreeItem,
+            Self::ScrollView => KitRole::ScrollView,
         }
     }
 }
@@ -306,6 +310,11 @@ impl Access {
     /// Its name.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// True when its value is on: a chosen radio, a checked box.
+    pub(crate) fn is_on(&self) -> bool {
+        matches!(self.value, Some(Value::On(true)))
     }
 
     /// True when it is turned off. A turned-off element is no focus stop.

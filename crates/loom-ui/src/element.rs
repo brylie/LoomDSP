@@ -156,6 +156,44 @@ impl Look {
     }
 }
 
+/// How a scroll container looks and moves (ui-layer.md, section 5, rule
+/// 12). The app fills it from its style tokens, so `loom-ui` chooses no
+/// size or colour of its own. It is given with the container, not at
+/// paint, because layout needs it first: the gutter the bar takes and the
+/// room the focus ring keeps are part of where the content goes.
+///
+/// The bar is a thumb on the right, drawn whenever the content is taller
+/// than the container. No track is drawn: the panel behind it is the
+/// track, so the thumb's colour needs a contrast of 3:1 or more against it
+/// (WCAG 2.2, SC 1.4.11).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScrollStyle {
+    /// The thumb's width, in logical pixels.
+    pub width: f32,
+    /// The room between the thumb and the container's edges.
+    pub inset: f32,
+    /// The radius of the thumb's corners.
+    pub radius: f32,
+    /// The thumb's colour.
+    pub thumb: Color,
+    /// How far the focus ring reaches outside an element: its offset and
+    /// its width. The content keeps this much room on every side inside
+    /// the clip, so a focused element at the edge keeps its whole ring.
+    pub ring: f32,
+    /// One line of the panel's body text, in logical pixels: the up and
+    /// down arrows move this far, and a wheel's line three times this.
+    pub line: f32,
+}
+
+impl ScrollStyle {
+    /// The width the container keeps for the bar at its right: the thumb
+    /// and the room on both sides of it. The content is laid out beside
+    /// it, never under it.
+    pub(crate) fn gutter(&self) -> f32 {
+        self.width + 2.0 * self.inset
+    }
+}
+
 /// The fill and the text colour of an element in one state, part of its
 /// [`Looks`].
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -208,6 +246,12 @@ impl Looks {
     }
 }
 
+/// The size of a radio's round mark, in logical pixels.
+const RADIO_MARK: f32 = 14.0;
+
+/// The room between a radio's mark and its label.
+const RADIO_GAP: f32 = 6.0;
+
 /// What kind of element it is.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Kind {
@@ -227,6 +271,9 @@ pub(crate) enum Kind {
         wrap: bool,
         /// The colour of its letters, or the panel style's.
         colour: Option<Color>,
+        /// It is a radio's note, in the panel style's quiet colour when it
+        /// sets none of its own.
+        quiet: bool,
     },
     /// A text field: the app's text, edited in place ([`crate::field`]),
     /// on one line, or on many for a text area.
@@ -237,6 +284,19 @@ pub(crate) enum Kind {
         style: TextStyle,
         /// It shows many lines: it wraps to its width and grows with them.
         many: bool,
+    },
+    /// A window onto its one child, which scrolls up and down inside it
+    /// ([`Element::scroll`]).
+    Scroll(ScrollStyle),
+    /// A group of radios, one focus stop ([`Element::radio_group`]).
+    RadioGroup,
+    /// One radio of a group ([`Element::radio`]): its mark, then its label
+    /// and its note.
+    Radio,
+    /// A radio's round mark, filled when the radio is chosen.
+    RadioMark {
+        /// The radio is the chosen one.
+        selected: bool,
     },
     /// Empty space.
     Space,
@@ -316,6 +376,7 @@ impl Element {
                 style,
                 wrap: false,
                 colour: None,
+                quiet: false,
             },
             Vec::new(),
         )
@@ -369,6 +430,86 @@ impl Element {
         area.focusable = true;
         area.look.clip = true;
         area
+    }
+
+    /// A scroll container showing `child`, laid out at its own height,
+    /// through a window as tall as the container, cut to it (ui-layer.md,
+    /// section 5, rule 12). The wheel and the thumb scroll it, and so does
+    /// focus moving to an element inside that is out of view. The content
+    /// keeps `style.ring` of room on every side, so no ring inside is cut.
+    ///
+    /// The offset is the runtime's, kept by the container's UI ID across
+    /// rebuilds, so it needs a key. It is a scroll view to a screen reader:
+    /// give it a name with [`Element::access`] and `Role::ScrollView`. A
+    /// container whose content has no focus stop is a stop itself, so a
+    /// keyboard user can scroll it. Its own sizes size it: give it a fixed
+    /// or filling height, or it grows to its child and never scrolls.
+    pub fn scroll(child: Element, style: ScrollStyle) -> Self {
+        let room = Self::new(Kind::Column, vec![child]).padding(style.ring);
+        let mut scroll = Self::new(Kind::Scroll(style), vec![room]);
+        scroll.look.clip = true;
+        scroll
+    }
+
+    /// A group of `radios`, built with [`Element::radio`], one under
+    /// another, named `label` for a screen reader (ui-layer.md, section 6,
+    /// rule 9; the WAI-ARIA radio group pattern). The group is one focus
+    /// stop: Tab lands on the chosen radio, or the first when none is, and
+    /// the arrows move among them and choose. Give it a key, and space the
+    /// radios with [`Element::spacing`] so no ring touches a neighbour.
+    pub fn radio_group(label: impl Into<String>, radios: impl IntoIterator<Item = Element>) -> Self {
+        let mut group = Self::new(Kind::RadioGroup, radios.into_iter().collect());
+        group.access = Some(Access::new(crate::access::Role::RadioGroup, label));
+        group
+    }
+
+    /// A radio named `label`, set in `style`, chosen when `selected`, for
+    /// [`Element::radio_group`]. A press on it, or a key that chooses it,
+    /// reaches the app as [`App::clicked`](crate::App::clicked) on the next
+    /// turn; the app keeps which one is chosen. It needs a key.
+    pub fn radio(label: impl Into<String>, style: TextStyle, selected: bool) -> Self {
+        let label = label.into();
+        // The mark sits on the middle of the label's first line.
+        let lift = ((style.size * style.line_height - RADIO_MARK) / 2.0).max(0.0);
+        let mark = Self::new(Kind::RadioMark { selected }, Vec::new())
+            .width(Length::Fixed(RADIO_MARK))
+            .height(Length::Fixed(RADIO_MARK));
+        let mark = Self::column([mark]).padding(Padding {
+            top: lift,
+            ..Padding::default()
+        });
+        let words = Self::column([Self::text(label.clone(), style)]);
+        let mut radio = Self::new(Kind::Radio, vec![mark, words]);
+        radio.spacing = RADIO_GAP;
+        radio.focusable = true;
+        radio.access = Some(
+            Access::new(crate::access::Role::RadioButton, label)
+                .value(crate::access::Value::On(selected))
+                .action(crate::access::Action::Click),
+        );
+        radio
+    }
+
+    /// For a radio, a second line under its label, `text` set in `style`,
+    /// in the panel style's quiet colour. It is part of the radio: a press
+    /// on it chooses the radio, the ring goes around both lines, and it is
+    /// the radio's description. Other elements have no note, so a debug
+    /// build panics on one.
+    pub fn note(mut self, text: impl Into<String>, style: TextStyle) -> Self {
+        if self.kind != Kind::Radio {
+            debug_assert!(false, "only a radio has a note");
+            return self;
+        }
+        let text = text.into();
+        if let Some(words) = self.children.last_mut() {
+            let mut note = Self::text(text.clone(), style);
+            if let Kind::Text { quiet, .. } = &mut note.kind {
+                *quiet = true;
+            }
+            words.children.push(note);
+        }
+        self.access = self.access.map(|access| access.description(text));
+        self
     }
 
     /// Empty space, `width` by `height`.

@@ -374,6 +374,45 @@ pub fn focus_ring() -> loom_ui::RingStyle {
     }
 }
 
+/// The width of a scroll container's thumb (ui-layer.md, section 5,
+/// rule 12).
+pub const SCROLLBAR_WIDTH: f32 = 6.0;
+
+/// The room between a scroll container's thumb and its edges.
+pub const SCROLLBAR_INSET: f32 = 2.0;
+
+/// The radius of a scroll container's thumb: half its width, so its ends
+/// are round.
+pub const SCROLLBAR_RADIUS: f32 = 3.0;
+
+/// The colour of a scroll container's thumb: the quiet text colour, which
+/// stands out at 3:1 or more against the panel it runs over, as no track is
+/// drawn (WCAG 2.2, 1.4.11). A test checks it.
+pub const SCROLLBAR_THUMB: iced::Color = QUIET;
+
+/// How a scroll container of the app's own UI layer looks and moves: the
+/// scrollbar tokens, the focus ring's reach kept as room around the
+/// content, and one line of body text for its keys and the wheel.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "used once the inspector moves to loom-ui (leaving-iced plan, row 4d)"
+    )
+)]
+pub fn scroll() -> loom_ui::ScrollStyle {
+    use loom_canvas::iced_convert::ToCore as _;
+    let ring = focus_ring();
+    loom_ui::ScrollStyle {
+        width: SCROLLBAR_WIDTH,
+        inset: SCROLLBAR_INSET,
+        radius: SCROLLBAR_RADIUS,
+        thumb: SCROLLBAR_THUMB.to_core(),
+        ring: ring.offset + ring.width,
+        line: BODY_TEXT.size * BODY_TEXT.line_height,
+    }
+}
+
 /// A tab title. The open tab has a fill and a border; the others are plain
 /// dim text. Shape as well as colour tells them apart (NFR-UX-03).
 pub fn tab(open: bool) -> impl Fn(&Theme, iced_button::Status) -> iced_button::Style {

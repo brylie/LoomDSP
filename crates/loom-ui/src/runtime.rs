@@ -44,8 +44,8 @@ use crate::routing::{Routed, Target};
 use crate::view::{Layer, View};
 use crate::waker::{Wake, Waker};
 use crate::window::Window;
-use accesskit::{Action as KitAction, ActionData};
-use loom_ui_core::{Event, Key, KeyEvent, Platform, Point, PointerEvent, Rect, Size, TextMeasure, UiId};
+use accesskit::{Action as KitAction, ActionData, ScrollUnit};
+use loom_ui_core::{Event, Key, KeyEvent, Modifiers, Platform, Point, PointerEvent, Rect, Size, TextMeasure, UiId};
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
@@ -336,8 +336,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// that is not a stop, focus comes in from outside: the first stop, or
     /// the last when `back` is set. [`FocusStep::PastEnd`] past either end.
     /// It moves nothing.
+    ///
+    /// A radio group is one stop on the way (section 6, rule 9).
     pub fn focus_step(&self, from: Option<&UiId>, back: bool) -> FocusStep {
-        self.step_among(self.panels.stops().iter().collect(), from, back)
+        self.step_among(self.panels.tab_stops(from), from, back)
     }
 
     /// [`Runtime::focus_step`] among `stops` only, in focus order.
@@ -358,8 +360,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     fn tab_step(&self, input: Layer, back: bool) -> FocusStep {
         let stops = self
             .panels
-            .stops()
-            .iter()
+            .tab_stops(self.focus.id())
+            .into_iter()
             .filter(|stop| self.panels.layer_of(stop).is_some_and(|layer| layer >= input))
             .collect();
         self.step_among(stops, self.focus.id(), back)
@@ -382,6 +384,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         panels.report_focus();
         self.release_if_owed();
         self.focus.id().cloned()
+    }
+
+    /// How far the runtime's scroll container with UI ID `id` is scrolled,
+    /// and the most it can be, in logical pixels, as last placed (section
+    /// 5, rule 12). `None` for an ID that is no such container.
+    pub fn scroll_offset(&self, id: &UiId) -> Option<(f32, f32)> {
+        self.panels.scroll_of(id)
     }
 
     /// Where the first of the runtime's text elements that reads `text` is
@@ -461,9 +470,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     }
 
     /// Moves the runtime's focus to `to`, from the keyboard or an effect,
-    /// so a ring shows. Returns true when it changed.
+    /// so a ring shows, and brings it into view (section 5, rule 12).
+    /// Returns true when it changed.
     fn focus_to(&mut self, to: Option<UiId>) -> bool {
         self.focus.wanted = None;
+        if to.is_some() {
+            self.panels.reveal.clone_from(&to);
+        }
         let changed = self.focus.id() != to.as_ref() || (to.is_some() && !self.focus.ring);
         self.focus.set(to);
         self.focus.ring = self.focus.id().is_some();
@@ -852,6 +865,140 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
     }
 
+    /// The arrows, Space, and Enter on a focused radio of a group (section
+    /// 6, rule 9; the WAI-ARIA radio group pattern). Down and Right move to
+    /// the next radio and choose it, Up and Left to the one before, both
+    /// wrapping; Space chooses the focused radio if it is not chosen; Enter
+    /// is taken and does nothing, so a dialog around the group does not act
+    /// on it. Each choice reaches the app as [`App::clicked`] on the next
+    /// turn. A key the radio takes shows the ring (rule 3). Returns whether
+    /// the key was taken, and whether anything that shows changed.
+    fn radio_key(&mut self, event: &Event) -> (bool, bool) {
+        let Event::Key(KeyEvent::Pressed {
+            key, modifiers, repeat, ..
+        }) = event
+        else {
+            return (false, false);
+        };
+        let Some(id) = self.focus.id().cloned() else {
+            return (false, false);
+        };
+        let Some(chosen) = self.panels.radio_chosen(&id) else {
+            return (false, false);
+        };
+        if self.app.input().canvas_focused || !self.in_input_layer(&id) || !plain(*modifiers) {
+            return (false, false);
+        }
+        let ring = !self.focus.ring;
+        match key {
+            Key::Down | Key::Right | Key::Up | Key::Left => {
+                let back = matches!(key, Key::Up | Key::Left);
+                let Some(next) = self.panels.radio_step(&id, back) else {
+                    return (true, false);
+                };
+                let moved = self.focus_to(Some(next.clone()));
+                self.click(&next);
+                (true, moved)
+            }
+            Key::Space => {
+                if !chosen && !repeat {
+                    self.click(&id);
+                }
+                self.focus.ring = true;
+                (true, ring)
+            }
+            Key::Enter => {
+                self.focus.ring = true;
+                (true, ring)
+            }
+            _ => (false, false),
+        }
+    }
+
+    /// The scroll keys on a focused scroll container, which is a stop only
+    /// when nothing inside is (section 5, rule 12; the browsers' keys, as
+    /// the APG has no pattern): Up and Down one line, Page Up and Page Down
+    /// a page less one line, Space and Shift+Space a page, and Home and End
+    /// the top and the bottom. Returns whether the key was taken, and
+    /// whether the content moved.
+    fn scroll_key(&mut self, event: &Event) -> (bool, bool) {
+        let Event::Key(KeyEvent::Pressed { key, modifiers, .. }) = event else {
+            return (false, false);
+        };
+        let Some(id) = self.focus.id().cloned() else {
+            return (false, false);
+        };
+        let Some(line) = self.panels.scroll_line(&id) else {
+            return (false, false);
+        };
+        if self.app.input().canvas_focused || !self.in_input_layer(&id) {
+            return (false, false);
+        }
+        let shift_only = modifiers.shift && plain(*modifiers);
+        let change: fn(f32, f32, f32, f32) -> f32 = match key {
+            Key::Up if modifiers.none() => |at, line, _, _| at - line,
+            Key::Down if modifiers.none() => |at, line, _, _| at + line,
+            Key::PageUp if modifiers.none() => |at, line, page, _| at - (page - line).max(line),
+            Key::PageDown if modifiers.none() => |at, line, page, _| at + (page - line).max(line),
+            Key::Space if modifiers.none() => |at, _, page, _| at + page,
+            Key::Space if shift_only => |at, _, page, _| at - page,
+            Key::Home if modifiers.none() => |_, _, _, _| 0.0,
+            Key::End if modifiers.none() => |_, _, _, most| most,
+            _ => return (false, false),
+        };
+        let moved = self
+            .panels
+            .scroll_container(&id, |at, page, most| change(at, line, page, most));
+        (true, moved)
+    }
+
+    /// A screen reader's scroll action (section 7, rule 28): ScrollUp,
+    /// ScrollDown, or SetScrollOffset on one of the runtime's scroll
+    /// containers, or ScrollIntoView on a part inside one, which scrolls
+    /// as a focus move does. Returns whether a container moved, or `None`
+    /// for an event that is not such an action, which goes to the app.
+    fn scroll_action(&mut self, event: &AccessEvent) -> Option<bool> {
+        let AccessEvent::Action(request) = event else {
+            return None;
+        };
+        if !matches!(
+            request.action,
+            KitAction::ScrollUp | KitAction::ScrollDown | KitAction::SetScrollOffset | KitAction::ScrollIntoView
+        ) {
+            return None;
+        }
+        let target = self.app.access_target(request.target_node)?;
+        if request.action == KitAction::ScrollIntoView {
+            if !self.panels.in_container(&target) {
+                return None;
+            }
+            return Some(self.panels.scroll_to_show(&target));
+        }
+        let line = self.panels.scroll_line(&target)?;
+        let moved = match (request.action, &request.data) {
+            (KitAction::SetScrollOffset, Some(ActionData::SetScrollOffset(point))) => {
+                // In the node's own space, which is physical pixels.
+                let scale = if self.window.scale > 0.0 {
+                    self.window.scale
+                } else {
+                    1.0
+                };
+                let to = point.y as f32 / scale;
+                self.panels.scroll_container(&target, |_, _, _| to)
+            }
+            (KitAction::SetScrollOffset, _) => false,
+            (action, data) => {
+                let down = action == KitAction::ScrollDown;
+                let item = matches!(data, Some(ActionData::ScrollUnit(ScrollUnit::Item)));
+                self.panels.scroll_container(&target, |at, page, _| {
+                    let by = if item { line } else { page };
+                    if down { at + by } else { at - by }
+                })
+            }
+        };
+        Some(moved)
+    }
+
     /// Sends the app's message for a click on `id`, for the next turn.
     fn click(&self, id: &UiId) {
         if let Some(message) = self.app.clicked(id) {
@@ -972,7 +1119,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let pressed = self.panels().shown_pressed();
         let mut redraw = self.follow_target();
         self.field_left(&mut batch, now);
-        let mut reported = self.panels.fields.take_changed();
+        // A scroll since the last turn, by the pointer between turns or by
+        // a layout's reveal, changed what the tree reports too.
+        let mut reported = self.panels.fields.take_changed() | self.panels.take_scrolled();
         // Paste answers that came since the last turn.
         let changed = self.take_pastes(now, &mut batch);
         redraw |= changed;
@@ -981,6 +1130,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // 2. Route the event.
         match event {
             DriverEvent::Input { event, pointer } => {
+                self.note_modifiers(&event);
                 // While the input method composes in a focused field, every
                 // key is the input method's, Tab and Space too: the field
                 // takes them before Tab or a button can.
@@ -990,6 +1140,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 if !taken && !composing {
                     let (activated, changed) = self.activate(&event);
                     taken = activated;
+                    redraw |= changed;
+                }
+                if !taken && !composing {
+                    let (used, changed) = self.radio_key(&event);
+                    taken = used;
+                    redraw |= changed;
+                }
+                if !taken && !composing {
+                    let (used, changed) = self.scroll_key(&event);
+                    taken = used;
                     redraw |= changed;
                 }
                 if taken {
@@ -1018,7 +1178,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     redraw |= changed;
                     reported |= changed;
                 }
-                None => batch.extend(self.app.accessibility_event(&event)),
+                None => match self.scroll_action(&event) {
+                    Some(moved) => redraw |= moved,
+                    None => batch.extend(self.app.accessibility_event(&event)),
+                },
             },
             DriverEvent::RedrawRequested => redraw = true,
             DriverEvent::Frame => {
@@ -1032,6 +1195,12 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // Tab, or a press the target handed back, may have moved focus off
         // a field: the app hears of it in this turn.
         self.field_left(&mut batch, now);
+        // A keyboard focus move shows its element now, when the layout is
+        // current; otherwise the next layout does it.
+        redraw |= self.panels().reveal();
+        let scrolled = self.panels.take_scrolled();
+        redraw |= scrolled;
+        reported |= scrolled;
 
         // 3. One update per message, each followed by its own effects. A
         // focus effect that moves focus off a field is looked at as it
@@ -1128,6 +1297,18 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         redraw
     }
 
+    /// Keeps the held modifiers from a key event, for Ctrl with the wheel
+    /// over a slider (section 5, rule 12).
+    fn note_modifiers(&mut self, event: &Event) {
+        match event {
+            Event::Key(KeyEvent::ModifiersChanged(modifiers) | KeyEvent::Pressed { modifiers, .. }) => {
+                self.pointer.modifiers = *modifiers;
+            }
+            Event::WindowUnfocused => self.pointer.modifiers = Modifiers::NONE,
+            _ => {}
+        }
+    }
+
     /// Moves everything wakers sent into `pending`, in order, and the
     /// paste answers drivers gave into `pasted`.
     fn drain_queue(&mut self) {
@@ -1216,6 +1397,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     self.field_left(&mut later, now);
                     self.pending.extend(later);
                 }
+                // The runtime's own element is its own to scroll, once its
+                // layout is current (section 5, rule 12); a toolkit's is
+                // the target's, as before.
+                Effect::ScrollIntoView(id) if self.panels.panel_of(&id).is_some() => {
+                    self.panels.reveal = Some(id);
+                    redraw |= self.panels().reveal();
+                }
                 Effect::ScrollIntoView(id) => self.target.scroll_into_view(&id),
                 Effect::ClipboardWrite(text) => driver.clipboard_write(text),
                 Effect::ClipboardRead(reply) => driver.clipboard_read(reply, &self.waker),
@@ -1287,6 +1475,11 @@ pub(crate) fn shown_ring<A: App>(window: &Window, app: &A, focus: &crate::focus:
         return None;
     }
     Some((id.clone(), window.bounds(id)?))
+}
+
+/// True when no modifier but Shift is held.
+fn plain(modifiers: Modifiers) -> bool {
+    !(modifiers.control || modifiers.alt || modifiers.meta)
 }
 
 /// True when the element with UI ID `id` in `window` is in a layer that

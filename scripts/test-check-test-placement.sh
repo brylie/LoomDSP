@@ -57,4 +57,14 @@ fails "an inline platform-only test module"
 case_dir lib.rs '#[test]\nfn t() {}\n'
 fails "a test in a code file"
 
+case_dir lib.rs '#[cfg(test)]\nmod tests;\n' tests_extra.rs '#[test]\nfn t() {}\n'
+fails "a test in a file whose name only starts with a test file's name"
+
+# One awk pass reads every file, so state must not leak from one file to the next.
+case_dir a.rs 'mod open {\n    #[cfg(test)]\n' b.rs '#[cfg(test)]\nmod tests;\n' b/tests.rs '#[test]\nfn t() {}\n' lib.rs 'mod a;\nmod b;\n'
+passes "a file ending inside a module and an attribute does not change the next file"
+
+case_dir a.rs '#[cfg(test)]\n' b.rs 'mod inline {\n}\n' lib.rs 'mod a;\nmod b;\n'
+passes "an attribute at the end of one file does not apply to the next file"
+
 echo "check-test-placement.sh behaves as expected."

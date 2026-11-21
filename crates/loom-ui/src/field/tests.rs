@@ -47,6 +47,8 @@ const PANEL: PanelStyle = PanelStyle {
         width: 2.0,
         offset: 2.0,
     },
+    quiet: Color::rgb(0.6, 0.6, 0.6),
+    mark: Color::rgb(0.9, 0.9, 0.9),
 };
 
 /// A field and the contexts it edits with.

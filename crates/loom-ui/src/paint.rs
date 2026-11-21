@@ -75,6 +75,13 @@ pub struct PanelStyle {
     /// How the focus ring looks, around the element the keyboard focused
     /// (ui-layer.md, section 6, rule 3).
     pub ring: crate::focus::RingStyle,
+    /// The colour of quiet text, such as a radio's note, that sets none of
+    /// its own. It needs a contrast of 4.5:1 or more against the panel
+    /// (WCAG 2.2, SC 1.4.3).
+    pub quiet: Color,
+    /// The colour of a radio's mark: its ring, and its dot when chosen. It
+    /// needs a contrast of 3:1 or more against the panel (SC 1.4.11).
+    pub mark: Color,
 }
 
 /// How text sits on its anchor, left to right.

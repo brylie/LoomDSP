@@ -198,6 +198,48 @@ fn the_focus_ring_stands_out() {
     );
 }
 
+/// A scroll container's thumb stands out at 3:1 or more against the panel
+/// it runs over, since no track is drawn (WCAG 2.2, 1.4.11), and its
+/// tokens are the spec's: 6 px wide, 2 px in, round ends (ui-layer.md,
+/// section 5, rule 12).
+#[test]
+fn the_scrollbar_thumb_stands_out_against_the_panel() {
+    use loom_canvas::contrast_ratio;
+    use loom_canvas::iced_convert::ToCore as _;
+    let scroll = super::scroll();
+    assert_eq!((scroll.width, scroll.inset, scroll.radius), (6.0, 2.0, 3.0));
+    let app = crate::tests::app();
+    let theme = app.theme();
+    let panel = theme.extended_palette().background.base.color;
+    let ratio = contrast_ratio(scroll.thumb, panel.to_core());
+    assert!(ratio >= 3.0, "{ratio:.2}:1");
+}
+
+/// The ring's reach is the room a scroll container keeps around its
+/// content, so a focused part at its edge keeps its whole ring.
+#[test]
+fn a_scroll_container_keeps_room_for_the_ring() {
+    let ring = super::focus_ring();
+    assert_eq!(super::scroll().ring, ring.offset + ring.width);
+}
+
+/// A radio's note, in the panel style's quiet colour, reads at 4.5:1 or
+/// more against the panel (WCAG 2.2, 1.4.3), and a radio's mark at 3:1 or
+/// more (1.4.11; ui-layer.md, section 6, rule 9).
+#[test]
+fn a_radio_note_and_mark_read_against_the_panel() {
+    use loom_canvas::contrast_ratio;
+    use loom_canvas::iced_convert::ToCore as _;
+    let app = crate::tests::app();
+    let theme = app.theme();
+    let panel = theme.extended_palette().background.base.color.to_core();
+    let style = crate::iced_bridge::paint::panel_style(&theme);
+    let note = contrast_ratio(style.quiet, panel);
+    assert!(note >= 4.5, "the note: {note:.2}:1");
+    let mark = contrast_ratio(style.mark, panel);
+    assert!(mark >= 3.0, "the mark: {mark:.2}:1");
+}
+
 /// No app source writes a size or a colour inline: every `.size(...)`,
 /// `text_size(...)`, `.radius(...)`, and `.border(...)` takes a token from
 /// this module, as does every `.background(...)` and `.colour(...)` of a

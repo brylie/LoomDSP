@@ -28,6 +28,8 @@ fn a_still_paints_each_layer_of_the_view() {
             width: 2.0,
             offset: 2.0,
         },
+        quiet: Color::rgb(0.6, 0.6, 0.6),
+        mark: Color::rgb(0.9, 0.9, 0.9),
     };
     let mut panels = PaintList::new(whole);
     still.paint(Layer::Panels, &mut ListPainter::new(&text, &mut panels), &style);
