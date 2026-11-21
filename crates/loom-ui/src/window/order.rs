@@ -347,8 +347,14 @@ impl Window {
                 // A text field: its text as it is now, which may be ahead
                 // of the app's by this turn's edits, its runs, and its
                 // selection in them (section 7, rule 10).
+                let placeholder = record.layout.text(index).and_then(|text| text.placeholder);
                 let runs = self.fields.get(id).map(|field| {
                     node.set_value(field.text().to_owned());
+                    // A hint of what to type, read after the name; never
+                    // the value (WAI-ARIA's `aria-placeholder`).
+                    if let Some((hint, _)) = placeholder {
+                        node.set_placeholder(hint.to_owned());
+                    }
                     if !access.is_disabled() {
                         node.add_action(accesskit::Action::SetValue);
                         node.add_action(accesskit::Action::SetTextSelection);

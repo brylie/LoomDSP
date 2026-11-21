@@ -508,6 +508,24 @@ fn paint_field(
             radius: 0.0,
         });
     }
+    // The placeholder, while nothing is typed or being composed. The caret
+    // still shows over it, at the start, where typing will go.
+    if let Some((hint, colour)) = text
+        .placeholder
+        .filter(|_| state.text().is_empty() && !state.composing())
+    {
+        painter.text(&TextRun {
+            text: hint,
+            anchor: start,
+            bounds: Size::new(content.width, content.height),
+            align: Align::Left,
+            vertical: Vertical::Top,
+            style: text.style,
+            wrap: false,
+            colour,
+            clip: shows,
+        });
+    }
     painter.text(&TextRun {
         text: state.text(),
         anchor: start,

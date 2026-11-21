@@ -297,6 +297,8 @@ pub(crate) enum Kind {
         text: String,
         /// How it is set.
         style: TextStyle,
+        /// What it shows while it is empty, and in which colour.
+        placeholder: Option<(String, Color)>,
     },
     /// A window onto its one child, which scrolls up and down inside it
     /// ([`Element::scroll`]).
@@ -521,6 +523,7 @@ impl Element {
             Kind::Field {
                 text: text.into(),
                 style,
+                placeholder: None,
             },
             Vec::new(),
         );
@@ -606,6 +609,21 @@ impl Element {
             words.children.push(note);
         }
         self.access = self.access.map(|access| access.description(text));
+        self
+    }
+
+    /// For a text field: `text` shown in `colour` while the field is empty
+    /// and nothing is being composed in it, as a hint of what to type. It
+    /// is not the field's value, and a screen reader hears it as the
+    /// field's placeholder, after its name (`set_placeholder`). Its colour
+    /// is the app's, which must reach 4.5:1 against the field (WCAG 2.2,
+    /// SC 1.4.3), since it is text to read. On any other element it does
+    /// nothing.
+    #[must_use]
+    pub fn placeholder(mut self, text: impl Into<String>, colour: Color) -> Self {
+        if let Kind::Field { placeholder, .. } = &mut self.kind {
+            *placeholder = Some((text.into(), colour));
+        }
         self
     }
 

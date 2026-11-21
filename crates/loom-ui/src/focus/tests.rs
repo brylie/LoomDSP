@@ -1048,3 +1048,28 @@ fn positions_count_from_zero_with_the_size_on_the_list() {
     assert_eq!(first.size_of_set(), None, "an item holds no size");
     assert_eq!(node(&list).size_of_set(), Some(3), "the list holds it");
 }
+
+/// A field's placeholder reaches its node as a placeholder, never as its
+/// value, so a screen reader reads the name, then the hint, and an empty
+/// value.
+#[test]
+fn a_placeholder_is_the_fields_hint_not_its_value() {
+    let mut window = crate::window::Window::default();
+    let field = Element::field("", STYLE)
+        .key("search")
+        .placeholder("Search modules", loom_ui_core::Color::WHITE)
+        .access(Access::new(Role::TextInput, "Search"));
+    window.sync(vec![(
+        UiId::panel("browser"),
+        Layer::Panels,
+        Some(Element::column([field])),
+    )]);
+    window.lay_out(Size::new(400.0, 100.0), &mut Mono::default());
+    let mut ids = IdTable::new();
+    let nodes = window.access_nodes(&mut ids, 1.0, None);
+    let number = NodeId(ids.number(&id("browser", "search")));
+    let node = &nodes.nodes.iter().find(|(node, _)| *node == number).expect("a node").1;
+    assert_eq!(node.placeholder(), Some("Search modules"));
+    assert_eq!(node.value(), Some(""));
+    assert_eq!(node.label(), Some("Search"));
+}

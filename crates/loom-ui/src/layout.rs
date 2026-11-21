@@ -282,6 +282,8 @@ pub(crate) struct TextPaint<'a> {
     pub(crate) field: bool,
     /// It is a radio's note, in the quiet colour unless it sets its own.
     pub(crate) quiet: bool,
+    /// A field's placeholder and its colour, shown while it is empty.
+    pub(crate) placeholder: Option<(&'a str, Color)>,
 }
 
 /// What a leaf's node holds: a text, or a slot.
@@ -358,6 +360,8 @@ pub(crate) struct TextLeaf {
     /// It is a text field's: one line, at least one em wide and one line
     /// tall, so an empty field still has room for its caret and a press.
     field: bool,
+    /// A field's placeholder and its colour.
+    placeholder: Option<(String, Color)>,
     /// The size on one line, for text that does not wrap.
     line: Option<Size>,
     /// The last sizes of wrapping text, by the width it was given (`None`
@@ -746,6 +750,7 @@ impl Layout {
                 colour: leaf.colour,
                 field: leaf.field,
                 quiet: leaf.quiet,
+                placeholder: leaf.placeholder.as_ref().map(|(text, colour)| (text.as_str(), *colour)),
             }),
             Leaf::Slot { .. } => None,
         }
@@ -839,6 +844,7 @@ impl Layout {
                     colour,
                     quiet,
                     field: false,
+                    placeholder: None,
                     line: None,
                     wrapped: [None; WRAPPED_SIZES],
                 });
@@ -847,6 +853,7 @@ impl Layout {
             Kind::Field {
                 text,
                 style: text_style,
+                placeholder,
             } => {
                 let leaf = Leaf::Text(TextLeaf {
                     text,
@@ -856,6 +863,7 @@ impl Layout {
                     colour: None,
                     quiet: false,
                     field: true,
+                    placeholder,
                     line: None,
                     wrapped: [None; WRAPPED_SIZES],
                 });
