@@ -30,6 +30,8 @@ enum Message {
     IntoTarget,
     /// A press outside this panel, which closes on one.
     Outside(UiId),
+    /// A key press under the question.
+    QuestionKey,
 }
 
 /// An app that shows a bar of two buttons in the panels layer, across the
@@ -94,6 +96,10 @@ impl App for Layers {
 
     fn pressed_outside(&self, root: &UiId) -> Option<Message> {
         Some(Message::Outside(root.clone()))
+    }
+
+    fn question_key(&self, _key: &loom_ui_core::KeyEvent) -> Option<Message> {
+        Some(Message::QuestionKey)
     }
 
     fn tab_from(&self, from: &UiId, next: Option<&UiId>, back: bool) -> crate::app::TabStep<Message> {
@@ -1166,4 +1172,29 @@ fn a_press_outside_a_closing_menu_is_taken_and_told() {
     below.send(Message::Input(Layer::Canvas));
     below.step(at(200.0, 100.0, PointerEvent::Pressed(PointerButton::Left)));
     assert_eq!(outside(&below), 0, "only while its layer takes input");
+}
+
+/// Section 6, rule 6, step 2 (plan 3.2, row 3a): while the Question layer
+/// takes input, a key press nothing of the runtime's takes goes to
+/// `App::question_key` and never to the target, so a toolkit's field or
+/// shortcut under the question hears nothing; its release still goes on.
+#[test]
+fn a_question_keeps_every_key_from_the_target() {
+    use loom_ui_core::Key;
+    let mut harness = harness(false, Routed::Passed);
+    harness.send(Message::Input(Layer::Question));
+    for key in [Key::Backspace, Key::Delete, Key::Character('d'), Key::Enter] {
+        harness.step(press_key(key, false));
+        assert!(!target_heard_press(&harness, key), "{key:?} went no further");
+    }
+    let asked = harness
+        .app()
+        .heard
+        .iter()
+        .filter(|heard| matches!(heard, Message::QuestionKey))
+        .count();
+    assert_eq!(asked, 4, "each press was the app's question key");
+    let heard = harness.runtime().target().heard.len();
+    harness.step(release_key(Key::Enter));
+    assert_eq!(harness.runtime().target().heard.len(), heard + 1, "the release goes on");
 }

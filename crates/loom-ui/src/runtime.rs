@@ -1165,6 +1165,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                         // A key a field took is the field's alone, so a
                         // toolkit that heard it first drops it too.
                         self.target.kept(&event);
+                    } else if let Event::Key(key @ KeyEvent::Pressed { .. }) = &event
+                        && self.app.input().layer == Layer::Question
+                    {
+                        // An open question has every key (section 6, rule
+                        // 6, step 2): the app's question keys, or Panic,
+                        // and none goes on to the target.
+                        batch.extend(self.app.question_key(key));
+                        self.target.kept(&event);
                     } else {
                         redraw |= self.route(&event, pointer, now, &mut batch);
                     }

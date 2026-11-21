@@ -623,6 +623,20 @@ impl Widget<Message, iced::Theme, crate::Renderer> for Injector<'_> {
                 self.resolve(&mut tree.children[0], layout, renderer, target)
             });
             for (injected, at) in events {
+                // Under an open question a key press is the question's,
+                // as the runtime makes a real one (ui-layer.md, section 6,
+                // rule 6, step 2): it never reaches Iced's widgets or the
+                // listeners. Its release goes on, as a real one's does.
+                if self.app.overlays.question.is_some()
+                    && let Event::Keyboard(keyboard::Event::KeyPressed { .. }) = &injected
+                {
+                    if let Some(loom_ui_core::Event::Key(key)) = loom_canvas::iced_convert::event_to_core(&injected)
+                        && let Some(message) = crate::question::key_of(&key)
+                    {
+                        shell.publish(message);
+                    }
+                    continue;
+                }
                 // A shell of its own, to tell whether a widget took it.
                 let mut messages = Vec::new();
                 let mut own = Shell::new(&mut messages);

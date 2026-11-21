@@ -260,24 +260,27 @@ impl Question {
     }
 }
 
-/// The keys an open question owns, whether or not a widget used them: a
-/// focused text field keeps its focus behind the question, and would take
-/// Enter for itself. A held Enter does not repeat, so one press cannot both
-/// raise a question and answer it.
-pub fn key(event: iced::Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<crate::Message> {
-    use iced::keyboard::{Event, Key, key::Named};
-    let iced::Event::Keyboard(Event::KeyPressed {
+/// What a key press means while the question owns the input, from the
+/// runtime, which keeps every press from Iced then (ui-layer.md, section 6,
+/// rule 6, step 2; `App::question_key`): the question's own keys, as
+/// [`key`] gives them, or the panic shortcut, which is always heard
+/// (panic.md). Every other key, Backspace, Delete, and the editing
+/// shortcuts among them, means nothing and goes no further.
+pub(crate) fn key_of(key: &loom_ui_core::KeyEvent) -> Option<crate::Message> {
+    use loom_ui_core::{Key, KeyEvent};
+    let KeyEvent::Pressed {
         key, modifiers, repeat, ..
-    }) = event
+    } = key
     else {
         return None;
     };
     let message = match key {
-        Key::Named(Named::Tab) if modifiers.shift() => Message::Move(-1),
-        Key::Named(Named::Tab | Named::ArrowRight | Named::ArrowDown) => Message::Move(1),
-        Key::Named(Named::ArrowLeft | Named::ArrowUp) => Message::Move(-1),
-        Key::Named(Named::Enter) if !repeat => Message::Activate,
-        Key::Named(Named::Escape) if !repeat => Message::Escape,
+        Key::Character('.') if modifiers.shortcut() && !repeat => return Some(crate::Message::Panic),
+        Key::Tab if modifiers.shift => Message::Move(-1),
+        Key::Tab | Key::Right | Key::Down => Message::Move(1),
+        Key::Left | Key::Up => Message::Move(-1),
+        Key::Enter if !repeat => Message::Activate,
+        Key::Escape if !repeat => Message::Escape,
         _ => return None,
     };
     Some(crate::Message::Question(message))

@@ -68,6 +68,18 @@ pub trait App {
         None
     }
 
+    /// The message for a key press that nothing of the runtime's took while
+    /// the Question layer takes input (section 6, rule 6, step 2): the
+    /// question's keys, or a key that is always heard, such as Panic. The
+    /// runtime keeps every such press from the target, whatever this
+    /// answers, so no key reaches a field, the canvas, or a shortcut under
+    /// an open question, whichever toolkit drew it. Its release goes on as
+    /// usual. It reads state and changes none.
+    fn question_key(&self, key: &loom_ui_core::KeyEvent) -> Option<Self::Message> {
+        let _ = key;
+        None
+    }
+
     /// The message for a press outside the panel `root`, whose root asks
     /// for it ([`Element::closes_on_press_outside`](crate::Element::closes_on_press_outside)),
     /// while its layer takes input: usually, close it (section 5, rule

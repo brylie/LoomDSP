@@ -248,27 +248,37 @@ fn the_keys_move_and_give_the_highlight() {
 }
 
 /// A held Enter repeats, and a repeat answers nothing, so one press cannot
-/// both raise a question and answer it.
+/// both raise a question and answer it. The panic shortcut is heard over
+/// the question, once per press; any other key means nothing to it.
 #[test]
 fn a_held_enter_answers_nothing() {
-    let press = |repeat| {
-        iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-            key: Key::Named(Named::Enter),
-            modified_key: Key::Named(Named::Enter),
-            physical_key: iced::keyboard::key::Physical::Code(iced::keyboard::key::Code::Enter),
-            location: iced::keyboard::Location::Standard,
-            modifiers: Modifiers::empty(),
-            text: None,
-            repeat,
-        })
+    use loom_ui_core::{Key as K, KeyEvent, Modifiers as M};
+    let press = |key, modifiers, repeat| KeyEvent::Pressed {
+        key,
+        modifiers,
+        repeat,
+        text: None,
     };
-    let status = iced::event::Status::Ignored;
-    let window = iced::window::Id::unique();
-    assert!(key(press(true), status, window).is_none());
+    assert!(key_of(&press(K::Enter, M::NONE, true)).is_none());
     assert!(matches!(
-        key(press(false), status, window),
+        key_of(&press(K::Enter, M::NONE, false)),
         Some(AppMessage::Question(Message::Activate))
     ));
+    let shortcut = if cfg!(target_os = "macos") {
+        M { meta: true, ..M::NONE }
+    } else {
+        M {
+            control: true,
+            ..M::NONE
+        }
+    };
+    assert!(matches!(
+        key_of(&press(K::Character('.'), shortcut, false)),
+        Some(AppMessage::Panic)
+    ));
+    assert!(key_of(&press(K::Character('.'), shortcut, true)).is_none());
+    assert!(key_of(&press(K::Backspace, M::NONE, false)).is_none());
+    assert!(key_of(&press(K::Character('d'), shortcut, false)).is_none());
 }
 
 /// With a text field focused behind the question, typing reaches neither the
@@ -426,4 +436,48 @@ fn the_primary_style_is_on_the_safe_answer() {
     assert_eq!(replace.primary, "cancel");
     assert_eq!(replace.primary, replace.highlight);
     assert_eq!(Question::error("no".into()).model().primary, "ok");
+}
+
+/// The question has every key (ui-layer.md, section 6, rule 6, step 2;
+/// plan 3.2, row 3a): with a module selected under it, Backspace, Delete,
+/// and the shortcuts on the selection (Cmd+D, Cmd+X, Cmd+C, Cmd+Z) never
+/// reach the app as a key at all, since the runtime keeps each press from
+/// Iced, and the module, the selection, the history, and the clipboard
+/// stay as they were.
+#[test]
+fn keys_under_the_question_never_reach_the_app() {
+    let mut ui = changed();
+    select_a_module(&mut ui);
+    let count = modules(ui.app());
+    let selection = ui.app().session.selection.clone();
+    let steps = ui.app().session.edits.history.len();
+    let clipboard = ui.clipboard().map(str::to_string);
+    ui.send(AppMessage::File(FileAction::Close));
+    ui.redraw();
+    let keys = [
+        (Key::Named(Named::Backspace), Modifiers::empty()),
+        (Key::Named(Named::Delete), Modifiers::empty()),
+        (Key::Character("d".into()), Modifiers::COMMAND),
+        (Key::Character("x".into()), Modifiers::COMMAND),
+        (Key::Character("c".into()), Modifiers::COMMAND),
+        (Key::Character("z".into()), Modifiers::COMMAND),
+    ];
+    for (key, modifiers) in keys {
+        let sent = ui.tap(key.clone(), modifiers);
+        assert!(
+            !sent
+                .iter()
+                .any(|message| matches!(message, AppMessage::Key(iced::keyboard::Event::KeyPressed { .. }))),
+            "{key:?}: no key reached the app: {sent:?}"
+        );
+    }
+    assert!(ui.app().overlays.question.is_some(), "the question is still open");
+    assert_eq!(modules(ui.app()), count, "no module went or came");
+    assert_eq!(ui.app().session.selection, selection, "the selection is the same");
+    assert_eq!(ui.app().session.edits.history.len(), steps, "no history step");
+    assert_eq!(
+        ui.clipboard().map(str::to_string),
+        clipboard,
+        "the clipboard is the same"
+    );
 }

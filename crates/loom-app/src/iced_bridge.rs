@@ -316,6 +316,12 @@ impl loom_ui::App for Hosted {
         }
     }
 
+    /// A key press under an open question, which the runtime keeps from
+    /// Iced: the question's keys and Panic (`question::key_of`).
+    fn question_key(&self, key: &loom_ui_core::KeyEvent) -> Option<Message> {
+        crate::question::key_of(key)
+    }
+
     /// The runtime's focus moved: the app keeps one copy of what has the
     /// keyboard, whichever toolkit holds it, so it hears this as it hears
     /// Iced's word on focus (`FocusMoved`).
