@@ -246,7 +246,9 @@ fn a_paste_and_a_screen_readers_text_keep_their_breaks() {
 }
 
 /// A long text wraps to the field's width: its runs are on more than one
-/// line, each line's run lower than the last, and none wider than the box.
+/// line, each line's run lower than the last, and none wider than the box
+/// to its last letter. A trailing space may hang past the edge, and does
+/// with Windows' fonts.
 #[test]
 fn a_long_text_wraps_into_one_run_per_line() {
     let Some(bench) = area_in("alpha beta gamma delta epsilon zeta eta theta", 80.0) else {
@@ -258,7 +260,27 @@ fn a_long_text_wraps_into_one_run_per_line() {
         assert!(pair[1].line > pair[0].line, "one run per line here");
         assert!(pair[1].y > pair[0].y, "each line is lower");
     }
-    assert!(runs.iter().all(|run| run.width <= 80.0 + 0.5), "{runs:?}");
+    // A line's trailing space may hang past the edge, as text layout lets
+    // it, so a run is measured to its last letter that is not a space.
+    let ink = |run: &super::super::ReaderRun| {
+        run.text
+            .chars()
+            .zip(run.positions.iter().zip(&run.widths))
+            .filter(|(letter, _)| !letter.is_whitespace())
+            .map(|(_, (at, width))| at + width)
+            .fold(0.0_f32, f32::max)
+    };
+    assert!(runs.iter().all(|run| ink(run) <= 80.0 + 0.5), "{runs:?}");
+    // The hanging space keeps its own character, so the runs still spell
+    // the whole text and a screen reader can put its caret after the space.
+    let spelled: String = runs.iter().map(|run| run.text.as_str()).collect();
+    assert_eq!(spelled, bench.text());
+    for run in &runs {
+        let bytes: usize = run.lengths.iter().map(|length| usize::from(*length)).sum();
+        assert_eq!(bytes, run.text.len(), "{run:?}");
+        assert_eq!(run.positions.len(), run.lengths.len());
+        assert_eq!(run.widths.len(), run.lengths.len());
+    }
     assert_eq!(bench.field.scroll(), 0.0, "a text area never scrolls sideways");
 }
 
