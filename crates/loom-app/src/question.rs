@@ -262,9 +262,10 @@ impl Question {
 
 /// What a key press means while the question owns the input, from the
 /// runtime, which keeps every press from Iced then (ui-layer.md, section 6,
-/// rule 6, step 2; `App::question_key`): the question's own keys, as
-/// [`key`] gives them, or the panic shortcut, which is always heard
-/// (panic.md). Every other key, Backspace, Delete, and the editing
+/// rule 6, step 2; `App::question_key`): the question's own keys (Tab,
+/// Shift+Tab, and the arrows move among the answers; Enter gives the
+/// highlighted one and Escape the safe one, neither on a repeat), or the
+/// panic shortcut, which is always heard (panic.md). Every other key, Backspace, Delete, and the editing
 /// shortcuts among them, means nothing and goes no further.
 pub(crate) fn key_of(key: &loom_ui_core::KeyEvent) -> Option<crate::Message> {
     use loom_ui_core::{Key, KeyEvent};
