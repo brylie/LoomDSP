@@ -53,14 +53,20 @@ run = ["cargo nextest run --workspace", "mise run doctest"]
 description = "Run every test with line coverage, and fail under LOOM_COVERAGE_MIN"
 # Debug build like `test`, so the no-allocation test still runs. The tests
 # run with nextest; its `ci` profile (.config/nextest.toml) writes a JUnit
-# report for Codecov's test results. The first command is a normal coverage
-# run: it clears the data of earlier runs, so a removed test cannot leave
-# its old coverage behind, and it writes the lcov file for Codecov. The
-# others write the Cobertura file for GitHub and report the same data per
-# file with the minimum. Tests that need hardware live in `device_tests.rs`
-# files and are ignored, so their code is left out of the measurement. Doc
-# tests are not measured; the `doctest` task runs them.
+# report for Codecov's test results. The first command removes every
+# instrumented build and profile from earlier runs. Without it, `cargo
+# llvm-cov report` also reads test binaries that older trees left in a
+# reused target folder, and counts their code as unrun, so files a change
+# never touched can fall to near 0%. `clean --workspace` is not enough: it
+# keeps binaries of tests the current tree no longer has. The second
+# command runs the tests and writes the lcov file for Codecov. The others
+# write the Cobertura file for GitHub and report the same data per file
+# with the minimum. Tests that
+# need hardware live in `device_tests.rs` files and are ignored, so their
+# code is left out of the measurement. Doc tests are not measured; the
+# `doctest` task runs them.
 run = [
+  "cargo llvm-cov clean",
   '''cargo llvm-cov nextest --workspace --profile ci --ignore-filename-regex 'device_tests\.rs$' --lcov --output-path target/lcov.info''',
   '''cargo llvm-cov report --ignore-filename-regex 'device_tests\.rs$' --cobertura --output-path target/cobertura.xml''',
   '''cargo llvm-cov report --ignore-filename-regex 'device_tests\.rs$' --fail-under-lines {{env.LOOM_COVERAGE_MIN}}''',
