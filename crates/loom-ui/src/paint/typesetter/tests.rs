@@ -207,8 +207,9 @@ fn spans(lens: &[usize]) -> Vec<Span> {
         .collect()
 }
 
-/// Each span's index is its glyphs' brush, so a painter can find a glyph
-/// run's span: the runs of three spans carry brushes 0, 1, and 2, in order.
+/// Each span's index plus 1 is its glyphs' brush, so a painter can find a
+/// glyph run's span: the runs of three spans carry brushes 1, 2, and 3, in
+/// order.
 #[test]
 fn each_span_brushes_its_glyph_runs() {
     let Some(mut text) = text() else { return };
@@ -223,7 +224,31 @@ fn each_span_brushes_its_glyph_runs() {
             }
         }
     }
-    assert_eq!(brushes, [0, 1, 2]);
+    assert_eq!(brushes, [1, 2, 3]);
+}
+
+/// Text past the last span keeps brush 0, which is no span's, so it takes
+/// the text's own style rather than the first span's.
+#[test]
+fn text_past_the_spans_has_no_span() {
+    let Some(mut text) = text() else { return };
+    let red = Span {
+        colour: Some(loom_ui_core::Color::rgb(1.0, 0.0, 0.0)),
+        underline: true,
+        ..Span::plain(1)
+    };
+    let layout = text.layout_spans("abc", &[red], style(12.0), None);
+    let mut brushes = Vec::new();
+    for line in layout.lines() {
+        for item in line.items() {
+            if let PositionedLayoutItem::GlyphRun(run) = item {
+                brushes.push(run.style().brush);
+            }
+        }
+    }
+    assert_eq!(brushes, [1, 0]);
+    assert_eq!(span_of(&[red], 0), None);
+    assert_eq!(span_of(&[red], 1), Some(&red));
 }
 
 /// A monospace span is set in another face: narrow letters take more room.
@@ -289,17 +314,17 @@ fn span_rects_are_empty_for_no_range() {
     assert!(text.span_rects("é", &[], style(12.0), None, 0..1).is_empty());
 }
 
-/// A span's brush is its index, up to the last a `u16` holds.
+/// A span's brush is its index plus 1, up to the last a `u16` holds.
 #[test]
-fn a_brush_is_the_span_index() {
-    assert_eq!(brush(0), 0);
-    assert_eq!(brush(usize::from(u16::MAX)), u16::MAX);
+fn a_brush_is_the_span_index_plus_one() {
+    assert_eq!(brush(0), 1);
+    assert_eq!(brush(usize::from(u16::MAX) - 1), u16::MAX);
 }
 
 /// More spans than a brush counts fail loudly in a debug build.
 #[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "more than 65535 spans")]
+#[should_panic(expected = "more than 65534 spans")]
 fn too_many_spans_panic_in_a_debug_build() {
-    brush(usize::from(u16::MAX) + 1);
+    brush(usize::from(u16::MAX));
 }

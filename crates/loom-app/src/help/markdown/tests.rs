@@ -91,6 +91,25 @@ fn a_code_block_is_whole() {
     assert_eq!(parsed.blocks, [Block::Code("Patch(\n  modules: [],\n)".to_string())]);
 }
 
+/// A list entry with two paragraphs reads them as one entry, a space
+/// between, so no two words run together.
+#[test]
+fn an_entry_with_two_paragraphs_keeps_its_words_apart() {
+    assert_eq!(words("- first\n\n  second\n"), ["first second"]);
+    assert_eq!(words("- one\n- two\n"), ["one", "two"]);
+}
+
+/// A table is named, so a page with one fails the bundled-page test; a
+/// line with a bar in it and no table is an ordinary paragraph.
+#[test]
+fn a_table_is_named_and_a_bar_is_not() {
+    let table = parse("| A | B |\n| --- | --- |\n| x | y |\n");
+    assert_eq!(table.unsupported, ["a table"]);
+    let bar = parse("Use a | b here.\n");
+    assert!(bar.unsupported.is_empty(), "{:?}", bar.unsupported);
+    assert_eq!(bar.blocks[0].words(), "Use a | b here.");
+}
+
 /// What help does not show is still read as words, and is named once.
 #[test]
 fn markdown_beyond_helps_part_is_named() {

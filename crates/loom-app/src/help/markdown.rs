@@ -125,7 +125,9 @@ pub(crate) fn parse(notes: &str) -> Parsed {
             parsed.blocks.push(Block::Text { kind, pieces, links });
         }
     };
-    for event in Parser::new_ext(notes, Options::empty()) {
+    // Tables are recognised only so that a page using one is named; help
+    // shows none.
+    for event in Parser::new_ext(notes, Options::ENABLE_TABLES) {
         if let Some(text) = code.as_mut() {
             match event {
                 Event::Text(more) => text.push_str(&more),
@@ -145,8 +147,13 @@ pub(crate) fn parse(notes: &str) -> Parsed {
                 close(&mut open, &mut parsed);
                 open = Some((Kind::Heading, Vec::new(), Vec::new()));
             }
-            // A paragraph inside a list entry is the entry's own text.
-            Event::Start(Tag::Paragraph) if open.as_ref().is_some_and(|(kind, ..)| *kind == Kind::Bullet) => {}
+            // A paragraph inside a list entry is the entry's own text; a
+            // second one is set apart from the first by a space.
+            Event::Start(Tag::Paragraph) if open.as_ref().is_some_and(|(kind, ..)| *kind == Kind::Bullet) => {
+                if open.as_ref().is_some_and(|(_, pieces, _)| !pieces.is_empty()) {
+                    push(&mut open, " ", bold > 0, false, link);
+                }
+            }
             Event::Start(Tag::Paragraph) => {
                 close(&mut open, &mut parsed);
                 open = Some((Kind::Paragraph, Vec::new(), Vec::new()));

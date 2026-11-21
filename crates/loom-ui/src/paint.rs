@@ -48,7 +48,7 @@ pub use list::{ListPainter, PaintList};
 #[cfg(feature = "gpu")]
 pub use plan::{Shape, Target, packed};
 pub use typesetter::Typesetter;
-pub(crate) use typesetter::{editing_contexts, properties};
+pub(crate) use typesetter::{editing_contexts, properties, span_of};
 
 // The style and the measuring trait live in `loom-ui-core`, so the layout
 // measures text with the same types (docs/design/ui-layer.md, section 1).

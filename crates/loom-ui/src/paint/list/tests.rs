@@ -242,7 +242,8 @@ fn a_list_painted_the_same_way_is_the_same() {
 
 /// Spanned text paints each span's glyphs in its colour, the run's colour
 /// where it sets none, and a link's underline after its glyphs, in its
-/// colour, under the letters.
+/// colour, under the letters, in a layer cut to the run's clip as the
+/// glyphs are.
 #[test]
 fn spans_paint_their_colours_and_underlines() {
     let Some(text) = text() else { return };
@@ -272,10 +273,15 @@ fn spans_paint_their_colours_and_underlines() {
     let link_glyphs: Vec<&PlacedGlyph> = list.glyphs.iter().filter(|glyph| glyph.colour == link).collect();
     assert!(line.from.x <= link_glyphs[0].origin.x + 0.01, "{line:?}");
     assert!(line.from.y > link_glyphs[0].origin.y, "below the baseline: {line:?}");
-    let layer = &list.layers[0];
     assert!(
-        matches!(layer.batches.as_slice(), [Batch::Glyphs(_), Batch::Boxes(_)]),
-        "the line after the glyphs: {:?}",
-        layer.batches
+        matches!(list.layers[0].batches.as_slice(), [Batch::Glyphs(_)]),
+        "the glyphs first: {:?}",
+        list.layers
     );
+    assert!(
+        matches!(list.layers[1].batches.as_slice(), [Batch::Boxes(_)]),
+        "then the line, over them: {:?}",
+        list.layers
+    );
+    assert_eq!(list.layers[1].clip, BOUNDS, "cut to the run's clip");
 }

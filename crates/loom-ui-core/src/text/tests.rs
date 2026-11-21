@@ -26,6 +26,15 @@ fn span_ranges_follow_each_other_and_stop_at_the_end() {
     assert_eq!(ranges, vec![0..3, 3..7, 7..9]);
 }
 
+/// A span too long to add up saturates, so the spans after it are empty
+/// at the end of the text rather than overflowing.
+#[test]
+fn span_ranges_saturate() {
+    let spans = [Span::plain(usize::MAX), Span::plain(1)];
+    let ranges: Vec<_> = Span::ranges(&spans, 3).collect();
+    assert_eq!(ranges, vec![0..3, 3..3]);
+}
+
 /// The default rectangles are the range's place on one line.
 #[test]
 fn default_span_rects_measure_on_one_line() {

@@ -34,10 +34,10 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::{Mutex, OnceLock};
 
-/// A Parley layout of a piece of text. Its brush is the index of the span a
-/// glyph is in (0 for plain text), not a colour: the colour of a run is the
-/// painter's, looked up from the span, so a colour of its own keys no
-/// layout.
+/// A Parley layout of a piece of text. Its brush says which span a glyph is
+/// in ([`brush`]): 0 for text no span covers, the span's index plus 1
+/// otherwise. It is not a colour: the colour of a run is the painter's,
+/// looked up from the span, so a colour of its own keys no layout.
 pub(crate) type TextLayout = Layout<u16>;
 
 /// The system's fonts, scanned and loaded once for the process. A clone
@@ -76,21 +76,28 @@ pub(crate) fn properties<B: Brush>(style: TextStyle) -> impl Iterator<Item = Sty
     .flatten()
 }
 
-/// The brush of the span at `index`: its index, which a `u16` holds for
-/// any paragraph a view builds.
+/// The brush of the span at `index`: its index plus 1, so that 0, Parley's
+/// default, stays the brush of text past the last span, which takes the
+/// text's own style. A `u16` holds that for any paragraph a view builds.
 ///
 /// # Panics
 ///
-/// In a debug build, past `u16::MAX` spans, so the mistake shows in a
+/// In a debug build, past `u16::MAX - 1` spans, so the mistake shows in a
 /// test. A release build gives the spans past it the last brush, and they
 /// paint as that span does, rather than stop a performance.
 fn brush(index: usize) -> u16 {
     debug_assert!(
-        index <= usize::from(u16::MAX),
+        index < usize::from(u16::MAX),
         "a paragraph has more than {} spans",
-        u16::MAX
+        u16::MAX - 1
     );
-    u16::try_from(index).unwrap_or(u16::MAX)
+    u16::try_from(index.saturating_add(1)).unwrap_or(u16::MAX)
+}
+
+/// The span a glyph run with `brush` is in, among `spans`: none for 0, the
+/// text no span covers.
+pub(crate) fn span_of(spans: &[Span], brush: u16) -> Option<&Span> {
+    usize::from(brush).checked_sub(1).and_then(|index| spans.get(index))
 }
 
 /// The system's fonts and a layout context of their own, for a text field's

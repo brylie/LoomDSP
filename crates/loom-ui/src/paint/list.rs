@@ -227,8 +227,8 @@ impl Painter for ListPainter<'_> {
                 let PositionedLayoutItem::GlyphRun(glyphs) = item else {
                     continue;
                 };
-                // The brush is the span's index (`typesetter.rs`).
-                let span = spans.get(usize::from(glyphs.style().brush));
+                // The brush names the span (`typesetter.rs`); 0 is none.
+                let span = super::span_of(spans, glyphs.style().brush);
                 let colour = span.and_then(|span| span.colour).unwrap_or(run.colour);
                 let shaped = glyphs.run();
                 let synthesis = shaped.synthesis();
@@ -267,9 +267,15 @@ impl Painter for ListPainter<'_> {
                 }
             }
         }
-        // After the glyphs, so a line is over the letters it crosses.
-        for line in underlines {
-            self.list.push_box(PaintBox::Segment(line));
+        // After the glyphs, so a line is over the letters it crosses, and
+        // cut to the run's clip as its glyphs are, in a layer of its own
+        // inside the one open.
+        if !underlines.is_empty() {
+            self.begin_layer(run.clip);
+            for line in underlines {
+                self.list.push_box(PaintBox::Segment(line));
+            }
+            self.end_layer();
         }
     }
 

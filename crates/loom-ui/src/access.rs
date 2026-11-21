@@ -302,6 +302,7 @@ impl Access {
     /// its active descendant. The runtime gives the node the row's node ID
     /// when the tree is sent, and leaves it out while no laid-out element
     /// has that UI ID, so the tree never names a node it does not hold.
+    #[must_use]
     pub fn active_descendant(mut self, id: UiId) -> Self {
         self.active = Some(id);
         self
@@ -310,6 +311,7 @@ impl Access {
     /// Says it is item `position` of its set, counted from 0, as a list
     /// box's option is. The set's size goes on the container
     /// ([`size_of_set`](Self::size_of_set)), as AccessKit has it.
+    #[must_use]
     pub fn position_in_set(mut self, position: usize) -> Self {
         self.position = Some(position);
         self
@@ -317,6 +319,7 @@ impl Access {
 
     /// Says it holds `size` items, as a list box says how many rows it
     /// shows.
+    #[must_use]
     pub fn size_of_set(mut self, size: usize) -> Self {
         self.size = Some(size);
         self

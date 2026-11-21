@@ -77,7 +77,7 @@ impl Span {
     pub fn ranges(spans: &[Span], text_len: usize) -> impl Iterator<Item = Range<usize>> + '_ {
         spans.iter().scan(0, move |start, span| {
             let from = (*start).min(text_len);
-            *start += span.len;
+            *start = start.saturating_add(span.len);
             Some(from..(*start).min(text_len))
         })
     }
