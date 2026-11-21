@@ -15,80 +15,79 @@
 
 set -eu
 
-fail=0
-test_files=$(mktemp)
-trap 'rm -f "$test_files"' EXIT
-
+# One awk pass over every file. Starting a process per file was most of
+# the cost: about 2,800 processes for 631 files, which took 40 s or more on
+# a loaded machine (#863).
 sources=$(find crates/*/src -name '*.rs' | sort)
+[ -n "$sources" ] || { echo "Tests are in their own files."; exit 0; }
 
-# Inline test modules, and the files that test module declarations point to.
-for file in $sources; do
-    dir=$(dirname "$file")
-    case $(basename "$file") in
-        lib.rs | main.rs | mod.rs) base=$dir ;;
-        *) base=${file%.rs} ;;
-    esac
-    # Attributes may sit between `#[cfg(test)]` and the `mod` line.
+# Unquoted on purpose: one argument per file. Crate paths have no spaces.
+awk '
+    FNR == 1 {
+        nfiles++
+        files[nfiles] = FILENAME
+        dir = FILENAME
+        sub(/\/[^\/]*$/, "", dir)
+        name = FILENAME
+        sub(/^.*\//, "", name)
+        base = (name == "lib.rs" || name == "main.rs" || name == "mod.rs") ? dir : substr(FILENAME, 1, length(FILENAME) - 3)
+        pending = 0
+        depth = 0
+    }
+    # Files with a test function. Checked before the rules below skip lines.
+    /#\[test\]/ { has_test[FILENAME] = 1 }
+    # `#[cfg(test)]`, or `#[cfg(all(test, ...))]` for platform-only tests.
+    # Attributes may sit between it and the `mod` line.
+    /^[[:space:]]*#\[cfg\((test|all\(test[,)].*)\)\][[:space:]]*$/ { pending = 1; next }
+    # Doc comments, comments, and blank lines may sit there too.
+    pending && /^[[:space:]]*(#\[|\/\/|$)/ { next }
+    pending {
+        pending = 0
+        if (match($0, /^[[:space:]]*(pub(\([a-z]+\))? )?mod [a-z_0-9]+ *\{/)) {
+            inline[++ninline] = FILENAME ":" FNR
+        } else if (match($0, /^[[:space:]]*(pub(\([a-z]+\))? )?mod [a-z_0-9]+;/)) {
+            mod = $0
+            sub(/^[[:space:]]*(pub(\([a-z]+\))? )?mod /, "", mod)
+            sub(/;.*/, "", mod)
+            prefix = base
+            for (i = 1; i <= depth; i++) prefix = prefix "/" stack[i]
+            tests[++ntests] = prefix "/" mod
+        }
+    }
+    # Track inline (non-test) modules so nested declarations resolve.
     # Inline modules nest their children in a folder of the same name.
-    awk -v file="$file" -v base="$base" '
-        # `#[cfg(test)]`, or `#[cfg(all(test, ...))]` for platform-only tests.
-        /^[[:space:]]*#\[cfg\((test|all\(test[,)].*)\)\][[:space:]]*$/ { pending = 1; next }
-        # Doc comments, comments, and blank lines may sit there too.
-        pending && /^[[:space:]]*(#\[|\/\/|$)/ { next }
-        pending {
-            pending = 0
-            if (match($0, /^[[:space:]]*(pub(\([a-z]+\))? )?mod [a-z_0-9]+ *\{/)) {
-                printf "INLINE %s:%d\n", file, NR
-            } else if (match($0, /^[[:space:]]*(pub(\([a-z]+\))? )?mod [a-z_0-9]+;/)) {
-                name = $0
-                sub(/^[[:space:]]*(pub(\([a-z]+\))? )?mod /, "", name)
-                sub(/;.*/, "", name)
-                prefix = base
-                for (i = 1; i <= depth; i++) prefix = prefix "/" stack[i]
-                printf "TEST %s/%s\n", prefix, name
+    /^[[:space:]]*(pub(\([a-z]+\))? )?mod [a-z_0-9]+ *\{/ {
+        mod = $0
+        sub(/^[[:space:]]*(pub(\([a-z]+\))? )?mod /, "", mod)
+        sub(/ *\{.*/, "", mod)
+        stack[++depth] = mod
+        indents[depth] = match($0, /[^[:space:]]/) - 1
+    }
+    /^[[:space:]]*\}[[:space:]]*$/ && depth > 0 {
+        if (match($0, /[^[:space:]]/) - 1 == indents[depth]) depth--
+    }
+    END {
+        fail = 0
+        for (i = 1; i <= ninline; i++) {
+            print inline[i] ": inline test module. Move it to its own file and declare it with `#[cfg(test)] mod name;`."
+            fail = 1
+        }
+        # `#[test]` outside a test file or its folder.
+        for (f = 1; f <= nfiles; f++) {
+            file = files[f]
+            if (!(file in has_test)) continue
+            stem = substr(file, 1, length(file) - 3)
+            sub(/\/mod$/, "", stem)
+            allowed = 0
+            for (t = 1; t <= ntests && !allowed; t++) {
+                if (stem == tests[t] || substr(stem, 1, length(tests[t]) + 1) == tests[t] "/") allowed = 1
+            }
+            if (!allowed) {
+                print file ": has #[test] but is not a test file. Move the tests to a file declared with `#[cfg(test)] mod name;`."
+                fail = 1
             }
         }
-        # Track inline (non-test) modules so nested declarations resolve.
-        /^[[:space:]]*(pub(\([a-z]+\))? )?mod [a-z_0-9]+ *\{/ {
-            name = $0
-            sub(/^[[:space:]]*(pub(\([a-z]+\))? )?mod /, "", name)
-            sub(/ *\{.*/, "", name)
-            indent = match($0, /[^[:space:]]/) - 1
-            stack[++depth] = name
-            indents[depth] = indent
-        }
-        /^[[:space:]]*\}[[:space:]]*$/ && depth > 0 {
-            indent = match($0, /[^[:space:]]/) - 1
-            if (indent == indents[depth]) depth--
-        }
-    ' "$file"
-done > "$test_files"
-
-if grep -q '^INLINE ' "$test_files"; then
-    grep '^INLINE ' "$test_files" | while read -r _ where; do
-        echo "$where: inline test module. Move it to its own file and declare it with \`#[cfg(test)] mod name;\`."
-    done
-    fail=1
-fi
-
-# `#[test]` outside a test file or its folder.
-for file in $sources; do
-    grep -q '#\[test\]' "$file" || continue
-    stem=${file%.rs}
-    stem=${stem%/mod}
-    allowed=0
-    for test in $(sed -n 's/^TEST //p' "$test_files"); do
-        case $stem in
-            "$test" | "$test"/*) allowed=1 ;;
-        esac
-    done
-    if [ "$allowed" = 0 ]; then
-        echo "$file: has #[test] but is not a test file. Move the tests to a file declared with \`#[cfg(test)] mod name;\`."
-        fail=1
-    fi
-done
-
-if [ "$fail" = 0 ]; then
-    echo "Tests are in their own files."
-fi
-exit "$fail"
+        if (!fail) print "Tests are in their own files."
+        exit fail
+    }
+' $sources
