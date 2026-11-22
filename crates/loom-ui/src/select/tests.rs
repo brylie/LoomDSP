@@ -134,6 +134,14 @@ fn type_ahead_finds_steps_and_resets() {
     );
 
     let mut typed = Typed::default();
+    assert_eq!(typed.find(&id, "s", start, &options, 0), Some(4), "Sine");
+    assert_eq!(
+        typed.find(&id, "S", soon(100), &options, 4),
+        Some(5),
+        "\"sS\" steps as \"ss\" does"
+    );
+
+    let mut typed = Typed::default();
     assert_eq!(typed.find(&id, "9", start, &options, 0), Some(3), "96 kHz");
     assert_eq!(
         typed.find(&id, "4", soon(600), &options, 3),
@@ -198,6 +206,7 @@ fn placed(count: usize, bounds: Rect) -> (Placement, f32) {
         id: UiId::panel("list").with("rate"),
         select: Select::new("Rate", options, Some(0), SELECT),
         highlight: 0,
+        anchor: None,
     };
     let list = list_panel(&open, bounds, 200.0);
     let scroll = match list.children[0].height {

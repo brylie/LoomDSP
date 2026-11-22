@@ -178,6 +178,9 @@ pub(crate) struct Open {
     pub(crate) select: Select,
     /// The highlighted option.
     pub(crate) highlight: usize,
+    /// Where the select was, and the window's height, when the list was
+    /// last built: the list is built again when either changes.
+    pub(crate) anchor: Option<(Rect, f32)>,
 }
 
 /// What a key does to a closed select (section 6, rule 12).
@@ -296,9 +299,11 @@ impl Typed {
             }
             _ => text.to_owned(),
         };
-        let mut chars = string.chars();
+        // Case is ignored here too, so "b" then "B" steps as "bb" does.
+        let folded = string.to_lowercase();
+        let mut chars = folded.chars();
         let first = chars.next();
-        let repeated = string.chars().count() > 1 && chars.all(|c| Some(c) == first);
+        let repeated = folded.chars().count() > 1 && chars.all(|c| Some(c) == first);
         let (needle, start) = if string.chars().count() == 1 || repeated {
             (first.map(String::from).unwrap_or_default(), from + 1)
         } else {
@@ -441,6 +446,7 @@ impl<A: crate::App> crate::Panels<'_, A> {
             id: id.clone(),
             select,
             highlight,
+            anchor: None,
         });
         self.window.reveal = Some(option_id(highlight));
         self.window.select_changed = true;

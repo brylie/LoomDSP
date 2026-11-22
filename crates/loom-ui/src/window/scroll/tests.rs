@@ -53,8 +53,9 @@ pub(crate) enum Message {
     Slid(UiId, f32, crate::SlidePhase),
     /// A select with this UI ID had this option chosen.
     Chose(UiId, usize),
-    /// An overlay of the app's opened, so the Overlays layer takes input.
-    Raise,
+    /// An overlay or a question of the app's opened, so this layer takes
+    /// input.
+    Raise(Layer),
 }
 
 /// Builds the panels from the version shown and the radio chosen.
@@ -95,7 +96,7 @@ impl App for Shown {
             Message::Focus(id) => return Effects::focus(id),
             Message::Describe => self.nodes = Some(cx.access_nodes(&mut self.ids)),
             Message::Slid(id, position, phase) => self.slid.push((id, position, phase)),
-            Message::Raise => self.layer = Layer::Overlays,
+            Message::Raise(layer) => self.layer = layer,
             Message::Chose(id, index) => {
                 // A select's builder reads its chosen option as the version's
                 // last two digits, so the app keeps the choice it heard.

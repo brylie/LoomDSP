@@ -324,7 +324,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     pub fn lay_out(&mut self, text: &mut dyn TextMeasure) {
         self.panels().lay_out(text);
         // A select that left the layout, scrolled out of view, or changed
-        // its options closes its list at once, so no stale list is drawn.
+        // its options closes its list at once, and one that moved has its
+        // list built again where it is now, so no stale list is drawn.
         self.check_select();
         if std::mem::take(&mut self.panels.select_changed) {
             self.build_view();
@@ -1175,6 +1176,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 // keyboard focus is elsewhere: Expand focuses it first, as
                 // its Focus action would, since the list stays open only
                 // while the select has the focus.
+                self.release_target();
                 self.focus_to(Some(target.clone()));
                 let at = select.chosen.unwrap_or(0);
                 self.panels().open_select(&target, select, at);
@@ -1196,19 +1198,41 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// its own (section 5, rule 18): the select left the layout, has no
     /// options or other options, or is scrolled out of view; the focus is
     /// not on it; or a layer above it, such as an overlay or a question,
-    /// takes the input.
+    /// takes the input. A list that stays open takes the app's current
+    /// choice, and is built again when its select moved.
     fn check_select(&mut self) {
         let Some(open) = self.panels.select.clone() else {
             return;
         };
-        let gone = match self.panels.select_of(&open.id) {
+        let now = self.panels.select_of(&open.id);
+        // Where things are is known only once the window is laid out again
+        // after a rebuild; until then only what the select offers is read.
+        let settled = self.panels.is_settled(self.window.size);
+        let gone = match &now {
             None => true,
-            Some((select, _, shows)) => select.options != open.select.options || !shows,
+            Some((select, _, shows)) => select.options != open.select.options || (settled && !shows),
         };
         let input = self.app.input();
         let covered = self.panels.layer_of(&open.id).is_none_or(|layer| layer < input.layer);
         if gone || covered || input.canvas_focused || self.focus.id() != Some(&open.id) {
             self.panels().close_select();
+            return;
+        }
+        // Still open: the list follows the app's choice, for its tick and
+        // for what a choice compares with, and follows its select when the
+        // select moves or the window changes height.
+        let Some((select, bounds, _)) = now else {
+            return;
+        };
+        let moved = settled
+            && open
+                .anchor
+                .is_some_and(|anchor| anchor != (bounds, self.window.size.height));
+        if let Some(kept) = self.panels.select.as_mut()
+            && (kept.select.chosen != select.chosen || moved)
+        {
+            kept.select.chosen = select.chosen;
+            self.panels.select_changed = true;
         }
     }
 
@@ -1642,6 +1666,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             updates += 1;
             redraw |= self.update(message, now, driver);
         }
+        // An overlay an update opened closes a select's list under it, and
+        // a list that opened, closed, or moved its highlight changes what
+        // the tree reports: its expanded state and active descendant.
+        self.check_select();
+        reported |= self.panels.select_changed;
         // What a field reports changed: one notice, asked for after the
         // turn's updates, so the app's answer is built from its model with
         // the field's messages in it.
@@ -1654,8 +1683,6 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
         self.counts.updates += updates as u64;
 
-        // An overlay an update opened closes a select's list under it.
-        self.check_select();
         // 4. What changed.
         // Taken first, so any rebuild uses up a stale view. A select's list
         // that opened, closed, or moved its highlight is built again too.
@@ -1919,17 +1946,28 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     fn build_view(&mut self) -> bool {
         let mut view = View::new();
         self.app.view(&mut view);
-        if let Some(open) = self.panels.select.clone()
+        if let Some(mut open) = self.panels.select.clone()
             && let Some(bounds) = self.panels.bounds(&open.id)
         {
+            let anchor = Some((bounds, self.window.size.height));
+            if let Some(kept) = self.panels.select.as_mut() {
+                kept.anchor = anchor;
+            }
+            open.anchor = anchor;
             let model = crate::select::ListModel {
                 open,
                 bounds,
                 window: self.window.size.height,
             };
+            // At least as high as its select's layer, so a select in a
+            // question has its list where the question's input goes.
+            let layer = self
+                .panels
+                .layer_of(&model.open.id)
+                .map_or(Layer::Overlays, |layer| layer.max(Layer::Overlays));
             view.panel_with(
                 UiId::panel(crate::select::LIST_PANEL),
-                Layer::Overlays,
+                layer,
                 &model,
                 crate::select::build_list,
             );

@@ -419,6 +419,25 @@ impl<A: App> Panels<'_, A> {
         {
             return heard;
         }
+        // Section 5, rule 18: a press anywhere outside a select's open list,
+        // the select itself included, closes the list with no choice, and
+        // is taken, as a press outside a menu is: before any scroll bar
+        // takes it, though a press on the list's own bar is inside it.
+        if side == Side::Above
+            && matches!(pointer, PointerEvent::Pressed(_))
+            && self.window.select.is_some()
+            && !self
+                .window
+                .bounds(&crate::select::list_id())
+                .is_some_and(|list| list.contains(point))
+        {
+            self.pointer.space = None;
+            self.close_select();
+            return Heard {
+                taken: true,
+                redraw: true,
+            };
+        }
         if let PointerEvent::Pressed(PointerButton::Left) = pointer
             && let Some(drag) = self.window.press_bar(point, keep)
         {
@@ -440,24 +459,6 @@ impl<A: App> Panels<'_, A> {
             return Heard {
                 taken: true,
                 redraw: on_source && self.note_hover_motion(),
-            };
-        }
-        // Section 5, rule 18: a press anywhere outside a select's open list,
-        // the select itself included, closes the list with no choice, and
-        // is taken, as a press outside a menu is.
-        if side == Side::Above
-            && matches!(pointer, PointerEvent::Pressed(_))
-            && self.window.select.is_some()
-            && !self
-                .window
-                .bounds(&crate::select::list_id())
-                .is_some_and(|list| list.contains(point))
-        {
-            self.pointer.space = None;
-            self.close_select();
-            return Heard {
-                taken: true,
-                redraw: true,
             };
         }
         // Section 5, rule 14: a press outside a panel of the input layer

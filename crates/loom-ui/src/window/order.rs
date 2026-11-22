@@ -252,12 +252,16 @@ impl Window {
             .iter()
             .find(|element| element.id.as_ref() == Some(id))?;
         let select = element.select.as_deref()?.clone();
-        // Scrolled out of view: nothing of it is inside the clip around it.
-        let shows = element.clip.is_none_or(|clip| {
-            let cut = crate::layout::cut(element.bounds, clip);
-            cut.width > 0.0 && cut.height > 0.0
-        });
-        Some((select, self.bounds(id)?, shows))
+        // Scrolled out of view: nothing of it is inside the clip around it
+        // in its panel, or inside its panel's own clip in the window, as in
+        // a slot a container scrolled away.
+        let some = |rect: loom_ui_core::Rect| rect.width > 0.0 && rect.height > 0.0;
+        let bounds = self.bounds(id)?;
+        let shows = element
+            .clip
+            .is_none_or(|clip| some(crate::layout::cut(element.bounds, clip)))
+            && some(crate::layout::cut(bounds, record.clip));
+        Some((select, bounds, shows))
     }
 
     /// Whether the panel that holds the element with UI ID `id` has it in
