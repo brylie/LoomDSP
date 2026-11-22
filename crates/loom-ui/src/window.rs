@@ -72,10 +72,11 @@ pub(crate) struct Window {
     /// An element to bring into view once the layout is current: the one a
     /// keyboard focus move or a scroll effect named (section 5, rule 12).
     pub(crate) reveal: Option<UiId>,
-    /// A multi-line field whose caret to bring into view, once the layout
-    /// is current: after an edit or a caret move in it, the containers
-    /// around it follow the caret (section 8, rule 7).
-    pub(crate) caret_reveal: Option<UiId>,
+    /// A multi-line field, and what of it to bring into view once the
+    /// layout is current (section 8, rule 7): its caret after an edit or a
+    /// caret move, or its start or end after Home or End on a Mac. The last
+    /// request wins.
+    pub(crate) caret_reveal: Option<(UiId, FieldShow)>,
     /// A scroll container moved since the runtime last asked
     /// ([`Window::take_scrolled`]), so what the tree reports changed.
     scrolled: bool,
@@ -711,5 +712,14 @@ impl Window {
 
 mod order;
 pub(crate) mod scroll;
+/// What of a multi-line field the containers around it bring into view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FieldShow {
+    /// Its caret.
+    Caret,
+    /// Its start or its end.
+    Edge(crate::field::Edge),
+}
+
 #[cfg(test)]
 mod tests;

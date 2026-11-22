@@ -621,3 +621,32 @@ fn on_a_mac_home_wins_over_a_waiting_caret_request() {
     harness.lay_out(&mut text);
     assert_eq!(scrolled_by(&mut harness, &mut text), 0.0, "Home's start, not the caret");
 }
+
+/// On a Mac, End right after an edit, with no layout between, shows the
+/// box's end once the layout has the edit: the edge waits for a current
+/// layout as the caret does. The keys run on this machine's platform, so
+/// the test runs on a Mac only.
+#[test]
+fn on_a_mac_end_after_an_edit_shows_the_end_once_laid_out() {
+    if Platform::current() != Platform::Mac {
+        eprintln!("skipped: Home and End move the caret off a Mac");
+        return;
+    }
+    let Some((mut harness, mut text)) = notes_in("a\nb\nc\nd\ne\nf\ng", true) else {
+        return;
+    };
+    harness.step(key_in(Key::Up, shortcut(Platform::Mac, false), None));
+    harness.lay_out(&mut text);
+    assert_eq!(scrolled_by(&mut harness, &mut text), 0.0, "the caret is at the start");
+    // An edit, then End, before any layout.
+    harness.step(key_in(Key::Character('x'), Modifiers::NONE, Some("x")));
+    harness.step(key_in(Key::End, Modifiers::NONE, None));
+    harness.lay_out(&mut text);
+    let most = harness
+        .runtime()
+        .scroll_offset(&UiId::panel("notes").with("pane"))
+        .expect("the container")
+        .1;
+    assert!(most > 0.0);
+    assert_eq!(f64::from(most), scrolled_by(&mut harness, &mut text), "End's end shows");
+}

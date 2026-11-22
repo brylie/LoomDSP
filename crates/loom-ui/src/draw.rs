@@ -133,7 +133,8 @@ impl<A: App> Panels<'_, A> {
     }
 
     /// Brings a multi-line field's caret into view after an edit or a caret
-    /// move in it (section 8, rule 7). It runs only right after a layout,
+    /// move in it, or its start or end after Home or End on a Mac
+    /// (section 8, rule 7). It runs only right after a layout,
     /// never in the turn of the edit: there the view is not yet rebuilt
     /// with the edit, so a box that grows a line would still have its old
     /// height. The caret's place is read now, from the field as this layout
@@ -142,18 +143,23 @@ impl<A: App> Panels<'_, A> {
         if !self.window.is_settled(self.size) {
             return false;
         }
-        let Some(id) = self.window.caret_reveal.take() else {
+        let Some((id, show)) = self.window.caret_reveal.take() else {
             return false;
         };
-        let Some(caret) = self
-            .window
-            .fields
-            .get(&id)
-            .and_then(crate::field::FieldState::focus_rect)
-        else {
-            return false;
-        };
-        self.window.scroll_to_show_inside(&id, caret)
+        match show {
+            crate::window::FieldShow::Edge(edge) => self.window.scroll_to_show_edge(&id, edge),
+            crate::window::FieldShow::Caret => {
+                let Some(caret) = self
+                    .window
+                    .fields
+                    .get(&id)
+                    .and_then(crate::field::FieldState::focus_rect)
+                else {
+                    return false;
+                };
+                self.window.scroll_to_show_inside(&id, caret)
+            }
+        }
     }
 
     /// Finds a named element or visible text in the current layout.

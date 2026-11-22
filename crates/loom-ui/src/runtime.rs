@@ -641,22 +641,17 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if used.committed {
             batch.extend(self.app.field_event(&id, &FieldEvent::Committed(text())));
         }
-        // Home or End in a multi-line field on a Mac: the containers around
-        // it scroll to show its start or end, and the caret stays.
-        let shown = used
-            .reveal
-            .is_some_and(|edge| self.panels.scroll_to_show_edge(&id, edge));
-        // Any other edit or caret move keeps the caret in view. An edge the
-        // user asked for wins over a caret request still waiting for its
-        // layout, or that layout would scroll back to the caret.
-        if used.reveal.is_some() {
-            if self.panels.caret_reveal.as_ref() == Some(&id) {
-                self.panels.caret_reveal = None;
-            }
+        // Home or End in a multi-line field on a Mac shows its start or end,
+        // and the caret stays; any other edit or caret move shows the caret.
+        // Either waits for a current layout, and the last asked for wins.
+        // Home and End move nothing, so they ask for a redraw, whose layout
+        // then scrolls.
+        if let Some(edge) = used.reveal {
+            self.panels.caret_reveal = Some((id.clone(), crate::window::FieldShow::Edge(edge)));
         } else if used.edited || used.redraw {
             self.follow_caret(&id);
         }
-        (used.taken, used.redraw || shown)
+        (used.taken, used.redraw || used.reveal.is_some())
     }
 
     /// Asks for the caret of the field `id` to be kept in view after an
@@ -671,7 +666,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             .get(id)
             .is_some_and(|field| field.lines() == crate::field::Lines::Many);
         if many {
-            self.panels.caret_reveal = Some(id.clone());
+            self.panels.caret_reveal = Some((id.clone(), crate::window::FieldShow::Caret));
         }
     }
 
