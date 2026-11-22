@@ -597,3 +597,27 @@ fn the_container_follows_the_caret_after_a_paste() {
     assert_caret_shows(&harness);
     assert!(scrolled_by(&mut harness, &mut text) > 0.0);
 }
+
+/// On a Mac, Home right after a caret move, with no layout between, still
+/// shows the box's start: the edge asked for wins over the caret request
+/// that the move left waiting. The keys run on this machine's platform, so
+/// the test runs on a Mac only.
+#[test]
+fn on_a_mac_home_wins_over_a_waiting_caret_request() {
+    if Platform::current() != Platform::Mac {
+        eprintln!("skipped: Home and End move the caret off a Mac");
+        return;
+    }
+    let Some((mut harness, mut text)) = notes_in("a\nb\nc\nd\ne\nf\ng", true) else {
+        return;
+    };
+    // The caret starts at the end; a letter typed there brings the end in.
+    harness.step(key_in(Key::Character('h'), Modifiers::NONE, Some("h")));
+    harness.lay_out(&mut text);
+    assert!(scrolled_by(&mut harness, &mut text) > 0.0, "the caret's end shows");
+    // A move, then Home, before any layout.
+    harness.step(key_in(Key::Up, Modifiers::NONE, None));
+    harness.step(key_in(Key::Home, Modifiers::NONE, None));
+    harness.lay_out(&mut text);
+    assert_eq!(scrolled_by(&mut harness, &mut text), 0.0, "Home's start, not the caret");
+}

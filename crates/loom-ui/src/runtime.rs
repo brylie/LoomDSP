@@ -646,8 +646,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let shown = used
             .reveal
             .is_some_and(|edge| self.panels.scroll_to_show_edge(&id, edge));
-        // Any other edit or caret move keeps the caret in view.
-        if used.reveal.is_none() && (used.edited || used.redraw) {
+        // Any other edit or caret move keeps the caret in view. An edge the
+        // user asked for wins over a caret request still waiting for its
+        // layout, or that layout would scroll back to the caret.
+        if used.reveal.is_some() {
+            if self.panels.caret_reveal.as_ref() == Some(&id) {
+                self.panels.caret_reveal = None;
+            }
+        } else if used.edited || used.redraw {
             self.follow_caret(&id);
         }
         (used.taken, used.redraw || shown)
