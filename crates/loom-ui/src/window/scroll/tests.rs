@@ -56,6 +56,10 @@ pub(crate) enum Message {
     /// An overlay or a question of the app's opened, so this layer takes
     /// input.
     Raise(Layer),
+    /// From now on, count each notice that what the tree reports changed.
+    CountNotices,
+    /// What the tree reports changed (`App::access_changed`).
+    Notice,
 }
 
 /// Builds the panels from the version shown and the radio chosen.
@@ -80,6 +84,10 @@ pub(crate) struct Shown {
     pub(crate) chosen_options: Vec<(UiId, usize)>,
     /// The lowest layer that takes input.
     layer: Layer,
+    /// Notices are counted, once a test asks.
+    count_notices: bool,
+    /// How many notices came that what the tree reports changed.
+    pub(crate) notices: usize,
 }
 
 impl App for Shown {
@@ -97,6 +105,8 @@ impl App for Shown {
             Message::Describe => self.nodes = Some(cx.access_nodes(&mut self.ids)),
             Message::Slid(id, position, phase) => self.slid.push((id, position, phase)),
             Message::Raise(layer) => self.layer = layer,
+            Message::CountNotices => self.count_notices = true,
+            Message::Notice => self.notices += 1,
             Message::Chose(id, index) => {
                 // A select's builder reads its chosen option as the version's
                 // last two digits, so the app keeps the choice it heard.
@@ -132,6 +142,10 @@ impl App for Shown {
         Some(Message::Chose(id.clone(), index))
     }
 
+    fn access_changed(&self) -> Option<Message> {
+        self.count_notices.then_some(Message::Notice)
+    }
+
     fn input(&self) -> crate::app::InputState {
         crate::app::InputState {
             layer: self.layer,
@@ -164,6 +178,11 @@ pub(crate) struct Toolkit {
     pub(crate) scrolled: Vec<UiId>,
     /// Every key pressed that reached it.
     pub(crate) keys: Vec<Key>,
+    /// An element of its own with the keys, as an Iced field would hold
+    /// them; none unless a test gives it one.
+    pub(crate) holds: Option<UiId>,
+    /// How many times the runtime told it to let go of its focus.
+    pub(crate) released: usize,
 }
 
 impl Target<Message> for Toolkit {
@@ -181,7 +200,12 @@ impl Target<Message> for Toolkit {
     }
 
     fn focused(&self) -> Option<UiId> {
-        None
+        self.holds.clone()
+    }
+
+    fn release_focus(&mut self) {
+        self.released += 1;
+        self.holds = None;
     }
 
     fn needs_redraw(&mut self, _updates: usize) -> bool {
@@ -201,6 +225,8 @@ pub(crate) fn showing(build: Build) -> Harness<Shown, Toolkit> {
         slid: Vec::new(),
         chosen_options: Vec::new(),
         layer: Layer::Canvas,
+        count_notices: false,
+        notices: 0,
     };
     let window = WindowState::new(Size::new(400.0, 200.0));
     let mut harness = Harness::new(app, Toolkit::default(), window, Instant::now());

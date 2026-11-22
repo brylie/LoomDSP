@@ -61,6 +61,18 @@ fn panel(version: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
     list_panel(Element::column([stop("before"), room, select, after]))
 }
 
+/// The panel of [`panel`], and an overlay of the app's with a container
+/// 30 px tall at (300, 165), clear of the open list, whose ten rows scroll:
+/// its bar is the 10 px at its right, from x 390.
+fn with_overlay(version: u32, chosen: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
+    let mut panels = panel(version, chosen);
+    let rows = (0..10).map(|n| Element::text(format!("row {n}"), STYLE)).collect();
+    let container = crate::window::scroll::tests::container("rows", 30.0, rows).width(Length::Fixed(100.0));
+    let overlay = Element::column([container]).placed(crate::element::Placement::At(Point::new(300.0, 165.0)));
+    panels.push((UiId::panel("overlay"), Layer::Overlays, overlay));
+    panels
+}
+
 /// The select alone, in a panel of the Question layer, as in a question.
 fn in_question(version: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
     let select = Element::select(Select::new(
@@ -511,4 +523,79 @@ fn a_select_in_a_question_has_its_list_there() {
     assert_eq!(highlight(&harness), Some(0));
     click(&mut harness, option_point(2));
     assert_eq!(chosen(&harness), [2]);
+}
+
+/// A press on another overlay's scroll bar while the list is open closes
+/// the list with no choice, and is taken: no drag starts, so moving the
+/// pointer scrolls nothing.
+#[test]
+fn a_press_on_another_bar_closes_the_list_and_drags_nothing() {
+    let mut harness = at(with_overlay, 0);
+    // The overlay's container is a stop of its own, read first, so the
+    // select takes the focus from the app, not from Tab.
+    harness.send(Message::Focus(rate()));
+    step(&mut harness, key(Key::Down));
+    assert_eq!(highlight(&harness), Some(0));
+    let rows = UiId::panel("overlay").with("rows");
+    let on_bar = Point::new(395.0, 170.0);
+    step(
+        &mut harness,
+        pointer(PointerEvent::Pressed(PointerButton::Left), on_bar),
+    );
+    assert_eq!(highlight(&harness), None, "closed");
+    step(&mut harness, pointer(PointerEvent::Moved, Point::new(395.0, 190.0)));
+    step(
+        &mut harness,
+        pointer(PointerEvent::Released(PointerButton::Left), Point::new(395.0, 190.0)),
+    );
+    assert_eq!(
+        harness.runtime().scroll_offset(&rows).expect("the container").0,
+        0.0,
+        "no drag"
+    );
+    assert!(chosen(&harness).is_empty());
+}
+
+/// Expand while the target holds the keys, as an Iced field would, tells
+/// the target to let go before the select takes the focus, so the two
+/// never both hold the keys.
+#[test]
+fn expand_releases_the_targets_focus() {
+    let mut harness = at(panel, 0);
+    harness.parts().1.holds = Some(UiId::panel("iced").with("field"));
+    harness.send(Message::Describe);
+    let nodes = harness.app().nodes.clone().expect("the nodes");
+    let (select, _) = nodes
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Sample rate") && node.role() == accesskit::Role::ComboBox)
+        .cloned()
+        .expect("the select's node");
+    step(
+        &mut harness,
+        DriverEvent::Accessibility(AccessEvent::Action(ActionRequest {
+            action: accesskit::Action::Expand,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: select,
+            data: None,
+        })),
+    );
+    assert_eq!(harness.runtime().target().released, 1);
+    assert_eq!(harness.runtime().target().holds, None);
+    assert_eq!(harness.runtime().focused(), Some(&rate()));
+    assert_eq!(highlight(&harness), Some(0));
+}
+
+/// Opening the list and moving its highlight each tell the app that what
+/// the tree reports changed, in that turn, so its expanded state and
+/// active descendant reach a screen reader.
+#[test]
+fn opening_and_moving_raise_the_tree_notice() {
+    let mut harness = at_chosen(0);
+    harness.send(Message::CountNotices);
+    let before = harness.app().notices;
+    step(&mut harness, key(Key::Down));
+    assert_eq!(harness.app().notices, before + 1, "opening");
+    step(&mut harness, key(Key::Down));
+    assert_eq!(harness.app().notices, before + 2, "moving the highlight");
 }
