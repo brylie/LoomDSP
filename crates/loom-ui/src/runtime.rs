@@ -646,18 +646,27 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let shown = used
             .reveal
             .is_some_and(|edge| self.panels.scroll_to_show_edge(&id, edge));
-        // Any other edit or caret move in a multi-line field keeps its caret
-        // in view: the containers around it follow, once the layout has the
-        // field's new height (section 8, rule 7).
+        // Any other edit or caret move keeps the caret in view.
+        if used.reveal.is_none() && (used.edited || used.redraw) {
+            self.follow_caret(&id);
+        }
+        (used.taken, used.redraw || shown)
+    }
+
+    /// Asks for the caret of the field `id` to be kept in view after an
+    /// edit or a caret move in it, when it shows many lines: the containers
+    /// around it follow at the next layout, which has the field's new
+    /// height (section 8, rule 7). A single-line field scrolls inside
+    /// itself instead.
+    fn follow_caret(&mut self, id: &UiId) {
         let many = self
             .panels
             .fields
-            .get(&id)
+            .get(id)
             .is_some_and(|field| field.lines() == crate::field::Lines::Many);
-        if many && used.reveal.is_none() && (used.edited || used.redraw) {
+        if many {
             self.panels.caret_reveal = Some(id.clone());
         }
-        (used.taken, used.redraw || shown)
     }
 
     /// Whether the input method is composing in the focused field, while
@@ -741,6 +750,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             return Some(false);
         };
         let used = self.panels.fields.act(&field, action, now);
+        if used.changed {
+            self.follow_caret(&field);
+        }
         if used.edited {
             let text = self
                 .panels
@@ -1359,6 +1371,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             }
             let used = self.panels.fields.paste(&field, &text, now);
             changed |= used.redraw;
+            if used.redraw {
+                self.follow_caret(&field);
+            }
             if used.edited {
                 let text = self
                     .panels

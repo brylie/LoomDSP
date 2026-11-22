@@ -534,9 +534,31 @@ fn on_a_mac_home_and_end_scroll_the_container_and_leave_the_caret() {
     );
 }
 
+/// The caret's place in the window, from the runtime's input method area,
+/// and the bounds of the notes app's scroll container.
+fn caret_and_pane(harness: &Harness<Notes, Keys>) -> (loom_ui_core::Rect, loom_ui_core::Rect) {
+    let Some(crate::Ime::On { area }) = harness.runtime().ime() else {
+        panic!("the area has focus, so its caret has a place");
+    };
+    let pane = harness
+        .runtime()
+        .bounds(&UiId::panel("notes").with("pane"))
+        .expect("the container");
+    (area, pane)
+}
+
+/// The caret lies within the container, top to bottom, after a layout.
+fn assert_caret_shows(harness: &Harness<Notes, Keys>) {
+    let (caret, pane) = caret_and_pane(harness);
+    assert!(
+        caret.y >= pane.y && caret.y + caret.height <= pane.y + pane.height,
+        "the caret at {caret:?} is outside the container at {pane:?}"
+    );
+}
+
 /// Typing new lines in a text area taller than its scroll container keeps
-/// the caret in view: the container follows it down, and Up back to the
-/// first line brings the container back to the top.
+/// the caret in view after every layout: the container follows it down,
+/// and Up back to the first line brings the container back to the top.
 #[test]
 fn the_container_follows_the_caret_as_lines_are_typed() {
     let Some((mut harness, mut text)) = notes_in("a", true) else {
@@ -546,12 +568,32 @@ fn the_container_follows_the_caret_as_lines_are_typed() {
     for _ in 0..6 {
         harness.step(key_in(Key::Enter, Modifiers::NONE, None));
         harness.lay_out(&mut text);
+        assert_caret_shows(&harness);
     }
-    let down = scrolled_by(&mut harness, &mut text);
-    assert!(down > 0.0, "the container followed the caret down");
+    assert!(
+        scrolled_by(&mut harness, &mut text) > 0.0,
+        "the container followed the caret down"
+    );
     for _ in 0..6 {
         harness.step(key_in(Key::Up, Modifiers::NONE, None));
         harness.lay_out(&mut text);
+        assert_caret_shows(&harness);
     }
     assert_eq!(scrolled_by(&mut harness, &mut text), 0.0, "and back to the top");
+}
+
+/// A paste of many lines keeps the caret in view too: the container
+/// follows it to the pasted text's end.
+#[test]
+fn the_container_follows_the_caret_after_a_paste() {
+    let Some((mut harness, mut text)) = notes_in("a", true) else {
+        return;
+    };
+    harness.driver_mut().set_clipboard(Some("1\n2\n3\n4\n5\n6".to_owned()));
+    harness.step(key_in(Key::Character('v'), shortcut(Platform::current(), false), None));
+    harness.step(DriverEvent::Woken);
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "a1\n2\n3\n4\n5\n6", "the paste went in");
+    assert_caret_shows(&harness);
+    assert!(scrolled_by(&mut harness, &mut text) > 0.0);
 }

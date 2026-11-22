@@ -114,6 +114,7 @@ impl<A: App> Panels<'_, A> {
         self.counts.elements_laid_out += laid.elements;
         self.focus.settle(self.window);
         self.reveal();
+        self.reveal_caret();
         self.place_hint(text);
         self.report_focus();
     }
@@ -125,23 +126,34 @@ impl<A: App> Panels<'_, A> {
         if !self.window.is_settled(self.size) {
             return false;
         }
-        let mut moved = self
-            .window
-            .reveal
-            .take()
-            .is_some_and(|id| self.window.scroll_to_show(&id));
-        // The caret's place is read now, from the field as this layout left
-        // it, so a box that grew with a new line shows its new last line.
-        if let Some(id) = self.window.caret_reveal.take()
-            && let Some(caret) = self
-                .window
-                .fields
-                .get(&id)
-                .and_then(crate::field::FieldState::focus_rect)
-        {
-            moved |= self.window.scroll_to_show_inside(&id, caret);
+        let Some(id) = self.window.reveal.take() else {
+            return false;
+        };
+        self.window.scroll_to_show(&id)
+    }
+
+    /// Brings a multi-line field's caret into view after an edit or a caret
+    /// move in it (section 8, rule 7). It runs only right after a layout,
+    /// never in the turn of the edit: there the view is not yet rebuilt
+    /// with the edit, so a box that grows a line would still have its old
+    /// height. The caret's place is read now, from the field as this layout
+    /// left it. Returns true when a container moved.
+    fn reveal_caret(&mut self) -> bool {
+        if !self.window.is_settled(self.size) {
+            return false;
         }
-        moved
+        let Some(id) = self.window.caret_reveal.take() else {
+            return false;
+        };
+        let Some(caret) = self
+            .window
+            .fields
+            .get(&id)
+            .and_then(crate::field::FieldState::focus_rect)
+        else {
+            return false;
+        };
+        self.window.scroll_to_show_inside(&id, caret)
     }
 
     /// Finds a named element or visible text in the current layout.
