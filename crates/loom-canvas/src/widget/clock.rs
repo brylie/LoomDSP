@@ -22,3 +22,6 @@ impl Clock for SystemClock {
         Instant::now()
     }
 }
+
+#[cfg(test)]
+mod tests;
