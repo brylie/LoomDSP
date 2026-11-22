@@ -240,6 +240,26 @@ impl Window {
         Some((slider, self.bounds(id)?))
     }
 
+    /// What the select with UI ID `id` shows, where it is in the window,
+    /// and what of it shows, as last laid out: `None` for any other
+    /// element.
+    pub(crate) fn select_of(&self, id: &UiId) -> Option<(crate::select::Select, loom_ui_core::Rect, bool)> {
+        let panel = self.panel_of(id)?;
+        let record = &self.records[panel];
+        let element = record
+            .layout
+            .records()
+            .iter()
+            .find(|element| element.id.as_ref() == Some(id))?;
+        let select = element.select.as_deref()?.clone();
+        // Scrolled out of view: nothing of it is inside the clip around it.
+        let shows = element.clip.is_none_or(|clip| {
+            let cut = crate::layout::cut(element.bounds, clip);
+            cut.width > 0.0 && cut.height > 0.0
+        });
+        Some((select, self.bounds(id)?, shows))
+    }
+
     /// Whether the panel that holds the element with UI ID `id` has it in
     /// its current layout, with a node: false for an element a rebuild
     /// removed before the next layout drops what the window keeps for it.
@@ -334,14 +354,29 @@ impl Window {
                 None => tops.push(child),
             };
             if let (Some(access), Some(id)) = (&element.access, &element.id) {
+                // An open select says so, and points to its list and
+                // highlight (section 7, rule 32).
+                let opened = match (&self.select, element.id.as_ref()) {
+                    (Some(open), Some(id)) if &open.id == id => Some(
+                        access
+                            .clone()
+                            .opened(crate::select::option_id(open.highlight), crate::select::list_id()),
+                    ),
+                    _ => None,
+                };
+                let access = opened.as_ref().unwrap_or(access);
                 let mut node = access.node(element.focusable);
                 // Only a node the tree holds (section 7, rule 13's rule
                 // for relations).
-                if let Some(active) = access.active().filter(|active| {
-                    self.panel_of(active)
-                        .is_some_and(|panel| self.records[panel].layout.has_node(active))
-                }) {
+                let held = |id: &&UiId| {
+                    self.panel_of(id)
+                        .is_some_and(|panel| self.records[panel].layout.has_node(id))
+                };
+                if let Some(active) = access.active().filter(held) {
                     node.set_active_descendant(NodeId(ids.number(active)));
+                }
+                if let Some(list) = access.controls().filter(held) {
+                    node.set_controls(vec![NodeId(ids.number(list))]);
                 }
                 // What a scroll container cuts away is not where the part
                 // is for a screen reader either (section 7, rule 28).

@@ -80,6 +80,12 @@ pub(crate) struct Window {
     /// A scroll container moved since the runtime last asked
     /// ([`Window::take_scrolled`]), so what the tree reports changed.
     scrolled: bool,
+    /// The select whose list is open, and its highlight (section 5, rule
+    /// 18; `select.rs`).
+    pub(crate) select: Option<crate::select::Open>,
+    /// The open list opened, closed, or moved its highlight since the
+    /// runtime last asked, so the view must be built again.
+    pub(crate) select_changed: bool,
 }
 
 /// One panel, as the window keeps it.
@@ -201,6 +207,8 @@ impl Default for Window {
             stops: Vec::new(),
             fields: crate::field::Fields::default(),
             scrolled: false,
+            select: None,
+            select_changed: false,
             groups: Vec::new(),
             reveal: None,
             caret_reveal: None,

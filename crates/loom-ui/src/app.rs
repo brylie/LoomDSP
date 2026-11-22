@@ -103,6 +103,17 @@ pub trait App {
         None
     }
 
+    /// The message for the option at `index` chosen in the select with UI
+    /// ID `id` (ui-layer.md, section 5, rule 18): from its open list, by a
+    /// key, a press, or a screen reader, or a screen reader's Increment or
+    /// Decrement, which steps one option. Only a choice that differs from
+    /// the chosen option is reported. It arrives on the next turn. It reads
+    /// state and changes none.
+    fn chose(&self, id: &UiId, index: usize) -> Option<Self::Message> {
+        let _ = (id, index);
+        None
+    }
+
     /// How hover text looks (ui-layer.md, section 5, rule 11), from the
     /// app's style tokens. The default is plain and readable.
     fn hint_style(&self) -> crate::HintStyle {

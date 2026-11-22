@@ -164,6 +164,10 @@ pub enum Action {
     SetValue,
     /// Open its menu.
     ShowContextMenu,
+    /// Open its list, as a closed select's.
+    Expand,
+    /// Close its list, as an open select's.
+    Collapse,
 }
 
 impl Action {
@@ -175,6 +179,8 @@ impl Action {
             Self::Decrement => KitAction::Decrement,
             Self::SetValue => KitAction::SetValue,
             Self::ShowContextMenu => KitAction::ShowContextMenu,
+            Self::Expand => KitAction::Expand,
+            Self::Collapse => KitAction::Collapse,
         }
     }
 }
@@ -208,6 +214,8 @@ pub struct Access {
     /// The element the keys act on while this one keeps the focus, as a
     /// search field's highlighted row (rule 27).
     active: Option<UiId>,
+    /// The element it controls, as an open select its list (rule 13).
+    controls: Option<UiId>,
     /// Where it is in its set, from 0, as a list box option.
     position: Option<usize>,
     /// How many items it holds, as a list box.
@@ -265,6 +273,7 @@ impl Access {
             states: States::default(),
             actions: Vec::new(),
             active: None,
+            controls: None,
             position: None,
             size: None,
         }
@@ -328,6 +337,25 @@ impl Access {
     pub fn size_of_set(mut self, size: usize) -> Self {
         self.size = Some(size);
         self
+    }
+
+    /// The same node shown as an open select (section 7, rule 32): it is
+    /// expanded, offers Collapse in place of Expand, names the highlighted
+    /// option `row` as its active descendant, and controls the list `list`.
+    pub(crate) fn opened(mut self, row: UiId, list: UiId) -> Self {
+        self.states.expanded = Some(true);
+        self.actions.retain(|action| *action != Action::Expand);
+        if !self.actions.contains(&Action::Collapse) {
+            self.actions.push(Action::Collapse);
+        }
+        self.active = Some(row);
+        self.controls = Some(list);
+        self
+    }
+
+    /// The element it controls, if any.
+    pub(crate) fn controls(&self) -> Option<&UiId> {
+        self.controls.as_ref()
     }
 
     /// The element it names as its active descendant, if any.

@@ -406,6 +406,9 @@ impl Layout {
             if let Some(slider) = &record.slider {
                 paint_slider(bounds, slider, painter, style);
             }
+            if let Some(glyph) = record.glyph {
+                paint_glyph(bounds, glyph, painter);
+            }
             if let Some(text) = self.text(index) {
                 let content = moved(record.content, by);
                 // Its own clip too: a text that clips cuts its own letters.
@@ -554,6 +557,25 @@ fn paint_check(bounds: Rect, on: bool, painter: &mut dyn TextPainter, style: &Pa
                 colour: style.primary,
             });
         }
+    }
+}
+
+/// Paints a drawn mark in `bounds`: a select's V, or a chosen option's
+/// tick, in two strokes.
+fn paint_glyph(bounds: Rect, glyph: crate::select::Glyph, painter: &mut dyn TextPainter) {
+    use crate::select::Glyph;
+    let at = |x: f32, y: f32| Point::new(bounds.x + x * bounds.width, bounds.y + y * bounds.height);
+    let (points, colour) = match glyph {
+        Glyph::Opens(colour) => ([at(0.15, 0.35), at(0.5, 0.7), at(0.85, 0.35)], colour),
+        Glyph::Tick(colour) => ([at(0.1, 0.55), at(0.4, 0.85), at(0.9, 0.2)], colour),
+    };
+    for (from, to) in [(points[0], points[1]), (points[1], points[2])] {
+        painter.segment(Segment {
+            from,
+            to,
+            width: CHECK_STROKE * 0.75,
+            colour,
+        });
     }
 }
 

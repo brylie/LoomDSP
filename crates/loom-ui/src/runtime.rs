@@ -125,6 +125,8 @@ pub struct Runtime<A: App, T> {
     /// The app changed outside a turn ([`Runtime::mark_view_stale`], for
     /// tests), so the next turn builds its view again even with no update.
     view_stale: bool,
+    /// The text typed into a select's type-ahead (section 6, rule 12).
+    typed: crate::select::Typed,
     /// The layouts of the panels that have elements.
     panels: Window,
     spec: Option<WindowSpec>,
@@ -171,6 +173,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             window,
             view: None,
             view_stale: false,
+            typed: crate::select::Typed::default(),
             panels: Window::default(),
             spec: None,
             deadline: None,
@@ -320,6 +323,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// driver calls it before it draws, and before it reads bounds or hits.
     pub fn lay_out(&mut self, text: &mut dyn TextMeasure) {
         self.panels().lay_out(text);
+        // A select that left the layout, scrolled out of view, or changed
+        // its options closes its list at once, so no stale list is drawn.
+        self.check_select();
+        if std::mem::take(&mut self.panels.select_changed) {
+            self.build_view();
+            self.panels().lay_out(text);
+        }
         self.release_if_owed();
     }
 
@@ -389,6 +399,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         panels.report_focus();
         self.release_if_owed();
         self.focus.id().cloned()
+    }
+
+    /// The highlighted option of a select's open list, or `None` while no
+    /// list is open, for tests.
+    #[cfg(test)]
+    pub(crate) fn select_highlight(&self) -> Option<usize> {
+        self.panels.select.as_ref().map(|open| open.highlight)
     }
 
     /// How far the runtime's scroll container with UI ID `id` is scrolled,
@@ -1043,6 +1060,152 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
     }
 
+    /// The WAI-ARIA select-only combobox pattern's keys on a focused select
+    /// (section 6, rule 12). Closed, the keys that open it open its list on
+    /// the chosen, the first, or the last option, or on what type-ahead
+    /// finds. Open, they move the highlight, choose, or close; Tab chooses
+    /// and is not taken, so it moves the focus on after. Returns whether
+    /// the key was taken, and whether anything that shows changed.
+    fn select_key(&mut self, event: &Event, now: Instant) -> (bool, bool) {
+        use crate::select::{Closed, OpenKey, closed_key, moved, open_key};
+        let Event::Key(KeyEvent::Pressed {
+            key, modifiers, text, ..
+        }) = event
+        else {
+            return (false, false);
+        };
+        let Some(id) = self.focus.id().cloned() else {
+            return (false, false);
+        };
+        let Some((select, _, _)) = self.panels.select_of(&id) else {
+            return (false, false);
+        };
+        if select.options.is_empty() || self.app.input().canvas_focused || !self.in_input_layer(&id) {
+            return (false, false);
+        }
+        let ring = !self.focus.ring;
+        let count = select.options.len();
+        let open = self.panels.select.clone().filter(|open| open.id == id);
+        let text = text.as_deref();
+        match open {
+            None => {
+                let Some(action) = closed_key(*key, *modifiers, text) else {
+                    return (false, false);
+                };
+                let at = match action {
+                    Closed::OpenOnChosen => select.chosen.unwrap_or(0),
+                    Closed::OpenOnFirst => 0,
+                    Closed::OpenOnLast => count - 1,
+                    Closed::Type => {
+                        let from = select.chosen.unwrap_or(count - 1);
+                        self.typed
+                            .find(&id, text.unwrap_or_default(), now, &select.options, from)
+                            .unwrap_or(from.min(count - 1))
+                    }
+                };
+                self.panels().open_select(&id, select, at);
+            }
+            Some(open) => {
+                let Some(action) = open_key(*key, *modifiers, text) else {
+                    return (false, false);
+                };
+                match action {
+                    OpenKey::Move(by) => self.panels().highlight_option(moved(open.highlight, by, count)),
+                    OpenKey::First => self.panels().highlight_option(0),
+                    OpenKey::Last => self.panels().highlight_option(count - 1),
+                    OpenKey::Choose => self.panels().choose_highlighted(),
+                    OpenKey::ChooseAndTab => {
+                        self.panels().choose_highlighted();
+                        return (false, true);
+                    }
+                    OpenKey::Close => self.panels().close_select(),
+                    OpenKey::Type => {
+                        if let Some(found) =
+                            self.typed
+                                .find(&id, text.unwrap_or_default(), now, &open.select.options, open.highlight)
+                        {
+                            self.panels().highlight_option(found);
+                        }
+                    }
+                }
+            }
+        }
+        self.focus.ring = true;
+        (true, ring)
+    }
+
+    /// A screen reader's action on a select or its open list (section 7,
+    /// rule 32): Expand opens the list on the chosen option, Collapse
+    /// closes it with no choice, Increment and Decrement step the chosen
+    /// option by one, and Click on an option chooses it. `None` for any
+    /// other action or element, which goes on. Returns whether anything
+    /// that shows changed.
+    fn select_action(&mut self, event: &AccessEvent) -> Option<bool> {
+        let AccessEvent::Action(request) = event else {
+            return None;
+        };
+        let target = self.app.access_target(request.target_node)?;
+        if let Some(index) = crate::select::option_index(&target) {
+            if request.action != KitAction::Click {
+                return None;
+            }
+            let open = self.panels.select.clone()?;
+            if index >= open.select.options.len() {
+                return Some(false);
+            }
+            self.panels().highlight_option(index);
+            self.panels().choose_highlighted();
+            return Some(true);
+        }
+        let (select, _, _) = self.panels.select_of(&target)?;
+        if !matches!(
+            request.action,
+            KitAction::Expand | KitAction::Collapse | KitAction::Increment | KitAction::Decrement
+        ) {
+            return None;
+        }
+        if select.options.is_empty() || !self.in_input_layer(&target) {
+            return Some(false);
+        }
+        let last = select.options.len() - 1;
+        match request.action {
+            KitAction::Expand => {
+                let at = select.chosen.unwrap_or(0);
+                self.panels().open_select(&target, select, at);
+            }
+            KitAction::Collapse => self.panels().close_select(),
+            KitAction::Increment => {
+                let to = select.chosen.map_or(0, |at| (at + 1).min(last));
+                self.panels().choose_option(&target, select.chosen, to);
+            }
+            _ => {
+                let to = select.chosen.map_or(0, |at| at.saturating_sub(1));
+                self.panels().choose_option(&target, select.chosen, to);
+            }
+        }
+        Some(true)
+    }
+
+    /// Closes a select's open list, with no choice, when it must close on
+    /// its own (section 5, rule 18): the select left the layout, has no
+    /// options or other options, or is scrolled out of view; the focus is
+    /// not on it; or a layer above it, such as an overlay or a question,
+    /// takes the input.
+    fn check_select(&mut self) {
+        let Some(open) = self.panels.select.clone() else {
+            return;
+        };
+        let gone = match self.panels.select_of(&open.id) {
+            None => true,
+            Some((select, _, shows)) => select.options != open.select.options || !shows,
+        };
+        let input = self.app.input();
+        let covered = self.panels.layer_of(&open.id).is_none_or(|layer| layer < input.layer);
+        if gone || covered || input.canvas_focused || self.focus.id() != Some(&open.id) {
+            self.panels().close_select();
+        }
+    }
+
     /// The WAI-ARIA slider pattern's keys on a focused slider (section 6,
     /// rule 10): the arrows by its key step, or its fine step with Shift,
     /// Home and End to the ends, and Page Up and Page Down by its page
@@ -1315,6 +1478,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     ) -> Next {
         self.counts.turns += 1;
         self.pointer.now = Some(now);
+        // A layout since the last turn may have taken a select's list away.
+        self.check_select();
         // A group of keys on a slider closes 500 ms after its last key.
         let closed = self.pointer.slide.close_keys_if(now, self.focus.id());
         self.panels().report_slid(closed);
@@ -1352,8 +1517,19 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 // key is the input method's, Tab and Space too: the field
                 // takes them before Tab or a button can.
                 let composing = matches!(event, Event::Key(_)) && self.composing();
-                let (mut taken, moved) = if composing { (false, false) } else { self.tab(&event) };
-                redraw |= moved;
+                // A focused select's keys come first, so Tab from an open
+                // list chooses before it moves the focus (section 6, rule 12).
+                let (mut taken, changed) = if composing {
+                    (false, false)
+                } else {
+                    self.select_key(&event, now)
+                };
+                redraw |= changed;
+                if !taken {
+                    let (tabbed, moved) = if composing { (false, false) } else { self.tab(&event) };
+                    taken = tabbed;
+                    redraw |= moved;
+                }
                 if !taken && !composing {
                     taken = self.panel_key(&event, &mut batch);
                 }
@@ -1416,7 +1592,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     redraw |= changed;
                     reported |= changed;
                 }
-                None => match self.slider_action(&event) {
+                None => match self.select_action(&event).or_else(|| self.slider_action(&event)) {
                     Some(changed) => redraw |= changed,
                     None => match self.scroll_action(&event) {
                         Some(moved) => redraw |= moved,
@@ -1439,6 +1615,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // Focus leaving a slider closes its group of keys.
         let closed = self.pointer.slide.close_keys_if(now, self.focus.id());
         self.panels().report_slid(closed);
+        // Or a select its list.
+        self.check_select();
         // A keyboard focus move shows its element now, when the layout is
         // current; otherwise the next layout does it.
         redraw |= self.panels().reveal();
@@ -1470,9 +1648,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
         self.counts.updates += updates as u64;
 
+        // An overlay an update opened closes a select's list under it.
+        self.check_select();
         // 4. What changed.
-        // Taken first, so any rebuild uses up a stale view.
-        let stale = std::mem::take(&mut self.view_stale);
+        // Taken first, so any rebuild uses up a stale view. A select's list
+        // that opened, closed, or moved its highlight is built again too.
+        let listed = std::mem::take(&mut self.panels.select_changed);
+        redraw |= listed;
+        let stale = std::mem::take(&mut self.view_stale) || listed;
         if updates > 0 || self.view.is_none() || stale {
             redraw |= self.rebuild(driver);
             // A layer the input layer rose above holds no hover or press.
@@ -1713,8 +1896,38 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// window spec to the driver, and asks for the next deadline. Returns
     /// true when a panel changed.
     fn rebuild(&mut self, driver: &mut impl Driver<A::Message>) -> bool {
+        let changed = self.build_view();
+        let spec = self.app.window();
+        if self.spec.as_ref() != Some(&spec) {
+            driver.window(&spec);
+            self.spec = Some(spec);
+        }
+        self.deadline = self.app.next_deadline();
+        changed
+    }
+
+    /// Builds the view again from the app, with a select's open list as a
+    /// panel of the runtime's in the Overlays layer (section 5, rule 18),
+    /// and hands it to the window. Returns true when anything drawn may
+    /// differ.
+    fn build_view(&mut self) -> bool {
         let mut view = View::new();
         self.app.view(&mut view);
+        if let Some(open) = self.panels.select.clone()
+            && let Some(bounds) = self.panels.bounds(&open.id)
+        {
+            let model = crate::select::ListModel {
+                open,
+                bounds,
+                window: self.window.size.height,
+            };
+            view.panel_with(
+                UiId::panel(crate::select::LIST_PANEL),
+                Layer::Overlays,
+                &model,
+                crate::select::build_list,
+            );
+        }
         let changed = match &self.view {
             Some(last) => view.changed_since(last),
             None => view.len(),
@@ -1724,13 +1937,6 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let synced = self.panels.sync(view.built(self.view.as_ref()));
         self.counts.duplicate_keys += synced.dropped;
         self.view = Some(view);
-
-        let spec = self.app.window();
-        if self.spec.as_ref() != Some(&spec) {
-            driver.window(&spec);
-            self.spec = Some(spec);
-        }
-        self.deadline = self.app.next_deadline();
         // A new order of panels, or a panel in another slot, is drawn
         // differently even when no model changed.
         changed > 0 || synced.composition

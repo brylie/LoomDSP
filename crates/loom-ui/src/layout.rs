@@ -208,6 +208,10 @@ pub(crate) struct Record {
     pub(crate) slider: Option<crate::slider::Slider>,
     /// For a check box's box: whether it is on (section 5, rule 17).
     pub(crate) check: Option<bool>,
+    /// For a select: what it shows (section 5, rule 18).
+    pub(crate) select: Option<Box<crate::select::Select>>,
+    /// For a drawn mark: which.
+    pub(crate) glyph: Option<crate::select::Glyph>,
     /// For a link inside a rich text: its bytes in its parent's text. It
     /// has no node of its own; its place comes from where the text sets
     /// those bytes.
@@ -854,7 +858,7 @@ impl Layout {
         let style = style(&element, around);
         let shrinks = (element.width == Length::Shrink, element.height == Length::Shrink);
         let inside = match element.kind {
-            Kind::Row | Kind::Radio | Kind::CheckBox => Parent::Row,
+            Kind::Row | Kind::Radio | Kind::CheckBox | Kind::Select(_) => Parent::Row,
             Kind::Column | Kind::RadioGroup => Parent::Column,
             Kind::Scroll(_) => Parent::Scroll,
             _ => Parent::Stack,
@@ -880,6 +884,15 @@ impl Layout {
             Kind::CheckMark { on } => Some(on),
             _ => None,
         };
+        let select = match &element.kind {
+            Kind::Select(select) => Some(select.clone()),
+            _ => None,
+        };
+        let glyph = match element.kind {
+            Kind::Glyph(glyph) => Some(glyph),
+            _ => None,
+        };
+        let passive = element.passive;
         let Element {
             kind,
             key,
@@ -1021,6 +1034,8 @@ impl Layout {
             keys_first,
             slider,
             check,
+            select,
+            glyph,
             inline: None,
             words: Vec::new(),
             pieces: Vec::new(),
@@ -1044,7 +1059,7 @@ impl Layout {
             // One that takes its keys from a named stop is never a stop
             // itself: that stop moves it, and Tab would stop twice.
             let inside = self.records[index + 1..].iter().any(|record| record.focusable);
-            let named = self.records[index].keys_from.is_some();
+            let named = self.records[index].keys_from.is_some() || passive;
             let stop = !inside && !named && is_stop(true, self.records[index].access.as_ref());
             self.records[index].focusable = stop;
             if stop && self.records[index].access.is_none() {
@@ -1126,6 +1141,8 @@ impl Layout {
             keys_first: Vec::new(),
             slider: None,
             check: None,
+            select: None,
+            glyph: None,
             inline: Some(link.range),
             words: Vec::new(),
             pieces: Vec::new(),
@@ -1194,7 +1211,7 @@ fn style(element: &Element, around: Parent) -> Style {
             style.display = Display::Flex;
             style.flex_direction = FlexDirection::Column;
         }
-        Kind::Radio | Kind::CheckBox => {
+        Kind::Radio | Kind::CheckBox | Kind::Select(_) => {
             // The mark at the top, beside the label's first line.
             style.display = Display::Flex;
             style.flex_direction = FlexDirection::Row;
@@ -1206,7 +1223,8 @@ fn style(element: &Element, around: Parent) -> Style {
         | Kind::Slot(_)
         | Kind::RadioMark { .. }
         | Kind::Slider(_)
-        | Kind::CheckMark { .. } => {}
+        | Kind::CheckMark { .. }
+        | Kind::Glyph(_) => {}
     }
     if element.wrap {
         style.flex_wrap = FlexWrap::Wrap;

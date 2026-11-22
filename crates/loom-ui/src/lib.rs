@@ -75,6 +75,7 @@ pub mod paint;
 mod pointer;
 mod routing;
 mod runtime;
+mod select;
 #[cfg(feature = "shell")]
 pub mod shell;
 mod slider;
@@ -97,6 +98,7 @@ pub use layout::Layout;
 pub use pointer::Heard;
 pub use routing::{NO_ELEMENTS, NoTarget, Routed, Target};
 pub use runtime::{Counts, Next, Runtime};
+pub use select::{Select, SelectStyle};
 pub use slider::{Drag, Fill, SlidePhase, Slider};
 pub use still::Still;
 pub use view::{Layer, View};

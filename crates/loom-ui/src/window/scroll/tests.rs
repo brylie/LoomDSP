@@ -51,6 +51,10 @@ pub(crate) enum Message {
     Describe,
     /// A slider with this UI ID moved, in a phase of its gesture.
     Slid(UiId, f32, crate::SlidePhase),
+    /// A select with this UI ID had this option chosen.
+    Chose(UiId, usize),
+    /// An overlay of the app's opened, so the Overlays layer takes input.
+    Raise,
 }
 
 /// Builds the panels from the version shown and the radio chosen.
@@ -71,6 +75,10 @@ pub(crate) struct Shown {
     pub(crate) nodes: Option<AccessNodes>,
     /// Every report from a slider, in order.
     pub(crate) slid: Vec<(UiId, f32, crate::SlidePhase)>,
+    /// Every choice in a select, in order.
+    pub(crate) chosen_options: Vec<(UiId, usize)>,
+    /// The lowest layer that takes input.
+    layer: Layer,
 }
 
 impl App for Shown {
@@ -87,6 +95,13 @@ impl App for Shown {
             Message::Focus(id) => return Effects::focus(id),
             Message::Describe => self.nodes = Some(cx.access_nodes(&mut self.ids)),
             Message::Slid(id, position, phase) => self.slid.push((id, position, phase)),
+            Message::Raise => self.layer = Layer::Overlays,
+            Message::Chose(id, index) => {
+                // A select's builder reads its chosen option as the version's
+                // last two digits, so the app keeps the choice it heard.
+                self.version = self.version / 100 * 100 + index as u32;
+                self.chosen_options.push((id, index));
+            }
         }
         Effects::none()
     }
@@ -110,6 +125,17 @@ impl App for Shown {
 
     fn slid(&self, id: &UiId, position: f32, phase: crate::SlidePhase) -> Option<Message> {
         Some(Message::Slid(id.clone(), position, phase))
+    }
+
+    fn chose(&self, id: &UiId, index: usize) -> Option<Message> {
+        Some(Message::Chose(id.clone(), index))
+    }
+
+    fn input(&self) -> crate::app::InputState {
+        crate::app::InputState {
+            layer: self.layer,
+            ..crate::app::InputState::default()
+        }
     }
 
     fn access_target(&self, node: NodeId) -> Option<UiId> {
@@ -172,6 +198,8 @@ pub(crate) fn showing(build: Build) -> Harness<Shown, Toolkit> {
         ids: IdTable::default(),
         nodes: None,
         slid: Vec::new(),
+        chosen_options: Vec::new(),
+        layer: Layer::Canvas,
     };
     let window = WindowState::new(Size::new(400.0, 200.0));
     let mut harness = Harness::new(app, Toolkit::default(), window, Instant::now());

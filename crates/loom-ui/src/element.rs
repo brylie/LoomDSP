@@ -343,6 +343,10 @@ pub(crate) enum Kind {
         /// The check box is on.
         on: bool,
     },
+    /// A select ([`Element::select`]): its chosen label, then its mark.
+    Select(Box<crate::select::Select>),
+    /// A drawn mark: a select's, or a chosen option's tick.
+    Glyph(crate::select::Glyph),
     /// Empty space.
     Space,
     /// The place of another panel, named by its key.
@@ -458,6 +462,9 @@ pub struct Element {
     /// The stop's unused scroll keys move it ([`Element::scrolls_from`]).
     pub(crate) scrolls_from_keys: bool,
     pub(crate) keys_first: Vec<Key>,
+    /// For a scroll container, it is never a focus stop, even with no stop
+    /// inside: a select's open list, whose select keeps the focus.
+    pub(crate) passive: bool,
     pub(crate) children: Vec<Element>,
     /// Where a root panel goes; `None` fills the window. Only a panel's
     /// root reads it.
@@ -490,6 +497,7 @@ impl Element {
             keys_from: None,
             scrolls_from_keys: false,
             keys_first: Vec::new(),
+            passive: false,
             children,
             placement: None,
             closes_outside: false,
@@ -760,6 +768,51 @@ impl Element {
                 .action(crate::access::Action::Click),
         );
         checkbox
+    }
+
+    /// A select showing `select`'s chosen option (ui-layer.md, section 5,
+    /// rule 18): a box with the chosen label and a mark that says it opens,
+    /// filling the width it gets. It is a focus stop, unless it has no
+    /// options, and takes the WAI-ARIA select-only combobox pattern's keys
+    /// (section 6, rule 12). Its open list is the runtime's. A choice
+    /// reaches the app through [`App::chose`](crate::App::chose); the app
+    /// keeps it, and the one it shows at the next layout wins. Its node is
+    /// a combo box named by `select`'s name (section 7, rule 32). It needs
+    /// a key.
+    pub fn select(select: crate::select::Select) -> Self {
+        let style = select.style;
+        let access = select.access();
+        let children = crate::select::select_children(&select);
+        let mut element = Self::new(Kind::Select(Box::new(select)), children)
+            .width(Length::FILL)
+            .spacing(6.0)
+            .padding(Padding {
+                top: style.padding_y,
+                bottom: style.padding_y,
+                left: style.padding_x,
+                right: style.padding_x,
+            })
+            .background(style.background)
+            .border(style.border_width, style.border)
+            .radius(style.radius);
+        element.focusable = true;
+        element.access = Some(access);
+        element
+    }
+
+    /// A drawn mark, [`crate::select::MARK`] square.
+    pub(crate) fn glyph(glyph: crate::select::Glyph) -> Self {
+        Self::new(Kind::Glyph(glyph), Vec::new())
+            .width(Length::Fixed(crate::select::MARK))
+            .height(Length::Fixed(crate::select::MARK))
+    }
+
+    /// For a scroll container: never a focus stop, even with no stop
+    /// inside, for a list whose keys come from an element in another
+    /// panel, as a select's open list does.
+    pub(crate) fn passive(mut self) -> Self {
+        self.passive = true;
+        self
     }
 
     /// For a radio, a second line under its label, `text` set in `style`,

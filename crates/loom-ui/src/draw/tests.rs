@@ -749,3 +749,27 @@ fn a_check_box_paints_its_box_and_its_mark_when_on() {
     let off = painted(Element::checkbox("Follow", STYLE, false).key("follow"), Point::ORIGIN);
     assert!(segments(&off).is_empty(), "no mark when off");
 }
+
+/// Section 5, rule 18: a select paints its box from its style, its label,
+/// and the mark that says it opens: two strokes in the mark's colour.
+#[test]
+fn a_select_paints_its_box_label_and_mark() {
+    let style = crate::select::tests::SELECT;
+    let options = vec!["48 kHz".to_string(), "96 kHz".to_string()];
+    let select = Element::select(crate::Select::new("Rate", options, Some(1), style)).key("rate");
+    let painted = painted(Element::column([select]).width(Length::FILL), Point::ORIGIN);
+    let boxes = quads(&painted);
+    assert_eq!((boxes[0].fill, boxes[0].border), (style.background, style.border));
+    assert!(
+        painted.iter().any(|piece| piece.as_text() == Some("96 kHz")),
+        "{painted:?}"
+    );
+    let marks: Vec<_> = painted
+        .iter()
+        .filter_map(|piece| match piece {
+            Painted::Segment(segment) => Some(segment.colour),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(marks, [style.mark, style.mark]);
+}

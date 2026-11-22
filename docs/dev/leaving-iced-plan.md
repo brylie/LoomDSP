@@ -429,7 +429,7 @@ Gates (macOS, release, against main 447bb01f): `--dump-ui` and `--dump-ui --fram
 
 **Row 4, as planned** (approved 2026-11-20): five pull requests, since the row is the largest.
 - **4a, `loom-ui`:** the scroll container and the radio group ([spec](../design/ui-layer.md), section 5, rule 12; section 6, rule 9; section 7, rules 28 and 29). Built first, for the inspector and for row 3's licence chooser (3c), so neither builds its own. Built: `Element::scroll` with its `ScrollStyle`, `Element::radio_group` and `Element::radio` with `.note`, and `Key::PageUp` and `Key::PageDown`; the app's tokens are `style::scroll()`. No view uses them yet.
-- **4b, `loom-ui`:** the slider, with a drag step apart from its key step; the check box; and the select with its list. The select's list waits on 3a's anchored placement and press outside.
+- **4b, `loom-ui`, done:** the slider, with a drag step apart from its key step, and the check box (#882); the select with its list, which is the runtime's own overlay panel, placed by 3a's placement (spec section 5, rule 18).
 - **4c, `loom-ui`:** the multi-line field (spec section 8, rule 7).
 - **4d, app:** the inspector, with patch info (row 7, folded in) and the sub-patch inspector.
 - **4e, app:** the matrix, as a WAI-ARIA grid, whose Depth cell is entered with Enter or F2.
