@@ -673,4 +673,49 @@ fn the_highlighted_item_has_the_weak_fill() {
         !quads.iter().any(|quad| quad.rect == second && quad.fill == weak),
         "the second has none"
     );
+    assert!(
+        quads.iter().any(|quad| is_ring_around(quad, first)),
+        "the keys put the ring on top"
+    );
+}
+
+/// A row the pointer moves over has the same weak fill as one the keys
+/// reached, and no focus ring (section 6, rule 8).
+#[test]
+fn a_hovered_item_has_the_weak_fill_and_no_ring() {
+    use loom_canvas::iced_convert::ToCore as _;
+    let dir = TempDir::new("recent-hover-look");
+    let files = patches(&dir.0, 2);
+    let mut ui = Ui::with_app(app());
+    assert!(ui.app_mut().open_path(&files[0]));
+    assert!(ui.app_mut().open_path(&files[1]));
+    ui.send(AppMessage::OpenRecent);
+    ui.redraw();
+    let rows = ui.app().ui_snapshot().recent.expect("the list is open");
+    let id = |at: usize| crate::menus::recent_id().with(rows[at].path.display().to_string().as_str());
+    let second = ui.runtime().bounds(&id(1)).expect("laid out");
+    ui.move_to(second.center());
+    ui.redraw();
+    assert_eq!(ui.runtime().focused(), Some(&id(1)), "the pointer focused the second");
+    let weak = ui.app().theme().extended_palette().background.weak.color.to_core();
+    let quads = ui.painted_quads(loom_ui::Layer::Overlays);
+    assert!(
+        quads.iter().any(|quad| quad.rect == second && quad.fill == weak),
+        "the hovered row has the fill"
+    );
+    assert!(
+        !quads.iter().any(|quad| is_ring_around(quad, second)),
+        "the pointer shows no ring"
+    );
+}
+
+/// True when `quad` is a focus ring: an unfilled border drawn outside
+/// `bounds` on every side.
+fn is_ring_around(quad: &loom_ui::paint::Quad, bounds: loom_ui_core::Rect) -> bool {
+    quad.fill.a == 0.0
+        && quad.border_width > 0.0
+        && quad.rect.x < bounds.x
+        && quad.rect.y < bounds.y
+        && quad.rect.x + quad.rect.width > bounds.x + bounds.width
+        && quad.rect.y + quad.rect.height > bounds.y + bounds.height
 }
