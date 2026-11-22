@@ -37,7 +37,10 @@ impl Window {
             .order
             .iter()
             .enumerate()
-            .filter(|(_, key)| self.records[*key].parent.is_none())
+            // A root this layout did not place, such as one under an
+            // element that is gone, shows nothing, so it has no stops and
+            // focus inside it falls back (section 6, rule 4).
+            .filter(|(_, key)| self.records[*key].parent.is_none() && self.drawn.contains(key))
             .map(|(place, key)| {
                 let mut stops = Vec::new();
                 self.panel_stops(key, &mut stops);
@@ -251,7 +254,9 @@ impl Window {
     pub(crate) fn first_stop_in(&self, panel: &UiId) -> Option<UiId> {
         let mut stops = Vec::new();
         self.panel_stops(panel, &mut stops);
-        stops.into_iter().next()
+        // Only a stop in the window's order: a panel that is not drawn has
+        // none to give.
+        stops.into_iter().find(|stop| self.stops.contains(stop))
     }
 
     /// The nodes of every laid-out panel, with node IDs from `ids`, bounds
