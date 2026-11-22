@@ -98,7 +98,7 @@ Help is a modal dialog, by the WAI-ARIA dialog pattern ([APG Dialog (Modal)](htt
 - [x] Tab cycles Close, the links, and Open example, and stays inside; focus starts on Close, with a ring only from the keyboard; Escape returns focus to what had it (test).
 - [x] Enter follows a focused link and Space does not; a link to a page that is not bundled is plain text with no node (test).
 - [x] The scroll keys move the body from Close and from a link, and a code block wraps (test).
-- [ ] VoiceOver reads each link by its words, and moves to it by Tab and by its own cursor (manual, Brylie).
+- [ ] VoiceOver reads each link by its words, and moves to it by Tab and by its own cursor (manual: on the M2 QA issue, #643).
 - [x] UI snapshots and `--dump-ui` report the open help view and its content.
 - [x] Help and examples work without access to the repository or network.
 
