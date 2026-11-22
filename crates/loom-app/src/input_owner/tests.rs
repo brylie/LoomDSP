@@ -430,7 +430,7 @@ fn the_subscription_sends_what_it_hears_with_who_was_listening() {
     });
     let events = vec![
         interaction(
-            iced::Event::Window(window::Event::RedrawRequested(std::time::Instant::now())),
+            iced::Event::Window(window::Event::RedrawRequested(ui.now())),
             Status::Ignored,
         ),
         interaction(

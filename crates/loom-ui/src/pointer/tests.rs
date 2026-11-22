@@ -1253,3 +1253,174 @@ fn hovering_a_menu_item_focuses_it_without_a_ring() {
     bar.step(at(5.0, 5.0, PointerEvent::Moved));
     assert_eq!(bar.runtime().focused(), None, "a button takes no focus from hover");
 }
+
+/// An app that shows one paragraph in the panels layer, "See Saw or
+/// Sine", with links on "Saw" and "Sine".
+struct Paragraph {
+    heard: Vec<Message>,
+}
+
+impl App for Paragraph {
+    type Message = Message;
+
+    fn update(&mut self, message: Message, _cx: &Context<'_, Message>) -> Effects<Message> {
+        self.heard.push(message);
+        Effects::none()
+    }
+
+    fn view(&self, view: &mut View) {
+        use crate::element::Inline;
+        view.panel_with(UiId::panel("help"), Layer::Panels, &(), |_| {
+            Element::rich(
+                [
+                    Inline::new("See "),
+                    link("Saw", "saw"),
+                    Inline::new(" or "),
+                    link("Sine", "sine"),
+                ],
+                STYLE,
+            )
+            .key("notes")
+        });
+    }
+
+    fn window(&self) -> WindowSpec {
+        WindowSpec::default()
+    }
+
+    fn input(&self) -> InputState {
+        InputState {
+            layer: Layer::Canvas,
+            canvas_focused: false,
+            target_first: false,
+        }
+    }
+
+    fn clicked(&self, id: &UiId) -> Option<Message> {
+        Some(Message::Clicked(id.clone()))
+    }
+}
+
+/// An underlined link to `key`, named by `words`.
+fn link(words: &str, key: &str) -> crate::element::Inline {
+    crate::element::Inline::new(words)
+        .underline()
+        .link(key, Access::new(Role::Link, words).action(Action::Click))
+}
+
+/// The paragraph app, laid out in a 400 by 200 window.
+fn paragraph() -> Harness<Paragraph, Fake> {
+    let target = Fake {
+        answer: Routed::Passed,
+        taken_from: 350.0,
+        heard: Vec::new(),
+        focus: None,
+    };
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let mut harness = Harness::new(Paragraph { heard: Vec::new() }, target, window, Instant::now());
+    harness.lay_out(&mut Mono::default());
+    harness
+}
+
+/// The clicks the paragraph app heard.
+fn link_clicks(harness: &Harness<Paragraph, Fake>) -> Vec<UiId> {
+    harness
+        .app()
+        .heard
+        .iter()
+        .filter_map(|message| match message {
+            Message::Clicked(id) => Some(id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Each link is a focus stop, in the order of the text, and Enter follows
+/// the focused one, as WAI-ARIA's link pattern says. Space does not: it is
+/// not the link's, so it goes on to the target, as a page's Space scrolls.
+#[test]
+fn enter_follows_a_focused_link_and_space_does_not() {
+    use loom_ui_core::Key;
+    let notes = UiId::panel("help").with("notes");
+    let mut harness = paragraph();
+    harness.step(press_key(Key::Tab, false));
+    assert_eq!(harness.runtime().focused(), Some(&notes.clone().with("saw")));
+    harness.step(press_key(Key::Tab, false));
+    assert_eq!(harness.runtime().focused(), Some(&notes.clone().with("sine")));
+    harness.step(press_key(Key::Space, false));
+    harness.step(release_key(Key::Space));
+    assert!(link_clicks(&harness).is_empty(), "Space follows no link");
+    assert!(
+        harness.runtime().target().heard.iter().any(|event| matches!(
+            event,
+            Event::Key(loom_ui_core::KeyEvent::Pressed { key: Key::Space, .. })
+        )),
+        "Space went on"
+    );
+    harness.step(press_key(Key::Enter, false));
+    assert_eq!(link_clicks(&harness), [notes.with("sine")]);
+}
+
+/// A press on a link follows it on release and takes no focus, as a
+/// button's does: the keys stay where they were.
+#[test]
+fn a_press_on_a_link_follows_it_without_focus() {
+    let mut harness = paragraph();
+    // "See " is 32 pixels at the fake's 8 a character, so "Saw" is 32 to 56.
+    harness.step(at(40.0, 8.0, PointerEvent::Moved));
+    click_paragraph(&mut harness, 40.0, 8.0);
+    assert_eq!(link_clicks(&harness), [UiId::panel("help").with("notes").with("saw")]);
+    assert_eq!(harness.runtime().focused(), None, "no focus from the press");
+}
+
+/// A left click on the paragraph app at `(x, y)`.
+fn click_paragraph(harness: &mut Harness<Paragraph, Fake>, x: f32, y: f32) {
+    harness.step(at(x, y, PointerEvent::Pressed(PointerButton::Left)));
+    harness.step(at(x, y, PointerEvent::Released(PointerButton::Left)));
+}
+
+/// Keyboard focus on a link rings its words, not the whole paragraph.
+#[test]
+fn a_focused_link_rings_its_words() {
+    let mut harness = paragraph();
+    harness.step(tab_key());
+    harness.lay_out(&mut Mono::default());
+    let mut recorder = crate::paint::testing::Recorder::default();
+    let (_, _, mut panels) = harness.parts();
+    panels.paint(Layer::Panels, &mut recorder, &ring_style());
+    let painted: Vec<crate::paint::Quad> = recorder
+        .painted
+        .iter()
+        .filter_map(|painted| match painted {
+            crate::paint::testing::Painted::Quad(quad) if quad.border == RING => Some(*quad),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(painted.len(), 1);
+    // "Saw" is 32 to 56 and 16 high; the ring is 4 outside.
+    assert_eq!(
+        painted[0].rect,
+        loom_ui_core::Rect::new(Point::new(28.0, -4.0), Size::new(32.0, 24.0))
+    );
+}
+
+/// The paragraph paints its text once, with its spans, and a link paints
+/// nothing of its own.
+#[test]
+fn a_paragraph_paints_its_links_once() {
+    let mut harness = paragraph();
+    let mut recorder = crate::paint::testing::Recorder::default();
+    let (_, _, mut panels) = harness.parts();
+    panels.paint(Layer::Panels, &mut recorder, &ring_style());
+    assert_eq!(recorder.texts(), ["See Saw or Sine"]);
+    let spans = recorder
+        .painted
+        .iter()
+        .find_map(|painted| match painted {
+            crate::paint::testing::Painted::Spans { spans, .. } => Some(spans.clone()),
+            _ => None,
+        })
+        .expect("painted with its spans");
+    assert_eq!(spans.len(), 4);
+    assert!(spans[1].underline && spans[3].underline && !spans[0].underline);
+}

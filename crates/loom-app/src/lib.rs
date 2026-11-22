@@ -22,6 +22,7 @@ mod canvas_events;
 mod chrome;
 mod clip;
 mod clipboard;
+mod clock;
 mod control;
 mod controls;
 mod devices;
@@ -962,6 +963,9 @@ struct App {
     /// (`App::post`). Returned at the end of `update` as one next-turn
     /// effect (`Effects::next_turn`).
     posted: Vec<Message>,
+    /// Where the app reads the time: the system clock, or the test
+    /// harness's stepped clock (`clock.rs`, #868).
+    clock: clock::Clock,
     /// What only the window's widgets can answer, for the bridge to ask
     /// after the turn (`window_question.rs`). Interior, so a call that only
     /// reads the app can ask.
@@ -1730,7 +1734,7 @@ impl App {
     /// Applies one message. Its effects collect in `self.effects`, and the
     /// window questions it asks in `self.window_questions`.
     fn apply(&mut self, message: Message) {
-        self.apply_at(message, Instant::now());
+        self.apply_at(message, self.clock.now());
     }
 
     /// Applies one message at the time given by the runtime.

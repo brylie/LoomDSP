@@ -18,6 +18,34 @@ key=$(printf '%s' "$worktree" | git hash-object --stdin | cut -c 1-16)
 target="$targets/$key"
 "$scripts_dir/setup-worktree-target.sh" "$targets" "$worktree" >/dev/null
 [ -f "$target/.loomdsp-worktree-target" ]
+config="$worktree/.cargo/config.toml"
+
+# Builds use half the cores, rounded up.
+cores=$(getconf _NPROCESSORS_ONLN)
+grep -Fxq "jobs = $(((cores + 1) / 2))" "$config"
+# A checkout with no wrapper script gets no wrapper, so Cargo never runs a
+# missing file.
+if grep -q '^rustc-wrapper' "$config"; then
+    echo 'setup wrote a wrapper the checkout does not have' >&2
+    exit 1
+fi
+# LOOM_BUILD_JOBS sets the jobs, and a checkout with the wrapper gets it,
+# by its own path.
+mkdir -p "$worktree/scripts"
+: > "$worktree/scripts/rustc-wrapper.sh"
+LOOM_BUILD_JOBS=3 "$scripts_dir/setup-worktree-target.sh" "$targets" "$worktree" >/dev/null
+grep -Fxq 'jobs = 3' "$config"
+grep -Fxq "rustc-wrapper = \"$worktree/scripts/rustc-wrapper.sh\"" "$config"
+# On Windows, Cargo cannot run a shell script as its wrapper, so there is
+# none, though the checkout has the script.
+for uname in MINGW64_NT-10.0 MSYS_NT-10.0 CYGWIN_NT-10.0; do
+    LOOM_UNAME=$uname "$scripts_dir/setup-worktree-target.sh" "$targets" "$worktree" >/dev/null
+    if grep -q '^rustc-wrapper' "$config"; then
+        echo "setup wrote a shell wrapper on $uname" >&2
+        exit 1
+    fi
+done
+rm -r "$worktree/scripts"
 
 # A symlink to the same managed directory must still be rejected by setup.
 mv "$target" "$scratch/real target"

@@ -2,7 +2,8 @@
 
 use crate::Element;
 use crate::style::{self, button};
-use iced::widget::{column, container, markdown, row, scrollable, space, text};
+use iced::widget::markdown as iced_markdown;
+use iced::widget::{column, container, row, scrollable, space, text};
 use iced::{Length, Theme};
 use loom_core::{ModuleDescriptor, Registry, RoleDescriptor, RolePort};
 use serde::Serialize;
@@ -36,6 +37,14 @@ pub struct Model {
     pub params: Vec<Entry>,
     pub notes: String,
     pub example: Option<String>,
+    /// The notes before the example section, parsed: what the view shows
+    /// and the accessibility tree reads. Left out of the snapshot, which
+    /// has the notes as written.
+    #[serde(skip)]
+    pub(crate) lead: Vec<markdown::Block>,
+    /// The example section and what follows it, parsed.
+    #[serde(skip)]
+    pub(crate) tail: Vec<markdown::Block>,
 }
 
 impl Model {
@@ -53,14 +62,23 @@ impl Model {
 /// example, and the example section with what follows it.
 pub struct Help {
     pub model: Model,
-    lead: Vec<markdown::Item>,
-    tail: Vec<markdown::Item>,
+    lead: Vec<iced_markdown::Item>,
+    tail: Vec<iced_markdown::Item>,
 }
 
 /// Where the hand-written notes' example section starts. The overlay shows
 /// the reference sections between the notes and the example
 /// (help-pages.md, In the app).
 pub(crate) const EXAMPLE_HEADING: &str = "\n## Example";
+
+/// The notes before the example section, and the section with what follows
+/// it.
+fn split_example(notes: &str) -> (&str, &str) {
+    match notes.find(EXAMPLE_HEADING) {
+        Some(at) => notes.split_at(at),
+        None => (notes, ""),
+    }
+}
 
 impl Help {
     /// Builds the view from the actual registry descriptor.
@@ -120,6 +138,8 @@ impl Help {
                 .collect(),
             notes: notes.clone(),
             example,
+            lead: Vec::new(),
+            tail: Vec::new(),
         };
         Self::from_model(model)
     }
@@ -169,6 +189,8 @@ impl Help {
                 .collect(),
             notes,
             example: None,
+            lead: Vec::new(),
+            tail: Vec::new(),
         })
     }
 
@@ -187,18 +209,25 @@ impl Help {
             params: Vec::new(),
             notes,
             example: None,
+            lead: Vec::new(),
+            tail: Vec::new(),
         })
     }
 
-    /// Parses the notes, split before the example section.
-    fn from_model(model: Model) -> Self {
-        let (lead, tail) = match model.notes.find(EXAMPLE_HEADING) {
-            Some(at) => model.notes.split_at(at),
-            None => (model.notes.as_str(), ""),
-        };
+    /// Parses the notes, split before the example section: once into our
+    /// own blocks, which the accessibility tree reads, and, until the view
+    /// moves to `loom-ui` (plan 3.2, row 6), once more for Iced's view.
+    fn from_model(mut model: Model) -> Self {
+        let (lead, tail) = split_example(&model.notes);
+        let (iced_lead, iced_tail) = (
+            iced_markdown::parse(lead).collect(),
+            iced_markdown::parse(tail).collect(),
+        );
+        model.lead = markdown::parse(lead).blocks;
+        model.tail = markdown::parse(tail).blocks;
         Self {
-            lead: markdown::parse(lead).collect(),
-            tail: markdown::parse(tail).collect(),
+            lead: iced_lead,
+            tail: iced_tail,
             model,
         }
     }
@@ -223,7 +252,7 @@ impl Help {
             content = content.push(text(m.summary()).size(style::SMALL).color(style::QUIET));
             content = content.push(text(m.description).size(style::BODY));
         }
-        content = content.push(markdown::view(&self.lead, style::markdown(&theme)).map(Message::HelpLink));
+        content = content.push(iced_markdown::view(&self.lead, style::markdown(&theme)).map(Message::HelpLink));
         for (title, entries) in [
             ("Parameters", &m.params),
             ("Inputs", &m.inputs),
@@ -253,7 +282,7 @@ impl Help {
                 button(text("Open example").size(style::CONTROL)).on_press(Message::HelpExample),
             ));
         }
-        content = content.push(markdown::view(&self.tail, style::markdown(&theme)).map(Message::HelpLink));
+        content = content.push(iced_markdown::view(&self.tail, style::markdown(&theme)).map(Message::HelpLink));
         let panel = container(
             column![
                 header,
@@ -305,6 +334,8 @@ impl crate::App {
         controller.graph().node(id).map(|node| Help::new(node.descriptor))
     }
 }
+
+pub(crate) mod markdown;
 
 #[cfg(test)]
 mod tests;

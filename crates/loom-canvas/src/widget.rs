@@ -28,10 +28,12 @@ use iced::advanced::{Clipboard, Shell, Widget};
 use iced::{Element, Length};
 use iced::{mouse, window};
 use std::collections::BTreeSet;
-use std::time::Instant;
 
+mod clock;
 mod drag_line;
 mod primitive;
+
+pub use clock::{Clock, SystemClock};
 
 pub use drag_line::DragLine;
 
@@ -48,6 +50,9 @@ pub struct PatchCanvas<'a, Message> {
     on_event: Box<dyn Fn(CanvasEvent) -> Message + 'a>,
     /// Where the draw call leaves its frame. Without one it builds none.
     slot: Option<&'a CanvasSlot>,
+    /// Where an event's time comes from: the system clock unless the host
+    /// gives another.
+    clock: &'a dyn Clock,
 }
 
 /// What the widget keeps between frames: the canvas's input state, and the
@@ -66,7 +71,15 @@ impl<'a, Message> PatchCanvas<'a, Message> {
             model: CanvasModel::new(scene, selection),
             on_event: Box::new(on_event),
             slot: None,
+            clock: &SystemClock,
         }
+    }
+
+    /// Reads the time of each event from `clock`, as the app's test harness
+    /// does with a clock it moves itself (#868).
+    pub fn clock(mut self, clock: &'a dyn Clock) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Leaves each frame the widget builds in `slot`, for the host to draw.
@@ -251,7 +264,7 @@ where
 
     fn state(&self) -> tree::State {
         let input = match self.model.still {
-            Some(still) => CanvasInput::still(&self.model, still, Instant::now()),
+            Some(still) => CanvasInput::still(&self.model, still, self.clock.now()),
             None => CanvasInput::default(),
         };
         tree::State::new(State {
@@ -284,7 +297,7 @@ where
         // happened now.
         let now = match event {
             iced::Event::Window(window::Event::RedrawRequested(at)) => *at,
-            _ => Instant::now(),
+            _ => self.clock.now(),
         };
         let moment = Moment {
             pointer: cursor.position().map(|point| point.to_core()),

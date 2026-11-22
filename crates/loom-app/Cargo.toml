@@ -59,6 +59,8 @@ iced = { workspace = true, features = ["smol", "markdown"] }
 clap.workspace = true
 rfd.workspace = true
 ron.workspace = true
+# Parses help's notes once, for the view and the accessibility tree.
+pulldown-cmark.workspace = true
 etcetera.workspace = true
 jiff.workspace = true
 # Runs widget operations on the live window, for the control channel.

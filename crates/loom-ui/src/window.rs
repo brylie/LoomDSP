@@ -33,7 +33,7 @@ use crate::element::Element;
 use crate::hit::Hit;
 use crate::layout::{Constraint, Layout, Measure, cut};
 use crate::view::Layer;
-use loom_ui_core::{Point, Rect, Size, TextMeasure, TextStyle, UiId, Vector};
+use loom_ui_core::{Point, Rect, Size, TextMeasure, UiId, Vector};
 pub(crate) use scroll::ThumbDrag;
 use std::collections::HashMap;
 
@@ -133,8 +133,8 @@ struct Panels<'a> {
 }
 
 impl Measure for Panels<'_> {
-    fn text(&mut self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size {
-        self.text.measure(text, style, wrap_width)
+    fn text(&mut self) -> &mut dyn TextMeasure {
+        self.text
     }
 
     fn slot(&mut self, owner: &UiId, panel: &UiId, index: usize, constraint: Constraint) -> Size {
@@ -573,6 +573,27 @@ impl Window {
             Point::new(record.origin.x + bounds.x, record.origin.y + bounds.y),
             bounds.size(),
         ))
+    }
+
+    /// Where the words of the link with UI ID `id` are in the window, one
+    /// rectangle per line, or nothing for an element that is not a link
+    /// inside a rich text.
+    pub(crate) fn pieces(&self, id: &UiId) -> Vec<Rect> {
+        let Some((_, record)) = self
+            .records
+            .iter()
+            .filter(|(key, _)| id.is_under(key))
+            .max_by_key(|(key, _)| key.keys().len())
+        else {
+            return Vec::new();
+        };
+        let by = Vector::new(record.origin.x, record.origin.y);
+        record
+            .layout
+            .pieces(id)
+            .iter()
+            .map(|piece| Rect::new(piece.position() + by, piece.size()))
+            .collect()
     }
 
     /// What is under `point` in the window: the panels are tried in the

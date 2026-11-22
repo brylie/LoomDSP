@@ -252,12 +252,18 @@ impl<A: App> Panels<'_, A> {
             .is_some_and(|access| access.role() == crate::access::Role::MenuItem)
     }
 
-    /// True when the element with UI ID `id` is a button, a switch, or a
-    /// menu item, which a pointer press does not focus.
+    /// True when the element with UI ID `id` is a button, a switch, a
+    /// link, or a menu item, which a pointer press does not focus: each acts, and none
+    /// takes input the keys would then go to.
     fn takes_no_press_focus(&self, id: &UiId) -> bool {
         self.window.access_of(id).is_some_and(|access| {
-            use crate::access::Role;
-            matches!(access.role(), Role::Button | Role::Switch | Role::MenuItem)
+            matches!(
+                access.role(),
+                crate::access::Role::Button
+                    | crate::access::Role::Switch
+                    | crate::access::Role::Link
+                    | crate::access::Role::MenuItem
+            )
         })
     }
 

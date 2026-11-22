@@ -591,3 +591,78 @@ fn a_shadow_paints_under_its_box_moved_by_its_offset() {
     assert_eq!(cast.rect, rect(10.0, 24.0, 24.0, 24.0), "moved by its offset");
     assert_eq!((cast.radius, cast.colour, cast.blur), (6.0, shadow.colour, 12.0));
 }
+
+/// A grey the placeholder tests set, unlike the panel's text colour.
+const HINT: Color = Color::rgb(0.6, 0.6, 0.6);
+
+/// What a window with one search field showing `text`, with a placeholder,
+/// paints in the panels layer, after the input method composes `composing`
+/// in it, when that is given.
+fn search_field(text: &str) -> Vec<Painted> {
+    search_field_composing(text, None)
+}
+
+/// [`search_field`], with `composing` given to the input method first.
+fn search_field_composing(text: &str, composing: Option<&str>) -> Vec<Painted> {
+    use crate::access::{Access, Role};
+    let mut window = Window::default();
+    let field = Element::field(text, STYLE)
+        .key("search")
+        .width(Length::Fixed(200.0))
+        .placeholder("Search modules", HINT)
+        .access(Access::new(Role::TextInput, "Search modules"));
+    window.sync(vec![(
+        UiId::panel("browser"),
+        Layer::Panels,
+        Some(Element::column([field])),
+    )]);
+    window.lay_out(Size::new(400.0, 100.0), &mut crate::layout::tests::Mono::default());
+    if let Some(composing) = composing {
+        let preedit = loom_ui_core::ImeEvent::Preedit {
+            text: composing.to_owned(),
+            cursor: Some((composing.len(), composing.len())),
+        };
+        let id = UiId::panel("browser").with("search");
+        window.fields.ime(&id, &preedit, std::time::Instant::now());
+    }
+    let mut recorder = Recorder::default();
+    window.paint(Layer::Panels, &mut recorder, &PANEL, None, (None, None), 1.0);
+    recorder.painted
+}
+
+/// While the input method composes in an empty field, the field shows the
+/// composition and no placeholder under it (ui-layer.md, section 8,
+/// rule 4).
+#[test]
+fn a_composition_hides_the_placeholder() {
+    let painted = search_field_composing("", Some("にほ"));
+    assert!(
+        painted.iter().all(|piece| piece.as_text() != Some("Search modules")),
+        "{painted:?}"
+    );
+    assert!(
+        painted.iter().any(|piece| piece.as_text() == Some("にほ")),
+        "{painted:?}"
+    );
+}
+
+/// An empty field paints its placeholder in its own colour, before the
+/// field's own text, so the caret comes after both; a field with text
+/// paints no placeholder.
+#[test]
+fn an_empty_field_shows_its_placeholder() {
+    let painted = search_field("");
+    let texts: Vec<(&str, Color)> = painted
+        .iter()
+        .filter_map(|piece| match piece {
+            Painted::Text { text, run } => Some((text.as_str(), run.colour)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts, [("Search modules", HINT), ("", PANEL.text)]);
+    let typed = search_field("saw");
+    assert!(
+        typed.iter().all(|piece| piece.as_text() != Some("Search modules")),
+        "no placeholder over typed text: {typed:?}"
+    );
+}

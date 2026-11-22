@@ -1492,7 +1492,7 @@ fn an_xy_pad_drags_relatively_on_both_axes() {
     assert!((moved - 0.1).abs() < 1e-3, "up raises y: {moved}");
 
     // Long enough after the last click not to be a double-click.
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     let coarse = position_of(&ui, id, "pad_x");
     ui.hold(keyboard::Modifiers::SHIFT);
     ui.drag(at, Point::new(at.x + 20.0, at.y), 4);
@@ -1519,7 +1519,7 @@ fn an_xy_pad_jumps_with_alt_and_resets_both() {
     assert!((x - 0.25).abs() < 1e-3, "x follows the pointer: {x}");
     assert!((y - 0.75).abs() < 1e-3, "y follows the pointer: {y}");
 
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     let steps = ui.app().session.edits.history.len();
     ui.move_to(at);
     ui.press();
@@ -1716,14 +1716,14 @@ fn a_range_handle_drags_and_cannot_cross() {
     assert!(moved > 0.0, "low moved up: {moved}");
     assert_eq!(param_value(&ui, id, "span_high"), 1.0, "high stayed");
 
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     let at = handle(&mut ui, id, "span_low");
     ui.drag(at, Point::new(at.x + 1_000.0, at.y), 8);
     assert_eq!(param_value(&ui, id, "span_low"), 1.0, "low stops at high");
     assert_eq!(param_value(&ui, id, "span_high"), 1.0);
 
     // Apart again, and a press on the track outside the band.
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     let widget = widget_of(&ui, id, "span_low");
     let _ = ui.app_mut().send(Message::Canvas(CanvasEvent::SetControl {
         module: id.0,
@@ -1788,7 +1788,7 @@ fn a_range_band_moves_both_and_a_double_click_resets() {
     assert!(low < 0.0 && high < 1.0, "both moved: {low}, {high}");
     assert!((high - low - 1.0).abs() < 1e-3, "the width stays: {}", high - low);
 
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     let (a, b) = (handle(&mut ui, id, "span_low"), handle(&mut ui, id, "span_high"));
     ui.move_to(a);
     ui.press();
@@ -1803,7 +1803,7 @@ fn a_range_band_moves_both_and_a_double_click_resets() {
     );
     assert_eq!(param_value(&ui, id, "span_high"), high);
 
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     ui.move_to(b);
     ui.press();
     ui.release();
@@ -1812,7 +1812,7 @@ fn a_range_band_moves_both_and_a_double_click_resets() {
     assert_eq!(param_value(&ui, id, "span_high"), 1.0, "high resets");
     assert_eq!(param_value(&ui, id, "span_low"), low, "low stays");
 
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     let middle = on_span(&mut ui, id, 0.7);
     let steps = ui.app().session.edits.history.len();
     ui.move_to(middle);
@@ -1994,7 +1994,7 @@ fn a_press_ends_the_inside_of_a_range() {
     let none = keyboard::Modifiers::default();
     ui.tap(keyboard::Key::Named(Named::Enter), none);
     ui.tap(keyboard::Key::Named(Named::Space), none);
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     focus_control(&mut ui, id, "span_low");
     let before = position_of(&ui, id, "span_low");
     ui.tap(keyboard::Key::Named(Named::ArrowRight), none);
@@ -3102,7 +3102,7 @@ fn a_capture_after_a_shrink_draws_the_last_frame_again() {
     let background = theme.palette().background;
     let size = crate::WINDOW;
     let mut built = UserInterface::build(app.view(), size, Cache::default(), &mut offscreen.renderer);
-    let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(std::time::Instant::now()));
+    let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(ui.now()));
     let _ = built.update(
         &[redraw],
         iced::mouse::Cursor::Unavailable,

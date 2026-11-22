@@ -1173,7 +1173,8 @@ fn drive(ui: &mut crate::ui_test::Ui, line: &str) -> (Answer, Vec<Message>) {
             return (answer, messages);
         }
         messages.extend(ui.redraw());
-        messages.extend(ui.deliver(Message::ControlFrame(Instant::now())));
+        let now = ui.now();
+        messages.extend(ui.deliver(Message::ControlFrame(now)));
     }
     (receiver.try_recv().expect("answered after drawing"), messages)
 }
@@ -1372,7 +1373,8 @@ fn a_real_release_during_a_script_drag_is_not_lost() {
     let mut answer = None;
     for _ in 0..50 {
         ui.redraw();
-        let _ = ui.app_mut().send(Message::ControlFrame(Instant::now()));
+        let ui_now = ui.now();
+        let _ = ui.app_mut().send(Message::ControlFrame(ui_now));
         if let Ok(a) = receiver.try_recv() {
             answer = Some(a);
             break;

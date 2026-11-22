@@ -225,6 +225,7 @@ impl App {
             },
             effects: loom_ui::Effects::none(),
             posted: Vec::new(),
+            clock: crate::clock::Clock::default(),
             window_questions: std::cell::RefCell::default(),
             control_replies: crate::control::Replies::new(),
             watching: false,

@@ -48,11 +48,11 @@ pub use list::{ListPainter, PaintList};
 #[cfg(feature = "gpu")]
 pub use plan::{Shape, Target, packed};
 pub use typesetter::Typesetter;
-pub(crate) use typesetter::{editing_contexts, properties};
+pub(crate) use typesetter::{editing_contexts, properties, span_of};
 
 // The style and the measuring trait live in `loom-ui-core`, so the layout
 // measures text with the same types (docs/design/ui-layer.md, section 1).
-pub use loom_ui_core::{TextMeasure, TextStyle, Weight};
+pub use loom_ui_core::{Face, Span, TextMeasure, TextStyle, Weight};
 
 /// The shaders that draw painted boxes and glyphs, and what a host's own
 /// shaders may build on: the globals, the move to clip space, and
@@ -191,6 +191,14 @@ pub struct Shadow {
 pub trait Painter {
     /// Paints one piece of text.
     fn text(&mut self, run: &TextRun<'_>);
+    /// Paints one piece of text with `spans` over it: each in its own
+    /// weight, face, and colour (the run's colour where it sets none), and
+    /// underlined where it says so. The default paints the text plain, for
+    /// a painter that does not set text.
+    fn text_spans(&mut self, run: &TextRun<'_>, spans: &[Span]) {
+        let _ = spans;
+        self.text(run);
+    }
     /// Paints one box.
     fn quad(&mut self, quad: Quad);
     /// Paints one straight mark.

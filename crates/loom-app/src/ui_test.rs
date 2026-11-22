@@ -34,10 +34,15 @@
 //! Subscriptions do not run, except the two key listeners the app uses:
 //! `keyboard::listen` and, while the browser is open, `browser_key`.
 //!
-//! Time is the wall clock, and steps take microseconds. So two clicks on
-//! the same control or on empty canvas in one test count as a double-click
-//! (a control resets, the browser opens). Click something else in between
-//! when a test needs two single clicks.
+//! Time is the harness's own clock (`clock.rs`, #868), not the system's:
+//! each step moves it on by [`STEP`], [`Ui::wait`] moves it on by a chosen
+//! amount, and [`Ui::redraw_at`] moves it to the redraw's time. Sleeping
+//! does not move it. So the outcome of a test that depends on time, such as
+//! a double-click, does not depend on how busy the machine is. Two clicks
+//! on the same control or on empty canvas in one test count as a
+//! double-click (a control resets, the browser opens). Wait more than the
+//! double-click time in between, or click something else, when a test
+//! needs two single clicks.
 //!
 //! Not covered: what the operating system and winit deliver, for example
 //! events while the pointer is outside the window.
@@ -62,10 +67,15 @@ use loom_ui_core::{Point, Rect};
 #[cfg(test)]
 use loom_core::ModuleId;
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// The window size the app opens with.
 pub(crate) const WINDOW: Size = crate::WINDOW;
+
+/// How far the harness's clock moves on each step: about the time between
+/// two events a person makes in quick succession, and well inside a
+/// double-click.
+pub(crate) const STEP: Duration = Duration::from_millis(1);
 
 /// The app view, driven by events the way the Iced runtime drives it.
 pub struct Ui {
@@ -339,7 +349,9 @@ impl Ui {
 
     /// Draws the first frame of an app built by the test, for example one
     /// that plays with `--fake-audio`.
-    pub(crate) fn with_app(app: App) -> Self {
+    pub(crate) fn with_app(mut app: App) -> Self {
+        // The harness's own time, which moves only as the test does (#868).
+        app.clock = crate::clock::Clock::stepped(Instant::now());
         let (mut bridge, first) = Bridge::<UiDriver>::new(app);
         bridge.log_messages();
         let mut ui = Self {
@@ -360,6 +372,9 @@ impl Ui {
     /// runs, and the new view is drawn. Returns every message `update` got,
     /// in order, with input as the messages it was routed to.
     pub(crate) fn step(&mut self, events: &[Event]) -> Vec<Message> {
+        // Each step happens a little after the last, as a person's input
+        // would (`STEP`).
+        self.app().clock.advance(STEP);
         // As the window: Iced keeps each event first, then the runtime
         // routes it. Iced hears what the runtime's layers above it leave,
         // and no key the runtime took.
@@ -579,7 +594,20 @@ impl Ui {
     /// A redraw, as the runtime sends before each frame. The canvas uses it
     /// to frame the patch and to report which lights are visible.
     pub(crate) fn redraw(&mut self) -> Vec<Message> {
-        self.redraw_at(Instant::now())
+        self.redraw_at(self.app().clock.now())
+    }
+
+    /// Lets `by` pass on the harness's clock, as a person would wait
+    /// between two gestures. Nothing runs: the next step or redraw sees the
+    /// new time. Use it instead of sleeping, which the harness's clock does
+    /// not see.
+    pub(crate) fn wait(&mut self, by: Duration) {
+        self.app().clock.advance(by);
+    }
+
+    /// The harness's time now.
+    pub(crate) fn now(&self) -> Instant {
+        self.app().clock.now()
     }
 
     /// Resizes the harness's window, leaving the new layout for the next frame.
@@ -593,6 +621,8 @@ impl Ui {
     /// A redraw at a chosen time, so a test can pass a timer's deadline
     /// without sleeping.
     pub(crate) fn redraw_at(&mut self, at: Instant) -> Vec<Message> {
+        // The clock moves to the redraw's time, never back.
+        self.app().clock.advance_to(at);
         self.lay_out_panels();
         self.step(&[Event::Window(window::Event::RedrawRequested(at))])
     }

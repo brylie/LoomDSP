@@ -16,6 +16,15 @@ pub enum Painted {
         /// The rest of the run, with an empty text.
         run: TextRun<'static>,
     },
+    /// A piece of text with spans over it, with its text and spans copied.
+    Spans {
+        /// The text.
+        text: String,
+        /// Its spans.
+        spans: Vec<Span>,
+        /// The rest of the run, with an empty text.
+        run: TextRun<'static>,
+    },
     /// A box.
     Quad(Quad),
     /// A straight mark.
@@ -32,7 +41,7 @@ impl Painted {
     /// The text, when this is a piece of text.
     pub fn as_text(&self) -> Option<&str> {
         match self {
-            Painted::Text { text, .. } => Some(text),
+            Painted::Text { text, .. } | Painted::Spans { text, .. } => Some(text),
             _ => None,
         }
     }
@@ -57,6 +66,14 @@ impl Painter for Recorder {
     fn text(&mut self, run: &TextRun<'_>) {
         self.painted.push(Painted::Text {
             text: run.text.to_string(),
+            run: TextRun { text: "", ..*run },
+        });
+    }
+
+    fn text_spans(&mut self, run: &TextRun<'_>, spans: &[Span]) {
+        self.painted.push(Painted::Spans {
+            text: run.text.to_string(),
+            spans: spans.to_vec(),
             run: TextRun { text: "", ..*run },
         });
     }
