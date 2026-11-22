@@ -1043,6 +1043,73 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
     }
 
+    /// The WAI-ARIA slider pattern's keys on a focused slider (section 6,
+    /// rule 10): the arrows by its key step, or its fine step with Shift,
+    /// Home and End to the ends, and Page Up and Page Down by its page
+    /// step. Each reaches the app through [`App::slid`] on the next turn,
+    /// in a group of keys that closes 500 ms after its last. A key it
+    /// takes at an end moves nothing and is still taken. A key it does not
+    /// take, such as Space, goes on to the container around it. Returns
+    /// whether the key was taken, and whether the ring came on.
+    fn slider_key(&mut self, event: &Event, now: Instant) -> (bool, bool) {
+        let Event::Key(KeyEvent::Pressed { key, modifiers, .. }) = event else {
+            return (false, false);
+        };
+        let Some(id) = self.focus.id().cloned() else {
+            return (false, false);
+        };
+        let Some((slider, _)) = self.panels.slider_of(&id) else {
+            return (false, false);
+        };
+        let off = self
+            .panels
+            .access_of(&id)
+            .is_some_and(crate::access::Access::is_disabled);
+        if off || self.app.input().canvas_focused || !self.in_input_layer(&id) {
+            return (false, false);
+        }
+        let from = self.pointer.slide.key_base(&id, slider.position());
+        let Some(to) = slider.after_key(from, *key, *modifiers) else {
+            return (false, false);
+        };
+        let reports = self.pointer.slide.key(&id, from, to, now);
+        self.panels().report_slid(reports);
+        let ring = !self.focus.ring;
+        self.focus.ring = true;
+        (true, ring)
+    }
+
+    /// A screen reader's Increment or Decrement on a slider (section 7,
+    /// rules 5 and 30): one key step, as one Start, Move, and End. Taken
+    /// even on a slider that is turned off or below the input layer, where
+    /// it does nothing. `None` for any other action, or another element,
+    /// which goes on. Returns whether anything that shows changed.
+    fn slider_action(&mut self, event: &AccessEvent) -> Option<bool> {
+        let AccessEvent::Action(request) = event else {
+            return None;
+        };
+        let up = match request.action {
+            KitAction::Increment => true,
+            KitAction::Decrement => false,
+            _ => return None,
+        };
+        let target = self.app.access_target(request.target_node)?;
+        let (slider, _) = self.panels.slider_of(&target)?;
+        let off = self
+            .panels
+            .access_of(&target)
+            .is_some_and(crate::access::Access::is_disabled);
+        if off || !self.in_input_layer(&target) {
+            return Some(false);
+        }
+        let reports = self
+            .pointer
+            .slide
+            .step(&target, slider.position(), slider.after_step(up));
+        self.panels().report_slid(reports);
+        Some(false)
+    }
+
     /// The scroll keys on a focused scroll container, which is a stop only
     /// when nothing inside is (section 5, rule 12; the browsers' keys, as
     /// the APG has no pattern): Up and Down one line, Page Up and Page Down
@@ -1247,6 +1314,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         driver: &mut impl Driver<A::Message>,
     ) -> Next {
         self.counts.turns += 1;
+        self.pointer.now = Some(now);
+        // A group of keys on a slider closes 500 ms after its last key.
+        let closed = self.pointer.slide.close_keys_if(now, self.focus.id());
+        self.panels().report_slid(closed);
         self.release_if_owed();
         // The target's own element may have taken the keyboard since the
         // last turn; then a layout between turns, or that, may have moved
@@ -1297,6 +1368,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     redraw |= changed;
                 }
                 if !taken && !composing {
+                    let (used, changed) = self.slider_key(&event, now);
+                    taken = used;
+                    redraw |= changed;
+                }
+                if !taken && !composing {
                     let (used, changed) = self.scroll_key(&event);
                     taken = used;
                     redraw |= changed;
@@ -1340,9 +1416,12 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     redraw |= changed;
                     reported |= changed;
                 }
-                None => match self.scroll_action(&event) {
-                    Some(moved) => redraw |= moved,
-                    None => batch.extend(self.app.accessibility_event(&event)),
+                None => match self.slider_action(&event) {
+                    Some(changed) => redraw |= changed,
+                    None => match self.scroll_action(&event) {
+                        Some(moved) => redraw |= moved,
+                        None => batch.extend(self.app.accessibility_event(&event)),
+                    },
                 },
             },
             DriverEvent::RedrawRequested => redraw = true,
@@ -1357,6 +1436,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // Tab, or a press the target handed back, may have moved focus off
         // a field: the app hears of it in this turn.
         self.field_left(&mut batch, now);
+        // Focus leaving a slider closes its group of keys.
+        let closed = self.pointer.slide.close_keys_if(now, self.focus.id());
+        self.panels().report_slid(closed);
         // A keyboard focus move shows its element now, when the layout is
         // current; otherwise the next layout does it.
         redraw |= self.panels().reveal();
@@ -1419,7 +1501,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             deadline: if self.exited {
                 None
             } else {
-                self.deadline.as_ref().map(|deadline| deadline.at)
+                // The app's deadline, or a slider's group of keys closing,
+                // whichever is sooner.
+                let app = self.deadline.as_ref().map(|deadline| deadline.at);
+                match (app, self.pointer.slide.deadline()) {
+                    (Some(app), Some(keys)) => Some(app.min(keys)),
+                    (app, keys) => app.or(keys),
+                }
             },
         }
     }
@@ -1433,6 +1521,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // with no position to route by (section 3, rule 4).
         if let Event::Pointer(PointerEvent::Pressed(_)) = event {
             self.pointer.space = None;
+            // A press closes a slider's group of keys, wherever it is
+            // (section 5, rule 16).
+            let closed = self.pointer.slide.close_keys();
+            self.panels().report_slid(closed);
         }
         let point = match (event, pointer) {
             (Event::Pointer(PointerEvent::LeftWindow), _) => {
@@ -1461,8 +1553,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         redraw
     }
 
-    /// Keeps the held modifiers from a key event, for Ctrl with the wheel
-    /// over a slider (section 5, rule 12).
+    /// Keeps the held modifiers from a key event, for Shift during a
+    /// slider's drag (section 5, rule 16).
     fn note_modifiers(&mut self, event: &Event) {
         // What the latest press came from, for a focus effect that follows
         // it (`Effects::focus_as_input`).
@@ -1675,7 +1767,8 @@ pub(crate) fn in_input_layer<A: App>(window: &Window, app: &A, id: &UiId) -> boo
 pub(crate) enum Activation {
     /// A button: Enter when it goes down, Space when it comes up.
     Button,
-    /// A switch: Space only.
+    /// A switch or a check box: Space only, as the WAI-ARIA switch and
+    /// checkbox patterns say (section 6, rule 11).
     Switch,
     /// A link: Enter only, as WAI-ARIA's link pattern has it. Space
     /// stays the page's, to scroll.
@@ -1713,7 +1806,7 @@ pub(crate) fn activatable<A: App>(window: &Window, app: &A, id: &UiId) -> Option
     match access.role() {
         // A menu item is a button in a list (section 3, rule 4).
         crate::access::Role::Button | crate::access::Role::MenuItem => Some(Activation::Button),
-        crate::access::Role::Switch => Some(Activation::Switch),
+        crate::access::Role::Switch | crate::access::Role::CheckBox => Some(Activation::Switch),
         crate::access::Role::Link => Some(Activation::Link),
         _ => None,
     }

@@ -91,6 +91,18 @@ pub trait App {
         None
     }
 
+    /// The message for the slider with UI ID `id` moving to `position`,
+    /// from 0 to 1 along its travel, in `phase` of its gesture (ui-layer.md,
+    /// section 5, rule 16): a drag, a double-click's reset, a group of keys,
+    /// or a screen reader's Increment or Decrement. Each phase carries the
+    /// position to show now, so the app sets it at every one, and makes one
+    /// undo step from Start to End. It arrives on the next turn. It reads
+    /// state and changes none.
+    fn slid(&self, id: &UiId, position: f32, phase: crate::SlidePhase) -> Option<Self::Message> {
+        let _ = (id, position, phase);
+        None
+    }
+
     /// How hover text looks (ui-layer.md, section 5, rule 11), from the
     /// app's style tokens. The default is plain and readable.
     fn hint_style(&self) -> crate::HintStyle {

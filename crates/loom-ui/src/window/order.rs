@@ -227,6 +227,19 @@ impl Window {
             .as_ref()
     }
 
+    /// The settings of the slider with UI ID `id`, and where it is in the
+    /// window, as last laid out: `None` for any other element.
+    pub(crate) fn slider_of(&self, id: &UiId) -> Option<(crate::slider::Slider, loom_ui_core::Rect)> {
+        let panel = self.panel_of(id)?;
+        let slider = self.records[panel]
+            .layout
+            .records()
+            .iter()
+            .find(|element| element.id.as_ref() == Some(id))?
+            .slider?;
+        Some((slider, self.bounds(id)?))
+    }
+
     /// Whether the panel that holds the element with UI ID `id` has it in
     /// its current layout, with a node: false for an element a rebuild
     /// removed before the next layout drops what the window keeps for it.

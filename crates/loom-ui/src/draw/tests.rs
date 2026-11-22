@@ -21,6 +21,8 @@ const PANEL: PanelStyle = PanelStyle {
     },
     quiet: Color::rgb(0.6, 0.6, 0.6),
     mark: Color::rgb(0.9, 0.9, 0.9),
+    primary: Color::rgb(0.3, 0.6, 1.0),
+    track: Color::rgb(0.4, 0.4, 0.4),
 };
 
 /// A red the tests set on boxes and text.
@@ -665,4 +667,85 @@ fn an_empty_field_shows_its_placeholder() {
         typed.iter().all(|piece| piece.as_text() != Some("Search modules")),
         "no placeholder over typed text: {typed:?}"
     );
+}
+
+/// The boxes `painted` holds, in order.
+fn quads(painted: &[Painted]) -> Vec<crate::paint::Quad> {
+    painted
+        .iter()
+        .filter_map(|piece| match piece {
+            Painted::Quad(quad) => Some(*quad),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A slider at `slider` keyed `key`, with its node.
+fn slider(slider: crate::Slider, key: &str) -> Element {
+    use crate::access::{Access, Action, Role, Value};
+    Element::slider(slider).key(key).access(
+        Access::new(Role::Slider, key)
+            .value(Value::Number {
+                value: 0.0,
+                min: 0.0,
+                max: 1.0,
+                step: None,
+            })
+            .action(Action::Increment),
+    )
+}
+
+/// Section 5, rule 16: a slider at 0.25 in 200 px paints its 4 px track
+/// across its middle, the part from the minimum to the thumb in the primary
+/// colour, then its 14 px round thumb there.
+#[test]
+fn a_slider_paints_its_track_fill_and_thumb() {
+    let painted = quads(&painted(
+        Element::column([slider(crate::Slider::new(0.25), "level")]).width(Length::FILL),
+        Point::ORIGIN,
+    ));
+    // The thumb's centre travels from 7 to 193: at 0.25 it is at 53.5.
+    assert_eq!(painted.len(), 3, "{painted:?}");
+    assert_eq!(painted[0].rect, rect(7.0, 5.0, 186.0, 4.0));
+    assert_eq!(painted[0].fill, PANEL.track);
+    assert_eq!(painted[1].rect, rect(7.0, 5.0, 46.5, 4.0));
+    assert_eq!(painted[1].fill, PANEL.primary);
+    assert_eq!(painted[2].rect, rect(46.5, 0.0, 14.0, 14.0));
+    assert_eq!((painted[2].fill, painted[2].radius), (PANEL.primary, 7.0));
+}
+
+/// A slider centred on 0 fills from the middle: below it at 0.25, from the
+/// thumb up to the middle.
+#[test]
+fn a_centred_slider_fills_from_the_middle() {
+    let painted = quads(&painted(
+        Element::column([slider(crate::Slider::new(0.25).centred(), "depth")]).width(Length::FILL),
+        Point::ORIGIN,
+    ));
+    assert_eq!(painted[1].rect, rect(53.5, 5.0, 46.5, 4.0));
+}
+
+/// Section 5, rule 17: a check box paints a 14 px box with a 1.5 px border
+/// in the mark's colour, and its check mark in the primary colour only
+/// when it is on.
+#[test]
+fn a_check_box_paints_its_box_and_its_mark_when_on() {
+    let segments = |painted: &[Painted]| {
+        painted
+            .iter()
+            .filter_map(|piece| match piece {
+                Painted::Segment(segment) => Some(*segment),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let on = painted(Element::checkbox("Follow", STYLE, true).key("follow"), Point::ORIGIN);
+    let boxes = quads(&on);
+    assert_eq!(boxes[0].rect.size(), Size::new(14.0, 14.0));
+    assert_eq!((boxes[0].border, boxes[0].border_width), (PANEL.mark, 1.5));
+    let marks = segments(&on);
+    assert_eq!(marks.len(), 2, "a tick of two strokes");
+    assert!(marks.iter().all(|mark| mark.colour == PANEL.primary));
+    let off = painted(Element::checkbox("Follow", STYLE, false).key("follow"), Point::ORIGIN);
+    assert!(segments(&off).is_empty(), "no mark when off");
 }

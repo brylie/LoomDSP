@@ -1003,6 +1003,8 @@ fn ring_style() -> crate::paint::PanelStyle {
         selection: loom_ui_core::Color::BLACK,
         quiet: loom_ui_core::Color::WHITE,
         mark: loom_ui_core::Color::WHITE,
+        primary: loom_ui_core::Color::rgb(0.3, 0.6, 1.0),
+        track: loom_ui_core::Color::rgb(0.4, 0.4, 0.4),
         ring: crate::focus::RingStyle {
             color: RING,
             width: 2.0,

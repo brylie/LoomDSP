@@ -82,6 +82,12 @@ pub struct PanelStyle {
     /// The colour of a radio's mark: its ring, and its dot when chosen. It
     /// needs a contrast of 3:1 or more against the panel (SC 1.4.11).
     pub mark: Color,
+    /// The colour of a check box's check mark, and of a slider's thumb and
+    /// the filled part of its track (section 5, rules 16 and 17). It needs
+    /// a contrast of 3:1 or more against the panel (SC 1.4.11).
+    pub primary: Color,
+    /// The colour of the part of a slider's track that is not filled.
+    pub track: Color,
 }
 
 /// How text sits on its anchor, left to right.

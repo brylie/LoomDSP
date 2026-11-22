@@ -277,6 +277,10 @@ const RADIO_MARK: f32 = 14.0;
 /// The room between a radio's mark and its label.
 const RADIO_GAP: f32 = 6.0;
 
+/// The size of a check box's box, in logical pixels (ui-layer.md, section
+/// 5, rule 17).
+const CHECK_BOX: f32 = 14.0;
+
 /// What kind of element it is.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Kind {
@@ -329,6 +333,15 @@ pub(crate) enum Kind {
     RadioMark {
         /// The radio is the chosen one.
         selected: bool,
+    },
+    /// A slider's track and thumb ([`Element::slider`]).
+    Slider(crate::slider::Slider),
+    /// A check box ([`Element::checkbox`]): its box, then its label.
+    CheckBox,
+    /// A check box's box, with its check mark when on.
+    CheckMark {
+        /// The check box is on.
+        on: bool,
     },
     /// Empty space.
     Space,
@@ -693,6 +706,60 @@ impl Element {
                 .action(crate::access::Action::Click),
         );
         radio
+    }
+
+    /// A slider showing `slider`'s position, from 0 to 1 along its travel
+    /// (ui-layer.md, section 5, rule 16): a 4 px track and a 14 px round
+    /// thumb, filling the width it gets. It is a focus stop, unless it is
+    /// turned off, and takes the WAI-ARIA slider pattern's keys (section 6,
+    /// rule 10). A drag, a double-click, a key, and a screen reader's
+    /// Increment and Decrement reach the app through
+    /// [`App::slid`](crate::App::slid); the app keeps the position, and the
+    /// one it shows at the next layout wins.
+    ///
+    /// It needs a key, and a node the app gives with [`Element::access`]:
+    /// `Role::Slider`, named by its parameter, with the parameter's own
+    /// value and range, offering Increment, Decrement, and SetValue
+    /// (section 7, rule 30). The runtime carries out Increment and
+    /// Decrement; SetValue, in the parameter's units, goes to the app.
+    pub fn slider(slider: crate::slider::Slider) -> Self {
+        let mut element = Self::new(Kind::Slider(slider), Vec::new())
+            .width(Length::FILL)
+            .height(Length::Fixed(crate::slider::THUMB));
+        element.focusable = true;
+        element
+    }
+
+    /// A check box named `label`, set in `style`, checked when `on`
+    /// (ui-layer.md, section 5, rule 17): a 14 px box with a 1.5 px border,
+    /// and a check mark in the panel style's primary colour when on, beside
+    /// its label. A press on the box or the label toggles it and takes no
+    /// focus; Space toggles it when it has focus (section 6, rule 11). Each
+    /// toggle reaches the app as [`App::clicked`](crate::App::clicked) on
+    /// the next turn, and a screen reader's Click through
+    /// [`App::accessibility_event`](crate::App::accessibility_event), as a
+    /// button's does. The app keeps whether it is on. It needs a key.
+    pub fn checkbox(label: impl Into<String>, style: TextStyle, on: bool) -> Self {
+        let label = label.into();
+        // The box sits on the middle of the label's first line.
+        let lift = ((style.size * style.line_height - CHECK_BOX) / 2.0).max(0.0);
+        let mark = Self::new(Kind::CheckMark { on }, Vec::new())
+            .width(Length::Fixed(CHECK_BOX))
+            .height(Length::Fixed(CHECK_BOX));
+        let mark = Self::column([mark]).padding(Padding {
+            top: lift,
+            ..Padding::default()
+        });
+        let words = Self::column([Self::text(label.clone(), style)]);
+        let mut checkbox = Self::new(Kind::CheckBox, vec![mark, words]);
+        checkbox.spacing = RADIO_GAP;
+        checkbox.focusable = true;
+        checkbox.access = Some(
+            Access::new(crate::access::Role::CheckBox, label)
+                .value(crate::access::Value::On(on))
+                .action(crate::access::Action::Click),
+        );
+        checkbox
     }
 
     /// For a radio, a second line under its label, `text` set in `style`,

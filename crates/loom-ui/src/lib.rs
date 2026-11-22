@@ -77,6 +77,7 @@ mod routing;
 mod runtime;
 #[cfg(feature = "shell")]
 pub mod shell;
+mod slider;
 mod still;
 mod view;
 mod waker;
@@ -96,6 +97,7 @@ pub use layout::Layout;
 pub use pointer::Heard;
 pub use routing::{NO_ELEMENTS, NoTarget, Routed, Target};
 pub use runtime::{Counts, Next, Runtime};
+pub use slider::{Drag, Fill, SlidePhase, Slider};
 pub use still::Still;
 pub use view::{Layer, View};
 pub use waker::{Wake, Waker};

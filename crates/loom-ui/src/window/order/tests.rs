@@ -16,6 +16,8 @@ use crate::window::scroll::tests::{
 use accesskit::{ActionRequest, Toggled};
 use loom_ui_core::{Key, Point, Rect, Size, UiId};
 
+mod checkbox;
+
 /// The radios of the licence group, by key and label; the second has a
 /// note.
 const RADIOS: [(&str, &str); 3] = [("mit", "MIT"), ("apache", "Apache"), ("other", "Other")];
