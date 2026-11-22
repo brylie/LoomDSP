@@ -114,7 +114,7 @@ impl App {
     }
 
     /// The message for a press outside the runtime menu `root`: close it
-    /// (section 5, rule 13).
+    /// (section 5, rule 14).
     pub(crate) fn menu_pressed_outside(&self, root: &UiId) -> Option<Message> {
         if *root == super::probe_id() {
             Some(Message::ProbeMenu(crate::probe_menu::Message::Close))

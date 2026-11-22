@@ -378,7 +378,7 @@ fn a_panel_draws_its_box_border_text_and_clip_on_the_gpu() {
     );
 }
 
-/// Section 5, rule 14: a soft shadow is solid inside its box, fades across
+/// Section 5, rule 15: a soft shadow is solid inside its box, fades across
 /// its edge over its blur, half inside and half outside, and is gone half
 /// the blur past the edge. Red on black, so the red channel is the cover.
 #[test]

@@ -1129,7 +1129,7 @@ fn enter_and_space_click_a_focused_menu_item() {
     assert_eq!(clicks(&menu), [item.clone(), item], "Space on key up");
 }
 
-/// Section 5, rule 13: with the menu's layer taking input, a press of any
+/// Section 5, rule 14: with the menu's layer taking input, a press of any
 /// button outside the menu is taken, so neither the target nor the bar
 /// under it hears it, and the app hears it on the next turn; a press on the
 /// menu is the menu's own. With the panels taking input, the menu does not

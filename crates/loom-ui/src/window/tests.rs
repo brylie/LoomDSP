@@ -606,7 +606,7 @@ fn placed_square(model: &(u8, Option<(f32, f32)>)) -> Element {
         .placed(placement)
 }
 
-/// Section 5, rule 12: a root placed at a point takes its content size
+/// Section 5, rule 13: a root placed at a point takes its content size
 /// there, is hit there and nowhere else, and is moved in to stay inside the
 /// window; in a window smaller than it, its top-left corner stays inside.
 #[test]
@@ -637,7 +637,7 @@ fn a_root_placed_at_a_point_stays_inside_the_window() {
     );
 }
 
-/// Section 5, rule 12: a root placed under an element opens at that
+/// Section 5, rule 13: a root placed under an element opens at that
 /// element's bottom-left corner, read from the panels laid out before it,
 /// and a root under an element that is gone is not placed: no bounds, no
 /// hit.

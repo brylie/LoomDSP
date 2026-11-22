@@ -380,7 +380,7 @@ impl Window {
                 self.place(&root, Point::ORIGIN, size, window, text, &mut laid);
                 continue;
             };
-            // Section 5, rule 12: at its content size, where it asks,
+            // Section 5, rule 13: at its content size, where it asks,
             // moved in to stay inside the window. An anchor in a lower
             // layer was placed earlier in this pass.
             let anchor = match &placement {
@@ -401,7 +401,7 @@ impl Window {
                 anchor.x.min(size.width - content.width).max(0.0),
                 anchor.y.min(size.height - content.height).max(0.0),
             );
-            // Cut only by the window, so its shadow shows (rule 14).
+            // Cut only by the window, so its shadow shows (rule 15).
             self.place(&root, origin, size, window, text, &mut laid);
         }
         self.laid_out_at = Some(size);
@@ -559,7 +559,7 @@ impl Window {
             .filter(|(key, _)| id == *key || id.is_under(key))
             .max_by_key(|(key, _)| key.keys().len())?;
         // A placed panel whose anchor was gone at the last layout is
-        // nowhere (section 5, rule 12).
+        // nowhere (section 5, rule 13).
         if record.layout.placement().is_some() && !self.drawn.contains(key) {
             return None;
         }

@@ -568,7 +568,7 @@ fn own_text_colour_wins_and_no_state_is_normal() {
     );
 }
 
-/// Section 5, rule 14: an element's shadow paints first, under its box,
+/// Section 5, rule 15: an element's shadow paints first, under its box,
 /// moved by its offset, with the box's corners and the token's colour and
 /// blur.
 #[test]

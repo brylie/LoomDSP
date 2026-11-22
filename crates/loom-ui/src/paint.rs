@@ -172,7 +172,7 @@ pub struct Segment {
 }
 
 /// A soft shadow: a rounded box whose edge fades out over `blur`, half
-/// inside and half outside `rect` (ui-layer.md, section 5, rule 14).
+/// inside and half outside `rect` (ui-layer.md, section 5, rule 15).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shadow {
     /// The box before blurring, already moved by the shadow's offset.

@@ -153,7 +153,7 @@ impl<A: App> Panels<'_, A> {
 
     /// The panels a press at `point` is outside of, when `event` is a press
     /// of any button and the input layer, above the target, has panels that
-    /// close on one (section 5, rule 13): each such panel, if the press is
+    /// close on one (section 5, rule 14): each such panel, if the press is
     /// inside none of them. Empty otherwise, and for a press inside one.
     fn pressed_outside(&self, input: Layer, event: &Event, point: Point) -> Vec<UiId> {
         if !matches!(event, Event::Pointer(PointerEvent::Pressed(_))) || Side::of(input) != Side::Above {
@@ -341,7 +341,7 @@ impl<A: App> Panels<'_, A> {
                 redraw: on_source && self.note_hover_motion(),
             };
         }
-        // Section 5, rule 13: a press outside a panel of the input layer
+        // Section 5, rule 14: a press outside a panel of the input layer
         // that closes on one is taken, and told to the app.
         let outside = if side == Side::Above {
             self.pressed_outside(input.layer, event, point)

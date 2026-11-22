@@ -13,7 +13,7 @@ use bytemuck::{Pod, Zeroable};
 use loom_ui_core::Rect;
 
 /// The vertex layout of a [`Shape`]: five `vec4<f32>`s at locations 0 to
-/// 4, the last a soft shadow's blur (ui-layer.md, section 5, rule 14).
+/// 4, the last a soft shadow's blur (ui-layer.md, section 5, rule 15).
 pub const SHAPE_ATTRIBUTES: [wgpu::VertexAttribute; 5] =
     wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4];
 

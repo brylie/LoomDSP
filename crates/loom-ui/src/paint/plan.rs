@@ -48,7 +48,7 @@ impl Shape {
     }
 
     /// A soft shadow: a filled rounded box whose edge fades out over
-    /// `blur`, half inside its rect and half outside (section 5, rule 14).
+    /// `blur`, half inside its rect and half outside (section 5, rule 15).
     pub fn shadow(rect: Rect, radius: f32, colour: Color, blur: f32) -> Self {
         let mut shape = Self::new(rect, radius, colour, Color::TRANSPARENT, 0.0);
         shape.soft[0] = blur.max(0.0);
