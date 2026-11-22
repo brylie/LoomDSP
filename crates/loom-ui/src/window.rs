@@ -72,6 +72,10 @@ pub(crate) struct Window {
     /// An element to bring into view once the layout is current: the one a
     /// keyboard focus move or a scroll effect named (section 5, rule 12).
     pub(crate) reveal: Option<UiId>,
+    /// A multi-line field whose caret to bring into view, once the layout
+    /// is current: after an edit or a caret move in it, the containers
+    /// around it follow the caret (section 8, rule 7).
+    pub(crate) caret_reveal: Option<UiId>,
     /// A scroll container moved since the runtime last asked
     /// ([`Window::take_scrolled`]), so what the tree reports changed.
     scrolled: bool,
@@ -198,6 +202,7 @@ impl Default for Window {
             scrolled: false,
             groups: Vec::new(),
             reveal: None,
+            caret_reveal: None,
         }
     }
 }

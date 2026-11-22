@@ -125,10 +125,23 @@ impl<A: App> Panels<'_, A> {
         if !self.window.is_settled(self.size) {
             return false;
         }
-        let Some(id) = self.window.reveal.take() else {
-            return false;
-        };
-        self.window.scroll_to_show(&id)
+        let mut moved = self
+            .window
+            .reveal
+            .take()
+            .is_some_and(|id| self.window.scroll_to_show(&id));
+        // The caret's place is read now, from the field as this layout left
+        // it, so a box that grew with a new line shows its new last line.
+        if let Some(id) = self.window.caret_reveal.take()
+            && let Some(caret) = self
+                .window
+                .fields
+                .get(&id)
+                .and_then(crate::field::FieldState::focus_rect)
+        {
+            moved |= self.window.scroll_to_show_inside(&id, caret);
+        }
+        moved
     }
 
     /// Finds a named element or visible text in the current layout.

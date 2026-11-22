@@ -114,6 +114,27 @@ impl Window {
         self.scroll_to_show_part(id, |bounds| edge_row(bounds, edge))
     }
 
+    /// Scrolls the containers around the field `id` so `inner`, a rectangle
+    /// from the corner of its content box, shows: its caret after an edit or
+    /// a caret move (section 8, rule 7). Returns true when any moved.
+    pub(crate) fn scroll_to_show_inside(&mut self, id: &UiId, inner: Rect) -> bool {
+        let Some(key) = self.panel_of(id) else {
+            return false;
+        };
+        let layout = &self.records[key].layout;
+        let Some(index) = layout.index_of(id) else {
+            return false;
+        };
+        let record = &layout.records()[index];
+        let (dx, dy) = (
+            record.content.x - record.bounds.x + inner.x,
+            record.content.y - record.bounds.y + inner.y,
+        );
+        self.scroll_to_show_part(id, |bounds| {
+            Rect::new(Point::new(bounds.x + dx, bounds.y + dy), inner.size())
+        })
+    }
+
     /// Scrolls the containers around the element `id`, in its panel and
     /// then around that panel's slot, by the least distance that shows the
     /// part of it `part` gives from its bounds, with its ring.

@@ -533,3 +533,25 @@ fn on_a_mac_home_and_end_scroll_the_container_and_leave_the_caret() {
         "neither key edits"
     );
 }
+
+/// Typing new lines in a text area taller than its scroll container keeps
+/// the caret in view: the container follows it down, and Up back to the
+/// first line brings the container back to the top.
+#[test]
+fn the_container_follows_the_caret_as_lines_are_typed() {
+    let Some((mut harness, mut text)) = notes_in("a", true) else {
+        return;
+    };
+    assert_eq!(scrolled_by(&mut harness, &mut text), 0.0);
+    for _ in 0..6 {
+        harness.step(key_in(Key::Enter, Modifiers::NONE, None));
+        harness.lay_out(&mut text);
+    }
+    let down = scrolled_by(&mut harness, &mut text);
+    assert!(down > 0.0, "the container followed the caret down");
+    for _ in 0..6 {
+        harness.step(key_in(Key::Up, Modifiers::NONE, None));
+        harness.lay_out(&mut text);
+    }
+    assert_eq!(scrolled_by(&mut harness, &mut text), 0.0, "and back to the top");
+}

@@ -732,6 +732,17 @@ impl FieldState {
         out
     }
 
+    /// Where the selection's moving end is, from the start of the text: its
+    /// left edge and its line's top and height, whether or not something is
+    /// selected. What the containers around a multi-line field keep in view.
+    pub(crate) fn focus_rect(&self) -> Option<Rect> {
+        let bounds = self.editor.cursor_geometry(1.0)?;
+        Some(Rect::new(
+            Point::new(bounds.x0 as f32, bounds.y0 as f32),
+            Size::new(1.0, (bounds.y1 - bounds.y0) as f32),
+        ))
+    }
+
     /// Where the caret is, from the start of the text: its left edge and
     /// its line's top and height. None while something is selected.
     pub(crate) fn caret(&self) -> Option<Rect> {

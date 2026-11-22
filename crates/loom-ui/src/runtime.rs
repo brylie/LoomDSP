@@ -646,6 +646,17 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let shown = used
             .reveal
             .is_some_and(|edge| self.panels.scroll_to_show_edge(&id, edge));
+        // Any other edit or caret move in a multi-line field keeps its caret
+        // in view: the containers around it follow, once the layout has the
+        // field's new height (section 8, rule 7).
+        let many = self
+            .panels
+            .fields
+            .get(&id)
+            .is_some_and(|field| field.lines() == crate::field::Lines::Many);
+        if many && used.reveal.is_none() && (used.edited || used.redraw) {
+            self.panels.caret_reveal = Some(id.clone());
+        }
         (used.taken, used.redraw || shown)
     }
 
