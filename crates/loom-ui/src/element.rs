@@ -437,6 +437,9 @@ pub struct Element {
     pub(crate) focusable: bool,
     pub(crate) access: Option<Access>,
     pub(crate) hover: Option<String>,
+    /// For a scroll container, the focus stop whose unused scroll keys move
+    /// it ([`Element::keys_from`]).
+    pub(crate) keys_from: Option<UiId>,
     pub(crate) children: Vec<Element>,
     /// Where a root panel goes; `None` fills the window. Only a panel's
     /// root reads it.
@@ -466,6 +469,7 @@ impl Element {
             focusable: false,
             access: None,
             hover: None,
+            keys_from: None,
             children,
             placement: None,
             closes_outside: false,
@@ -583,6 +587,24 @@ impl Element {
         let mut scroll = Self::new(Kind::Scroll(style), vec![room]);
         scroll.look.clip = true;
         scroll
+    }
+
+    /// For a scroll container, takes its keys from the focus stop `stop` in
+    /// the same panel, such as a search field above a list of results
+    /// (ui-layer.md, section 5, rule 12). The container is then never a
+    /// stop itself, even with no stop inside, so Tab does not stop twice
+    /// for one list. It takes no scroll key itself: the app drives it from
+    /// that stop's keys, by moving its highlight and asking for the row
+    /// with `Effects::scroll_into_view`, as the APG combobox pattern does. `stop` must be a focus stop of
+    /// the panel when it is laid out; a debug build panics when it is not.
+    /// Other elements take no keys this way, so a debug build panics on one.
+    pub fn keys_from(mut self, stop: UiId) -> Self {
+        if !matches!(self.kind, Kind::Scroll(_)) {
+            debug_assert!(false, "only a scroll container takes its keys from a stop");
+            return self;
+        }
+        self.keys_from = Some(stop);
+        self
     }
 
     /// A group of `radios`, built with [`Element::radio`], one under
