@@ -688,14 +688,20 @@ impl crate::App {
             jump: self.jump_items(),
             overlay,
             overlay_focus,
-            ours_overlay: match (&self.overlays.question, self.runtime_menu()) {
-                (Some(question), _) => Some((
+            ours_overlay: match (&self.overlays.question, &self.overlays.help, self.runtime_menu()) {
+                (Some(question), _, _) => Some((
                     accesskit::Role::AlertDialog,
                     question.model().title,
                     crate::overlays::access::question_id(),
                 )),
-                (None, Some(menu)) => Some((accesskit::Role::Menu, menu.label, menu.id)),
-                (None, None) => None,
+                // Help is over the menus (row 6), as F1 opens it from them.
+                (None, Some(help), _) => Some((
+                    accesskit::Role::Dialog,
+                    help.model.name.to_string(),
+                    crate::overlays::access::help_id(),
+                )),
+                (None, None, Some(menu)) => Some((accesskit::Role::Menu, menu.label, menu.id)),
+                (None, None, None) => None,
             },
         }
     }
@@ -819,6 +825,7 @@ impl crate::App {
             .id(request.target_node.0)
             .filter(|id| {
                 id.is_under(&crate::overlays::access::question_id())
+                    || id.is_under(&crate::overlays::access::help_id())
                     || self.runtime_menu().is_some_and(|menu| id.is_under(&menu.id))
             })
             .cloned()
@@ -827,6 +834,7 @@ impl crate::App {
             return match request.action {
                 accesskit::Action::Click => self
                     .question_click(&id)
+                    .or_else(|| self.help_click(&id))
                     .or_else(|| self.menu_click(&id))
                     .into_iter()
                     .collect(),

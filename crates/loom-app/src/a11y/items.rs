@@ -53,8 +53,6 @@ pub(crate) enum Kind {
     Menu,
     /// One item of a menu. Click picks it.
     MenuItem,
-    /// A link in text. Click follows it.
-    Link,
     /// A list of options to pick from, one selected, such as the module
     /// browser's results. Its children are list box options, each told its
     /// position and the list's size.

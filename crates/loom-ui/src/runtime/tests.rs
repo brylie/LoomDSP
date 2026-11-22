@@ -1269,3 +1269,148 @@ fn only_around_the_focus_and_in_the_input_layer() {
     harness.step(press(Key::Down));
     assert!(taken(&harness).is_empty(), "a layer above takes input");
 }
+
+/// What the opener test app hears.
+#[derive(Debug, Clone, PartialEq)]
+enum OpenMsg {
+    /// Open the dialog and focus its Close button as the latest input says.
+    Open,
+    /// Open it the same way, then, in the same update, focus its Help
+    /// button with a plain focus effect.
+    OpenThenHelp,
+}
+
+/// An app that shows, once opened, a dialog with a Close button in the
+/// Overlays layer, and focuses it with `Effects::focus_as_input` in the
+/// same turn that opens it.
+#[derive(Default)]
+struct Opener {
+    open: bool,
+}
+
+impl App for Opener {
+    type Message = OpenMsg;
+
+    fn update(&mut self, message: OpenMsg, _cx: &Context<'_, OpenMsg>) -> Effects<OpenMsg> {
+        self.open = true;
+        let quiet = Effects::focus_as_input(UiId::panel("dialog").with("close"));
+        match message {
+            OpenMsg::Open => quiet,
+            OpenMsg::OpenThenHelp => quiet.and(Effects::focus(UiId::panel("dialog").with("help"))),
+        }
+    }
+
+    fn view(&self, view: &mut crate::view::View) {
+        use crate::access::{Access, Action, Role};
+        use crate::element::Element;
+        if self.open {
+            view.panel_with(UiId::panel("dialog"), Layer::Overlays, &(), |_| {
+                let button = |key: &'static str, label: &'static str| {
+                    Element::text(label, crate::layout::tests::STYLE)
+                        .key(key)
+                        .focusable()
+                        .access(Access::new(Role::Button, label).action(Action::Click))
+                };
+                Element::column([button("close", "Close"), button("help", "Help")])
+            });
+        }
+    }
+
+    fn window(&self) -> crate::app::WindowSpec {
+        crate::app::WindowSpec::default()
+    }
+
+    fn input(&self) -> crate::app::InputState {
+        crate::app::InputState {
+            layer: if self.open { Layer::Overlays } else { Layer::Canvas },
+            canvas_focused: false,
+            target_first: false,
+        }
+    }
+}
+
+/// A target that takes everything and sends nothing.
+#[derive(Default)]
+struct Silent;
+
+impl Target<OpenMsg> for Silent {
+    fn input(&mut self, _event: &Event, _pointer: Option<Point>, _now: Instant, _out: &mut Vec<OpenMsg>) -> Routed {
+        Routed::Taken
+    }
+
+    fn focus(&mut self, _target: &FocusTarget, _select: Selection) {}
+
+    fn scroll_into_view(&mut self, _id: &UiId) {}
+
+    fn focused(&self) -> Option<UiId> {
+        None
+    }
+
+    fn needs_redraw(&mut self, _updates: usize) -> bool {
+        false
+    }
+}
+
+/// Opens the dialog right after `before`, and says whether the focus on
+/// its Close button shows a ring.
+fn opened_after(before: DriverEvent) -> bool {
+    let mut harness = Harness::new(
+        Opener::default(),
+        Silent,
+        WindowState::new(Size::new(400.0, 300.0)),
+        Instant::now(),
+    );
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    harness.step(before);
+    harness.send(OpenMsg::Open);
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    assert_eq!(
+        harness.runtime().focused(),
+        Some(&UiId::panel("dialog").with("close")),
+        "the focus moved in"
+    );
+    harness.runtime().focus_ring().is_some()
+}
+
+/// Section 6, rule 3: a focus effect that follows the latest input shows
+/// the ring after a key press, as a browser's `:focus-visible` does when a
+/// script moves the focus, and none after a pointer press, also when the
+/// element is laid out only after the turn that asked for it.
+#[test]
+fn a_focus_as_input_rings_after_a_key_and_not_after_a_press() {
+    use loom_ui_core::{PointerButton, PointerEvent};
+    assert!(opened_after(press(Key::F10)), "opened from the keyboard");
+    let pointer = DriverEvent::Input {
+        event: Event::Pointer(PointerEvent::Pressed(PointerButton::Left)),
+        pointer: Some(Point::new(300.0, 250.0)),
+    };
+    assert!(!opened_after(pointer), "opened by the pointer");
+}
+
+/// The quiet mark of a focus effect that follows a pointer press belongs
+/// to its element alone: a plain focus effect on another element, before
+/// the layout that takes either, shows its ring.
+#[test]
+fn a_quiet_focus_never_quiets_another() {
+    use loom_ui_core::{PointerButton, PointerEvent};
+    let mut harness = Harness::new(
+        Opener::default(),
+        Silent,
+        WindowState::new(Size::new(400.0, 300.0)),
+        Instant::now(),
+    );
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    harness.step(DriverEvent::Input {
+        event: Event::Pointer(PointerEvent::Pressed(PointerButton::Left)),
+        pointer: Some(Point::new(300.0, 250.0)),
+    });
+    harness.send(OpenMsg::OpenThenHelp);
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    let help = UiId::panel("dialog").with("help");
+    assert_eq!(harness.runtime().focused(), Some(&help));
+    assert_eq!(
+        harness.runtime().focus_ring().map(|(id, _)| id),
+        Some(help),
+        "the plain focus rings"
+    );
+}

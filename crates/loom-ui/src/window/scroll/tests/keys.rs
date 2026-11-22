@@ -211,3 +211,40 @@ fn a_key_the_element_uses_or_a_modified_key_moves_no_container() {
     step(&mut harness, key_with(Key::Down, alt));
     assert_eq!(offset(&harness, &id("rows")), 0.0, "Alt with Down");
 }
+
+/// A Close button over a container of ten rows that scrolls from it, as
+/// help's body does from its Close button.
+fn closed_over(_: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
+    let close = Element::text("Close", STYLE)
+        .key("close")
+        .focusable()
+        .access(Access::new(Role::Button, "Close").action(Action::Click));
+    list_panel(Element::column([
+        close,
+        container("rows", 100.0, rows()).scrolls_from(id("close")),
+    ]))
+}
+
+/// A container that scrolls from a stop outside it takes the scroll keys
+/// that stop leaves unused, Down and End, as a container around the stop
+/// would, and still is no stop itself; Space stays the button's.
+#[test]
+fn a_container_scrolls_from_the_stop_it_names() {
+    let mut harness = focused(closed_over, &id("close"));
+    step(&mut harness, key(Key::Down));
+    let down = offset(&harness, &id("rows"));
+    assert!(down > 0.0, "Down scrolled it: {down}");
+    step(&mut harness, key(Key::End));
+    assert!(offset(&harness, &id("rows")) > down, "End went to the end");
+    assert!(
+        harness.runtime().target().keys.is_empty(),
+        "the keys were the container's"
+    );
+    assert!(
+        matches!(
+            harness.runtime().focus_step(Some(&id("close")), false),
+            FocusStep::PastEnd
+        ),
+        "the container is no stop"
+    );
+}

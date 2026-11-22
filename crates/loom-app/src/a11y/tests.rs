@@ -2391,7 +2391,6 @@ fn every_inspector_part_is_named_and_placed() {
                 Kind::Dialog => Role::Dialog,
                 Kind::Menu => Role::Menu,
                 Kind::MenuItem => Role::MenuItem,
-                Kind::Link => Role::Link,
                 Kind::ListBox => Role::ListBox,
                 Kind::ListBoxOption => Role::ListBoxOption,
             };
@@ -3650,7 +3649,7 @@ fn every_small_overlay_part_is_named_and_placed() {
                 "{name}: {} has a name",
                 item.id
             );
-            if item.click.is_none() || item.kind == Kind::Link {
+            if item.click.is_none() {
                 continue;
             }
             acting += 1;
@@ -3838,8 +3837,13 @@ fn only_the_overlay_that_owns_the_input_is_reported() {
     ui.app_mut().overlays.help = Some(crate::help::Help::shortcuts());
     let _ = ui.redraw();
     let frames = ui.app().a11y_frames();
-    assert_eq!(frames.overlay.len(), 1);
-    assert_eq!(frames.overlay[0].id, crate::overlays::access::help_id());
+    // Help is the runtime's (row 6): its nodes come from its panel, and the
+    // menu under it gives none.
+    assert!(frames.overlay.is_empty(), "no overlay of Iced's is reported");
+    assert_eq!(
+        frames.ours_overlay.map(|(_, _, id)| id),
+        Some(crate::overlays::access::help_id())
+    );
 }
 
 /// The menu key opens the selected tile's menu with the pointer anywhere,

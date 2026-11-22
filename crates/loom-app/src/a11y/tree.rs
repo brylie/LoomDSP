@@ -926,7 +926,6 @@ impl Frame<'_> {
             Kind::Dialog => Role::Dialog,
             Kind::Menu => Role::Menu,
             Kind::MenuItem => Role::MenuItem,
-            Kind::Link => Role::Link,
             Kind::ListBox => Role::ListBox,
             Kind::ListBoxOption => Role::ListBoxOption,
         });
@@ -978,10 +977,7 @@ impl Frame<'_> {
             node.set_active_descendant(node_id(self.table, active));
         }
         if item.enabled {
-            if matches!(
-                item.kind,
-                Kind::Button | Kind::Check | Kind::Option | Kind::MenuItem | Kind::Link
-            ) {
+            if matches!(item.kind, Kind::Button | Kind::Check | Kind::Option | Kind::MenuItem) {
                 node.add_action(Action::Click);
             }
             // An option offers Click only when it can be picked: a file that

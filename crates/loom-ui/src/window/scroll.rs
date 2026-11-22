@@ -261,6 +261,14 @@ impl Window {
         let Some(mut index) = self.records[&key].layout.index_of(id) else {
             return out;
         };
+        // A container that scrolls from this stop, though the stop is
+        // outside it, comes first: help's body, from its Close button
+        // ([`Element::scrolls_from`](crate::Element::scrolls_from)).
+        for (at, record) in self.records[&key].layout.records().iter().enumerate() {
+            if record.scrolls_from_keys && record.keys_from.as_ref() == Some(id) && record.scroll.is_some() {
+                out.push((key.clone(), at));
+            }
+        }
         loop {
             for at in self.records[&key].layout.containers_around(index) {
                 out.push((key.clone(), at));

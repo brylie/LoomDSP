@@ -131,10 +131,8 @@ impl App {
         if let Some(chooser) = &self.overlays.chooser {
             layers = layers.push(crate::licence_chooser::view(chooser.model()));
         }
-        // Over the dialogs, because F1 opens it from them (help-pages.md).
-        if let Some(help) = &self.overlays.help {
-            layers = layers.push(iced::widget::opaque(help.view(self.theme())));
-        }
+        // Help is the runtime's, in its Overlays layer, over the dialogs
+        // Iced draws, because F1 opens it from them (help-pages.md; row 6).
         // The question is the runtime's, in its Question layer, over
         // everything Iced draws (row 3b).
         // The control channel's pointer events go in here, as a real

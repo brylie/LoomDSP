@@ -511,6 +511,13 @@ enum Message {
     MenuTab {
         back: bool,
     },
+    /// Tab or Shift+Tab inside help: the focus moves to help's next stop,
+    /// or the one before, wrapping at both ends (the WAI-ARIA modal dialog
+    /// pattern; row 6). One message whether the key came from the keyboard
+    /// or a script.
+    HelpTab {
+        back: bool,
+    },
     /// One step of the runtime's focus, after a menu closed and gave back
     /// the focus it opened over (row 3b).
     FocusStep {
@@ -838,6 +845,7 @@ impl Message {
             | Self::EnterFields { .. }
             | Self::ToolbarFocus(_)
             | Self::MenuTab { .. }
+            | Self::HelpTab { .. }
             | Self::FocusStep { .. }
             | Self::SliderReleased
             | Self::Matrix(_)
@@ -1859,6 +1867,11 @@ impl App {
                 }
             }
             Message::FocusStep { back } => self.effect(loom_ui::Effects::focus_step(back)),
+            Message::HelpTab { back } => {
+                if let Some(next) = self.help_next_stop(self.focus.as_ref(), back) {
+                    self.effect(loom_ui::Effects::focus(next));
+                }
+            }
             Message::ToolbarFocus(stop) => self.toolbar_focus(stop),
             Message::Canvas(CanvasEvent::Paste { world }) => {
                 let generation = self.generation;
@@ -1964,6 +1977,9 @@ impl App {
             self.run_files.finish();
             self.effect(loom_ui::Effects::quit());
         } else if !was_help_open && self.overlays.help.is_some() {
+            // The focus goes to Close, with a ring only when help was
+            // opened from the keyboard (help-pages.md; section 6, rule 4).
+            self.effect(loom_ui::Effects::focus_as_input(help::Help::first_stop()));
             if matches!(
                 before_help,
                 input_owner::InputOwner::Browser | input_owner::InputOwner::Patches
@@ -2176,6 +2192,7 @@ impl App {
             | Message::EnterFields { .. }
             | Message::ToolbarFocus(_)
             | Message::MenuTab { .. }
+            | Message::HelpTab { .. }
             | Message::FocusStep { .. }
             | Message::FocusMoved(_)
             | Message::Inspector(_)
@@ -2266,11 +2283,13 @@ impl App {
                     .copied();
                 if let Some(descriptor) = descriptor {
                     self.overlays.help = Some(help::Help::new(descriptor));
+                    self.help_to_top();
                 } else if let Some(role) = link
                     .strip_suffix(".md")
                     .and_then(|id| self.session.controller.registry().role(id))
                 {
                     self.overlays.help = Some(help::Help::role(role, self.session.controller.registry()));
+                    self.help_to_top();
                 } else {
                     self.alerts.warn(format!("Linked document is not bundled: {link}"));
                 }

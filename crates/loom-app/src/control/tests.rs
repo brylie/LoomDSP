@@ -1604,6 +1604,9 @@ fn routed_names(messages: Vec<Message>) -> Vec<String> {
                 "ControlFrame",
                 "Located",
                 "FocusMoved",
+                // A script's Tab inside help, which moves the focus as the
+                // runtime's own Tab does with no message of its own.
+                "HelpTab",
                 "TypeFocus",
                 "Telemetry",
             ]

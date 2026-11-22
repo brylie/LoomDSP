@@ -442,6 +442,8 @@ pub struct Element {
     /// For a scroll container, the focus stop whose unused scroll keys move
     /// it ([`Element::keys_from`]).
     pub(crate) keys_from: Option<UiId>,
+    /// The stop's unused scroll keys move it ([`Element::scrolls_from`]).
+    pub(crate) scrolls_from_keys: bool,
     pub(crate) keys_first: Vec<Key>,
     pub(crate) children: Vec<Element>,
     /// Where a root panel goes; `None` fills the window. Only a panel's
@@ -473,6 +475,7 @@ impl Element {
             access: None,
             hover: None,
             keys_from: None,
+            scrolls_from_keys: false,
             keys_first: Vec::new(),
             children,
             placement: None,
@@ -627,7 +630,8 @@ impl Element {
     /// stop itself, even with no stop inside, so Tab does not stop twice
     /// for one list. It takes no scroll key itself: the app drives it from
     /// that stop's keys, by moving its highlight and asking for the row
-    /// with `Effects::scroll_into_view`, as the APG combobox pattern does. `stop` must be a focus stop of
+    /// with `Effects::scroll_into_view`, as the APG combobox pattern does.
+    /// [`Element::scrolls_from`] is the other kind. `stop` must be a focus stop of
     /// the panel when it is laid out; a debug build panics when it is not.
     /// Other elements take no keys this way, so a debug build panics on one.
     pub fn keys_from(mut self, stop: UiId) -> Self {
@@ -636,6 +640,19 @@ impl Element {
             return self;
         }
         self.keys_from = Some(stop);
+        self
+    }
+
+    /// For a scroll container, as [`Element::keys_from`], and a scroll key
+    /// the stop `stop` leaves unused also moves it, as it would move a
+    /// container around the stop (ui-layer.md, section 6, rule 6, step 3):
+    /// help's body scrolls from its Close button, which sits above it, so a
+    /// keyboard user can read on without first tabbing to a link (WCAG 2.2,
+    /// SC 2.1.1).
+    #[must_use]
+    pub fn scrolls_from(mut self, stop: UiId) -> Self {
+        self = self.keys_from(stop);
+        self.scrolls_from_keys = self.keys_from.is_some();
         self
     }
 

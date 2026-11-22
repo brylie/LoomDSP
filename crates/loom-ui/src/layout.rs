@@ -197,6 +197,8 @@ pub(crate) struct Record {
     /// For a scroll container, the focus stop whose unused scroll keys move
     /// it (section 5, rule 12).
     pub(crate) keys_from: Option<UiId>,
+    /// The stop's unused scroll keys move it ([`Element::scrolls_from`]).
+    pub(crate) scrolls_from_keys: bool,
     /// For a radio group, a radio, or a radio's mark: which.
     pub(crate) radio: Option<RadioPart>,
     /// The keys it takes before the focused element inside it
@@ -875,6 +877,7 @@ impl Layout {
             access,
             hover,
             keys_from,
+            scrolls_from_keys,
             keys_first,
             children,
             ..
@@ -979,6 +982,7 @@ impl Layout {
         };
         // Only a container with a UI ID takes its keys from a stop.
         let keys_from = keys_from.filter(|_| kept.is_some());
+        let keys_from_kept = keys_from.is_some();
         self.records.push(Record {
             node,
             parent,
@@ -1000,6 +1004,7 @@ impl Layout {
                 most: 0.0,
             }),
             keys_from,
+            scrolls_from_keys: scrolls_from_keys && keys_from_kept,
             radio,
             keys_first,
             inline: None,
@@ -1102,6 +1107,7 @@ impl Layout {
             clip: None,
             scroll: None,
             keys_from: None,
+            scrolls_from_keys: false,
             radio: None,
             keys_first: Vec::new(),
             inline: Some(link.range),

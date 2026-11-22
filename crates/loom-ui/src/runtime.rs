@@ -525,6 +525,15 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         changed
     }
 
+    /// After a focus effect: each one may move focus off a field, even one
+    /// that a later effect of the same update moves back, so the field
+    /// leaves at each, and the app hears of it on the next turn.
+    fn field_left_after_focus(&mut self, now: Instant) {
+        let mut later = Vec::new();
+        self.field_left(&mut later, now);
+        self.pending.extend(later);
+    }
+
     /// Moves the runtime's focus to `to`, from the keyboard or an effect,
     /// so a ring shows, and brings it into view (section 5, rule 12).
     /// Returns true when it changed.
@@ -1445,6 +1454,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// Keeps the held modifiers from a key event, for Ctrl with the wheel
     /// over a slider (section 5, rule 12).
     fn note_modifiers(&mut self, event: &Event) {
+        // What the latest press came from, for a focus effect that follows
+        // it (`Effects::focus_as_input`).
+        match event {
+            Event::Key(KeyEvent::Pressed { .. }) => self.focus.by_key = true,
+            Event::Pointer(loom_ui_core::PointerEvent::Pressed(_)) => self.focus.by_key = false,
+            _ => {}
+        }
         match event {
             Event::Key(KeyEvent::ModifiersChanged(modifiers) | KeyEvent::Pressed { modifiers, .. }) => {
                 self.pointer.modifiers = *modifiers;
@@ -1535,15 +1551,21 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let mut redraw = false;
         for effect in effects {
             match effect {
+                Effect::FocusAsInput(id) => {
+                    let quiet = !self.focus.by_key;
+                    redraw |= self.focus_effect(&FocusTarget::Element(id.clone()), Selection::Keep);
+                    if quiet {
+                        if self.focus.id() == Some(&id) {
+                            self.focus.ring = false;
+                        } else if self.focus.wanted.as_ref() == Some(&id) {
+                            self.focus.wanted_quiet = Some(id);
+                        }
+                    }
+                    self.field_left_after_focus(now);
+                }
                 Effect::Focus { target, select } => {
                     redraw |= self.focus_effect(&target, select);
-                    // Each focus effect may move focus off a field, even
-                    // one that a later effect of the same update moves
-                    // back: the field leaves at each, and the app hears of
-                    // it on the next turn.
-                    let mut later = Vec::new();
-                    self.field_left(&mut later, now);
-                    self.pending.extend(later);
+                    self.field_left_after_focus(now);
                 }
                 // The runtime's own element is its own to scroll, once its
                 // layout is current (section 5, rule 12); a toolkit's is

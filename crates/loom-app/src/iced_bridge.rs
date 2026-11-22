@@ -288,6 +288,7 @@ impl loom_ui::App for Hosted {
             .or_else(|| self.0.breadcrumb_click(id))
             .or_else(|| self.0.bar_click(id))
             .or_else(|| self.0.question_click(id))
+            .or_else(|| self.0.help_click(id))
             .or_else(|| self.0.menu_click(id))
             .or_else(|| self.2.clicked(id))
     }

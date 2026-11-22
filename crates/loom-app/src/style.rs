@@ -9,7 +9,6 @@
 use crate::Element;
 use iced::Theme;
 use iced::widget::button as iced_button;
-use iced::widget::markdown as iced_markdown;
 
 /// Table cells, row details, and captions in the inspector and matrix.
 pub const SMALL: f32 = 11.0;
@@ -74,6 +73,16 @@ pub const BODY_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
     line_height: LINE_HEIGHT,
     weight: loom_ui_core::Weight::Regular,
 };
+
+/// [`SMALL`] text, for `loom-ui` elements: details and IDs.
+pub const SMALL_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
+    size: SMALL,
+    line_height: LINE_HEIGHT,
+    weight: loom_ui_core::Weight::Regular,
+};
+
+/// Help's widest box, in logical pixels, as Iced drew it.
+pub const HELP_WIDTH: f32 = 720.0;
 
 /// [`CONTROL`] text, for `loom-ui` elements.
 pub const CONTROL_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
@@ -431,13 +440,6 @@ pub const SCROLLBAR_THUMB: iced::Color = QUIET;
 /// How a scroll container of the app's own UI layer looks and moves: the
 /// scrollbar tokens, the focus ring's reach kept as room around the
 /// content, and one line of body text for its keys and the wheel.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "used once the inspector moves to loom-ui (leaving-iced plan, row 4d)"
-    )
-)]
 pub fn scroll() -> loom_ui::ScrollStyle {
     use loom_canvas::iced_convert::ToCore as _;
     let ring = focus_ring();
@@ -522,24 +524,6 @@ pub fn quiet_pick_list(theme: &Theme, status: iced::widget::pick_list::Status) -
             radius: 3.0.into(),
         },
     }
-}
-
-/// Markdown in the help overlay, on the same scale as the rest of the app.
-pub fn markdown(theme: &Theme) -> iced_markdown::Settings {
-    let mut settings = iced_markdown::Settings::with_text_size(BODY, theme);
-    settings.h1_size = TITLE.into();
-    settings.h2_size = HEADING.into();
-    settings.h3_size = HEADING.into();
-    settings.h4_size = CONTROL.into();
-    settings.h5_size = CONTROL.into();
-    settings.h6_size = CONTROL.into();
-    settings.code_size = SMALL.into();
-    // The link token, which `loom-ui`'s help takes too (with its underline).
-    settings.style.link_color = {
-        use loom_canvas::iced_convert::ToIced as _;
-        link(theme).colour.to_iced()
-    };
-    settings
 }
 
 /// How a dialog over the canvas looks: help and Your patches. Today's

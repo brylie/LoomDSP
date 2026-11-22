@@ -280,6 +280,9 @@ pub enum Effect<M> {
         /// What happens to a text field's selection.
         select: Selection,
     },
+    /// Move the keyboard focus to one of the runtime's elements, with a
+    /// ring only if the latest input was a key ([`Effects::focus_as_input`]).
+    FocusAsInput(UiId),
     /// Scroll so the element with this UI ID is in view.
     ScrollIntoView(UiId),
     /// Put this text on the clipboard.
@@ -339,7 +342,7 @@ impl<M> Effect<M> {
     /// The effect's stable name, from [`names`].
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Focus { .. } => names::FOCUS,
+            Self::Focus { .. } | Self::FocusAsInput(_) => names::FOCUS,
             Self::ScrollIntoView(_) => names::SCROLL_INTO_VIEW,
             Self::ClipboardWrite(_) => names::CLIPBOARD_WRITE,
             Self::ClipboardRead(_) => names::CLIPBOARD_READ,
@@ -364,6 +367,7 @@ impl<M> fmt::Debug for Effect<M> {
                 .field("target", target)
                 .field("select", select)
                 .finish(),
+            Self::FocusAsInput(id) => f.debug_tuple("FocusAsInput").field(id).finish(),
             Self::ScrollIntoView(id) => f.debug_tuple("ScrollIntoView").field(id).finish(),
             Self::ClipboardWrite(text) => f.debug_tuple("ClipboardWrite").field(text).finish(),
             Self::ClipboardRead(_) => f.write_str("ClipboardRead"),
@@ -433,6 +437,17 @@ impl<M> Effects<M> {
             target: FocusTarget::Element(id),
             select: Selection::Keep,
         })
+    }
+
+    /// Focus the element with `id`, showing the ring only when the latest
+    /// input was a key press, as a browser decides `:focus-visible` when a
+    /// script moves the focus (ui-layer.md, section 6, rule 3). For an
+    /// overlay that a click or a key may open: from the keyboard, the user
+    /// must see where the focus went; from the pointer, a ring would show
+    /// for no keyboard use. Only one of the runtime's own elements takes
+    /// it; any other ID is the target's, as with [`Effects::focus`].
+    pub fn focus_as_input(id: UiId) -> Self {
+        Self::one(Effect::FocusAsInput(id))
     }
 
     /// Focus the text field with `id`, with all of its text selected.

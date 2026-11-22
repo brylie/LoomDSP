@@ -226,6 +226,12 @@ pub(crate) fn ours(event: &iced::Event) -> Option<Event> {
         iced::Event::Mouse(mouse::Event::CursorMoved { .. }) => PointerEvent::Moved,
         iced::Event::Mouse(mouse::Event::ButtonPressed(pressed)) => PointerEvent::Pressed(button(pressed)?),
         iced::Event::Mouse(mouse::Event::ButtonReleased(released)) => PointerEvent::Released(button(released)?),
+        // The wheel too, so a scroll container of the runtime's above Iced
+        // scrolls in the harness as the window's own events scroll it.
+        iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+            use loom_canvas::iced_convert::ToCore as _;
+            PointerEvent::Scrolled(delta.to_core())
+        }
         _ => return None,
     };
     Some(Event::Pointer(pointer))

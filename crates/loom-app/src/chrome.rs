@@ -28,6 +28,7 @@ impl App {
         self.toolbar_panel(view);
         self.breadcrumb_panel(view);
         self.bar_panel(view);
+        self.help_panel(view);
         self.question_panel(view);
         self.menu_panel(view);
     }
@@ -54,6 +55,7 @@ impl App {
     /// ([`Self::top_stops`]).
     pub(crate) fn our_stops(&self) -> Vec<UiId> {
         let mut stops = self.question_stops();
+        stops.extend(self.help_stops());
         stops.extend(self.menu_stops());
         stops.extend(self.toolbar_stops());
         stops.extend(self.breadcrumb_stops());
@@ -81,6 +83,13 @@ impl App {
         if self.question_stops().contains(from) {
             let by = if back { -1 } else { 1 };
             return TabStep::Send(Message::Question(crate::question::Message::Move(by)));
+        }
+        // Tab stays inside help, wrapping at both ends (the WAI-ARIA modal
+        // dialog pattern; help-pages.md, Keys, links, and focus).
+        if self.help_stops().contains(from) {
+            return self
+                .help_next_stop(Some(from), back)
+                .map_or(TabStep::Leave, TabStep::To);
         }
         // Tab on a menu item closes the menu and moves on from what opened
         // it (the WAI-ARIA menu pattern; section 6, rule 8).

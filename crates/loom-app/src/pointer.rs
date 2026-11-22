@@ -641,6 +641,21 @@ impl Widget<Message, iced::Theme, crate::Renderer> for Injector<'_> {
                     }
                     continue;
                 }
+                // Tab from a script inside help moves among help's stops, as
+                // the runtime's Tab does (row 6); Iced never hears it.
+                if self.app.overlays.help.is_some()
+                    && self.app.overlays.question.is_none()
+                    && let Event::Keyboard(keyboard::Event::KeyPressed {
+                        key: keyboard::Key::Named(keyboard::key::Named::Tab),
+                        modifiers,
+                        ..
+                    }) = &injected
+                {
+                    shell.publish(Message::HelpTab {
+                        back: modifiers.shift(),
+                    });
+                    continue;
+                }
                 // While one of the runtime's overlays owns the input, a
                 // pointer event is the runtime's layers' above Iced, as a
                 // real one is (Panels::over_target): Iced never hears it.

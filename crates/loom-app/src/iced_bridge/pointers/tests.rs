@@ -93,7 +93,9 @@ fn click(ui: &mut Ui, at: Point) -> Vec<Message> {
 /// on the bar each reach only the question, and the bar is neither
 /// hovered nor focused. With the question gone, the bar's click is the
 /// bar's: its message runs, and its button takes no focus from the press
-/// (section 6, rule 3; Brylie's decision, 2026-11-19).
+/// (section 6, rule 3; Brylie's decision, 2026-11-19). That message opens
+/// help, which takes the focus to its Close button, with no ring, since
+/// the pointer opened it (help-pages.md, Keys, links, and focus).
 #[test]
 fn a_question_holds_presses_on_both_toolkits() {
     let mut ui = ui_with(bar);
@@ -112,7 +114,13 @@ fn a_question_holds_presses_on_both_toolkits() {
     ui.redraw();
     let heard = click(&mut ui, on_go());
     assert!(heard.iter().any(|m| matches!(m, Message::ShowHelp)), "{heard:?}");
-    assert_eq!(ui.runtime().focused(), None, "a press on a button takes no focus");
+    let _ = ui.redraw();
+    assert_eq!(
+        ui.runtime().focused(),
+        Some(&crate::overlays::access::help_id().with("close")),
+        "the button took no focus; help, which it opened, did"
+    );
+    assert_eq!(ui.runtime().focus_ring(), None, "opened by the pointer: no ring");
 }
 
 /// A press Iced captures never reaches the runtime's layers, so the focus

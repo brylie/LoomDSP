@@ -8,10 +8,10 @@
 //! is reported: the question, help, the menus, the browsers, Preferences,
 //! and the licence chooser.
 
+use crate::App;
 use crate::a11y::items::{Item, Kind};
 use crate::input_owner::InputOwner;
 use crate::menus::MenuModel;
-use crate::{App, Message, help};
 use loom_ui_core::UiId;
 
 /// The UI ID of the open question.
@@ -39,10 +39,8 @@ impl App {
             // The question is the runtime's (row 3b): its nodes come from
             // its panel, and its focus is the runtime's on an answer.
             InputOwner::Question => (Vec::new(), None),
-            InputOwner::Help => match &self.overlays.help {
-                Some(open) => (vec![help_item(&open.model)], Some(help_id())),
-                None => (Vec::new(), None),
-            },
+            // Help is the runtime's (row 6): its nodes come from its panel.
+            InputOwner::Help => (Vec::new(), None),
             // The probe menu and Recent are the runtime's (row 3b).
             InputOwner::ProbeMenu | InputOwner::RecentList => (Vec::new(), None),
             InputOwner::TileMenu => match self.menu_model() {
@@ -105,86 +103,3 @@ fn menu_item(menu: &MenuModel) -> Item {
         ..Item::new(menu.id.clone(), Kind::Menu)
     }
 }
-
-/// The help page: a dialog with its Close button, the module's summary,
-/// its notes one paragraph and one list entry at a time with links as
-/// links, its parameters and ports, and Open example.
-fn help_item(model: &help::Model) -> Item {
-    let id = help_id();
-    let mut parts = vec![Item::button(
-        id.clone().with("close"),
-        "Close",
-        Some(Message::CloseHelp),
-    )];
-    if !model.id.is_empty() {
-        parts.push(Item::text(id.clone().with("summary"), model.summary()));
-        parts.push(Item::text(id.clone().with("description"), model.description));
-    }
-    // The page does not change while it is open, so its blocks are keyed
-    // by their place on it (section 4: a list that never changes length).
-    parts.extend(notes(&id.clone().with("notes"), &model.lead));
-    if !model.id.is_empty() {
-        for (key, title, entries) in [
-            ("parameters", "Parameters", &model.params),
-            ("inputs", "Inputs", &model.inputs),
-            ("outputs", "Outputs", &model.outputs),
-        ] {
-            let section = id.clone().with(key);
-            let rows = if entries.is_empty() {
-                vec![Item::text(section.clone().with("none"), "None.")]
-            } else {
-                entries
-                    .iter()
-                    .map(|entry| {
-                        Item::text(
-                            section.clone().with(entry.name),
-                            format!("{}: {} {}", entry.label, entry.details, entry.description),
-                        )
-                    })
-                    .collect()
-            };
-            parts.push(Item::group(section, title, rows));
-        }
-    }
-    if model.example.is_some() {
-        parts.push(Item::button(
-            id.clone().with("example"),
-            "Open example",
-            Some(Message::HelpExample),
-        ));
-    }
-    parts.extend(notes(&id.clone().with("example-notes"), &model.tail));
-    Item {
-        label: Some(model.name.to_string()),
-        children: parts,
-        ..Item::new(id, Kind::Dialog)
-    }
-}
-
-/// Our own notes, one item per paragraph, heading, list entry, or code
-/// block, under `under`, from the blocks the view shows
-/// (`help/markdown.rs`). A link is read as its words in its block's text,
-/// and is also an item of its own that follows the link, as a click on it
-/// in the view does.
-fn notes(under: &UiId, blocks: &[help::markdown::Block]) -> Vec<Item> {
-    let mut items = Vec::new();
-    for (at, block) in blocks.iter().enumerate() {
-        let key = under.clone().with(at as u32);
-        let words = block.words();
-        if words.trim().is_empty() {
-            continue;
-        }
-        items.push(Item::text(key.clone(), words));
-        for (n, link) in block.links().iter().enumerate() {
-            items.push(Item {
-                label: Some(link.label.clone()),
-                click: Some(Message::HelpLink(link.target.clone())),
-                ..Item::new(key.clone().with("link").with(n as u32), Kind::Link)
-            });
-        }
-    }
-    items
-}
-
-#[cfg(test)]
-mod tests;
