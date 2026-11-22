@@ -23,6 +23,10 @@ struct Item {
     second: Option<String>,
     /// Shown dimmed: a Recent file that was not there.
     dim: bool,
+    /// The menu's highlighted item, which is its focused one: the weak
+    /// fill, whether the pointer or the keys put it there (Brylie's
+    /// decision, 2026-11-20), with the focus ring on top from the keys.
+    highlighted: bool,
 }
 
 /// Everything the menu's panel shows, so the runtime builds it again only
@@ -80,6 +84,7 @@ impl App {
                     label: item.label.clone(),
                     second: item.description.clone(),
                     dim: missing.get(at).copied().unwrap_or(false),
+                    highlighted: menu.highlight == Some(at),
                 })
                 .collect(),
             placement,
@@ -161,12 +166,16 @@ fn row(panel: &Panel, item: &Item) -> Element {
         background: Some(panel.hover),
         text: None,
     };
+    let normal = loom_ui::StateLook {
+        background: item.highlighted.then_some(panel.hover),
+        text: None,
+    };
     Element::column(lines)
         .padding(style::BUTTON_PADDING)
         .width(Length::FILL)
         .radius(style::MENU_ITEM_RADIUS)
         .looks(loom_ui::Looks {
-            normal: loom_ui::StateLook::default(),
+            normal,
             hovered,
             pressed: hovered,
             off: loom_ui::StateLook::default(),

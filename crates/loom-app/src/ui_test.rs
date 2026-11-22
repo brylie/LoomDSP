@@ -472,6 +472,24 @@ impl Ui {
             .collect()
     }
 
+    /// Every box the runtime paints in `layer` now, in the order painted.
+    pub(crate) fn painted_quads(&mut self, layer: loom_ui::Layer) -> Vec<loom_ui::paint::Quad> {
+        use loom_ui::paint::testing::Painted;
+        self.lay_out_panels();
+        let style = crate::iced_bridge::paint::panel_style(&self.app().theme());
+        let mut recorder = loom_ui::paint::testing::Recorder::default();
+        let (_, _, mut panels) = self.bridge.runtime_mut().parts();
+        panels.paint(layer, &mut recorder, &style);
+        recorder
+            .painted
+            .iter()
+            .filter_map(|painted| match painted {
+                Painted::Quad(quad) => Some(*quad),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Lays out the runtime's own panels, as the window does before each
     /// frame, so hits and focus read what was drawn.
     pub(crate) fn lay_out_panels(&mut self) {

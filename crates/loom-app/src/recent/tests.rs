@@ -642,3 +642,35 @@ fn from_the_keyboard_the_list_starts_on_its_first_item_and_tab_leaves_it() {
         "and the focus moved on"
     );
 }
+
+/// The highlighted item, which is the focused one, has one look whichever
+/// way it got there: the weak fill, here from the keys (Brylie's decision,
+/// 2026-11-20; row 3b). The item below it has none.
+#[test]
+fn the_highlighted_item_has_the_weak_fill() {
+    use loom_canvas::iced_convert::ToCore as _;
+    let dir = TempDir::new("recent-look");
+    let files = patches(&dir.0, 2);
+    let mut ui = Ui::with_app(app());
+    assert!(ui.app_mut().open_path(&files[0]));
+    assert!(ui.app_mut().open_path(&files[1]));
+    ui.send(AppMessage::OpenRecent);
+    ui.redraw();
+    ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
+    ui.redraw();
+    let rows = ui.app().ui_snapshot().recent.expect("the list is open");
+    let id = |at: usize| crate::menus::recent_id().with(rows[at].path.display().to_string().as_str());
+    let first = ui.runtime().bounds(&id(0)).expect("laid out");
+    let second = ui.runtime().bounds(&id(1)).expect("laid out");
+    assert_eq!(ui.runtime().focused(), Some(&id(0)), "the keys highlighted the first");
+    let weak = ui.app().theme().extended_palette().background.weak.color.to_core();
+    let quads = ui.painted_quads(loom_ui::Layer::Overlays);
+    assert!(
+        quads.iter().any(|quad| quad.rect == first && quad.fill == weak),
+        "the first has the fill"
+    );
+    assert!(
+        !quads.iter().any(|quad| quad.rect == second && quad.fill == weak),
+        "the second has none"
+    );
+}
