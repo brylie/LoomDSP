@@ -805,13 +805,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.panels.fields.get(id).map(crate::field::FieldState::text)
     }
 
-    /// What the keyboard can activate the element with UI ID `id` as, now:
-    /// `Some(true)` for a button, `Some(false)` for a switch, `None` when it
-    /// is neither, offers no Click, is turned off, or is in a layer below
-    /// the one taking input. The press and the release of Space both ask,
-    /// so an element that stopped being clickable while Space was held
-    /// clicks nothing.
-    fn activatable(&self, id: &UiId) -> Option<bool> {
+    /// What the keyboard can activate the element with UI ID `id` as, now
+    /// ([`activatable`]).
+    fn activatable(&self, id: &UiId) -> Option<Activation> {
         activatable(&self.panels, &self.app, id)
     }
 
@@ -821,8 +817,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     }
 
     /// Keyboard activation of the focused element (section 3, rule 4):
-    /// Enter clicks a button when it goes down, and Space clicks a button
-    /// or a switch when it comes up on the element it went down on.
+    /// Enter clicks a button or a link when it goes down, and Space clicks
+    /// a button or a switch when it comes up on the element it went down
+    /// on.
     /// Escape, any move of the focus, or a pointer press while Space is held
     /// cancels it, and so does the element no longer being clickable when
     /// Space comes up. Repeats click nothing. The click reaches the app
@@ -867,7 +864,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let Some(id) = self.focus.id().cloned() else {
             return (false, false);
         };
-        let Some(button) = self.activatable(&id) else {
+        let Some(activation) = self.activatable(&id) else {
             return (false, false);
         };
         let KeyEvent::Pressed {
@@ -878,13 +875,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         };
         let plain = !(modifiers.control || modifiers.alt || modifiers.meta);
         match key {
-            Key::Enter if button && plain => {
+            Key::Enter if activation.on_enter() && plain => {
                 if !repeat {
                     self.click(&id);
                 }
                 (true, false)
             }
-            Key::Space if plain => {
+            Key::Space if activation.on_space() && plain => {
                 if !repeat {
                     self.pointer.space = Some((id, self.focus.moves));
                 }
@@ -1522,13 +1519,37 @@ pub(crate) fn in_input_layer<A: App>(window: &Window, app: &A, id: &UiId) -> boo
     window.layer_of(id).is_some_and(|its| its >= layer)
 }
 
+/// Which keys click an element the keyboard can activate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Activation {
+    /// A button: Enter when it goes down, Space when it comes up.
+    Button,
+    /// A switch: Space only.
+    Switch,
+    /// A link: Enter only, as WAI-ARIA's link pattern has it. Space
+    /// stays the page's, to scroll.
+    Link,
+}
+
+impl Activation {
+    /// True when Enter clicks it.
+    pub(crate) fn on_enter(self) -> bool {
+        matches!(self, Self::Button | Self::Link)
+    }
+
+    /// True when Space clicks it.
+    pub(crate) fn on_space(self) -> bool {
+        matches!(self, Self::Button | Self::Switch)
+    }
+}
+
 /// What the keyboard can activate the element with UI ID `id` in `window`
-/// as, now, with `app`'s input state: `Some(true)` for a button,
-/// `Some(false)` for a switch, `None` when it is neither, offers no Click,
-/// is turned off, or is in a layer below the one taking input. The press
-/// and the release of Space both ask, so an element that stopped being
-/// clickable while Space was held clicks nothing.
-pub(crate) fn activatable<A: App>(window: &Window, app: &A, id: &UiId) -> Option<bool> {
+/// as, now, with `app`'s input state: a button, a switch, or a link, or
+/// `None` when it is none of them, offers no Click, is turned off, or is in
+/// a layer below the one taking input. The press and the release of Space
+/// both ask, so an element that stopped being clickable while Space was
+/// held clicks nothing.
+pub(crate) fn activatable<A: App>(window: &Window, app: &A, id: &UiId) -> Option<Activation> {
     // While the canvas has the keyboard, its keys are its own (section 6,
     // rule 1): no element of ours is activated by them.
     if app.input().canvas_focused || !in_input_layer(window, app, id) {
@@ -1539,8 +1560,9 @@ pub(crate) fn activatable<A: App>(window: &Window, app: &A, id: &UiId) -> Option
         return None;
     }
     match access.role() {
-        crate::access::Role::Button => Some(true),
-        crate::access::Role::Switch => Some(false),
+        crate::access::Role::Button => Some(Activation::Button),
+        crate::access::Role::Switch => Some(Activation::Switch),
+        crate::access::Role::Link => Some(Activation::Link),
         _ => None,
     }
 }
@@ -1552,7 +1574,7 @@ pub(crate) fn activatable<A: App>(window: &Window, app: &A, id: &UiId) -> Option
 pub(crate) fn live_arm<A: App>(window: &Window, app: &A, focus: &Focus, pointer: &Pointer) -> Option<UiId> {
     let (armed, moves) = pointer.space.as_ref()?;
     let unmoved = focus.moves == *moves && focus.id() == Some(armed);
-    (unmoved && activatable(window, app, armed).is_some()).then(|| armed.clone())
+    (unmoved && activatable(window, app, armed).is_some_and(Activation::on_space)).then(|| armed.clone())
 }
 #[cfg(test)]
 mod tests;

@@ -2120,11 +2120,8 @@ fn frame_nodes_are_hidden_below_a_panel() {
     for id in [tree::toolbar_id(), tree::tabs_id(), tree::toolbar_id().with("undo")] {
         assert!(node(&update, node_of(ui.app_mut(), &id)).is_hidden(), "{id}");
     }
-    assert!(!ui_act(
-        &mut ui,
-        &request(Action::Click, add, None),
-        std::time::Instant::now()
-    ));
+    let ui_now = ui.now();
+    assert!(!ui_act(&mut ui, &request(Action::Click, add, None), ui_now));
 }
 
 /// The audio watcher's reading is a live value: it asks for no build, and
@@ -2278,11 +2275,8 @@ fn the_tree_follows_the_pointer_under_every_panel() {
         }
         let knob_node = widget_node(ui.app_mut(), module, knob);
         let before = cutoff(&ui);
-        let sent = ui_act(
-            &mut ui,
-            &request(Action::Increment, knob_node, None),
-            std::time::Instant::now(),
-        );
+        let now = ui.now();
+        let sent = ui_act(&mut ui, &request(Action::Increment, knob_node, None), now);
         assert_eq!(sent, open, "{owner:?}: Increment on a tile's knob");
         assert_eq!(
             (cutoff(&ui) - before).abs() > 1e-6,
@@ -2299,11 +2293,8 @@ fn the_tree_follows_the_pointer_under_every_panel() {
             !open,
             "{owner:?}: the inspector"
         );
-        let clicked = ui_act(
-            &mut ui,
-            &request(Action::Click, shortcuts_node, None),
-            std::time::Instant::now(),
-        );
+        let now = ui.now();
+        let clicked = ui_act(&mut ui, &request(Action::Click, shortcuts_node, None), now);
         assert_eq!(clicked, open, "{owner:?}: a Click in the inspector");
         if open {
             // The overlay it opened is closed again, so the knob below is
@@ -2509,7 +2500,7 @@ fn an_inspector_slider_steps_as_its_own_arrow_key_and_groups() {
     let steps = ui.app().session.edits.history.len();
     let before = position(ui.app());
     let node_id = node_of(ui.app_mut(), &slider_id);
-    let at = std::time::Instant::now();
+    let at = ui.now();
     ui_act(&mut ui, &request(Action::Increment, node_id, None), at);
     ui_act(&mut ui, &request(Action::Increment, node_id, None), at);
     let step = crate::param::slider_step(&spec);
@@ -2625,11 +2616,8 @@ fn an_inspector_option_click_chooses_it() {
         .clone();
     let target = node_of(ui.app_mut(), &other.id);
     assert_eq!(node(&update, target).role(), Role::RadioButton);
-    ui_act(
-        &mut ui,
-        &request(Action::Click, target, None),
-        std::time::Instant::now(),
-    );
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::Click, target, None), ui_now);
     let (_, update, _) = inspector_of(&mut ui, &[module]);
     assert_eq!(node(&update, target).toggled(), Some(accesskit::Toggled::True));
 }
@@ -2905,7 +2893,7 @@ fn the_inspector_slider_steps_a_tenth_of_the_tile_knob_until_phase_3() {
     let spec = ui.app().control_target(module, knob, ControlPart::Main).unwrap().spec;
     let position =
         |app: &App| spec.normalize(app.session.controller.graph().node(ModuleId(module)).unwrap().params[index]);
-    let at = std::time::Instant::now();
+    let at = ui.now();
     let mut moved = Vec::new();
     for target in ["inspector", "tile"] {
         ui.send(Message::Inspector(crate::inspector::Message::Param {
@@ -3119,7 +3107,7 @@ fn a_matrix_source_step_skips_a_taken_pair_and_is_its_own_undo_step() {
     let steps = ui.app().session.edits.history.len();
     let source = crate::matrix::access::cell(id, crate::matrix::Column::Source);
     let target = node_of(ui.app_mut(), &source);
-    let at = std::time::Instant::now();
+    let at = ui.now();
     ui_act(&mut ui, &request(Action::Increment, target, None), at);
     let moved = ui
         .app()
@@ -3186,11 +3174,8 @@ fn a_matrix_step_with_nothing_allowed_does_nothing() {
     let source = crate::matrix::access::cell(id, crate::matrix::Column::Source);
     let _ = matrix_tree(&mut ui);
     let node_id = node_of(ui.app_mut(), &source);
-    ui_act(
-        &mut ui,
-        &request(Action::Decrement, node_id, None),
-        std::time::Instant::now(),
-    );
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::Decrement, node_id, None), ui_now);
     assert_eq!(ui.app().session.edits.history.len(), steps);
     assert_eq!(ui.app().alerts.status(), status, "nothing is said");
 }
@@ -3213,7 +3198,7 @@ fn a_matrix_depth_is_a_slider_in_percent_that_groups() {
     assert_eq!(found.numeric_value_step(), Some(1.0));
     let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
     let steps = ui.app().session.edits.history.len();
-    let at = std::time::Instant::now();
+    let at = ui.now();
     ui_act(
         &mut ui,
         &request(Action::SetValue, slider, Some(ActionData::NumericValue(40.0))),
@@ -3244,10 +3229,11 @@ fn the_matrix_filter_takes_text_and_focus() {
     let found = node(&update, node_id);
     assert_eq!(found.role(), Role::TextInput);
     assert!(found.supports_action(Action::Focus) && found.supports_action(Action::SetValue));
+    let ui_now = ui.now();
     ui_act(
         &mut ui,
         &request(Action::SetValue, node_id, Some(ActionData::Value("lfo".into()))),
-        std::time::Instant::now(),
+        ui_now,
     );
     assert_eq!(ui.app().session.matrix.filter, "lfo");
     let (_, update) = matrix_tree(&mut ui);
@@ -3423,7 +3409,8 @@ fn a_screen_reader_target_step_follows_a_renumbered_row_inside_a_sub_patch() {
         let cell = access::cell(id, Column::Target);
         let node = node_of(ui.app_mut(), &cell);
         let action = if forward { Action::Increment } else { Action::Decrement };
-        ui_act(&mut ui, &request(action, node, None), std::time::Instant::now());
+        let ui_now = ui.now();
+        ui_act(&mut ui, &request(action, node, None), ui_now);
         steps += 1;
         assert_ne!(
             ui.app().alerts.severity(),
@@ -3477,7 +3464,7 @@ fn a_matrix_depth_steps_onto_the_percent_grid() {
     let _ = matrix_tree(&mut ui);
     let slider = node_of(ui.app_mut(), &depth_id);
     let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
-    let at = std::time::Instant::now();
+    let at = ui.now();
     ui_act(&mut ui, &request(Action::Increment, slider, None), at);
     assert!((depth(ui.app()) - 0.31).abs() < 1e-6, "{}", depth(ui.app()));
     for _ in 0..19 {
@@ -3519,7 +3506,7 @@ fn an_inspector_depth_steps_onto_the_percent_grid() {
     );
     let slider = node_of(ui.app_mut(), &depth_id);
     let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
-    let at = std::time::Instant::now();
+    let at = ui.now();
     ui_act(&mut ui, &request(Action::Increment, slider, None), at);
     assert!((depth(ui.app()) - 0.31).abs() < 1e-6, "{}", depth(ui.app()));
     for _ in 0..19 {
@@ -4231,11 +4218,8 @@ fn a_click_on_a_browser_option_adds_its_module() {
     let before = ui.app().ui_snapshot().tiles.len();
     let _ = ui.places();
     let option = browser_option(&mut ui, 0);
-    ui_act(
-        &mut ui,
-        &request(Action::Click, option, None),
-        std::time::Instant::now(),
-    );
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::Click, option, None), ui_now);
     assert!(ui.app().overlays.browser().is_none(), "the browser closed");
     assert_eq!(ui.app().ui_snapshot().tiles.len(), before + 1);
 }
@@ -4263,11 +4247,8 @@ fn show_context_menu_on_a_library_row_opens_its_menu() {
     assert!(!node(&update, module).supports_action(Action::ShowContextMenu));
     let option = browser_option(&mut ui, row);
     assert!(node(&update, option).supports_action(Action::ShowContextMenu));
-    ui_act(
-        &mut ui,
-        &request(Action::ShowContextMenu, option, None),
-        std::time::Instant::now(),
-    );
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::ShowContextMenu, option, None), ui_now);
     let _ = ui.redraw();
     let places = ui.places();
     let update = ui.app_mut().a11y_tree(&places);
@@ -4278,7 +4259,8 @@ fn show_context_menu_on_a_library_row_opens_its_menu() {
     assert!(places.of(&crate::browser::insert_linked_id(&id)).is_some());
 
     let before = ui.app().ui_snapshot().tiles.len();
-    ui_act(&mut ui, &request(Action::Click, item, None), std::time::Instant::now());
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::Click, item, None), ui_now);
     assert_eq!(ui.app().ui_snapshot().tiles.len(), before + 1, "inserted");
     assert!(ui.app().overlays.browser().is_none());
 }
@@ -4298,11 +4280,8 @@ fn help_over_the_browser_hides_it() {
     let update = ui.app_mut().a11y_tree(&places);
     assert!(update.nodes.iter().all(|(id, _)| *id != option), "not reported");
     let tiles = ui.app().ui_snapshot().tiles.len();
-    ui_act(
-        &mut ui,
-        &request(Action::Click, option, None),
-        std::time::Instant::now(),
-    );
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::Click, option, None), ui_now);
     assert_eq!(ui.app().ui_snapshot().tiles.len(), tiles, "inert");
 }
 
@@ -4601,11 +4580,8 @@ fn an_overlay_edit_is_one_undo_step() {
     let steps = ui.app().session.edits.history.len();
     let _ = ui.places();
     let option = browser_option(&mut ui, 0);
-    ui_act(
-        &mut ui,
-        &request(Action::Click, option, None),
-        std::time::Instant::now(),
-    );
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::Click, option, None), ui_now);
     assert_eq!(ui.app().ui_snapshot().tiles.len(), before + 1);
     assert_eq!(ui.app().session.edits.history.len(), steps + 1, "one step");
     let _ = ui.app_mut().send(Message::Undo);

@@ -309,6 +309,14 @@ impl Window {
             };
             if let (Some(access), Some(id)) = (&element.access, &element.id) {
                 let mut node = access.node(element.focusable);
+                // Only a node the tree holds (section 7, rule 13's rule
+                // for relations).
+                if let Some(active) = access.active().filter(|active| {
+                    self.panel_of(active)
+                        .is_some_and(|panel| self.records[panel].layout.has_node(active))
+                }) {
+                    node.set_active_descendant(NodeId(ids.number(active)));
+                }
                 // What a scroll container cuts away is not where the part
                 // is for a screen reader either (section 7, rule 28).
                 let bounds = match element.clip {
@@ -339,8 +347,14 @@ impl Window {
                 // A text field: its text as it is now, which may be ahead
                 // of the app's by this turn's edits, its runs, and its
                 // selection in them (section 7, rule 10).
+                let placeholder = record.layout.text(index).and_then(|text| text.placeholder);
                 let runs = self.fields.get(id).map(|field| {
                     node.set_value(field.text().to_owned());
+                    // A hint of what to type, read after the name; never
+                    // the value (WAI-ARIA's `aria-placeholder`).
+                    if let Some((hint, _)) = placeholder {
+                        node.set_placeholder(hint.to_owned());
+                    }
                     if !access.is_disabled() {
                         node.add_action(accesskit::Action::SetValue);
                         node.add_action(accesskit::Action::SetTextSelection);

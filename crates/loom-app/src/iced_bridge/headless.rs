@@ -233,7 +233,7 @@ impl Surface {
         // it only while handling a redraw, and draws a freshly built one as
         // disabled until then (#460, #776). What the widgets ask for is
         // dropped: a capture is a still frame, not a turn.
-        let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(std::time::Instant::now()));
+        let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(app.clock.now()));
         let mut asked = Vec::new();
         let _ = ui.update(
             &[redraw],

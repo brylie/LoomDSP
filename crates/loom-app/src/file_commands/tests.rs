@@ -132,6 +132,9 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         effects: _,
         // Filled and taken within one `update` (`App::post`).
         posted: _,
+        // The window's, so it stays: a test's stepped clock keeps its
+        // time across New and Open (`clock.rs`).
+        clock: _,
         // Filled and taken within one turn, by the bridge.
         window_questions: _,
         // The control channel's: a command that sent `new` is still

@@ -39,10 +39,20 @@
 //! rectangle even when its corners are round. Text draws in its
 //! [`colour`](Element::colour), or in the panel style's text colour
 //! ([`PanelStyle`](crate::paint::PanelStyle)).
+//!
+//! # Rich text
+//!
+//! [`Element::rich`] is one wrapping paragraph made of [`Inline`] pieces,
+//! each in its own weight, face, and colour. A piece that is a link is a
+//! part of its own: keyed, a focus stop, hit where its words are, with a
+//! ring around them, and its own node for a screen reader. Its place comes
+//! from where the paragraph sets its words, one rectangle per line it is
+//! on, so a link that wraps is hit on both lines and nowhere between.
 
 use crate::access::Access;
-use loom_ui_core::{Color, IdKey, TextStyle, UiId};
+use loom_ui_core::{Color, Face, IdKey, Span, TextStyle, UiId, Weight};
 use std::num::NonZeroU16;
+use std::ops::Range;
 
 /// How large an element is along one axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -265,6 +275,11 @@ pub(crate) enum Kind {
     Text {
         /// The text.
         text: String,
+        /// How its pieces differ from `style`, for rich text; empty for
+        /// plain text.
+        spans: Vec<Span>,
+        /// The links in it, in the order of the text.
+        links: Vec<Link>,
         /// How it is set.
         style: TextStyle,
         /// Break lines between words to fit the width it gets.
@@ -284,6 +299,8 @@ pub(crate) enum Kind {
         style: TextStyle,
         /// It shows many lines: it wraps to its width and grows with them.
         many: bool,
+        /// What it shows while it is empty, and in which colour.
+        placeholder: Option<(String, Color)>,
     },
     /// A window onto its one child, which scrolls up and down inside it
     /// ([`Element::scroll`]).
@@ -302,6 +319,77 @@ pub(crate) enum Kind {
     Space,
     /// The place of another panel, named by its key.
     Slot(UiId),
+}
+
+/// A link inside a rich text: the bytes of the text it covers, and what
+/// it is as a part of its own.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Link {
+    /// Its bytes in the paragraph's text.
+    pub(crate) range: Range<usize>,
+    /// Its key, under the paragraph's UI ID, or the one around it.
+    pub(crate) key: IdKey,
+    /// What it is to a screen reader.
+    pub(crate) access: Access,
+}
+
+/// One piece of an [`Element::rich`] paragraph: some words, how they
+/// differ from the paragraph's style, and, for a link, what the link is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Inline {
+    text: String,
+    span: Span,
+    link: Option<(IdKey, Access)>,
+}
+
+impl Inline {
+    /// `text` in the paragraph's own style.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            span: Span::default(),
+            link: None,
+        }
+    }
+
+    /// Bold letters.
+    #[must_use]
+    pub fn bold(mut self) -> Self {
+        self.span.weight = Weight::Bold;
+        self
+    }
+
+    /// The monospace face, for code.
+    #[must_use]
+    pub fn mono(mut self) -> Self {
+        self.span.face = Face::Mono;
+        self
+    }
+
+    /// Letters in `colour`, not the paragraph's.
+    #[must_use]
+    pub fn colour(mut self, colour: Color) -> Self {
+        self.span.colour = Some(colour);
+        self
+    }
+
+    /// A line under the letters, in their colour.
+    #[must_use]
+    pub fn underline(mut self) -> Self {
+        self.span.underline = true;
+        self
+    }
+
+    /// Makes the piece a link keyed `key`: a focus stop of its own, with
+    /// `access` as its node (a `Role::Link` that offers Click). Its look
+    /// is the app's to set, with [`colour`](Self::colour) and
+    /// [`underline`](Self::underline), so the words show they are a link
+    /// by more than colour (WCAG 2.2, SC 1.4.1).
+    #[must_use]
+    pub fn link(mut self, key: impl Into<IdKey>, access: Access) -> Self {
+        self.link = Some((key.into(), access));
+        self
+    }
 }
 
 /// One node of a panel's tree. Build it with [`Element::row`],
@@ -373,8 +461,48 @@ impl Element {
         Self::new(
             Kind::Text {
                 text: text.into(),
+                spans: Vec::new(),
+                links: Vec::new(),
                 style,
                 wrap: false,
+                colour: None,
+                quiet: false,
+            },
+            Vec::new(),
+        )
+    }
+
+    /// One paragraph made of `pieces`, set in `style` where a piece sets
+    /// nothing else, breaking its lines between words to fit the width it
+    /// gets. Each link among the pieces is a part of its own, keyed under
+    /// this element's UI ID, or under the one around it when this element
+    /// has no key.
+    pub fn rich(pieces: impl IntoIterator<Item = Inline>, style: TextStyle) -> Self {
+        let mut text = String::new();
+        let mut spans = Vec::new();
+        let mut links = Vec::new();
+        for piece in pieces {
+            let start = text.len();
+            text.push_str(&piece.text);
+            spans.push(Span {
+                len: piece.text.len(),
+                ..piece.span
+            });
+            if let Some((key, access)) = piece.link {
+                links.push(Link {
+                    range: start..text.len(),
+                    key,
+                    access,
+                });
+            }
+        }
+        Self::new(
+            Kind::Text {
+                text,
+                spans,
+                links,
+                style,
+                wrap: true,
                 colour: None,
                 quiet: false,
             },
@@ -398,6 +526,7 @@ impl Element {
                 text: text.into(),
                 style,
                 many: false,
+                placeholder: None,
             },
             Vec::new(),
         );
@@ -424,6 +553,7 @@ impl Element {
                 text: text.into(),
                 style,
                 many: true,
+                placeholder: None,
             },
             Vec::new(),
         );
@@ -509,6 +639,21 @@ impl Element {
             words.children.push(note);
         }
         self.access = self.access.map(|access| access.description(text));
+        self
+    }
+
+    /// For a text field: `text` shown in `colour` while the field is empty
+    /// and nothing is being composed in it, as a hint of what to type. It
+    /// is not the field's value, and a screen reader hears it as the
+    /// field's placeholder, after its name (`set_placeholder`). Its colour
+    /// is the app's, which must reach 4.5:1 against the field (WCAG 2.2,
+    /// SC 1.4.3), since it is text to read. On any other element it does
+    /// nothing.
+    #[must_use]
+    pub fn placeholder(mut self, text: impl Into<String>, colour: Color) -> Self {
+        if let Kind::Field { placeholder, .. } = &mut self.kind {
+            *placeholder = Some((text.into(), colour));
+        }
         self
     }
 

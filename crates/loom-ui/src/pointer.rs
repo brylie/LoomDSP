@@ -229,12 +229,16 @@ impl<A: App> Panels<'_, A> {
         over.then(|| pressed.clone())
     }
 
-    /// True when the element with UI ID `id` is a button or a switch,
-    /// which a pointer press does not focus.
+    /// True when the element with UI ID `id` is a button, a switch, or a
+    /// link, which a pointer press does not focus: each acts, and none
+    /// takes input the keys would then go to.
     fn takes_no_press_focus(&self, id: &UiId) -> bool {
-        self.window
-            .access_of(id)
-            .is_some_and(|access| matches!(access.role(), crate::access::Role::Button | crate::access::Role::Switch))
+        self.window.access_of(id).is_some_and(|access| {
+            matches!(
+                access.role(),
+                crate::access::Role::Button | crate::access::Role::Switch | crate::access::Role::Link
+            )
+        })
     }
 
     /// Offers a pointer event to the runtime's layers above the target.

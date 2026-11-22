@@ -274,7 +274,16 @@ impl<A: App> Panels<'_, A> {
             let whole = Rect::new(Point::ORIGIN, self.size);
             let shows = self.window.ring_clip(&id).map_or(whole, |clip| cut(whole, clip));
             painter.begin_layer(shows);
-            painter.quad(ring(bounds, self.window.radius_of(&id), style.ring));
+            // A link that wraps has a ring around its words on each line,
+            // not one around both lines and the words between.
+            let pieces = self.window.pieces(&id);
+            let radius = self.window.radius_of(&id);
+            if pieces.is_empty() {
+                painter.quad(ring(bounds, radius, style.ring));
+            }
+            for piece in pieces {
+                painter.quad(ring(piece, radius, style.ring));
+            }
             painter.end_layer();
         }
     }
@@ -413,7 +422,7 @@ impl Layout {
                     }
                     continue;
                 }
-                painter.text(&TextRun {
+                let run = TextRun {
                     text: text.text,
                     anchor: content.position(),
                     // A wrapping text breaks its lines at the width it was
@@ -432,7 +441,12 @@ impl Layout {
                         .or(tint)
                         .unwrap_or(style.text),
                     clip: shows,
-                });
+                };
+                if text.spans.is_empty() {
+                    painter.text(&run);
+                } else {
+                    painter.text_spans(&run, text.spans);
+                }
             }
             if look.clip {
                 painter.begin_layer(bounds);
@@ -523,6 +537,24 @@ fn paint_field(
             border: Color::TRANSPARENT,
             border_width: 0.0,
             radius: 0.0,
+        });
+    }
+    // The placeholder, while nothing is typed or being composed. The caret
+    // still shows over it, at the start, where typing will go.
+    if let Some((hint, colour)) = text
+        .placeholder
+        .filter(|_| state.text().is_empty() && !state.composing())
+    {
+        painter.text(&TextRun {
+            text: hint,
+            anchor: start,
+            bounds: Size::new(content.width, content.height),
+            align: Align::Left,
+            vertical: Vertical::Top,
+            style: text.style,
+            wrap: false,
+            colour,
+            clip: shows,
         });
     }
     painter.text(&TextRun {

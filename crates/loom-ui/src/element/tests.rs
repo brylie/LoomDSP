@@ -100,3 +100,43 @@ fn the_look_setters_set_what_they_name() {
     let text = Element::text("a", STYLE).colour(white);
     assert!(matches!(text.kind, Kind::Text { colour: Some(c), .. } if c == white));
 }
+
+/// `rich` joins its pieces into one wrapping text, with a span for each
+/// piece over its bytes, and a link for each piece that is one.
+#[test]
+fn rich_text_keeps_its_pieces_as_spans_and_links() {
+    use super::Inline;
+    use crate::access::{Access, Action, Role};
+    use loom_ui_core::{Color, Face};
+    let blue = Color::rgb(0.0, 0.0, 1.0);
+    let element = Element::rich(
+        [
+            Inline::new("Use "),
+            Inline::new("delay1").mono(),
+            Inline::new(", see "),
+            Inline::new("Saw")
+                .colour(blue)
+                .underline()
+                .link("saw", Access::new(Role::Link, "Saw").action(Action::Click)),
+        ],
+        STYLE,
+    );
+    let Kind::Text {
+        text,
+        spans,
+        links,
+        wrap,
+        ..
+    } = element.kind
+    else {
+        panic!("a text");
+    };
+    assert_eq!(text, "Use delay1, see Saw");
+    assert!(wrap, "a paragraph wraps");
+    assert_eq!(spans.iter().map(|span| span.len).collect::<Vec<_>>(), [4, 6, 6, 3]);
+    assert_eq!(spans[1].face, Face::Mono);
+    assert!(spans[3].underline && spans[3].colour == Some(blue));
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0].range, 16..19);
+    assert_eq!(links[0].key, IdKey::from("saw"));
+}
