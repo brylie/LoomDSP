@@ -965,6 +965,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let Event::Key(press @ KeyEvent::Pressed { key, .. }) = event else {
             return false;
         };
+        // While the canvas has the keyboard, its keys are its own (section
+        // 6, rule 1), as for every other key step of the runtime's.
+        if self.app.input().canvas_focused {
+            return false;
+        }
+        // Escape with a Space held on a button cancels that click first
+        // (section 3, rule 4), so it is left to the activation step.
+        if *key == Key::Escape && self.live_arm().is_some() {
+            return false;
+        }
         let Some(focused) = self.focus.id() else {
             return false;
         };

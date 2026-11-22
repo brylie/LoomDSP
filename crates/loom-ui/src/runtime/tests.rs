@@ -1052,6 +1052,12 @@ enum ComboMsg {
     Focus(UiId),
     /// Show the panel in this layer, under the input layer or not.
     Below(bool),
+    /// The canvas takes the keyboard, or lets it go.
+    Canvas(bool),
+    /// A click on this element.
+    Clicked(UiId),
+    /// From now on the app takes Escape first too, as a browser's closes it.
+    TakeEscape,
 }
 
 /// A browser as the combobox pattern has it: a column that takes Up, Down,
@@ -1063,6 +1069,9 @@ struct Combo {
     heard: Vec<ComboMsg>,
     search: String,
     below: bool,
+    canvas: bool,
+    /// The app takes Escape too, as a browser's closes it.
+    takes_escape: bool,
 }
 
 impl App for Combo {
@@ -1079,7 +1088,15 @@ impl App for Combo {
                 self.below = *below;
                 Effects::none()
             }
-            ComboMsg::Panel(..) => Effects::none(),
+            ComboMsg::Canvas(on) => {
+                self.canvas = *on;
+                Effects::none()
+            }
+            ComboMsg::TakeEscape => {
+                self.takes_escape = true;
+                Effects::none()
+            }
+            ComboMsg::Panel(..) | ComboMsg::Clicked(_) => Effects::none(),
         };
         self.heard.push(message);
         effects
@@ -1095,7 +1112,11 @@ impl App for Combo {
                 .key("search")
                 .width(Length::Fixed(200.0))
                 .access(Access::new(Role::TextInput, "Search"));
-            let combo = Element::column([field]).key("combo").takes_first([
+            let go = Element::text("Go", style)
+                .key("go")
+                .focusable()
+                .access(Access::new(Role::Button, "Go").action(Action::Click));
+            let combo = Element::column([field, go]).key("combo").takes_first([
                 Key::Up,
                 Key::Down,
                 Key::Enter,
@@ -1117,16 +1138,21 @@ impl App for Combo {
     fn input(&self) -> crate::app::InputState {
         crate::app::InputState {
             layer: if self.below { Layer::Question } else { Layer::Overlays },
-            canvas_focused: false,
+            canvas_focused: self.canvas,
             target_first: false,
         }
+    }
+
+    fn clicked(&self, id: &UiId) -> Option<ComboMsg> {
+        Some(ComboMsg::Clicked(id.clone()))
     }
 
     fn panel_key(&self, id: &UiId, key: &KeyEvent) -> Option<ComboMsg> {
         let KeyEvent::Pressed { key, .. } = key else {
             return None;
         };
-        matches!(key, Key::Up | Key::Down | Key::Enter).then(|| ComboMsg::Panel(id.clone(), *key))
+        let taken = matches!(key, Key::Up | Key::Down | Key::Enter) || (*key == Key::Escape && self.takes_escape);
+        taken.then(|| ComboMsg::Panel(id.clone(), *key))
     }
 
     fn field_event(&self, _id: &UiId, event: &crate::field::FieldEvent) -> Option<ComboMsg> {
@@ -1412,5 +1438,46 @@ fn a_quiet_focus_never_quiets_another() {
         harness.runtime().focus_ring().map(|(id, _)| id),
         Some(help),
         "the plain focus rings"
+    );
+}
+
+/// While the canvas has the keyboard, no element takes a key first: the
+/// canvas's keys are its own (section 6, rule 1).
+#[test]
+fn nothing_takes_a_key_first_while_the_canvas_has_the_keyboard() {
+    let mut harness = combo();
+    harness.send(ComboMsg::Canvas(true));
+    harness.step(press(Key::Down));
+    assert!(taken(&harness).is_empty());
+}
+
+/// Escape with a Space held on a button inside the element cancels the
+/// button's click, as everywhere (section 3, rule 4), before the element
+/// that takes Escape first can: releasing Space then clicks nothing.
+#[test]
+fn escape_cancels_a_held_space_before_it_is_taken_first() {
+    let mut harness = combo();
+    harness.send(ComboMsg::TakeEscape);
+    let go = UiId::panel("browser").with("combo").with("go");
+    harness.send(ComboMsg::Focus(go.clone()));
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    assert_eq!(harness.runtime().focused(), Some(&go));
+    harness.step(press(Key::Space));
+    harness.step(press(Key::Escape));
+    harness.step(DriverEvent::Input {
+        event: Event::Key(KeyEvent::Released { key: Key::Space }),
+        pointer: None,
+    });
+    harness.step(DriverEvent::Woken);
+    let clicks = harness
+        .app()
+        .heard
+        .iter()
+        .filter(|m| matches!(m, ComboMsg::Clicked(_)))
+        .count();
+    assert_eq!(clicks, 0, "the held Space clicked nothing");
+    assert!(
+        taken(&harness).is_empty(),
+        "the Escape cancelled it, and went to no element first"
     );
 }
