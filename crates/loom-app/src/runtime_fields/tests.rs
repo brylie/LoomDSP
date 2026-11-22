@@ -229,3 +229,17 @@ fn a_field_change_rebuilds_the_tree_only_while_a_reader_listens() {
         "a reader hears the change: {typed:?}"
     );
 }
+
+/// A runtime field's paste that could not read the clipboard is said in
+/// the status line, for any field, whatever its view maps (ui-layer.md,
+/// section 8, rule 2): never shown as an empty clipboard.
+#[test]
+fn a_refused_paste_is_said_in_the_status_line_for_any_field() {
+    let mut app = crate::ui_test::open_app("subtractive.ron");
+    let message = app
+        .field_message(&UiId::panel("any").with("field"), &FieldEvent::PasteRefused)
+        .expect("a refused paste has a message");
+    assert!(matches!(message, Message::FieldPasteRefused), "{message:?}");
+    let _ = app.send(message);
+    assert_eq!(app.alerts.status(), crate::clipboard::COULD_NOT_READ);
+}
