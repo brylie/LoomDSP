@@ -4736,48 +4736,36 @@ fn one_change_in_preferences_sends_only_what_changed() {
     );
 }
 
-/// A message the runtime sends for a part runs before a window answer that
-/// the same turn asked for, as the bridge orders them: Enter on the tile
-/// menu's first item, opened from the keyboard with a screen reader
-/// listening, gives the item's message, and any answer about where parts
-/// are comes after it. The tile menu is the runtime's from row 3d, so
-/// Enter is its activation, not a message the app posts.
+/// A message posted with `App::post` runs on the next turn, before the
+/// window's answer to a question that turn asked, as the bridge orders
+/// them (no nested updates, section 2): a screen reader's Click on the
+/// Outline tab, which Iced still draws, posts the tab's message, and the
+/// tree then asks where the parts are. The posted message comes first.
 #[test]
 fn a_posted_message_runs_before_the_window_answers() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    let area = Rect::new(Point::new(0.0, 0.0), Size::new(800.0, 600.0));
     ui.send(Message::A11y(Event::Activated));
-    ui.send(Message::Canvas(CanvasEvent::TileMenu {
-        module: 4,
-        at: Point::new(100.0, 100.0),
-        area,
-        by_key: true,
-    }));
-    ui.redraw();
-    let menu = ui.app().menu_model().expect("the tile menu is open");
-    assert_eq!(
-        ui.runtime().focused(),
-        Some(&menu.items[0].id),
-        "opened by key, on its first item"
+    let _ = ui.redraw();
+    let places = ui.places();
+    let _ = ui.app_mut().a11y_tree(&places);
+    let tab = node_of(ui.app_mut(), &tree::tab_id(crate::matrix::Tab::Outline));
+    let log = ui.deliver(Message::A11y(Event::Action(request(Action::Click, tab, None))));
+    let item = format!(
+        "{:?}",
+        Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Outline))
     );
-    let item = format!("{:?}", menu.items[0].message);
-    let log = ui.deliver(Message::Key(iced::keyboard::Event::KeyPressed {
-        key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
-        modified_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
-        physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
-        location: iced::keyboard::Location::Standard,
-        modifiers: iced::keyboard::Modifiers::empty(),
-        text: None,
-        repeat: false,
-    }));
     let posted = log.iter().position(|message| format!("{message:?}") == item);
     let located = log
         .iter()
         .position(|message| matches!(message, Message::A11y(Event::Located(_))));
-    assert!(posted.is_some(), "Enter gave the item's message: {log:?}");
     assert!(
-        located.is_none_or(|located| posted < Some(located)),
-        "the item's message, then any answer: {posted:?}, {located:?}"
+        matches!((posted, located), (Some(posted), Some(located)) if posted < located),
+        "the posted message, then the answer: {posted:?}, {located:?}"
+    );
+    assert_eq!(
+        ui.app().right_tab,
+        crate::matrix::Tab::Outline,
+        "the Click chose the tab"
     );
 }
 

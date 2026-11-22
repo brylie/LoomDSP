@@ -25,6 +25,10 @@ struct Item {
     /// one such as `make-slot/<role>` (ui-layer.md, section 4), so the
     /// element the runtime lays out has the item's own UI ID.
     path: Vec<IdKey>,
+    /// Its place in the menu, from 0, in the model's order: a row inside a
+    /// column says it, so a screen reader counts it among all the items,
+    /// not among the column's.
+    position: usize,
     /// What it says.
     label: String,
     /// A second, quiet line under it: a Recent file's folder.
@@ -92,6 +96,7 @@ impl App {
                 .enumerate()
                 .map(|(at, item)| Item {
                     path: item.id.keys()[menu.id.keys().len()..].to_vec(),
+                    position: at,
                     label: item.label.clone(),
                     second: item.description.clone(),
                     dim: missing.get(at).copied().unwrap_or(false),
@@ -168,6 +173,10 @@ impl App {
 /// closing on a press outside.
 fn build(panel: &Panel) -> Element {
     let items: Vec<&Item> = panel.items.iter().collect();
+    debug_assert!(
+        keys_grouped(&items),
+        "a menu's items keep each shared key together, and no item is a prefix of another"
+    );
     Element::column(rows(panel, &items, 0))
         .padding(4.0)
         .width(Length::Fixed(panel.width))
@@ -177,6 +186,32 @@ fn build(panel: &Panel) -> Element {
         .shadow(style::MENU_SHADOW)
         .placed(panel.placement.clone())
         .closes_on_press_outside()
+}
+
+/// True when `rows` can key every row with its whole UI ID and no two
+/// columns share one: the items with a shared leading run of keys sit next
+/// to each other, and no item's keys begin another's. The menus' own order
+/// gives this (the make-slot items, then each slot's swaps, by kind), and
+/// a debug build checks it.
+fn keys_grouped(items: &[&Item]) -> bool {
+    for (at, item) in items.iter().enumerate() {
+        for other in &items[at + 1..] {
+            let shorter = item.path.len().min(other.path.len());
+            if item.path[..shorter] == other.path[..shorter] {
+                return false;
+            }
+        }
+        for depth in 1..item.path.len() {
+            let prefix = &item.path[..depth];
+            let has = |other: &&Item| other.path.len() > depth && other.path[..depth] == *prefix;
+            let first = items.iter().position(has).unwrap_or(at);
+            let last = items.iter().rposition(has).unwrap_or(at);
+            if !items[first..=last].iter().all(has) {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// The rows of `items`, in order, keyed by their keys from `depth` on:
@@ -211,7 +246,9 @@ fn rows(panel: &Panel, items: &[&Item], depth: usize) -> Vec<Element> {
 fn row(panel: &Panel, item: &Item, key: IdKey) -> Element {
     let label_colour = if item.dim { style::QUIET.to_core() } else { panel.text };
     let mut lines = vec![Element::text(item.label.clone(), style::CONTROL_TEXT).colour(label_colour)];
-    let mut access = Access::new(Role::MenuItem, item.label.clone()).action(Action::Click);
+    let mut access = Access::new(Role::MenuItem, item.label.clone())
+        .action(Action::Click)
+        .position_in_set(item.position);
     if let Some(second) = &item.second {
         lines.push(Element::text(second.clone(), style::BODY_TEXT).colour(style::QUIET.to_core()));
         access = access.description(second.clone());
@@ -239,3 +276,6 @@ fn row(panel: &Panel, item: &Item, key: IdKey) -> Element {
         .focusable()
         .access(access)
 }
+
+#[cfg(test)]
+mod tests;

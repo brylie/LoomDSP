@@ -438,6 +438,9 @@ pub(crate) fn tree(
             frame.covered = covered;
             if let Some((_, node)) = frame.nodes.last_mut().filter(|_| !dialog.is_empty()) {
                 node.set_modal();
+                if let Some(size) = frames.ours_overlay_items {
+                    node.set_size_of_set(size);
+                }
             }
             dialog
         }
@@ -766,6 +769,9 @@ pub(crate) struct Frames {
     /// alert dialog for the question and a menu for the probe menu or
     /// Recent.
     pub ours_overlay: Option<(Role, String, UiId)>,
+    /// How many items the runtime menu in `ours_overlay` holds, for its
+    /// node's set size, so an item in a column still reads as one of all.
+    pub ours_overlay_items: Option<usize>,
 }
 
 /// The UI ID a fixed text names. The texts are this app's own constants,

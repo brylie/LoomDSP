@@ -713,6 +713,11 @@ impl crate::App {
                 (None, None, Some(menu)) => Some((accesskit::Role::Menu, menu.label, menu.id)),
                 (None, None, None) => None,
             },
+            ours_overlay_items: if self.overlays.question.is_some() {
+                None
+            } else {
+                self.runtime_menu().map(|menu| menu.items.len())
+            },
         }
     }
 

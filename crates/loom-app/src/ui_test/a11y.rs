@@ -147,6 +147,12 @@ impl A11yTree {
         A11yNode { tree: self, id: node }
     }
 
+    /// The UI IDs of every node, shown or not, for `id` or a part inside
+    /// it, in no order.
+    pub fn parts_under(&self, id: &UiId) -> Vec<UiId> {
+        self.ids.values().filter(|of| of.is_under(id)).cloned().collect()
+    }
+
     /// True when some node, shown or not, is for `id` or a part inside it.
     pub fn has_part_under(&self, id: &UiId) -> bool {
         self.ids.values().any(|of| of.is_under(id))
@@ -174,6 +180,16 @@ impl<'a> A11yNode<'a> {
     /// Its accessible name, what a screen reader says for it.
     pub fn name(&self) -> Option<&'a str> {
         self.raw().label()
+    }
+
+    /// Its place in its set, as AccessKit has it, when it says one.
+    pub fn position_in_set(&self) -> Option<usize> {
+        self.raw().position_in_set()
+    }
+
+    /// How many items its set holds, when it says.
+    pub fn size_of_set(&self) -> Option<usize> {
+        self.raw().size_of_set()
     }
 
     /// Its role: a button, a slider, a group.

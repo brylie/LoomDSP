@@ -1073,3 +1073,51 @@ fn a_slot_value_field_takes_a_typed_value() {
         .params[cutoff];
     assert!((value - 440.0).abs() < 0.5, "{value}");
 }
+
+/// A slot's tile menu, opened from the keyboard, has items two and more
+/// keys deep (`swap/<slot>/module/<kind>`), which the runtime keys in
+/// columns. Every item is a menu item with its model's UI ID, its place in
+/// the whole menu (from 0, in the model's order), and the menu says how
+/// many there are; the columns themselves add no node (ui-layer.md,
+/// section 4; section 7, rule 2).
+#[test]
+fn a_slot_menu_reads_each_item_in_its_place_among_all() {
+    let (app, slot, _) = with_slot();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.send(Message::A11y(crate::a11y::Event::Activated));
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![slot])));
+    let area = loom_ui_core::Rect::new(
+        loom_ui_core::Point::new(0.0, 0.0),
+        loom_ui_core::Size::new(800.0, 600.0),
+    );
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::TileMenu {
+        module: slot,
+        at: loom_ui_core::Point::new(100.0, 100.0),
+        area,
+        by_key: true,
+    }));
+    ui.redraw();
+    let menu = ui.app().menu_model().expect("the slot's menu is open");
+    let deep = menu
+        .items
+        .iter()
+        .filter(|item| item.id.keys().len() > menu.id.keys().len() + 2)
+        .count();
+    assert!(deep >= 2, "more than one swap item, keyed in columns: {:?}", menu.items);
+    let tree = ui.a11y_tree();
+    let root = tree.node_by_id(&menu.id);
+    assert_eq!(root.size_of_set(), Some(menu.items.len()), "the menu says how many");
+    for (at, item) in menu.items.iter().enumerate() {
+        let node = tree.node_by_id(&item.id);
+        assert_eq!(node.role(), accesskit::Role::MenuItem, "{}", item.id);
+        assert_eq!(node.name(), Some(item.label.as_str()), "{}", item.id);
+        assert_eq!(node.position_in_set(), Some(at), "{} is item {at} of all", item.id);
+    }
+    let mut nodes = tree.parts_under(&menu.id);
+    nodes.sort_by_key(ToString::to_string);
+    let mut expected: Vec<_> = std::iter::once(menu.id.clone())
+        .chain(menu.items.iter().map(|item| item.id.clone()))
+        .collect();
+    expected.sort_by_key(ToString::to_string);
+    assert_eq!(nodes, expected, "the columns add no node");
+}
