@@ -1135,7 +1135,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     }
 
     /// A screen reader's action on a select or its open list (section 7,
-    /// rule 32): Expand opens the list on the chosen option, Collapse
+    /// rule 32): Expand focuses the select and opens its list on the chosen
+    /// option, Collapse
     /// closes it with no choice, Increment and Decrement step the chosen
     /// option by one, and Click on an option chooses it. `None` for any
     /// other action or element, which goes on. Returns whether anything
@@ -1170,6 +1171,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let last = select.options.len() - 1;
         match request.action {
             KitAction::Expand => {
+                // A screen reader's cursor may be on the select while the
+                // keyboard focus is elsewhere: Expand focuses it first, as
+                // its Focus action would, since the list stays open only
+                // while the select has the focus.
+                self.focus_to(Some(target.clone()));
                 let at = select.chosen.unwrap_or(0);
                 self.panels().open_select(&target, select, at);
             }

@@ -417,3 +417,35 @@ fn the_nodes_and_a_screen_readers_actions() {
     assert_eq!(highlight(&harness), None);
     assert_eq!(chosen(&harness), [2, 3]);
 }
+
+/// A screen reader's Expand with the keyboard focus elsewhere, as with
+/// VoiceOver's cursor on the select and keyboard focus not following it:
+/// the select takes the focus and its list opens, and stays open on the
+/// next turn.
+#[test]
+fn expand_with_the_focus_elsewhere_focuses_the_select() {
+    let mut harness = at(panel, 0);
+    step(&mut harness, key(Key::Tab));
+    assert_eq!(harness.runtime().focused(), Some(&id("before")));
+    harness.send(Message::Describe);
+    let nodes = harness.app().nodes.clone().expect("the nodes");
+    let (select, _) = nodes
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Sample rate") && node.role() == accesskit::Role::ComboBox)
+        .cloned()
+        .expect("the select's node");
+    step(
+        &mut harness,
+        DriverEvent::Accessibility(AccessEvent::Action(ActionRequest {
+            action: accesskit::Action::Expand,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: select,
+            data: None,
+        })),
+    );
+    assert_eq!(harness.runtime().focused(), Some(&rate()));
+    assert_eq!(highlight(&harness), Some(0));
+    step(&mut harness, DriverEvent::Woken);
+    assert_eq!(highlight(&harness), Some(0), "still open on the next turn");
+}
