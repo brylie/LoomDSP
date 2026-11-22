@@ -320,6 +320,11 @@ impl App {
                 // (ui-layer.md, section 6, rule 8).
                 if by_key {
                     self.overlays.set_menu_highlight(Some(0));
+                    // The highlight is the runtime's focus, with a ring as
+                    // the keys put it there (row 3d).
+                    if let Some(first) = self.menu_model().and_then(|menu| menu.items.into_iter().next()) {
+                        self.effect(loom_ui::Effects::focus(first.id));
+                    }
                 }
             }
             CanvasEvent::OpenBrowser { placement, at, area } => {

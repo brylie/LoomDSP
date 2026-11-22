@@ -285,42 +285,32 @@ fn source_import_has_button(source: &str, n: usize) -> bool {
 }
 
 /// Every canvas menu state meets the text and edge thresholds on the
-/// colours the tile and probe menu renderers actually use.
+/// colours the runtime's menus use (`menus/panel.rs`, rows 3b and 3d): the
+/// menu's edge stands out at 3:1 against the canvas, a tile, and its own
+/// fill; an item's text reads against the menu's fill and a hovered
+/// item's; a quiet second line or a missing file's name reaches 4.5:1 on
+/// both; and a focused item's ring is the focus ring, checked in
+/// `the_focus_ring_stands_out`.
 #[test]
 fn canvas_menu_contrast() {
-    use iced::widget::button::Status;
     use loom_canvas::iced_convert::ToCore as _;
     use loom_canvas::{MIN_TEXT_CONTRAST, Palette, contrast_ratio};
     let theme = crate::tests::app().theme();
-    let menu = super::canvas_menu(&theme);
-    let Some(iced::Background::Color(panel)) = menu.background else {
-        panic!("opaque panel fill")
-    };
-    assert_eq!(panel.a, 1.0);
-    for background in [Palette::default().background, Palette::default().tile, panel.to_core()] {
-        let ratio = contrast_ratio(menu.border.color.to_core(), background);
-        assert!(menu.border.width >= 1.0 && ratio >= 3.0, "menu edge {ratio:.2}:1");
+    let palette = theme.extended_palette();
+    let fill = palette.background.base.color.to_core();
+    let hover = palette.background.weak.color.to_core();
+    let text = palette.background.base.text.to_core();
+    let edge = super::QUIET.to_core();
+    const { assert!(super::MENU_BORDER >= 1.0, "an edge one pixel wide at least") };
+    for background in [Palette::default().background, Palette::default().tile, fill] {
+        let ratio = contrast_ratio(edge, background);
+        assert!(ratio >= 3.0, "menu edge {ratio:.2}:1");
     }
-    for (status, focused) in [
-        (Status::Active, false),
-        (Status::Hovered, false),
-        (Status::Pressed, false),
-        (Status::Active, true),
-        (Status::Disabled, false),
-    ] {
-        let row = super::menu_item(focused)(&theme, status);
-        let Some(iced::Background::Color(fill)) = row.background else {
-            panic!("opaque row fill")
-        };
-        assert_eq!((row.text_color.a, fill.a, row.border.color.a), (1.0, 1.0, 1.0));
-        let text = contrast_ratio(row.text_color.to_core(), fill.to_core());
-        let edge = contrast_ratio(row.border.color.to_core(), fill.to_core());
-        let outside = contrast_ratio(row.border.color.to_core(), panel.to_core());
-        assert!(text >= MIN_TEXT_CONTRAST, "{status:?} text {text:.2}:1");
-        assert!(
-            edge.min(outside) >= 3.0,
-            "{status:?} edge {edge:.2}:1 inside, {outside:.2}:1 outside"
-        );
+    for (state, under) in [("normal", fill), ("hovered", hover)] {
+        let label = contrast_ratio(text, under);
+        assert!(label >= MIN_TEXT_CONTRAST, "{state} text {label:.2}:1");
+        let quiet = contrast_ratio(edge, under);
+        assert!(quiet >= 4.5, "{state} quiet text {quiet:.2}:1");
     }
 }
 

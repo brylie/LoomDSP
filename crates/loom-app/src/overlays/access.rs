@@ -9,9 +9,8 @@
 //! and the licence chooser.
 
 use crate::App;
-use crate::a11y::items::{Item, Kind};
+use crate::a11y::items::Item;
 use crate::input_owner::InputOwner;
-use crate::menus::MenuModel;
 use loom_ui_core::UiId;
 
 /// The UI ID of the open question.
@@ -41,17 +40,8 @@ impl App {
             InputOwner::Question => (Vec::new(), None),
             // Help is the runtime's (row 6): its nodes come from its panel.
             InputOwner::Help => (Vec::new(), None),
-            // The probe menu and Recent are the runtime's (row 3b).
-            InputOwner::ProbeMenu | InputOwner::RecentList => (Vec::new(), None),
-            InputOwner::TileMenu => match self.menu_model() {
-                Some(menu) => {
-                    let focus = menu
-                        .highlighted()
-                        .map_or_else(|| menu.id.clone(), |item| item.id.clone());
-                    (vec![menu_item(&menu)], Some(focus))
-                }
-                None => (Vec::new(), None),
-            },
+            // The menus are the runtime's (rows 3b and 3d).
+            InputOwner::TileMenu | InputOwner::ProbeMenu | InputOwner::RecentList => (Vec::new(), None),
             InputOwner::Browser => match self.overlays.browser() {
                 Some(open) => {
                     let (item, focus) = crate::browser::access::items(open.model());
@@ -81,25 +71,5 @@ impl App {
             },
             InputOwner::Canvas => (Vec::new(), None),
         }
-    }
-}
-
-/// A menu and its items. The highlighted item is reported as focus, not
-/// as a state of its own.
-fn menu_item(menu: &MenuModel) -> Item {
-    let items = menu
-        .items
-        .iter()
-        .map(|item| Item {
-            label: Some(item.label.clone()),
-            description: item.description.clone(),
-            click: Some(item.message.clone()),
-            ..Item::new(item.id.clone(), Kind::MenuItem)
-        })
-        .collect();
-    Item {
-        label: Some(menu.label.clone()),
-        children: items,
-        ..Item::new(menu.id.clone(), Kind::Menu)
     }
 }

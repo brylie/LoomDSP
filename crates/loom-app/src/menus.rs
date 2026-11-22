@@ -52,13 +52,6 @@ pub(crate) struct MenuModel {
     pub highlight: Option<usize>,
 }
 
-impl MenuModel {
-    /// The UI ID of the highlighted item.
-    pub(crate) fn highlighted(&self) -> Option<&MenuItem> {
-        self.highlight.and_then(|at| self.items.get(at))
-    }
-}
-
 /// The UI ID of the menu on tile `module`.
 pub(crate) fn tile_id(module: u32) -> UiId {
     UiId::panel("menu").with("tile").with(module)
@@ -210,7 +203,7 @@ impl App {
     /// A key a menu uses ([`is_menu_key`]) while a menu is open. It stops
     /// here, so it reaches neither the canvas nor a window behind the menu.
     pub(crate) fn menu_key(&mut self, event: &keyboard::Event) {
-        let keyboard::Event::KeyPressed { key, repeat, .. } = event else {
+        let keyboard::Event::KeyPressed { key, .. } = event else {
             return;
         };
         let Some(menu) = self.menu_model() else {
@@ -220,21 +213,16 @@ impl App {
             Key::Named(Named::Escape) => {
                 self.close_menu(menu.kind);
             }
-            // The item's message is its own update, on the next turn, as a
-            // click on the item would send it (ui-layer.md, section 2, rule 5).
-            Key::Named(Named::Enter) if !repeat => {
-                if let Some(item) = menu.highlighted() {
-                    self.post(item.message.clone());
-                }
-            }
+            // Enter and Space on an item are the runtime's activation
+            // (section 3, rule 4), which reaches the app as `App::clicked`.
+            // Here Enter only stops at the menu, with no item focused.
+            Key::Named(Named::Enter) => {}
             _ => {
                 if let Some(at) = step(menu.highlight, menu.items.len(), key) {
                     self.overlays.set_menu_highlight(Some(at));
-                    // In a runtime menu the highlight is the focus, with a
-                    // ring, as the keys put it there (row 3b).
-                    if matches!(menu.kind, MenuKind::Probe | MenuKind::Recent) {
-                        self.effect(loom_ui::Effects::focus(menu.items[at].id.clone()));
-                    }
+                    // The highlight is the runtime's focus, with a ring, as
+                    // the keys put it there (rows 3b and 3d).
+                    self.effect(loom_ui::Effects::focus(menu.items[at].id.clone()));
                 }
             }
         }

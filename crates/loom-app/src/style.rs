@@ -333,56 +333,6 @@ pub fn outlined(
     }
 }
 
-/// The tile and probe menu surface, with an opaque fill and a visible
-/// edge where it crosses a tile or empty canvas.
-pub fn canvas_menu(theme: &Theme) -> iced::widget::container::Style {
-    let palette = theme.extended_palette();
-    iced::widget::container::Style {
-        background: Some(palette.background.base.color.into()),
-        border: iced::Border {
-            color: QUIET,
-            width: 1.0,
-            radius: 6.0.into(),
-        },
-        shadow: iced::Shadow {
-            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-            offset: iced::Vector::new(0.0, 4.0),
-            blur_radius: 12.0,
-        },
-        ..iced::widget::container::Style::default()
-    }
-}
-
-/// A canvas menu row. The edge marks the hit area and the accent marks
-/// the row under the pointer or keyboard focus.
-pub fn menu_item(focused: bool) -> impl Fn(&Theme, iced_button::Status) -> iced_button::Style {
-    move |theme, status| {
-        let palette = theme.extended_palette();
-        let active = matches!(status, iced_button::Status::Hovered | iced_button::Status::Pressed) || focused;
-        iced_button::Style {
-            background: Some(
-                if active {
-                    palette.background.weak.color
-                } else {
-                    palette.background.base.color
-                }
-                .into(),
-            ),
-            text_color: if status == iced_button::Status::Disabled {
-                QUIET
-            } else {
-                palette.background.base.text
-            },
-            border: iced::Border {
-                color: if active { palette.primary.base.color } else { QUIET },
-                width: if active { 2.0 } else { 1.0 },
-                radius: 3.0.into(),
-            },
-            ..iced_button::Style::default()
-        }
-    }
-}
-
 /// A value shown as plain text that can be clicked to edit it, such as a
 /// cell of the modulation matrix. A light fill on hover, and an outline
 /// while it has keyboard focus, so focus never depends on colour alone.

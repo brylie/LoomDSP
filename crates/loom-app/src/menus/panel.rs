@@ -2,7 +2,9 @@
 //! (ui-layer.md, section 6, rule 8; plan 3.2, row 3b): placed where they
 //! were asked for, closing on a press outside, with the menu shadow. Their
 //! items are menu items and focus stops, and the menu's highlight is the
-//! runtime's focus on an item. The tile menu stays Iced's for now.
+//! runtime's focus on an item. The tile menu is one too (row 3d): placed
+//! at the tile's top-left corner from the keyboard, or where the pointer
+//! pressed.
 
 use super::{MenuKind, MenuModel};
 use crate::style;
@@ -12,11 +14,17 @@ use loom_ui::access::{Access, Action, Role};
 use loom_ui::{Element, Layer, Length, Placement, View};
 use loom_ui_core::{Color, IdKey, UiId};
 
+/// The width of the tile menu, in logical pixels: its items' 200 and the
+/// menu's padding, as Iced drew it.
+const TILE_MENU_WIDTH: f32 = 208.0;
+
 /// One item as the menu's panel shows it.
 #[derive(Debug, Clone, PartialEq)]
 struct Item {
-    /// Its key in the menu: the last key of its UI ID.
-    key: IdKey,
+    /// Its keys under the menu's UI ID: one for most items, more for
+    /// one such as `make-slot/<role>` (ui-layer.md, section 4), so the
+    /// element the runtime lays out has the item's own UI ID.
+    path: Vec<IdKey>,
     /// What it says.
     label: String,
     /// A second, quiet line under it: a Recent file's folder.
@@ -62,7 +70,10 @@ impl App {
                 Placement::Under(crate::toolbar::toolbar_id().with("recent")),
                 crate::recent::LIST_WIDTH,
             ),
-            MenuKind::Tile(_) => return,
+            MenuKind::Tile(_) => match self.overlays.tile_menu() {
+                Some((_, at)) => (Placement::At(at), TILE_MENU_WIDTH),
+                None => return,
+            },
         };
         let missing: Vec<bool> = match menu.kind {
             MenuKind::Recent => self
@@ -80,7 +91,7 @@ impl App {
                 .iter()
                 .enumerate()
                 .map(|(at, item)| Item {
-                    key: item.id.keys().last().cloned().expect("an item's UI ID has keys"),
+                    path: item.id.keys()[menu.id.keys().len()..].to_vec(),
                     label: item.label.clone(),
                     second: item.description.clone(),
                     dim: missing.get(at).copied().unwrap_or(false),
@@ -96,18 +107,19 @@ impl App {
         view.panel_with(menu.id, Layer::Overlays, &panel, build);
     }
 
-    /// The open menu the runtime draws: the probe menu or Recent, not the
-    /// tile menu, which Iced still draws.
+    /// The open menu: the tile menu, the probe menu, or Recent, each the
+    /// runtime's.
     pub(crate) fn runtime_menu(&self) -> Option<MenuModel> {
         // Only while it owns the input: under Help or a question it is
         // covered, so it is neither drawn nor reported, and refuses a
         // screen reader's actions (section 7, rule 24).
         let owns = matches!(
             self.overlays.owner(),
-            crate::input_owner::InputOwner::ProbeMenu | crate::input_owner::InputOwner::RecentList
+            crate::input_owner::InputOwner::ProbeMenu
+                | crate::input_owner::InputOwner::RecentList
+                | crate::input_owner::InputOwner::TileMenu
         );
-        self.menu_model()
-            .filter(|menu| owns && matches!(menu.kind, MenuKind::Probe | MenuKind::Recent))
+        self.menu_model().filter(|_| owns)
     }
 
     /// The message for a click on one of the runtime menu's items, from the
@@ -127,6 +139,12 @@ impl App {
             Some(Message::ProbeMenu(crate::probe_menu::Message::Close))
         } else if *root == super::recent_id() {
             Some(Message::Recent(crate::recent::Message::Close))
+        } else if self
+            .overlays
+            .tile_menu()
+            .is_some_and(|(module, _)| *root == super::tile_id(module))
+        {
+            Some(Message::CloseTileMenu)
         } else {
             None
         }
@@ -149,7 +167,8 @@ impl App {
 /// The menu: a column of items in a box with the menu shadow, placed, and
 /// closing on a press outside.
 fn build(panel: &Panel) -> Element {
-    Element::column(panel.items.iter().map(|item| row(panel, item)))
+    let items: Vec<&Item> = panel.items.iter().collect();
+    Element::column(rows(panel, &items, 0))
         .padding(4.0)
         .width(Length::Fixed(panel.width))
         .background(panel.fill)
@@ -160,8 +179,36 @@ fn build(panel: &Panel) -> Element {
         .closes_on_press_outside()
 }
 
+/// The rows of `items`, in order, keyed by their keys from `depth` on:
+/// items next to each other whose IDs share the key at `depth` go in a
+/// column keyed by it, so a row's UI ID is its item's whole ID.
+fn rows(panel: &Panel, items: &[&Item], depth: usize) -> Vec<Element> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < items.len() {
+        let item = items[at];
+        if item.path.len() == depth + 1 {
+            out.push(row(panel, item, item.path[depth].clone()));
+            at += 1;
+            continue;
+        }
+        let key = &item.path[depth];
+        let group = items[at..]
+            .iter()
+            .take_while(|other| other.path.len() > depth + 1 && other.path[depth] == *key)
+            .count();
+        out.push(
+            Element::column(rows(panel, &items[at..at + group], depth + 1))
+                .width(Length::FILL)
+                .key(key.clone()),
+        );
+        at += group;
+    }
+    out
+}
+
 /// One item: its label, and a quiet second line where it has one.
-fn row(panel: &Panel, item: &Item) -> Element {
+fn row(panel: &Panel, item: &Item, key: IdKey) -> Element {
     let label_colour = if item.dim { style::QUIET.to_core() } else { panel.text };
     let mut lines = vec![Element::text(item.label.clone(), style::CONTROL_TEXT).colour(label_colour)];
     let mut access = Access::new(Role::MenuItem, item.label.clone()).action(Action::Click);
@@ -188,7 +235,7 @@ fn row(panel: &Panel, item: &Item) -> Element {
             pressed: hovered,
             off: loom_ui::StateLook::default(),
         })
-        .key(item.key.clone())
+        .key(key)
         .focusable()
         .access(access)
 }

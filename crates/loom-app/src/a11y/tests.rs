@@ -3788,39 +3788,47 @@ fn the_question_has_focus_over_a_focused_outline_row() {
 }
 
 /// A runtime menu under help or a question is covered: it is not reported,
-/// and a screen reader's Click on one of its items does nothing.
+/// and a screen reader's Click on one of its items does nothing, so the
+/// menu stays open (picking an item would close it). Each menu: the tile
+/// menu, the probe menu, and Recent.
 #[test]
 fn a_covered_runtime_menu_is_not_reported_and_refuses_a_click() {
-    for cover in ["help", "question"] {
-        let (_, mut ui) = with_each_small_overlay()
-            .into_iter()
-            .find(|(name, _)| *name == "probe menu")
-            .unwrap();
-        if cover == "help" {
-            ui.app_mut().overlays.help = Some(crate::help::Help::shortcuts());
-        } else {
-            ui.app_mut().edit(|app| {
-                app.session.controller.add_module("loom.osc.sine").unwrap();
-                app.commit();
-            });
-            ui.send(Message::File(crate::FileAction::New));
-            assert!(ui.app().overlays.question.is_some(), "New asks");
+    for menu in ["tile menu", "probe menu", "recent"] {
+        for cover in ["help", "question"] {
+            let (_, mut ui) = with_each_small_overlay()
+                .into_iter()
+                .find(|(name, _)| *name == menu)
+                .unwrap();
+            let model = ui.app().menu_model().expect("the menu is open");
+            if cover == "help" {
+                ui.app_mut().overlays.help = Some(crate::help::Help::shortcuts());
+            } else {
+                ui.app_mut().edit(|app| {
+                    app.session.controller.add_module("loom.osc.sine").unwrap();
+                    app.commit();
+                });
+                ui.send(Message::File(crate::FileAction::New));
+                assert!(ui.app().overlays.question.is_some(), "New asks");
+            }
+            let _ = ui.redraw();
+            let tree = ui.a11y_tree();
+            assert!(
+                !tree.has_part_under(&model.id),
+                "under {cover}, the {menu} is not in the tree"
+            );
+            let node = node_of(ui.app_mut(), &model.items[0].id);
+            let modules = ui.app().session.controller.graph().nodes().count();
+            ui.send(Message::A11y(Event::Action(request(Action::Click, node, None))));
+            assert!(
+                ui.app().menu_model().is_some(),
+                "under {cover}, the {menu} refused the click and stays open"
+            );
+            assert_eq!(
+                ui.app().session.controller.graph().nodes().count(),
+                modules,
+                "under {cover}, the click on the {menu} changed nothing"
+            );
         }
-        let _ = ui.redraw();
-        let tree = ui.a11y_tree();
-        let meter = crate::menus::probe_id().with("meter");
-        assert!(
-            !tree.has_part_under(&crate::menus::probe_id()),
-            "under {cover}, the probe menu is not in the tree"
-        );
-        let node = node_of(ui.app_mut(), &meter);
-        let modules = ui.app().session.controller.graph().nodes().count();
-        ui.send(Message::A11y(Event::Action(request(Action::Click, node, None))));
-        assert_eq!(
-            ui.app().session.controller.graph().nodes().count(),
-            modules,
-            "under {cover}, the click added no meter"
-        );
     }
 }
 
@@ -3925,6 +3933,9 @@ fn a_menu_opened_by_key_starts_on_its_first_item() {
             by_key,
         }));
         let _ = ui.redraw();
+        // The tile menu is the runtime's (row 3d): its focus is in the
+        // runtime's nodes.
+        ui.read_runtime_nodes();
         let places = ui.places();
         let update = ui.app_mut().a11y_tree(&places);
         let focus = ui.app().a11y.ids.id(update.focus.0).cloned();
@@ -4725,25 +4736,31 @@ fn one_change_in_preferences_sends_only_what_changed() {
     );
 }
 
-/// The harness answers a window question after what the same update
-/// posted, as the bridge does: Enter on a menu item, with a screen reader
-/// listening, posts the item's message and asks where the parts are; the
-/// item's message runs first, then the tree reads the window.
+/// A message the runtime sends for a part runs before a window answer that
+/// the same turn asked for, as the bridge orders them: Enter on the tile
+/// menu's first item, opened from the keyboard with a screen reader
+/// listening, gives the item's message, and any answer about where parts
+/// are comes after it. The tile menu is the runtime's from row 3d, so
+/// Enter is its activation, not a message the app posts.
 #[test]
 fn a_posted_message_runs_before_the_window_answers() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     let area = Rect::new(Point::new(0.0, 0.0), Size::new(800.0, 600.0));
+    ui.send(Message::A11y(Event::Activated));
     ui.send(Message::Canvas(CanvasEvent::TileMenu {
         module: 4,
         at: Point::new(100.0, 100.0),
         area,
         by_key: true,
     }));
-    ui.send(Message::A11y(Event::Activated));
-    ui.app_mut().overlays.set_menu_highlight(Some(0));
-    let item = ui.app().menu_model().expect("the tile menu is open").items[0]
-        .message
-        .clone();
+    ui.redraw();
+    let menu = ui.app().menu_model().expect("the tile menu is open");
+    assert_eq!(
+        ui.runtime().focused(),
+        Some(&menu.items[0].id),
+        "opened by key, on its first item"
+    );
+    let item = format!("{:?}", menu.items[0].message);
     let log = ui.deliver(Message::Key(iced::keyboard::Event::KeyPressed {
         key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
         modified_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
@@ -4753,14 +4770,14 @@ fn a_posted_message_runs_before_the_window_answers() {
         text: None,
         repeat: false,
     }));
-    let item = format!("{item:?}");
     let posted = log.iter().position(|message| format!("{message:?}") == item);
     let located = log
         .iter()
         .position(|message| matches!(message, Message::A11y(Event::Located(_))));
+    assert!(posted.is_some(), "Enter gave the item's message: {log:?}");
     assert!(
-        matches!((posted, located), (Some(posted), Some(located)) if posted < located),
-        "the item's message, then the answer: {posted:?}, {located:?}"
+        located.is_none_or(|located| posted < Some(located)),
+        "the item's message, then any answer: {posted:?}, {located:?}"
     );
 }
 

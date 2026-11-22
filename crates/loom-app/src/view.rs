@@ -9,7 +9,6 @@ use crate::style::button;
 use crate::{App, Message, browser, inspector, matrix, pointer, style};
 use iced::Length;
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, tooltip};
-use loom_canvas::iced_convert::ToIced as _;
 use loom_canvas::{DragLine, EditGroupView, PatchCanvas};
 
 impl App {
@@ -93,34 +92,8 @@ impl App {
                 .on_press(Message::Browser(browser::Message::Close));
             layers = layers.push(outside).push(open.view().map(Message::Browser));
         }
-        // The probe menu and Recent are the runtime's, in its Overlays
-        // layer over everything Iced draws (row 3b, `menus/panel.rs`).
-        if let Some((module, at)) = self.overlays.tile_menu() {
-            let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
-                .on_press(Message::CloseTileMenu)
-                .on_right_press(Message::CloseTileMenu);
-            // Drawn from the menu's model, which its keys and the tree read
-            // too (`menus.rs`); each item is named by its UI ID.
-            let mut items = column![].spacing(2);
-            let model = self.menu_model();
-            let highlight = model.as_ref().and_then(|menu| menu.highlight);
-            for (at, item) in model.iter().flat_map(|menu| menu.items.iter()).enumerate() {
-                items = items.push(crate::inspector::ids::named(
-                    &item.id,
-                    button(iced::widget::text(item.label.clone()).size(style::CONTROL))
-                        .on_press(item.message.clone())
-                        .width(200)
-                        .style(style::menu_item(highlight == Some(at))),
-                ));
-            }
-            let menu = crate::inspector::ids::named(
-                &crate::menus::tile_id(module),
-                container(items).padding(4).style(style::canvas_menu),
-            );
-            layers = layers
-                .push(outside)
-                .push(iced::widget::pin(iced::widget::opaque(menu)).position(at.to_iced()));
-        }
+        // The menus (tile, probe, Recent) are the runtime's, in its Overlays
+        // layer over everything Iced draws (rows 3b and 3d, `menus/panel.rs`).
         if let Some(window) = self.preferences_view() {
             layers = layers.push(window);
         }
