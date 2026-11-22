@@ -1054,6 +1054,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 let Some(next) = self.panels.radio_step(&id, back) else {
                     return (true, false);
                 };
+                // No other radio to move to, in a group of one or one
+                // whose other radios are turned off (no stops, section 6,
+                // rule 2): the arrows are not the radio's, and go on, as to
+                // a scroll container around it, so they never choose it;
+                // Space does (section 6, rule 9).
+                if next == id {
+                    return (false, false);
+                }
                 let moved = self.focus_to(Some(next.clone()));
                 self.click(&next);
                 (true, moved)

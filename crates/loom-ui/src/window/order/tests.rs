@@ -282,3 +282,125 @@ fn a_select_shows_only_through_both_clips() {
         "moved into the window, it is past the panel's clip"
     );
 }
+
+/// A stop, a group holding one radio (keyed `other`, its radio `expression`),
+/// and a field after it, as the licence chooser's Other is built.
+fn lone(_: u32, chosen: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
+    let expression = id("other").with("expression");
+    let radio = Element::radio("Other: any expression", STYLE, chosen == Some(&expression)).key("expression");
+    let group = Element::radio_group("Other", [radio]).key("other");
+    let field = Element::field("", STYLE)
+        .key("text")
+        .access(Access::new(Role::TextInput, "Expression"));
+    list_panel(Element::column([stop("before"), group, field]))
+}
+
+/// Section 7, rule 29: a group of one radio gives no node of its own, so a
+/// screen reader does not hear its name twice. The radio's node sits where
+/// the group's would, under the group's parent, with no place in a set, and
+/// its UI ID still runs through the group's key. A group of more than one
+/// still gives its node (the test above).
+#[test]
+fn a_group_of_one_radio_gives_no_node_of_its_own() {
+    let mut harness = showing(lone);
+    harness.send(Message::Describe);
+    let nodes = harness.app().nodes.clone().expect("the nodes");
+    assert!(
+        nodes
+            .nodes
+            .iter()
+            .all(|(_, node)| node.role() != accesskit::Role::RadioGroup),
+        "no radio group node"
+    );
+    assert!(
+        nodes.nodes.iter().all(|(_, node)| node.label() != Some("Other")),
+        "the group's label is not used"
+    );
+    let (radio_node, radio) = nodes
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Other: any expression"))
+        .cloned()
+        .expect("the radio's node");
+    assert_eq!(radio.role(), accesskit::Role::RadioButton);
+    assert_eq!(
+        (radio.position_in_set(), radio.size_of_set()),
+        (None, None),
+        "a set of one says nothing"
+    );
+    let holder = nodes
+        .nodes
+        .iter()
+        .find(|(_, node)| node.children().contains(&radio_node))
+        .map(|(_, node)| node.role());
+    let field_holder = nodes
+        .nodes
+        .iter()
+        .find(|(_, node)| {
+            node.children().iter().any(|child| {
+                nodes
+                    .nodes
+                    .iter()
+                    .any(|(at, n)| at == child && n.label() == Some("Expression"))
+            })
+        })
+        .map(|(_, node)| node.role());
+    assert_eq!(
+        holder, field_holder,
+        "the radio sits beside the field, where the group's node would"
+    );
+    assert!(
+        harness.runtime().bounds(&id("other").with("expression")).is_some(),
+        "its UI ID runs through the group's key"
+    );
+}
+
+/// Section 6, rule 9: in a group of one, the arrows have nowhere to go and
+/// are not the radio's, so Down does not choose it; Space does.
+#[test]
+fn in_a_group_of_one_the_arrows_do_not_choose_and_space_does() {
+    let mut harness = showing(lone);
+    step(&mut harness, key(Key::Tab));
+    step(&mut harness, key(Key::Tab));
+    let expression = id("other").with("expression");
+    assert_eq!(harness.runtime().focused(), Some(&expression), "Tab lands on the radio");
+    step(&mut harness, key(Key::Down));
+    assert_eq!(harness.app().chosen, None, "Down did not choose it");
+    assert_eq!(harness.runtime().focused(), Some(&expression), "nor moved the focus");
+    step(&mut harness, key(Key::Space));
+    assert_eq!(harness.app().chosen, Some(expression), "Space chose it");
+}
+
+/// Section 6, rule 9: a group whose other radios are turned off has no other
+/// radio to move to either, so the arrows do not choose the focused one;
+/// Space does, as in a group of one.
+#[test]
+fn with_its_other_radios_turned_off_the_arrows_do_not_choose() {
+    fn build(_: u32, chosen: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
+        let off = |label: &str, key: &str| {
+            Element::radio(label, STYLE, false)
+                .access(Access::new(Role::RadioButton, label).states(crate::access::States {
+                    disabled: true,
+                    ..crate::access::States::default()
+                }))
+                .key(key)
+        };
+        let first = Element::radio("First", STYLE, chosen == Some(&radio("first"))).key("first");
+        let group = Element::radio_group("Licence", [first, off("Second", "second"), off("Third", "third")])
+            .key("licence")
+            .spacing(8.0);
+        list_panel(Element::column([stop("before"), group]))
+    }
+    let mut harness = showing(build);
+    step(&mut harness, key(Key::Tab));
+    step(&mut harness, key(Key::Tab));
+    assert_eq!(
+        harness.runtime().focused(),
+        Some(&radio("first")),
+        "Tab lands on the one that is on"
+    );
+    step(&mut harness, key(Key::Down));
+    assert_eq!(harness.app().chosen, None, "Down did not choose it");
+    step(&mut harness, key(Key::Space));
+    assert_eq!(harness.app().chosen, Some(radio("first")), "Space chose it");
+}

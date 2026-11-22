@@ -683,9 +683,18 @@ impl Element {
     /// stop: Tab lands on the chosen radio, or the first when none is, and
     /// the arrows move among them and choose. Give it a key, and space the
     /// radios with [`Element::spacing`] so no ring touches a neighbour.
+    ///
+    /// A group of one radio gives no node of its own (section 7, rule 29):
+    /// it would only say the radio's name twice, so the radio's node sits
+    /// where the group's would, and `label` is not used. It stays a keyed
+    /// element in the layout, so the radio's UI ID is the same either way.
     pub fn radio_group(label: impl Into<String>, radios: impl IntoIterator<Item = Element>) -> Self {
-        let mut group = Self::new(Kind::RadioGroup, radios.into_iter().collect());
-        group.access = Some(Access::new(crate::access::Role::RadioGroup, label));
+        let radios: Vec<Element> = radios.into_iter().collect();
+        let alone = radios.len() == 1;
+        let mut group = Self::new(Kind::RadioGroup, radios);
+        if !alone {
+            group.access = Some(Access::new(crate::access::Role::RadioGroup, label));
+        }
         group
     }
 
