@@ -162,10 +162,12 @@ pub(crate) fn browser_key(
     _window: iced::window::Id,
 ) -> Option<Message> {
     use iced::keyboard::{Event, Key, key::Named};
-    let iced::Event::Keyboard(Event::KeyPressed { key, .. }) = event else {
+    let iced::Event::Keyboard(Event::KeyPressed { key, modifiers, .. }) = event else {
         return None;
     };
     let nav = match key {
+        Key::Named(Named::ContextMenu) => browser::Nav::Menu,
+        Key::Named(Named::F10) if modifiers.shift() && !modifiers.command() && !modifiers.alt() => browser::Nav::Menu,
         Key::Named(Named::ArrowUp) => browser::Nav::Up,
         Key::Named(Named::ArrowDown) => browser::Nav::Down,
         Key::Named(Named::PageUp) => browser::Nav::PageUp,

@@ -477,3 +477,33 @@ fn toolbar_adds_two_tiles_without_covering_transport_or_each_other() {
     ui.send(crate::Message::Redo);
     assert_eq!(ui.app().session.positions[&id], placed);
 }
+
+/// Shift+F10 and the menu key, typed in the search field, open the
+/// highlighted library row's menu through the window's own key path, and
+/// the canvas under the browser opens no tile menu for its selected tile.
+#[test]
+fn the_menu_keys_open_a_library_rows_menu_from_the_field() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    for (key, modifiers) in [
+        (Key::Named(Named::F10), Modifiers::SHIFT),
+        (Key::Named(Named::ContextMenu), Modifiers::empty()),
+    ] {
+        let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+        let _ = ui
+            .app_mut()
+            .send(crate::Message::Canvas(crate::CanvasEvent::Select(vec![4])));
+        ui.send(crate::Message::OpenBrowser);
+        let _ = ui.redraw();
+        ui.send(crate::Message::Browser(Message::Library(library_items(2))));
+        ui.send(crate::Message::Browser(Message::Query("zz-lib".into())));
+        let _ = ui.redraw();
+        let _ = ui.tap(key.clone(), modifiers);
+        let browser = ui.app().overlays.browser().expect("still open");
+        assert_eq!(browser.model().menu, Some(0), "{key:?}: the first row's menu");
+        assert_eq!(browser.model().menu_highlight, Some(0), "{key:?}: on its item");
+        assert!(
+            ui.app().overlays.tile_menu().is_none(),
+            "{key:?}: no tile menu under it"
+        );
+    }
+}

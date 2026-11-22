@@ -80,7 +80,8 @@ pub enum Message {
     Close,
 }
 
-/// Keys that move the highlight or close the browser.
+/// Keys that move the highlight, open a library row's menu, or close the
+/// browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Nav {
     Up,
@@ -88,6 +89,11 @@ pub enum Nav {
     PageUp,
     PageDown,
     Escape,
+    /// The menu key, or Shift+F10: opens the highlighted library row's
+    /// menu on its first item, as a menu over the canvas opens from the
+    /// keyboard (ui-layer.md, section 6, rule 8). On any other row it does
+    /// nothing.
+    Menu,
 }
 
 /// A patch file in the library folder, as the list shows it.
@@ -400,6 +406,17 @@ impl Browser {
                 self.scroll = offset;
                 Outcome::Stay
             }
+            // The menu key opens the highlighted row's menu, as a screen
+            // reader's ShowContextMenu does, so the keyboard reaches Insert
+            // linked too.
+            Message::Key(Nav::Menu) => {
+                if let Some(row) = self.model.highlight
+                    && matches!(self.results.get(row), Some(Entry::Library(_)))
+                {
+                    self.set_menu(Some(row), Some(0));
+                }
+                Outcome::Stay
+            }
             // Escape closes a menu first, then the browser.
             Message::Key(Nav::Escape) if self.model.menu.is_some() => {
                 self.set_menu(None, None);
@@ -575,7 +592,7 @@ impl Browser {
             Nav::Down => (at + 1).min(last),
             Nav::PageUp => at.saturating_sub(ROWS),
             Nav::PageDown => (at + ROWS).min(last),
-            Nav::Escape => at,
+            Nav::Escape | Nav::Menu => at,
         });
     }
 
