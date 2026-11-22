@@ -677,6 +677,15 @@ fn the_highlighted_item_has_the_weak_fill() {
         quads.iter().any(|quad| is_ring_around(quad, first)),
         "the keys put the ring on top"
     );
+    let quiet = crate::style::QUIET.to_core();
+    for (row, name) in [(first, "first"), (second, "second")] {
+        assert!(
+            quads
+                .iter()
+                .any(|quad| quad.rect == row && quad.border == quiet && quad.border_width == crate::style::MENU_BORDER),
+            "the {name} has the 1 px quiet border, as every row does"
+        );
+    }
 }
 
 /// A row the pointer moves over has the same weak fill as one the keys

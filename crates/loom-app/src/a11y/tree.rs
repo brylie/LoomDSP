@@ -666,7 +666,13 @@ pub(crate) fn tree(
             .or_else(|| Some(node_id(table, root))),
         None => ours.focus,
     };
-    let focus = field_focus.or(overlay_focus).or(item_focus).or(ours_focus).or(focus);
+    // While the runtime's overlay owns the input, nothing it covers has
+    // focus: not a field, a panel part, or an Iced overlay below it.
+    let focus = if overlay_root.is_some() {
+        ours_focus
+    } else {
+        field_focus.or(overlay_focus).or(item_focus).or(ours_focus).or(focus)
+    };
     let root_node = node_id(table, &window_id());
     let mut root = Node::new(Role::Window);
     root.set_label(snapshot.title.clone());

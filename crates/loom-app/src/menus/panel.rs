@@ -99,8 +99,15 @@ impl App {
     /// The open menu the runtime draws: the probe menu or Recent, not the
     /// tile menu, which Iced still draws.
     pub(crate) fn runtime_menu(&self) -> Option<MenuModel> {
+        // Only while it owns the input: under Help or a question it is
+        // covered, so it is neither drawn nor reported, and refuses a
+        // screen reader's actions (section 7, rule 24).
+        let owns = matches!(
+            self.overlays.owner(),
+            crate::input_owner::InputOwner::ProbeMenu | crate::input_owner::InputOwner::RecentList
+        );
         self.menu_model()
-            .filter(|menu| matches!(menu.kind, MenuKind::Probe | MenuKind::Recent))
+            .filter(|menu| owns && matches!(menu.kind, MenuKind::Probe | MenuKind::Recent))
     }
 
     /// The message for a click on one of the runtime menu's items, from the
@@ -173,6 +180,7 @@ fn row(panel: &Panel, item: &Item) -> Element {
     Element::column(lines)
         .padding(style::BUTTON_PADDING)
         .width(Length::FILL)
+        .border(style::MENU_BORDER, style::QUIET.to_core())
         .radius(style::MENU_ITEM_RADIUS)
         .looks(loom_ui::Looks {
             normal,
