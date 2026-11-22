@@ -27,6 +27,9 @@ pub struct Shape {
     fill: [f32; 4],
     border: [f32; 4],
     params: [f32; 4],
+    /// The blur of a soft shadow's edge, in the units of `rect`, then
+    /// unused room; 0 for a box with a crisp edge.
+    soft: [f32; 4],
 }
 
 impl Shape {
@@ -40,7 +43,16 @@ impl Shape {
             fill: packed(fill),
             border: packed(border),
             params: [radius, border_width, 1.0, 0.0],
+            soft: [0.0; 4],
         }
+    }
+
+    /// A soft shadow: a filled rounded box whose edge fades out over
+    /// `blur`, half inside its rect and half outside (section 5, rule 15).
+    pub fn shadow(rect: Rect, radius: f32, colour: Color, blur: f32) -> Self {
+        let mut shape = Self::new(rect, radius, colour, Color::TRANSPARENT, 0.0);
+        shape.soft[0] = blur.max(0.0);
+        shape
     }
 
     /// A filled rectangle rotated about the centre of the mark.
@@ -173,6 +185,12 @@ impl PaintPlan {
                                                 Shape::new(rect, quad.radius, quad.fill, quad.border, quad.border_width)
                                             }
                                             PaintBox::Segment(segment) => Shape::segment(segment, target.origin),
+                                            PaintBox::Shadow(shadow) => {
+                                                let mut rect = shadow.rect;
+                                                rect.x -= target.origin.x;
+                                                rect.y -= target.origin.y;
+                                                Shape::shadow(rect, shadow.radius, shadow.colour, shadow.blur)
+                                            }
                                         },
                                     ),
                                 );

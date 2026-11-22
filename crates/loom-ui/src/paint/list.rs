@@ -85,6 +85,8 @@ pub(crate) enum PaintBox {
     Quad(Quad),
     /// A rotated box.
     Segment(Segment),
+    /// A soft shadow.
+    Shadow(super::Shadow),
 }
 
 /// Everything painted in one frame, ready for the renderer.
@@ -285,6 +287,10 @@ impl Painter for ListPainter<'_> {
 
     fn segment(&mut self, segment: Segment) {
         self.list.push_box(PaintBox::Segment(segment));
+    }
+
+    fn shadow(&mut self, shadow: super::Shadow) {
+        self.list.push_box(PaintBox::Shadow(shadow));
     }
 
     fn begin_layer(&mut self, clip: Rect) {

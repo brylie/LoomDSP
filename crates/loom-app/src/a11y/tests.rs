@@ -2389,7 +2389,6 @@ fn every_inspector_part_is_named_and_placed() {
                 Kind::List => Role::List,
                 Kind::ListItem => Role::ListItem,
                 Kind::Dialog => Role::Dialog,
-                Kind::AlertDialog => Role::AlertDialog,
                 Kind::Menu => Role::Menu,
                 Kind::MenuItem => Role::MenuItem,
                 Kind::Link => Role::Link,
@@ -3596,6 +3595,36 @@ fn every_small_overlay_part_is_named_and_placed() {
         let places = ui.places();
         let update = ui.app_mut().a11y_tree(&places);
         let frames = ui.app().a11y_frames();
+        // The probe menu and Recent are the runtime's (row 3b): their nodes
+        // come from their panels, placed by the runtime's layout.
+        if let Some((role, label, id)) = frames.ours_overlay.clone() {
+            assert!(frames.overlay.is_empty(), "{name}: reported once");
+            let root_node = node(&update, node_of(ui.app_mut(), &id));
+            assert!(!root_node.is_hidden(), "{name}: the overlay is not hidden");
+            assert!(root_node.is_modal(), "{name}: it owns the input");
+            assert_eq!(root_node.role(), role, "{name}");
+            assert!(!label.is_empty(), "{name}: it has a name");
+            let stops = ui.app().our_stops();
+            let items: Vec<_> = stops.iter().filter(|stop| stop.is_under(&id)).collect();
+            assert!(!items.is_empty(), "{name}: something acts");
+            for item in items {
+                let found = node(&update, node_of(ui.app_mut(), item));
+                assert!(!found.is_hidden(), "{name}: {item} is not hidden");
+                assert!(
+                    found.label().is_some_and(|text| !text.is_empty()),
+                    "{name}: {item} has a name"
+                );
+                let at = ui
+                    .runtime()
+                    .bounds(item)
+                    .unwrap_or_else(|| panic!("{name}: {item} is laid out"));
+                assert!(at.width > 0.0 && at.height > 0.0, "{item}");
+                assert!(found.bounds().is_some(), "{item} has bounds");
+            }
+            let panic = node(&update, node_of(ui.app_mut(), &tree::toolbar_id().with("panic")));
+            assert!(panic.is_hidden(), "{name}: what it covers stays hidden");
+            continue;
+        }
         assert_eq!(frames.overlay.len(), 1, "{name}: one overlay is reported");
         let root = &frames.overlay[0];
         let root_node = node(&update, node_of(ui.app_mut(), &root.id));
@@ -3649,6 +3678,9 @@ fn a_menu_highlight_is_moved_by_keys_and_reported_as_focus() {
         .unwrap();
     let focus = |ui: &mut crate::ui_test::Ui| {
         let _ = ui.redraw();
+        // The probe menu is the runtime's (row 3b): its focus is in the
+        // runtime's nodes.
+        ui.read_runtime_nodes();
         let places = ui.places();
         let update = ui.app_mut().a11y_tree(&places);
         ui.app().a11y.ids.id(update.focus.0).cloned()
@@ -3703,29 +3735,94 @@ fn a_menu_item_is_picked_by_a_screen_reader() {
 #[test]
 fn the_question_reports_its_highlight_and_takes_a_screen_reader_answer() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    ui.app_mut().overlays.question = Some(crate::question::Question::discard(
-        "Patch".to_string(),
-        crate::question::AfterDiscard::New,
-    ));
+    // Opened as the app opens it, so it takes the focus to its safe
+    // answer (row 3b): New with a change not saved.
+    ui.app_mut().edit(|app| {
+        app.session.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+    });
+    ui.send(Message::File(crate::FileAction::New));
     let _ = ui.redraw();
-    let places = ui.places();
-    let update = ui.app_mut().a11y_tree(&places);
-    let model = ui.app().overlays.question.as_ref().unwrap().model();
+    let model = ui.app().overlays.question.as_ref().expect("New asks").model();
+    let tree = ui.a11y_tree();
     assert_eq!(
-        ui.app().a11y.ids.id(update.focus.0),
+        tree.focused().ui_id(),
         Some(&crate::overlays::access::answer_id(model.highlight)),
         "focus is on the highlighted answer"
     );
-    let root = node(&update, node_of(ui.app_mut(), &crate::overlays::access::question_id()));
+    let root = tree.node_by_id(&crate::overlays::access::question_id());
     assert_eq!(root.role(), Role::AlertDialog);
+    assert_eq!(root.name(), Some(model.title.as_str()));
     // The sentence is heard as a text's value, not as a description a
     // screen reader may never say.
     assert_eq!(root.description(), None);
-    let text = node_of(ui.app_mut(), &crate::overlays::access::question_id().with("text"));
-    assert_eq!(node(&update, text).value(), Some(model.text.as_str()));
+    let text = tree.node_by_id(&crate::overlays::access::question_id().with("text"));
+    assert_eq!(text.value(), Some(model.text.as_str()));
     let cancel = node_of(ui.app_mut(), &crate::overlays::access::answer_id("cancel"));
     ui.send(Message::A11y(Event::Action(request(Action::Click, cancel, None))));
     assert!(ui.app().overlays.question.is_none(), "Cancel answered it");
+}
+
+/// A question that opens over a focused Outline row takes the focus a
+/// screen reader hears: the row is covered, so the safe answer has it.
+#[test]
+fn the_question_has_focus_over_a_focused_outline_row() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Outline)));
+    let _ = ui.redraw();
+    assert!(
+        ui.app().a11y_frames().focused_item.is_some(),
+        "a row has the panel's focus"
+    );
+    ui.app_mut().edit(|app| {
+        app.session.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+    });
+    ui.send(Message::File(crate::FileAction::New));
+    let _ = ui.redraw();
+    let model = ui.app().overlays.question.as_ref().expect("New asks").model();
+    assert_eq!(
+        ui.a11y_tree().focused().ui_id(),
+        Some(&crate::overlays::access::answer_id(model.highlight)),
+        "focus is on the safe answer, not the covered row"
+    );
+}
+
+/// A runtime menu under help or a question is covered: it is not reported,
+/// and a screen reader's Click on one of its items does nothing.
+#[test]
+fn a_covered_runtime_menu_is_not_reported_and_refuses_a_click() {
+    for cover in ["help", "question"] {
+        let (_, mut ui) = with_each_small_overlay()
+            .into_iter()
+            .find(|(name, _)| *name == "probe menu")
+            .unwrap();
+        if cover == "help" {
+            ui.app_mut().overlays.help = Some(crate::help::Help::shortcuts());
+        } else {
+            ui.app_mut().edit(|app| {
+                app.session.controller.add_module("loom.osc.sine").unwrap();
+                app.commit();
+            });
+            ui.send(Message::File(crate::FileAction::New));
+            assert!(ui.app().overlays.question.is_some(), "New asks");
+        }
+        let _ = ui.redraw();
+        let tree = ui.a11y_tree();
+        let meter = crate::menus::probe_id().with("meter");
+        assert!(
+            !tree.has_part_under(&crate::menus::probe_id()),
+            "under {cover}, the probe menu is not in the tree"
+        );
+        let node = node_of(ui.app_mut(), &meter);
+        let modules = ui.app().session.controller.graph().nodes().count();
+        ui.send(Message::A11y(Event::Action(request(Action::Click, node, None))));
+        assert_eq!(
+            ui.app().session.controller.graph().nodes().count(),
+            modules,
+            "under {cover}, the click added no meter"
+        );
+    }
 }
 
 /// While help is open over a menu's level, only help is reported: an

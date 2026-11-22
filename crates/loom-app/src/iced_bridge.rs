@@ -287,6 +287,8 @@ impl loom_ui::App for Hosted {
             .toolbar_click(id)
             .or_else(|| self.0.breadcrumb_click(id))
             .or_else(|| self.0.bar_click(id))
+            .or_else(|| self.0.question_click(id))
+            .or_else(|| self.0.menu_click(id))
             .or_else(|| self.2.clicked(id))
     }
 
@@ -314,6 +316,17 @@ impl loom_ui::App for Hosted {
             max_width: 480.0,
             gap: 0.0,
         }
+    }
+
+    /// A key press under an open question, which the runtime keeps from
+    /// Iced: the question's keys and Panic (`question::key_of`).
+    fn question_key(&self, key: &loom_ui_core::KeyEvent) -> Option<Message> {
+        crate::question::key_of(key)
+    }
+
+    /// A press outside the probe menu or Recent closes it (row 3b).
+    fn pressed_outside(&self, root: &UiId) -> Option<Message> {
+        self.0.menu_pressed_outside(root)
     }
 
     /// The runtime's focus moved: the app keeps one copy of what has the

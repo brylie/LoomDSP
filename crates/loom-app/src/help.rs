@@ -5,6 +5,7 @@ use crate::style::{self, button};
 use iced::widget::markdown as iced_markdown;
 use iced::widget::{column, container, row, scrollable, space, text};
 use iced::{Length, Theme};
+use loom_canvas::iced_convert::ToIced as _;
 use loom_core::{ModuleDescriptor, Registry, RoleDescriptor, RolePort};
 use serde::Serialize;
 
@@ -308,7 +309,7 @@ impl Help {
             .center_y(Length::Fill)
             .padding(30)
             .style(|_: &Theme| container::Style {
-                background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, style::HELP_SCRIM).into()),
+                background: Some(style::HELP_SCRIM.to_iced().into()),
                 ..container::Style::default()
             });
         iced::widget::mouse_area(backdrop).on_press(Message::CloseHelp).into()

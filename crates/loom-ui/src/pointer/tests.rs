@@ -28,6 +28,10 @@ enum Message {
     Canvas(bool),
     /// Tab left the first run of stops for the target's stops after it.
     IntoTarget,
+    /// A press outside this panel, which closes on one.
+    Outside(UiId),
+    /// A key press under the question.
+    QuestionKey,
 }
 
 /// An app that shows a bar of two buttons in the panels layer, across the
@@ -69,7 +73,7 @@ impl App for Layers {
         });
         if self.overlay {
             view.panel_with(UiId::panel("menu"), Layer::Overlays, &(), |_| {
-                Element::row([button("item", 20.0)])
+                Element::row([menu_item("item", 20.0)]).closes_on_press_outside()
             });
         }
     }
@@ -90,6 +94,14 @@ impl App for Layers {
         Some(Message::Clicked(id.clone()))
     }
 
+    fn pressed_outside(&self, root: &UiId) -> Option<Message> {
+        Some(Message::Outside(root.clone()))
+    }
+
+    fn question_key(&self, _key: &loom_ui_core::KeyEvent) -> Option<Message> {
+        Some(Message::QuestionKey)
+    }
+
     fn tab_from(&self, from: &UiId, next: Option<&UiId>, back: bool) -> crate::app::TabStep<Message> {
         use crate::app::TabStep;
         let (a, b) = (UiId::panel("bar").with("a"), UiId::panel("bar").with("b"));
@@ -106,6 +118,17 @@ impl App for Layers {
             (_, _, next) => next.map_or(TabStep::Leave, |next| TabStep::To(next.clone())),
         }
     }
+}
+
+/// A menu item `width` wide and 16 high, keyed `key`: a button in a
+/// list, to a screen reader and to the keyboard.
+fn menu_item(key: &str, width: f32) -> Element {
+    Element::text(key, STYLE)
+        .key(key)
+        .width(Length::Fixed(width))
+        .min_width(width)
+        .focusable()
+        .access(Access::new(Role::MenuItem, key).action(Action::Click))
 }
 
 /// A button `width` wide and 16 high, keyed `key`.
@@ -1069,6 +1092,166 @@ fn an_overlays_focus_rings_in_the_overlays_layer() {
     menu.send(Message::Input(Layer::Overlays));
     assert!(rings(&mut menu, Layer::Panels).is_empty());
     assert_eq!(rings(&mut menu, Layer::Overlays).len(), 1);
+}
+
+/// An update that raises the input layer over the focused element hides
+/// its ring with no panel built again, so it asks for a frame: otherwise
+/// the last frame would keep showing the ring (CodeRabbit, #861). Dropping
+/// the layer shows it again, with a frame too.
+#[test]
+fn a_ring_shown_or_hidden_asks_for_a_frame() {
+    let mut harness = harness(false, Routed::Passed);
+    harness.step(tab_key());
+    assert!(harness.runtime().focus_ring().is_some());
+    let before = harness.driver().redraws();
+    harness.send(Message::Input(Layer::Overlays));
+    assert_eq!(harness.runtime().focus_ring(), None);
+    assert!(harness.driver().redraws() > before, "hiding the ring draws a frame");
+    let hidden = harness.driver().redraws();
+    harness.send(Message::Input(Layer::Canvas));
+    assert!(harness.driver().redraws() > hidden, "showing it again draws one");
+}
+
+/// Section 3, rule 4 (plan 3.2, row 3a): a focused menu item is activated
+/// as a button is, Enter on key down and Space on key up, each once.
+#[test]
+fn enter_and_space_click_a_focused_menu_item() {
+    use loom_ui_core::Key;
+    let item = UiId::panel("menu").with("item");
+    let mut menu = harness(true, Routed::Passed);
+    menu.step(tab_key());
+    assert_eq!(menu.runtime().focused(), Some(&item));
+    menu.step(press_key(Key::Enter, false));
+    assert_eq!(clicks(&menu), std::slice::from_ref(&item), "Enter on key down");
+    menu.step(press_key(Key::Space, false));
+    menu.step(release_key(Key::Space));
+    menu.step(DriverEvent::Woken);
+    assert_eq!(clicks(&menu), [item.clone(), item], "Space on key up");
+}
+
+/// Section 5, rule 14: with the menu's layer taking input, a press of any
+/// button outside the menu is taken, so neither the target nor the bar
+/// under it hears it, and the app hears it on the next turn; a press on the
+/// menu is the menu's own. With the panels taking input, the menu does not
+/// close on a press outside it.
+#[test]
+fn a_press_outside_a_closing_menu_is_taken_and_told() {
+    let menu = UiId::panel("menu");
+    let outside = |of: &Harness<Layers, Fake>| {
+        of.app()
+            .heard
+            .iter()
+            .filter(|heard| matches!(heard, Message::Outside(_)))
+            .count()
+    };
+    let mut menu_open = harness(true, Routed::Passed);
+    menu_open.send(Message::Input(Layer::Overlays));
+    for button in [PointerButton::Left, PointerButton::Right] {
+        let heard = menu_open.runtime().target().heard.len();
+        menu_open.step(at(200.0, 100.0, PointerEvent::Pressed(button)));
+        assert_eq!(
+            menu_open.runtime().target().heard.len(),
+            heard,
+            "{button:?}: the target heard nothing"
+        );
+    }
+    assert_eq!(outside(&menu_open), 2, "both presses were told");
+    assert!(menu_open.app().heard.contains(&Message::Outside(menu.clone())));
+    {
+        let (_, _, panels) = menu_open.parts();
+        let press = Event::Pointer(PointerEvent::Pressed(PointerButton::Left));
+        assert!(
+            panels.over_target(&press, Point::new(200.0, 100.0)),
+            "a driver keeps it from the toolkit"
+        );
+    }
+    menu_open.step(at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    assert_eq!(outside(&menu_open), 2, "a press on the menu is its own");
+
+    let mut below = harness(true, Routed::Passed);
+    below.send(Message::Input(Layer::Canvas));
+    below.step(at(200.0, 100.0, PointerEvent::Pressed(PointerButton::Left)));
+    assert_eq!(outside(&below), 0, "only while its layer takes input");
+}
+
+/// Section 6, rule 6, step 2 (plan 3.2, row 3a): while the Question layer
+/// takes input, a key press nothing of the runtime's takes goes to
+/// `App::question_key` and never to the target, so a toolkit's field or
+/// shortcut under the question hears nothing; its release still goes on.
+#[test]
+fn a_question_keeps_every_key_from_the_target() {
+    use loom_ui_core::Key;
+    let mut harness = harness(false, Routed::Passed);
+    harness.send(Message::Input(Layer::Question));
+    for key in [Key::Backspace, Key::Delete, Key::Character('d'), Key::Enter] {
+        harness.step(press_key(key, false));
+        assert!(!target_heard_press(&harness, key), "{key:?} went no further");
+    }
+    let asked = harness
+        .app()
+        .heard
+        .iter()
+        .filter(|heard| matches!(heard, Message::QuestionKey))
+        .count();
+    assert_eq!(asked, 4, "each press was the app's question key");
+    let heard = harness.runtime().target().heard.len();
+    harness.step(release_key(Key::Enter));
+    assert_eq!(harness.runtime().target().heard.len(), heard + 1, "the release goes on");
+}
+
+/// Section 6, rule 4 (plan 3.2, row 3a): an overlay saves the focus it
+/// opens over and gives it back, with its ring, when it closes, one level
+/// at a time: a question over the menu gives the menu its item back, then
+/// the menu gives the bar its button back. With no focus before, there is
+/// none to give back.
+#[test]
+fn an_overlay_gives_back_the_focus_it_opened_over() {
+    let (a, item) = (UiId::panel("bar").with("a"), UiId::panel("menu").with("item"));
+    let mut menu = harness(true, Routed::Passed);
+    menu.step(tab_key());
+    menu.step(tab_key());
+    assert_eq!(
+        menu.runtime().focused(),
+        Some(&a),
+        "the bar's button, from the keyboard"
+    );
+    menu.send(Message::Input(Layer::Overlays));
+    menu.send(Message::Refocus(vec![item.clone()]));
+    assert_eq!(menu.runtime().focused(), Some(&item), "the menu took it");
+    menu.send(Message::Input(Layer::Question));
+    menu.send(Message::Refocus(Vec::new()));
+    menu.send(Message::Input(Layer::Overlays));
+    assert_eq!(
+        menu.runtime().focused(),
+        Some(&item),
+        "the question gave the menu its item"
+    );
+    menu.send(Message::Input(Layer::Canvas));
+    assert_eq!(menu.runtime().focused(), Some(&a), "the menu gave the bar its button");
+    assert!(menu.runtime().focus_ring().is_some(), "with its ring");
+
+    let mut nothing = harness(true, Routed::Passed);
+    nothing.send(Message::Input(Layer::Overlays));
+    nothing.send(Message::Input(Layer::Canvas));
+    assert_eq!(nothing.runtime().focused(), None, "nothing to give back");
+}
+
+/// Section 6, rule 8 (plan 3.2, row 3b): the pointer moving over a menu
+/// item focuses it with no ring, so the keys go on from there; moving over
+/// a button focuses nothing.
+#[test]
+fn hovering_a_menu_item_focuses_it_without_a_ring() {
+    let item = UiId::panel("menu").with("item");
+    let mut menu = harness(true, Routed::Passed);
+    menu.send(Message::Input(Layer::Overlays));
+    menu.step(at(5.0, 5.0, PointerEvent::Moved));
+    assert_eq!(menu.runtime().focused(), Some(&item));
+    assert_eq!(menu.runtime().focus_ring(), None, "no ring from the pointer");
+
+    let mut bar = harness(false, Routed::Passed);
+    bar.send(Message::Input(Layer::Canvas));
+    bar.step(at(5.0, 5.0, PointerEvent::Moved));
+    assert_eq!(bar.runtime().focused(), None, "a button takes no focus from hover");
 }
 
 /// An app that shows one paragraph in the panels layer, "See Saw or

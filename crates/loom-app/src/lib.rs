@@ -505,6 +505,17 @@ enum Message {
     /// Escape (ui-layer.md, section 6, rule 7). Posted for a turn of its
     /// own, after every other message the same key sent.
     ToolbarFocus(Option<loom_ui_core::UiId>),
+    /// Tab or Shift+Tab on an item of the probe menu or Recent: the menu
+    /// closes, and the focus moves on from what opened it (the WAI-ARIA
+    /// menu pattern; row 3b).
+    MenuTab {
+        back: bool,
+    },
+    /// One step of the runtime's focus, after a menu closed and gave back
+    /// the focus it opened over (row 3b).
+    FocusStep {
+        back: bool,
+    },
     /// Tab between a view's fields, from the part the window says has
     /// focus (`window_question.rs`).
     TabFrom {
@@ -826,6 +837,8 @@ impl Message {
             | Self::TabFrom { .. }
             | Self::EnterFields { .. }
             | Self::ToolbarFocus(_)
+            | Self::MenuTab { .. }
+            | Self::FocusStep { .. }
             | Self::SliderReleased
             | Self::Matrix(_)
             | Self::MatrixKey(_)
@@ -1684,7 +1697,14 @@ impl App {
         if matches!(message, Message::ControlFrame(_)) {
             self.control_frame_asked = false;
         }
+        let asked = self.overlays.question.is_some();
         self.apply_at(message, now);
+        // A question that opened takes the focus to its safe answer, with a
+        // ring (ui-layer.md, section 6, rule 4; plan 3.2, row 3b).
+        if !asked && let Some(question) = &self.overlays.question {
+            let answer = question.highlighted_id();
+            self.effect(loom_ui::Effects::focus(answer));
+        }
         self.sync_part_authors();
         // The timers, the watchers, and the frames a command waits for
         // follow what this update changed.
@@ -1828,6 +1848,17 @@ impl App {
                 self.tab_between_fields(from.as_ref(), backwards);
             }
             Message::EnterFields { backwards } => self.enter_fields(backwards),
+            Message::MenuTab { back } => {
+                if let Some(menu) = self.runtime_menu() {
+                    self.close_menu(menu.kind);
+                    // After the frame that shows the menu closed: by then
+                    // the runtime has given back the focus the menu opened
+                    // over, and told the app (`FocusMoved`), so the step
+                    // goes on from there.
+                    self.effect(loom_ui::Effects::after_draw(Message::FocusStep { back }));
+                }
+            }
+            Message::FocusStep { back } => self.effect(loom_ui::Effects::focus_step(back)),
             Message::ToolbarFocus(stop) => self.toolbar_focus(stop),
             Message::Canvas(CanvasEvent::Paste { world }) => {
                 let generation = self.generation;
@@ -2144,6 +2175,8 @@ impl App {
             | Message::TabFrom { .. }
             | Message::EnterFields { .. }
             | Message::ToolbarFocus(_)
+            | Message::MenuTab { .. }
+            | Message::FocusStep { .. }
             | Message::FocusMoved(_)
             | Message::Inspector(_)
             | Message::Located { .. }

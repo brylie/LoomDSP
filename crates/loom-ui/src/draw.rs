@@ -114,6 +114,7 @@ impl<A: App> Panels<'_, A> {
         self.counts.elements_laid_out += laid.elements;
         self.focus.settle(self.window);
         self.reveal();
+        self.reveal_caret();
         self.place_hint(text);
         self.report_focus();
     }
@@ -129,6 +130,36 @@ impl<A: App> Panels<'_, A> {
             return false;
         };
         self.window.scroll_to_show(&id)
+    }
+
+    /// Brings a multi-line field's caret into view after an edit or a caret
+    /// move in it, or its start or end after Home or End on a Mac
+    /// (section 8, rule 7). It runs only right after a layout,
+    /// never in the turn of the edit: there the view is not yet rebuilt
+    /// with the edit, so a box that grows a line would still have its old
+    /// height. The caret's place is read now, from the field as this layout
+    /// left it. Returns true when a container moved.
+    fn reveal_caret(&mut self) -> bool {
+        if !self.window.is_settled(self.size) {
+            return false;
+        }
+        let Some((id, show)) = self.window.caret_reveal.take() else {
+            return false;
+        };
+        match show {
+            crate::window::FieldShow::Edge(edge) => self.window.scroll_to_show_edge(&id, edge),
+            crate::window::FieldShow::Caret => {
+                let Some(caret) = self
+                    .window
+                    .fields
+                    .get(&id)
+                    .and_then(crate::field::FieldState::focus_rect)
+                else {
+                    return false;
+                };
+                self.window.scroll_to_show_inside(&id, caret)
+            }
+        }
     }
 
     /// Finds a named element or visible text in the current layout.
@@ -345,6 +376,14 @@ impl Layout {
                 tints.push((index, shown.text));
             }
             let tint = tints.last().and_then(|(_, colour)| *colour);
+            if let Some(shadow) = look.shadow {
+                painter.shadow(crate::paint::Shadow {
+                    rect: Rect::new(bounds.position() + shadow.offset, bounds.size()),
+                    radius: look.radius,
+                    colour: shadow.colour,
+                    blur: shadow.blur,
+                });
+            }
             if look.draws_box() {
                 let (border_width, border) = look.border.unwrap_or((0.0, Color::TRANSPARENT));
                 painter.quad(Quad {
@@ -526,14 +565,22 @@ fn paint_field(
             clip: shows,
         });
     }
+    // A multi-line field's text wraps at the width its editor wraps at, so
+    // the letters sit on the lines its caret and selection do (section 8,
+    // rule 7); a single-line field's runs on, to scroll inside its box.
+    let many = state.lines() == crate::field::Lines::Many;
     painter.text(&TextRun {
         text: state.text(),
         anchor: start,
-        bounds: Size::new(state.text_width().max(content.width), content.height),
+        bounds: if many {
+            Size::new(state.shown_width(), content.height)
+        } else {
+            Size::new(state.text_width().max(content.width), content.height)
+        },
         align: Align::Left,
         vertical: Vertical::Top,
         style: text.style,
-        wrap: false,
+        wrap: many,
         colour: style.text,
         clip: shows,
     });

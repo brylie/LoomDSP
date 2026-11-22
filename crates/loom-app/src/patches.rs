@@ -11,6 +11,7 @@ use crate::style::{self, button};
 use crate::{DIM, files, recovery};
 use iced::widget::{checkbox, column, container, mouse_area, opaque, row, scrollable, space, text, text_input};
 use iced::{Length, Theme};
+use loom_canvas::iced_convert::ToIced as _;
 use loom_patch::Metadata;
 use loom_patch::metadata::{Filter, Licence, LicenceFilter, Prepared};
 use loom_ui::Effects;
@@ -744,7 +745,7 @@ impl PatchBrowser {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .center(Length::Fill)
-                .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, style::PATCHES_SCRIM))),
+                .style(|_| container::background(style::SCRIM.to_iced())),
         )
     }
 }

@@ -1,5 +1,8 @@
-//! Single-line text fields: the editing state the runtime keeps for each
-//! [`Element::field`](crate::Element::field) (ui-layer.md, section 8).
+//! Text fields: the editing state the runtime keeps for each
+//! [`Element::field`](crate::Element::field), which shows one line, and
+//! each [`Element::text_area`](crate::Element::text_area), which shows
+//! many (ui-layer.md, section 8). Both are one [`FieldState`] with a
+//! [`Lines`] setting, so the two cannot drift apart.
 //!
 //! - **The app owns the text.** A field element carries the text the app
 //!   holds. The field edits in place and tells the app each change, as
@@ -20,8 +23,10 @@
 //!   it. Every delete by word and every cut is a step of its own. Leaving
 //!   the field or committing it clears both stacks.
 //! - **The keys follow section 6, rule 6** (see [`FieldState::key`]).
-//! - **A field scrolls** so its caret stays inside its box, with
-//!   [`CARET_MARGIN`] to spare.
+//! - **A single-line field scrolls** so its caret stays inside its box,
+//!   with [`CARET_MARGIN`] to spare. A multi-line field wraps to its width
+//!   and grows with its lines, so it never scrolls; the panel does
+//!   (section 8, rule 7).
 
 use crate::paint::{editing_contexts, properties};
 use loom_ui_core::{IdKey, ImeEvent, Key, KeyEvent, Platform, Point, Rect, Size, TextStyle, UiId};
@@ -44,6 +49,27 @@ const UNDO_STEPS: usize = 100;
 /// run's character lengths and word starts as bytes, so a longer text is
 /// split into runs of this many characters.
 pub(crate) const RUN_CHARACTERS: usize = 255;
+
+/// How many lines a field shows (ui-layer.md, section 8, rules 2 and 7).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum Lines {
+    /// One line, scrolling sideways to keep the caret in view.
+    #[default]
+    One,
+    /// Many: it wraps to its width, Enter inserts a line break, and it
+    /// grows with its lines.
+    Many,
+}
+
+/// Which end of a multi-line field to show: what Home and End do on a Mac,
+/// where they scroll and leave the caret where it is (section 8, rule 7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Edge {
+    /// The start of its text.
+    Start,
+    /// The end of its text.
+    End,
+}
 
 /// What a text field tells the app, through
 /// [`App::field_event`](crate::App::field_event).
@@ -94,6 +120,8 @@ pub(crate) struct Seen {
     pub(crate) style: TextStyle,
     /// The width its text shows in, in logical pixels.
     pub(crate) width: f32,
+    /// How many lines it shows.
+    pub(crate) lines: Lines,
 }
 
 impl Fields {
@@ -113,12 +141,12 @@ impl Fields {
                     // is copied while nothing changes.
                     let text = state.text() != field.text;
                     let before = (*state.editor.raw_selection(), state.scroll.to_bits());
-                    state.take(&field.text, field.style, field.width, fonts, layouts);
+                    state.take(&field.text, field.style, field.lines, field.width, fonts, layouts);
                     self.changed |= text || (*state.editor.raw_selection(), state.scroll.to_bits()) != before;
                 }
                 None => {
                     let mut state = FieldState::new(&field.text, field.style, fonts, layouts);
-                    state.take(&field.text, field.style, field.width, fonts, layouts);
+                    state.take(&field.text, field.style, field.lines, field.width, fonts, layouts);
                     self.states.insert(field.id, state);
                 }
             }
@@ -265,6 +293,13 @@ pub(crate) struct ReaderRun {
     pub(crate) x: f32,
     /// How wide it is.
     pub(crate) width: f32,
+    /// The visual line it is on, counted from 0. A run never crosses a
+    /// line, so runs on one line link to each other and no others.
+    pub(crate) line: usize,
+    /// The top of its line, from the top of the text, in logical pixels.
+    pub(crate) y: f32,
+    /// The height of its line.
+    pub(crate) height: f32,
 }
 
 /// One cluster of a field's layout: its bytes, where it starts, its width,
@@ -277,6 +312,8 @@ struct Character {
     offset: f32,
     advance: f32,
     word: bool,
+    /// The visual line it is on.
+    line: usize,
 }
 
 /// What a key did in a field.
@@ -296,6 +333,9 @@ pub(crate) struct KeyUse {
     pub(crate) paste: bool,
     /// Something it shows changed: its text, caret, selection, or scroll.
     pub(crate) redraw: bool,
+    /// A multi-line field asks for this end of it to be shown, by scrolling
+    /// the panel, with the caret left where it is: Home and End on a Mac.
+    pub(crate) reveal: Option<Edge>,
 }
 
 /// What a typing run is made of.
@@ -340,6 +380,8 @@ pub(crate) struct FieldState {
     scroll: f32,
     /// The width its text shows in.
     width: f32,
+    /// How many lines it shows.
+    lines: Lines,
 }
 
 impl std::fmt::Debug for FieldState {
@@ -389,6 +431,23 @@ pub(crate) fn one_line(text: &str) -> String {
         .collect()
 }
 
+/// `text` as many lines, for a field that shows them (section 8, rule 7):
+/// each line break (CRLF, CR, or the line and paragraph separators U+2028
+/// and U+2029) becomes LF, a tab becomes one space, as in [`one_line`], and
+/// other control characters go, as when typing. A break at the end stays,
+/// since the app's tidying drops an empty line anyway.
+pub(crate) fn multi_line(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .chars()
+        .filter_map(|c| match c {
+            '\n' | '\r' | '\u{2028}' | '\u{2029}' => Some('\n'),
+            '\t' => Some(' '),
+            c if c.is_control() => None,
+            c => Some(c),
+        })
+        .collect()
+}
+
 impl FieldState {
     /// A field showing `text` in `style`, with the caret at its end.
     pub(crate) fn new(text: &str, style: TextStyle, fonts: &mut FontContext, layouts: &mut LayoutContext<()>) -> Self {
@@ -408,6 +467,7 @@ impl FieldState {
             run_before: None,
             scroll: 0.0,
             width: 0.0,
+            lines: Lines::One,
         }
     }
 
@@ -419,10 +479,19 @@ impl FieldState {
         &mut self,
         text: &str,
         style: TextStyle,
+        lines: Lines,
         width: f32,
         fonts: &mut FontContext,
         layouts: &mut LayoutContext<()>,
     ) {
+        if lines != self.lines {
+            self.lines = lines;
+            // A single-line field lays its text out on one line; a
+            // multi-line field wraps it to its width.
+            if lines == Lines::One {
+                self.editor.set_width(None);
+            }
+        }
         if style != self.style {
             self.style = style;
             self.editor.edit_styles().clear();
@@ -436,9 +505,33 @@ impl FieldState {
             self.editor.set_text(text);
             self.forget_steps();
         }
+        if lines == Lines::Many && width != self.width {
+            self.editor.set_width(Some(width));
+        }
         self.width = width;
         self.editor.refresh_layout(fonts, layouts);
         self.keep_caret();
+    }
+
+    /// How many lines it shows.
+    pub(crate) fn lines(&self) -> Lines {
+        self.lines
+    }
+
+    /// The width its text shows in, as the last layout gave it: the width
+    /// a multi-line field wraps at, for its editor and its painting alike.
+    pub(crate) fn shown_width(&self) -> f32 {
+        self.width
+    }
+
+    /// `text` made to fit the field: one line, or many with its breaks
+    /// kept. Every text that comes in other than by typing goes through
+    /// this: a paste, an input method's commit, and a screen reader's.
+    fn fit(&self, text: &str) -> String {
+        match self.lines {
+            Lines::One => one_line(text),
+            Lines::Many => multi_line(text),
+        }
     }
 
     /// The text it shows, with any text the input method is composing.
@@ -552,9 +645,10 @@ impl FieldState {
     }
 
     /// Puts `text` in at the selection as one undo step of its own, made
-    /// one line (section 8, rule 2): an input method's commit or a paste.
+    /// to fit the field (section 8, rules 2 and 7): an input method's
+    /// commit or a paste.
     fn commit_text(&mut self, text: &str, now: Instant, fonts: &mut FontContext, layouts: &mut LayoutContext<()>) {
-        let text = one_line(text);
+        let text = self.fit(text);
         if text.is_empty() {
             return;
         }
@@ -644,6 +738,17 @@ impl FieldState {
         out
     }
 
+    /// Where the selection's moving end is, from the start of the text: its
+    /// left edge and its line's top and height, whether or not something is
+    /// selected. What the containers around a multi-line field keep in view.
+    pub(crate) fn focus_rect(&self) -> Option<Rect> {
+        let bounds = self.editor.cursor_geometry(1.0)?;
+        Some(Rect::new(
+            Point::new(bounds.x0 as f32, bounds.y0 as f32),
+            Size::new(1.0, (bounds.y1 - bounds.y0) as f32),
+        ))
+    }
+
     /// Where the caret is, from the start of the text: its left edge and
     /// its line's top and height. None while something is selected.
     pub(crate) fn caret(&self) -> Option<Rect> {
@@ -700,9 +805,10 @@ impl FieldState {
             offset: f32,
             advance: f32,
             boundary: bool,
+            line: usize,
         }
         let mut found = Vec::new();
-        for line in layout.lines() {
+        for (index, line) in layout.lines().enumerate() {
             let mut offset = line.metrics().offset;
             for run in line.runs() {
                 for cluster in run.visual_clusters() {
@@ -716,6 +822,7 @@ impl FieldState {
                             offset: if geometry { offset } else { 0.0 },
                             advance: if geometry { advance } else { 0.0 },
                             boundary: cluster.is_word_boundary() && !cluster.is_space_or_nbsp(),
+                            line: index,
                         });
                     }
                     offset += advance;
@@ -727,10 +834,10 @@ impl FieldState {
         for cluster in found {
             let bytes = cluster.bytes;
             // A word starts at a boundary that is not a space, since
-            // AccessKit counts the space after a word as part of it; the
+            // AccessKit counts the space after a word as part of it; each
             // line's first character starts one too. These are where
             // moving left by word stops.
-            let word = out.is_empty() || cluster.boundary;
+            let word = out.last().is_none_or(|last: &Character| last.line != cluster.line) || cluster.boundary;
             // AccessKit keeps a character's length in one byte, so a
             // cluster longer than that (a letter with hundreds of
             // combining marks) is split at char boundaries into pieces of
@@ -757,6 +864,7 @@ impl FieldState {
                     },
                     advance: if first { cluster.advance } else { 0.0 },
                     word: word && first,
+                    line: cluster.line,
                 });
                 first = false;
                 start = end;
@@ -765,16 +873,63 @@ impl FieldState {
         out
     }
 
+    /// Which of `characters` each screen reader run holds: at most
+    /// [`RUN_CHARACTERS`] of them, and never two visual lines, so a run
+    /// links only to its neighbours on its own line. An empty field has one
+    /// empty run.
+    fn run_spans(characters: &[Character]) -> Vec<std::ops::Range<usize>> {
+        let mut spans = Vec::new();
+        let mut start = 0;
+        while start < characters.len() {
+            let line = characters[start].line;
+            let mut end = start;
+            while end < characters.len() && end - start < RUN_CHARACTERS && characters[end].line == line {
+                end += 1;
+            }
+            spans.push(start..end);
+            start = end;
+        }
+        if spans.is_empty() {
+            spans.push(0..0);
+        }
+        spans
+    }
+
+    /// The top and the height of each visual line, from the top of the
+    /// text, in logical pixels.
+    fn line_boxes(&self) -> Vec<(f32, f32)> {
+        self.editor.try_layout().map_or_else(Vec::new, |layout| {
+            layout
+                .lines()
+                .map(|line| {
+                    let metrics = line.metrics();
+                    (
+                        metrics.block_min_coord,
+                        metrics.block_max_coord - metrics.block_min_coord,
+                    )
+                })
+                .collect()
+        })
+    }
+
     /// Its text as runs for a screen reader, of at most [`RUN_CHARACTERS`]
-    /// characters each. An empty field has one empty run.
+    /// characters each, and one visual line at most. An empty field has
+    /// one empty run.
     pub(crate) fn runs(&self) -> Vec<ReaderRun> {
         let characters = self.characters(true);
+        let lines = self.line_boxes();
+        let first = lines.first().copied().unwrap_or((0.0, 0.0));
         if characters.is_empty() {
-            return vec![ReaderRun::default()];
+            return vec![ReaderRun {
+                y: first.0,
+                height: first.1,
+                ..ReaderRun::default()
+            }];
         }
-        characters
-            .chunks(RUN_CHARACTERS)
-            .map(|chunk| {
+        Self::run_spans(&characters)
+            .into_iter()
+            .map(|span| {
+                let chunk = &characters[span];
                 let x = chunk.iter().map(|character| character.offset).fold(f32::MAX, f32::min);
                 let end = chunk
                     .iter()
@@ -782,6 +937,8 @@ impl FieldState {
                     .fold(f32::MIN, f32::max);
                 let start = chunk[0].bytes.start;
                 let stop = chunk[chunk.len() - 1].bytes.end;
+                let line = chunk[0].line;
+                let (y, height) = lines.get(line).copied().unwrap_or(first);
                 ReaderRun {
                     text: self.text()[start..stop].to_owned(),
                     lengths: chunk
@@ -796,6 +953,9 @@ impl FieldState {
                         .collect(),
                     x,
                     width: end - x,
+                    line,
+                    y,
+                    height,
                 }
             })
             .collect()
@@ -806,14 +966,19 @@ impl FieldState {
     /// is the last run's length.
     pub(crate) fn reader_selection(&self) -> ((usize, usize), (usize, usize)) {
         let characters = self.characters(false);
+        let spans = Self::run_spans(&characters);
         let place = |byte: usize| {
             let index = characters
                 .iter()
                 .take_while(|character| character.bytes.start < byte)
                 .count();
-            let runs = characters.len().div_ceil(RUN_CHARACTERS).max(1);
-            let run = (index / RUN_CHARACTERS).min(runs - 1);
-            (run, index - run * RUN_CHARACTERS)
+            // The run that starts at or holds `index`; past the last
+            // character, the last run, at its end.
+            let run = spans
+                .iter()
+                .position(|span| index < span.end)
+                .unwrap_or(spans.len() - 1);
+            (run, index - spans[run].start)
         };
         let selection = self.editor.raw_selection();
         (place(selection.anchor().index()), place(selection.focus().index()))
@@ -826,24 +991,16 @@ impl FieldState {
     /// run's length, so a stale request does nothing.
     fn byte_at(
         characters: &[Character],
+        spans: &[std::ops::Range<usize>],
         text_len: usize,
         run: usize,
         index: usize,
     ) -> Option<(usize, std::ops::Range<usize>)> {
-        let runs = characters.len().div_ceil(RUN_CHARACTERS).max(1);
-        // The run is checked before it is multiplied, so a huge index from
-        // a stale or made-up node cannot overflow.
-        if run >= runs {
+        let span = spans.get(run)?;
+        if index > span.len() {
             return None;
         }
-        let length = characters
-            .len()
-            .saturating_sub(run * RUN_CHARACTERS)
-            .min(RUN_CHARACTERS);
-        if index > length {
-            return None;
-        }
-        let at = run * RUN_CHARACTERS + index;
+        let at = span.start + index;
         Some(match characters.get(at) {
             Some(character) => (character.bytes.start, character.cluster.clone()),
             None => (text_len, text_len..text_len),
@@ -857,9 +1014,10 @@ impl FieldState {
     /// its end, since the editor selects whole clusters only.
     fn reader_range(&self, anchor: (usize, usize), focus: (usize, usize)) -> Option<(usize, usize)> {
         let characters = self.characters(false);
+        let spans = Self::run_spans(&characters);
         let len = self.text().len();
-        let (anchor_at, anchor_cluster) = Self::byte_at(&characters, len, anchor.0, anchor.1)?;
-        let (focus_at, focus_cluster) = Self::byte_at(&characters, len, focus.0, focus.1)?;
+        let (anchor_at, anchor_cluster) = Self::byte_at(&characters, &spans, len, anchor.0, anchor.1)?;
+        let (focus_at, focus_cluster) = Self::byte_at(&characters, &spans, len, focus.0, focus.1)?;
         let inside = |at: usize, cluster: &std::ops::Range<usize>| at > cluster.start && at < cluster.end;
         let snap = |at: usize, cluster: &std::ops::Range<usize>, far: bool| match (inside(at, cluster), far) {
             (true, true) => cluster.end,
@@ -913,18 +1071,18 @@ impl FieldState {
         let before = self.reported();
         self.run = None;
         match action {
-            // A field shows one line, so a screen reader's text is made one
-            // as a pasted text is (section 8, rule 2).
+            // A screen reader's text is made to fit the field, as a pasted
+            // text is (section 8, rules 2 and 7).
             FieldAction::SetValue(text) => {
                 self.step(None, now, false);
-                self.editor.set_text(&one_line(&text));
+                let text = self.fit(&text);
+                self.editor.set_text(&text);
                 self.editor.driver(fonts, layouts).move_to_text_end();
             }
             FieldAction::ReplaceSelection(text) => {
                 self.step(None, now, false);
-                self.editor
-                    .driver(fonts, layouts)
-                    .insert_or_replace_selection(&one_line(&text));
+                let text = self.fit(&text);
+                self.editor.driver(fonts, layouts).insert_or_replace_selection(&text);
             }
             FieldAction::Select { .. } => {
                 if let Some((anchor, focus)) = range {
@@ -1011,6 +1169,7 @@ impl FieldState {
         let word = modifiers.word_on(platform);
         let shift = modifiers.shift;
         let mac = platform == Platform::Mac;
+        let many = self.lines == Lines::Many;
         // AltGr is Control and Alt together off a Mac, and types letters;
         // Control alone on a Mac types nothing, and Control+Space there
         // switches the input source.
@@ -1027,6 +1186,78 @@ impl FieldState {
         };
         match key {
             Key::Tab | Key::Escape => return KeyUse::default(),
+            // A multi-line field (section 8, rule 7): Enter inserts a line
+            // break, and with the shortcut key goes on to the app's
+            // shortcuts, which do nothing while a field has focus.
+            Key::Enter if many && shortcut => return KeyUse::default(),
+            Key::Enter if many => self.type_text("\n", now, fonts, layouts),
+            Key::Up | Key::Down if many => {
+                let up = *key == Key::Up;
+                if mac && shortcut {
+                    self.moved(fonts, layouts, |driver| match (up, shift) {
+                        (true, false) => driver.move_to_text_start(),
+                        (true, true) => driver.select_to_text_start(),
+                        (false, false) => driver.move_to_text_end(),
+                        (false, true) => driver.select_to_text_end(),
+                    });
+                } else if word {
+                    // Option on a Mac, Ctrl elsewhere: to the paragraph's
+                    // start or end, and on to the next one from there.
+                    self.paragraph(up, shift, fonts, layouts);
+                } else if !shortcut && !modifiers.alt {
+                    // By visual line, keeping the caret's place across.
+                    self.moved(fonts, layouts, |driver| match (up, shift) {
+                        (true, false) => driver.move_up(),
+                        (true, true) => driver.select_up(),
+                        (false, false) => driver.move_down(),
+                        (false, true) => driver.select_down(),
+                    });
+                }
+            }
+            // On a Mac, Home and End show the start or the end of the box
+            // by scrolling the panel, and leave the caret where it is, as
+            // the platform's text views do.
+            Key::Home | Key::End if many && mac && !shortcut && !modifiers.control && !modifiers.alt => {
+                out.reveal = Some(if *key == Key::Home { Edge::Start } else { Edge::End });
+            }
+            // Elsewhere, with Ctrl, to the start or the end of the text.
+            Key::Home | Key::End if many && !mac && shortcut => {
+                self.moved(fonts, layouts, |driver| match (key, shift) {
+                    (Key::Home, false) => driver.move_to_text_start(),
+                    (Key::Home, true) => driver.select_to_text_start(),
+                    (_, false) => driver.move_to_text_end(),
+                    (_, true) => driver.select_to_text_end(),
+                });
+            }
+            // Off a Mac, Page Up and Page Down move by the box's height in
+            // lines. The box grows with its lines, so that is the whole
+            // text: they go to its start and end.
+            Key::PageUp | Key::PageDown if many && !mac && !shortcut => {
+                self.moved(fonts, layouts, |driver| match (key, shift) {
+                    (Key::PageUp, false) => driver.move_to_text_start(),
+                    (Key::PageUp, true) => driver.select_to_text_start(),
+                    (_, false) => driver.move_to_text_end(),
+                    (_, true) => driver.select_to_text_end(),
+                });
+            }
+            // On a Mac, Ctrl+A and Ctrl+E go to the start and the end of the
+            // line, as in the platform's text views.
+            Key::Character(letter)
+                if many
+                    && mac
+                    && modifiers.control
+                    && !modifiers.meta
+                    && !modifiers.alt
+                    && matches!(letter.to_ascii_lowercase(), 'a' | 'e') =>
+            {
+                let start = letter.eq_ignore_ascii_case(&'a');
+                self.moved(fonts, layouts, |driver| match (start, shift) {
+                    (true, false) => driver.move_to_line_start(),
+                    (true, true) => driver.select_to_line_start(),
+                    (false, false) => driver.move_to_line_end(),
+                    (false, true) => driver.select_to_line_end(),
+                });
+            }
             Key::Enter => {
                 self.forget_steps();
                 out.committed = true;
@@ -1158,6 +1389,32 @@ impl FieldState {
         out
     }
 
+    /// Moves the caret, or extends the selection with `shift`, to the start
+    /// of its paragraph when `up`, else to its end: a paragraph is the text
+    /// between hard line breaks. From a paragraph's start or end, it goes
+    /// on to the one before or after.
+    fn paragraph(&mut self, up: bool, shift: bool, fonts: &mut FontContext, layouts: &mut LayoutContext<()>) {
+        self.run = None;
+        let mut driver = self.editor.driver(fonts, layouts);
+        let focus = driver.editor.raw_selection().focus().index();
+        let end = |driver: &mut PlainEditorDriver<'_, ()>| match (up, shift) {
+            (true, false) => driver.move_to_hard_line_start(),
+            (true, true) => driver.select_to_hard_line_start(),
+            (false, false) => driver.move_to_hard_line_end(),
+            (false, true) => driver.select_to_hard_line_end(),
+        };
+        end(&mut driver);
+        if driver.editor.raw_selection().focus().index() == focus {
+            match (up, shift) {
+                (true, false) => driver.move_left(),
+                (true, true) => driver.select_left(),
+                (false, false) => driver.move_right(),
+                (false, true) => driver.select_right(),
+            }
+            end(&mut driver);
+        }
+    }
+
     /// Moves the caret or the selection with `act`, which ends the typing
     /// run.
     fn moved(
@@ -1242,6 +1499,11 @@ impl FieldState {
     /// Slides the text so the caret stays [`CARET_MARGIN`] inside the box,
     /// and no further than it must: a text that fits does not slide.
     fn keep_caret(&mut self) {
+        // A multi-line field wraps, so its caret is always inside its width.
+        if self.lines == Lines::Many {
+            self.scroll = 0.0;
+            return;
+        }
         let Some(caret) = self.editor.cursor_geometry(1.0) else {
             return;
         };

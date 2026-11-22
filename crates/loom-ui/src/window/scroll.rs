@@ -104,6 +104,41 @@ impl Window {
     /// shows it with its ring (section 5, rule 12). Returns true when any
     /// moved.
     pub(crate) fn scroll_to_show(&mut self, id: &UiId) -> bool {
+        self.scroll_to_show_part(id, |bounds| bounds)
+    }
+
+    /// Scrolls the containers around the multi-line field `id` so its start
+    /// or its end shows: what Home and End do in one on a Mac, where they
+    /// leave the caret (section 8, rule 7). Returns true when any moved.
+    pub(crate) fn scroll_to_show_edge(&mut self, id: &UiId, edge: crate::field::Edge) -> bool {
+        self.scroll_to_show_part(id, |bounds| edge_row(bounds, edge))
+    }
+
+    /// Scrolls the containers around the field `id` so `inner`, a rectangle
+    /// from the corner of its content box, shows: its caret after an edit or
+    /// a caret move (section 8, rule 7). Returns true when any moved.
+    pub(crate) fn scroll_to_show_inside(&mut self, id: &UiId, inner: Rect) -> bool {
+        let Some(key) = self.panel_of(id) else {
+            return false;
+        };
+        let layout = &self.records[key].layout;
+        let Some(index) = layout.index_of(id) else {
+            return false;
+        };
+        let record = &layout.records()[index];
+        let (dx, dy) = (
+            record.content.x - record.bounds.x + inner.x,
+            record.content.y - record.bounds.y + inner.y,
+        );
+        self.scroll_to_show_part(id, |bounds| {
+            Rect::new(Point::new(bounds.x + dx, bounds.y + dy), inner.size())
+        })
+    }
+
+    /// Scrolls the containers around the element `id`, in its panel and
+    /// then around that panel's slot, by the least distance that shows the
+    /// part of it `part` gives from its bounds, with its ring.
+    fn scroll_to_show_part(&mut self, id: &UiId, part: impl FnOnce(Rect) -> Rect) -> bool {
         let Some(mut key) = self.panel_of(id).cloned() else {
             return false;
         };
@@ -113,7 +148,7 @@ impl Window {
         let Some(mut index) = self.records[&key].layout.index_of(id) else {
             return false;
         };
-        let mut rect = bounds;
+        let mut rect = part(bounds);
         let mut moved = false;
         loop {
             let record = self.records.get_mut(&key).expect("a panel being scrolled");
@@ -384,6 +419,18 @@ impl Window {
 /// The corner of a panel in the window, as a vector.
 fn origin_of(record: &super::Record) -> Vector {
     Vector::new(record.origin.x, record.origin.y)
+}
+
+/// The top or the bottom row of `bounds`, one pixel high: the part of a
+/// multi-line field to show for its start or its end. Showing a row, not
+/// the whole box, scrolls only as far as that edge needs.
+pub(crate) fn edge_row(bounds: Rect, edge: crate::field::Edge) -> Rect {
+    let height = bounds.height.min(1.0);
+    let y = match edge {
+        crate::field::Edge::Start => bounds.y,
+        crate::field::Edge::End => bounds.y + bounds.height - height,
+    };
+    Rect::new(Point::new(bounds.x, y), loom_ui_core::Size::new(bounds.width, height))
 }
 
 /// How a scroll key moves a container: from its offset, one line, one page,

@@ -37,7 +37,10 @@ impl Window {
             .order
             .iter()
             .enumerate()
-            .filter(|(_, key)| self.records[*key].parent.is_none())
+            // A root this layout did not place, such as one under an
+            // element that is gone, shows nothing, so it has no stops and
+            // focus inside it falls back (section 6, rule 4).
+            .filter(|(_, key)| self.records[*key].parent.is_none() && self.drawn.contains(key))
             .map(|(place, key)| {
                 let mut stops = Vec::new();
                 self.panel_stops(key, &mut stops);
@@ -259,7 +262,9 @@ impl Window {
     pub(crate) fn first_stop_in(&self, panel: &UiId) -> Option<UiId> {
         let mut stops = Vec::new();
         self.panel_stops(panel, &mut stops);
-        stops.into_iter().next()
+        // Only a stop in the window's order: a panel that is not drawn has
+        // none to give.
+        stops.into_iter().find(|stop| self.stops.contains(stop))
     }
 
     /// The nodes of every laid-out panel, with node IDs from `ids`, bounds
@@ -371,17 +376,30 @@ impl Window {
                     let content = element.content;
                     let left = origin.x + content.x - field.scroll();
                     let top = origin.y + content.y;
-                    let mut runs: Vec<(NodeId, Node)> = field
+                    let many = field.lines() == crate::field::Lines::Many;
+                    // A multi-line field is a multi-line text input to a
+                    // screen reader (section 7, rule 10; section 8, rule 7).
+                    if many {
+                        node.set_role(accesskit::Role::MultilineTextInput);
+                    }
+                    let mut runs: Vec<(NodeId, Node, usize)> = field
                         .runs()
                         .into_iter()
                         .enumerate()
                         .map(|(at, run)| {
                             let mut node = Node::new(accesskit::Role::TextRun);
+                            // One line's runs sit on it; a single-line
+                            // field's run spans its content box.
+                            let (y, height) = if many {
+                                (top + run.y, run.height)
+                            } else {
+                                (top, content.height)
+                            };
                             node.set_bounds(accesskit::Rect {
                                 x0: f64::from(left + run.x) * scale,
-                                y0: f64::from(top) * scale,
+                                y0: f64::from(y) * scale,
                                 x1: f64::from(left + run.x + run.width) * scale,
-                                y1: f64::from(top + content.height) * scale,
+                                y1: f64::from(y + height) * scale,
                             });
                             let physical = |values: &[f32]| -> Vec<f32> {
                                 values.iter().map(|value| value * scale as f32).collect()
@@ -392,21 +410,24 @@ impl Window {
                             node.set_word_starts(run.word_starts);
                             node.set_text_direction(accesskit::TextDirection::LeftToRight);
                             node.set_value(run.text);
-                            (NodeId(ids.number(&run_id(id, at))), node)
+                            (NodeId(ids.number(&run_id(id, at))), node, run.line)
                         })
                         .collect();
-                    // A field is one line, so its runs are one line too:
-                    // each links to its neighbours, or a screen reader
-                    // would read 255 characters as a whole line.
-                    let ids: Vec<NodeId> = runs.iter().map(|(id, _)| *id).collect();
-                    for (at, (_, run)) in runs.iter_mut().enumerate() {
-                        if at > 0 {
-                            run.set_previous_on_line(ids[at - 1]);
+                    // The runs on one visual line link to their neighbours
+                    // on it, or a screen reader would read 255 characters
+                    // as a whole line; a run never links across lines.
+                    let ids: Vec<(NodeId, usize)> = runs.iter().map(|(id, _, line)| (*id, *line)).collect();
+                    for (at, (_, run, line)) in runs.iter_mut().enumerate() {
+                        if at > 0 && ids[at - 1].1 == *line {
+                            run.set_previous_on_line(ids[at - 1].0);
                         }
-                        if let Some(next) = ids.get(at + 1) {
-                            run.set_next_on_line(*next);
+                        if let Some(&(next, next_line)) = ids.get(at + 1)
+                            && next_line == *line
+                        {
+                            run.set_next_on_line(next);
                         }
                     }
+                    let runs: Vec<(NodeId, Node)> = runs.into_iter().map(|(id, node, _)| (id, node)).collect();
                     let ((anchor_run, anchor), (focus_run, focus)) = field.reader_selection();
                     node.set_text_selection(accesskit::TextSelection {
                         anchor: accesskit::TextPosition {
