@@ -2505,6 +2505,7 @@ dependencies = [
  "loom-ui",
  "loom-ui-core",
  "png",
+ "pulldown-cmark",
  "rfd",
  "ron",
  "rustfft",

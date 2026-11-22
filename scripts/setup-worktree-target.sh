@@ -83,12 +83,13 @@ if [ -d "$target" ]; then
     else
         # An old target is adoptable only when its generated config already
         # points to this exact directory. A hash-shaped name is not proof.
-        old_config=$(printf '# Local to this worktree. Regenerate with scripts/setup-worktree-target.sh.\n[build]\ntarget-dir = "%s"' "$escaped_target")
-        legacy_config=$(printf '# Local to this worktree. Regenerate with scripts/setup-external-target.sh.\n[build]\ntarget-dir = "%s"' "$escaped_target")
+        # The config may hold more settings than the target, from a newer
+        # version of this script (jobs, the wrapper).
         if [ ! -f "$config" ] || {
-            [ "$(cat "$config")" != "$old_config" ] &&
-                [ "$(cat "$config")" != "$legacy_config" ];
-        }; then
+            [ "$(head -n 1 "$config")" != '# Local to this worktree. Regenerate with scripts/setup-worktree-target.sh.' ] &&
+                [ "$(head -n 1 "$config")" != '# Local to this worktree. Regenerate with scripts/setup-external-target.sh.' ];
+        } || [ "$(sed -n 2p "$config")" != '[build]' ] ||
+            ! grep -Fxq "target-dir = \"$escaped_target\"" "$config"; then
             echo "Unmarked target cannot be adopted: $target" >&2
             exit 1
         fi
@@ -99,10 +100,44 @@ mkdir -p "$target" "$root/.cargo"
 if [ ! -e "$marker" ]; then
     printf '%s\n' "$expected_marker" > "$marker"
 fi
-cat > "$config" <<EOF
-# Local to this worktree. Regenerate with scripts/setup-worktree-target.sh.
-[build]
-target-dir = "$escaped_target"
-EOF
+# Half the cores, rounded up, so several agents building on one machine
+# leave each other room. `mise run check` runs the tests on as many
+# threads. LOOM_BUILD_JOBS overrides it.
+cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+jobs=${LOOM_BUILD_JOBS:-$(((cores + 1) / 2))}
+
+# Every worktree compiles through sccache, one cache for the machine
+# (scripts/rustc-wrapper.sh). Only when this checkout has the wrapper, so a
+# worktree on an older branch never points Cargo at a missing file, and not
+# on Windows, where Cargo cannot run a shell script as its wrapper. This
+# script runs there under Git Bash, MSYS2, or Cygwin, whose `uname -s`
+# starts with MINGW, MSYS, or CYGWIN. Under WSL, Cargo is a Linux program,
+# so the wrapper works. LOOM_UNAME stands in for `uname -s` in the tests.
+wrapper=""
+sccache=""
+case ${LOOM_UNAME:-$(uname -s)} in
+    MINGW* | MSYS* | CYGWIN*) windows=1 ;;
+    *) windows=0 ;;
+esac
+if [ "$windows" = 0 ] && [ -f "$root/scripts/rustc-wrapper.sh" ]; then
+    wrapper=$(printf '%s' "$root/scripts/rustc-wrapper.sh" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    sccache=$(cd "$root" && mise which sccache 2>/dev/null || true)
+fi
+
+{
+    echo '# Local to this worktree. Regenerate with scripts/setup-worktree-target.sh.'
+    echo '[build]'
+    printf 'target-dir = "%s"\n' "$escaped_target"
+    printf 'jobs = %s\n' "$jobs"
+    if [ -n "$wrapper" ]; then
+        printf 'rustc-wrapper = "%s"\n' "$wrapper"
+    fi
+    if [ -n "$sccache" ]; then
+        echo
+        echo '[env]'
+        echo '# The sccache mise installed. If mise upgrades it, run this script again.'
+        printf 'LOOM_SCCACHE = "%s"\n' "$(printf '%s' "$sccache" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+    fi
+} > "$config"
 
 echo "Cargo target for $root: $target"

@@ -12,6 +12,7 @@
 //! and nothing else does (section 7, rule 22).
 
 use accesskit::{Action as KitAction, Node, Role as KitRole, Toggled};
+use loom_ui_core::UiId;
 use std::fmt;
 
 /// What an element is, as the table in section 7 names it.
@@ -204,6 +205,13 @@ pub struct Access {
     value: Option<Value>,
     states: States,
     actions: Vec<Action>,
+    /// The element the keys act on while this one keeps the focus, as a
+    /// search field's highlighted row (rule 27).
+    active: Option<UiId>,
+    /// Where it is in its set, from 0, as a list box option.
+    position: Option<usize>,
+    /// How many items it holds, as a list box.
+    size: Option<usize>,
 }
 
 /// A way an [`Access`] breaks section 7, rule 2.
@@ -256,6 +264,9 @@ impl Access {
             value: None,
             states: States::default(),
             actions: Vec::new(),
+            active: None,
+            position: None,
+            size: None,
         }
     }
 
@@ -289,6 +300,39 @@ impl Access {
             self.actions.push(action);
         }
         self
+    }
+
+    /// Names the element the keys act on while this one keeps the focus,
+    /// by its UI ID: a search field's highlighted row, which WAI-ARIA calls
+    /// its active descendant. The runtime gives the node the row's node ID
+    /// when the tree is sent, and leaves it out while no laid-out element
+    /// has that UI ID, so the tree never names a node it does not hold.
+    #[must_use]
+    pub fn active_descendant(mut self, id: UiId) -> Self {
+        self.active = Some(id);
+        self
+    }
+
+    /// Says it is item `position` of its set, counted from 0, as a list
+    /// box's option is. The set's size goes on the container
+    /// ([`size_of_set`](Self::size_of_set)), as AccessKit has it.
+    #[must_use]
+    pub fn position_in_set(mut self, position: usize) -> Self {
+        self.position = Some(position);
+        self
+    }
+
+    /// Says it holds `size` items, as a list box says how many rows it
+    /// shows.
+    #[must_use]
+    pub fn size_of_set(mut self, size: usize) -> Self {
+        self.size = Some(size);
+        self
+    }
+
+    /// The element it names as its active descendant, if any.
+    pub(crate) fn active(&self) -> Option<&UiId> {
+        self.active.as_ref()
     }
 
     /// True when it has a description of its own.
@@ -393,6 +437,12 @@ impl Access {
         }
         if self.states.current {
             node.set_aria_current(accesskit::AriaCurrent::Page);
+        }
+        if let Some(position) = self.position {
+            node.set_position_in_set(position);
+        }
+        if let Some(size) = self.size {
+            node.set_size_of_set(size);
         }
         if !self.states.disabled {
             for action in &self.actions {

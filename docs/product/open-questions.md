@@ -62,6 +62,13 @@ VCV Rack's ecosystem works because people can install modules without building t
 
 - **Leaning:** compile in for now. Spike WebAssembly modules in M4: measure the cost of a filter and an oscillator as WASM against native, and check the runtime's real-time behaviour. Decide before announcing a module SDK.
 
+### OQ-23. Accessibility for a UI drawn in a browser canvas
+
+- The web is a first-class target (Brylie's decision, 2026-11-19; [UI design goal 3](../design/ui-layer.md#design-goals)). `loom-ui` draws into a GPU surface, and on the web that is a canvas element. A browser's screen reader does not see inside a canvas: the UI needs a mirror in the page's own accessibility tree, usually hidden DOM elements kept in step with the UI.
+- On 2026-11-22 no official AccessKit adapter for the web was listed on crates.io, beside the core crate, `accesskit_winit`, and the platform adapters ([research snapshot](../research/2026-11-next-100-guis.md)).
+- Options to weigh when the web build is planned: an AccessKit adapter for the web, upstream or our own (it would map the same tree `loom-ui` already builds into DOM nodes with ARIA roles); or a DOM mirror inside `loom-ui`'s web driver only.
+- **Action:** decide before the web build is scheduled, and before any web-only UI work starts. Until then, keep the accessibility tree `loom-ui` builds independent of any platform adapter, as it is today, so either option can use it.
+
 ## Risks
 
 | ID | Risk | Likelihood | Impact | Mitigation |

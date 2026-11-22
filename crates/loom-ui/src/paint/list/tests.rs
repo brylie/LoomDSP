@@ -239,3 +239,49 @@ fn a_list_painted_the_same_way_is_the_same() {
     assert!(!first.same_as(&paint(110.0, "51", false)), "other text");
     assert!(!first.same_as(&paint(110.0, "50", true)), "another layer");
 }
+
+/// Spanned text paints each span's glyphs in its colour, the run's colour
+/// where it sets none, and a link's underline after its glyphs, in its
+/// colour, under the letters, in a layer cut to the run's clip as the
+/// glyphs are.
+#[test]
+fn spans_paint_their_colours_and_underlines() {
+    let Some(text) = text() else { return };
+    let link = Color::rgb(0.0, 0.5, 1.0);
+    let spans = [
+        crate::paint::Span::plain(4),
+        crate::paint::Span {
+            len: 3,
+            colour: Some(link),
+            underline: true,
+            ..crate::paint::Span::default()
+        },
+    ];
+    let mut list = PaintList::new(BOUNDS);
+    let mut painter = ListPainter::new(&text, &mut list);
+    painter.text_spans(
+        &run("See Saw", Point::new(110.0, 60.0), Align::Left, Vertical::Top),
+        &spans,
+    );
+    let colours: Vec<Color> = list.glyphs.iter().map(|glyph| glyph.colour).collect();
+    assert_eq!(colours.first(), Some(&Color::WHITE), "the run's colour first");
+    assert_eq!(colours.last(), Some(&link), "the link's colour last");
+    let [PaintBox::Segment(line)] = list.boxes.as_slice() else {
+        panic!("one underline: {:?}", list.boxes);
+    };
+    assert_eq!(line.colour, link);
+    let link_glyphs: Vec<&PlacedGlyph> = list.glyphs.iter().filter(|glyph| glyph.colour == link).collect();
+    assert!(line.from.x <= link_glyphs[0].origin.x + 0.01, "{line:?}");
+    assert!(line.from.y > link_glyphs[0].origin.y, "below the baseline: {line:?}");
+    assert!(
+        matches!(list.layers[0].batches.as_slice(), [Batch::Glyphs(_)]),
+        "the glyphs first: {:?}",
+        list.layers
+    );
+    assert!(
+        matches!(list.layers[1].batches.as_slice(), [Batch::Boxes(_)]),
+        "then the line, over them: {:?}",
+        list.layers
+    );
+    assert_eq!(list.layers[1].clip, BOUNDS, "cut to the run's clip");
+}

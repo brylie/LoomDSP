@@ -287,3 +287,26 @@ fn a_slot_row_reads_its_name_once_and_has_no_menu() {
         .unwrap();
     assert!(!browser.model().rows[row].library, "no menu, so no ShowContextMenu");
 }
+
+/// The menu key, or Shift+F10, opens the highlighted library row's menu on
+/// its first item, so Enter picks Insert linked at once and the menu's item
+/// has the focus, as from a screen reader's ShowContextMenu. On a module's
+/// row it opens nothing (ui-layer.md, section 6, rule 8; module-browser.md).
+#[test]
+fn the_menu_key_opens_a_library_rows_menu_on_its_item() {
+    let mut browser = browser();
+    let _ = browser.update(Message::Key(super::super::Nav::Menu));
+    assert_eq!(browser.model().menu, None, "a module's row has no menu");
+
+    let row = library_row(&browser, "Pad");
+    let _ = browser.update(Message::Hover(row));
+    let _ = browser.update(Message::Key(super::super::Nav::Menu));
+    assert_eq!(browser.model().menu, Some(row));
+    assert_eq!(browser.model().menu_highlight, Some(0), "on its first item");
+    let (_, focus) = items(browser.model());
+    assert_eq!(focus, Some(insert_linked_id(&browser.model().rows[row].id)));
+    assert!(
+        matches!(browser.update(Message::Submit).0, Outcome::Insert { linked: true, .. }),
+        "Enter inserts linked"
+    );
+}

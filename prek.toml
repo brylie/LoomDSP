@@ -17,9 +17,10 @@
 # made by a rebase or a merge never ran the commit hooks. The slow checks
 # (tests with coverage, doc tests, docs, the WebAssembly build, and
 # cargo-deny) are in the manual stage: CI runs every one of them on the pull
-# request, and `mise run check` runs them all locally. Why not before push:
-# several agent sessions on one machine each ran `mise run check` and then
-# the same checks again in the hook, and parallel full checks starve the CPU.
+# request, and `mise run check-full` runs them all locally. Why not before
+# push: several agent sessions on one machine each ran the full check and
+# then the same checks again in the hook, and parallel full checks starve
+# the CPU.
 #
 # Every hook that needs a tool runs it through mise (`mise run` or
 # `mise exec --`), so it uses the versions pinned in mise.toml and does not
@@ -149,7 +150,7 @@ pass_filenames = false
 
 # ---------------------------------------------------------------------------
 # Slow checks, run by hand (`prek run --hook-stage manual --all-files`), by
-# `mise run check`, and by CI on every pull request.
+# `mise run check-full`, and by CI on every pull request.
 # ---------------------------------------------------------------------------
 
 [[repos.hooks]]

@@ -2,7 +2,7 @@
 //! The input handling has its own tests in `crate::input`.
 
 use super::*;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Applying a reaction hands Iced the events as messages in their order,
 /// and leaves the input not captured and no redraw asked for when the

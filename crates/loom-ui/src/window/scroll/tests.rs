@@ -706,4 +706,34 @@ fn focus_moving_in_scrolls_so_the_painted_ring_is_never_cut() {
     );
 }
 
+/// A link inside a rich text in a scroll container moves with the scroll,
+/// with no new measure: its bounds, its words, and where it is hit
+/// (ui-layer.md, section 8, rule 10).
+#[test]
+fn a_link_moves_with_its_scroll_container() {
+    use crate::element::Inline;
+    let saw = UiId::panel("help").with("rows").with("notes").with("saw");
+    let lines = (0..6).map(|n| Element::text(format!("line {n}"), STYLE));
+    let link = Inline::new("Saw").link("saw", Access::new(Role::Link, "Saw").action(Action::Click));
+    let notes = Element::rich([Inline::new("See "), link], STYLE).key("notes");
+    let content = Element::column(lines.chain([notes]));
+    let rows = Element::scroll(content, SCROLL).key("rows").height(Length::Fixed(48.0));
+    let mut window = crate::window::Window::default();
+    window.sync(vec![(
+        UiId::panel("help"),
+        Layer::Panels,
+        Some(Element::column([rows])),
+    )]);
+    window.lay_out(Size::new(300.0, 200.0), &mut Mono::default());
+    let before = window.bounds(&saw).expect("laid out");
+    assert!(window.scroll_to_show(&saw), "the container moved");
+    let after = window.bounds(&saw).expect("still laid out");
+    assert!(after.y < before.y, "{before:?} {after:?}");
+    assert_eq!(after.x, before.x);
+    assert_eq!(window.pieces(&saw), [after], "its words moved with it");
+    let middle = Point::new(after.x + after.width / 2.0, after.y + after.height / 2.0);
+    let hit = window.hit(middle).map(|(_, hit)| format!("{hit:?}"));
+    assert!(hit.is_some_and(|hit| hit.contains("saw")), "hit where it shows now");
+}
+
 mod keys;
