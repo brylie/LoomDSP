@@ -252,15 +252,13 @@ impl Window {
             .iter()
             .find(|element| element.id.as_ref() == Some(id))?;
         let select = element.select.as_deref()?.clone();
-        // Scrolled out of view: nothing of it is inside the clip around it
-        // in its panel, or inside its panel's own clip in the window, as in
-        // a slot a container scrolled away.
-        let some = |rect: loom_ui_core::Rect| rect.width > 0.0 && rect.height > 0.0;
+        // Scrolled out of view: nothing of it is left once it is cut by the
+        // clip around it in its panel, then by its panel's own clip in the
+        // window, as in a slot a container scrolled away. Both cuts go on one
+        // rectangle, so two clips that each overlap it but not each other
+        // leave nothing.
         let bounds = self.bounds(id)?;
-        let shows = element
-            .clip
-            .is_none_or(|clip| some(crate::layout::cut(element.bounds, clip)))
-            && some(crate::layout::cut(bounds, record.clip));
+        let shows = shows_through(element.bounds, element.clip, record.origin, record.clip);
         Some((select, bounds, shows))
     }
 
@@ -529,6 +527,26 @@ fn level(a: Option<Rect>, b: Option<Rect>) -> bool {
         (None, None) => true,
         _ => false,
     }
+}
+
+/// True when something of `bounds`, in its panel, is left once it is cut
+/// by `clip`, the clip around it in its panel, then moved by `origin` into
+/// the window and cut by `panel_clip`, the panel's own clip there. Both cuts
+/// go on one rectangle, so two clips that each overlap it but not each
+/// other leave nothing.
+pub(crate) fn shows_through(
+    bounds: loom_ui_core::Rect,
+    clip: Option<loom_ui_core::Rect>,
+    origin: loom_ui_core::Point,
+    panel_clip: loom_ui_core::Rect,
+) -> bool {
+    let inside = clip.map_or(bounds, |clip| crate::layout::cut(bounds, clip));
+    let in_window = loom_ui_core::Rect::new(
+        loom_ui_core::Point::new(inside.x + origin.x, inside.y + origin.y),
+        inside.size(),
+    );
+    let left = crate::layout::cut(in_window, panel_clip);
+    left.width > 0.0 && left.height > 0.0
 }
 
 #[cfg(test)]

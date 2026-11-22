@@ -86,6 +86,10 @@ pub(crate) struct Window {
     /// The open list opened, closed, or moved its highlight since the
     /// runtime last asked, so the view must be built again.
     pub(crate) select_changed: bool,
+    /// The same, for what the tree reports: kept apart, since a layout that
+    /// closes the list builds the view at once but the app hears of it in
+    /// the next turn (`App::access_changed`).
+    pub(crate) select_reported: bool,
 }
 
 /// One panel, as the window keeps it.
@@ -209,6 +213,7 @@ impl Default for Window {
             scrolled: false,
             select: None,
             select_changed: false,
+            select_reported: false,
             groups: Vec::new(),
             reveal: None,
             caret_reveal: None,

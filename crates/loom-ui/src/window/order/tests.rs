@@ -256,3 +256,29 @@ fn an_arrow_in_a_tall_group_brings_the_radio_into_view() {
     assert_eq!(harness.runtime().focused(), Some(&id("rows").with("tall").with("r0")));
     assert_eq!(harness.runtime().scroll_offset(&rows).map(|(at, _)| at), Some(0.0));
 }
+
+/// A select is shown only when something of it is left after both clips
+/// cut it, one after the other: two clips that each overlap it but not each
+/// other leave nothing (section 5, rule 18). The panel's corner moves the
+/// cut from the panel into the window.
+#[test]
+fn a_select_shows_only_through_both_clips() {
+    use crate::window::order::shows_through;
+    let rect = |x: f32, width: f32| Rect::new(Point::new(x, 0.0), Size::new(width, 20.0));
+    let bounds = rect(0.0, 100.0);
+    assert!(shows_through(bounds, None, Point::ORIGIN, rect(0.0, 400.0)));
+    assert!(shows_through(
+        bounds,
+        Some(rect(0.0, 40.0)),
+        Point::ORIGIN,
+        rect(0.0, 40.0)
+    ));
+    assert!(
+        !shows_through(bounds, Some(rect(0.0, 40.0)), Point::ORIGIN, rect(60.0, 40.0)),
+        "each clip overlaps it, but not each other"
+    );
+    assert!(
+        !shows_through(bounds, None, Point::new(500.0, 0.0), rect(0.0, 400.0)),
+        "moved into the window, it is past the panel's clip"
+    );
+}

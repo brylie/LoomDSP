@@ -450,12 +450,14 @@ impl<A: crate::App> crate::Panels<'_, A> {
         });
         self.window.reveal = Some(option_id(highlight));
         self.window.select_changed = true;
+        self.window.select_reported = true;
     }
 
     /// Closes the open list, if any, with no choice.
     pub(crate) fn close_select(&mut self) {
         if self.window.select.take().is_some() {
             self.window.select_changed = true;
+            self.window.select_reported = true;
         }
     }
 
@@ -466,6 +468,7 @@ impl<A: crate::App> crate::Panels<'_, A> {
             if open.highlight != index {
                 open.highlight = index;
                 self.window.select_changed = true;
+                self.window.select_reported = true;
             }
             self.window.reveal = Some(option_id(index));
         }

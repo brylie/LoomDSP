@@ -331,6 +331,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             self.build_view();
             self.panels().lay_out(text);
         }
+        // A list this layout closed is told to the app in the next turn.
+        if self.panels.select_reported {
+            self.waker().nudge();
+        }
         self.release_if_owed();
     }
 
@@ -1233,6 +1237,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         {
             kept.select.chosen = select.chosen;
             self.panels.select_changed = true;
+            self.panels.select_reported = true;
         }
     }
 
@@ -1670,7 +1675,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // a list that opened, closed, or moved its highlight changes what
         // the tree reports: its expanded state and active descendant.
         self.check_select();
-        reported |= self.panels.select_changed;
+        reported |= std::mem::take(&mut self.panels.select_reported);
         // What a field reports changed: one notice, asked for after the
         // turn's updates, so the app's answer is built from its model with
         // the field's messages in it.

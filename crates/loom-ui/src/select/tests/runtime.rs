@@ -90,7 +90,8 @@ fn in_question(version: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
 }
 
 /// The same, inside a container 60 px tall with 200 px of space after the
-/// select, so it can be scrolled out of view.
+/// select, so it can be scrolled out of view; version 1xx puts 200 px of
+/// space before the select too, so a rebuild moves it out of view.
 fn scrolled(version: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
     let select = Element::select(Select::new(
         "Sample rate",
@@ -99,10 +100,14 @@ fn scrolled(version: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
         SELECT,
     ))
     .key("rate");
+    let before = Element::space(
+        Length::Shrink,
+        Length::Fixed(if version / 100 == 1 { 200.0 } else { 0.0 }),
+    );
     list_panel(crate::window::scroll::tests::container(
         "rows",
         60.0,
-        vec![select, Element::space(Length::Shrink, Length::Fixed(200.0))],
+        vec![before, select, Element::space(Length::Shrink, Length::Fixed(200.0))],
     ))
 }
 
@@ -598,4 +603,25 @@ fn opening_and_moving_raise_the_tree_notice() {
     assert_eq!(harness.app().notices, before + 1, "opening");
     step(&mut harness, key(Key::Down));
     assert_eq!(harness.app().notices, before + 2, "moving the highlight");
+}
+
+/// A list that a layout closes, here because a rebuild moved its select out
+/// of view, is still told to the app as a change of what the tree reports,
+/// in the turn after that layout.
+#[test]
+fn a_list_closed_by_a_layout_raises_the_tree_notice() {
+    let mut harness = at(scrolled, 0);
+    step(&mut harness, key(Key::Tab));
+    step(&mut harness, key(Key::Down));
+    assert_eq!(highlight(&harness), Some(0));
+    harness.send(Message::CountNotices);
+    // The rebuild moves the select; only the layout after it sees that it
+    // is out of view, and closes the list.
+    harness.send(Message::Show(100));
+    assert_eq!(harness.runtime().select_highlight(), Some(0), "open until the layout");
+    let before = harness.app().notices;
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    assert_eq!(harness.runtime().select_highlight(), None, "the layout closed it");
+    step(&mut harness, DriverEvent::Woken);
+    assert_eq!(harness.app().notices, before + 1, "told in the next turn");
 }
