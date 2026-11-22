@@ -212,6 +212,57 @@ impl Window {
         moved
     }
 
+    /// The scroll containers that a scroll key the element `id` does not
+    /// use goes to, in order (section 6, rule 6, step 3): those around it,
+    /// the innermost first, then those around its panel's slot, outward.
+    /// Each is its panel and its record there. A container that takes its
+    /// keys from `id` is not among them: that stop drives it through the
+    /// app, so the app's own keys come first (section 5, rule 12).
+    fn key_containers(&self, id: &UiId) -> Vec<(UiId, usize)> {
+        let mut out = Vec::new();
+        let Some(mut key) = self.panel_of(id).cloned() else {
+            return out;
+        };
+        let Some(mut index) = self.records[&key].layout.index_of(id) else {
+            return out;
+        };
+        loop {
+            for at in self.records[&key].layout.containers_around(index) {
+                out.push((key.clone(), at));
+            }
+            let Some((parent, slot)) = self.records[&key].parent.clone() else {
+                break;
+            };
+            let Some(slot_index) = self.records[&parent].layout.slot_record(slot) else {
+                break;
+            };
+            index = slot_index;
+            key = parent;
+        }
+        out
+    }
+
+    /// Moves the first of the containers a scroll key the element `id` does
+    /// not use goes to that can move, by `change` from its offset, its
+    /// line, its page, and the most it can move. A container that cannot
+    /// move that way passes the key on to the next. Returns true when one
+    /// moved, which takes the key.
+    pub(crate) fn scroll_by_key(&mut self, id: &UiId, change: ScrollChange) -> bool {
+        for (key, index) in self.key_containers(id) {
+            let layout = &mut self.records.get_mut(&key).expect("its panel").layout;
+            let record = &layout.records()[index];
+            let (Some(scroll), Some(view)) = (record.scroll, record.viewport()) else {
+                continue;
+            };
+            let offset = change(scroll.offset, scroll.style.line, view.height, scroll.most);
+            if layout.scroll_to(index, offset) {
+                self.slots_moved(&key);
+                return true;
+            }
+        }
+        false
+    }
+
     /// One line of the container with UI ID `id`, for its keys: `None` when
     /// it is no scroll container of the runtime's.
     pub(crate) fn scroll_line(&self, id: &UiId) -> Option<f32> {
@@ -334,6 +385,10 @@ impl Window {
 fn origin_of(record: &super::Record) -> Vector {
     Vector::new(record.origin.x, record.origin.y)
 }
+
+/// How a scroll key moves a container: from its offset, one line, one page,
+/// and the most it can move, to its new offset.
+pub(crate) type ScrollChange = fn(f32, f32, f32, f32) -> f32;
 
 #[cfg(test)]
 pub(crate) mod tests;

@@ -126,10 +126,15 @@ impl App for Shown {
 pub(crate) struct Toolkit {
     /// Every element it was asked to bring into view.
     pub(crate) scrolled: Vec<UiId>,
+    /// Every key pressed that reached it.
+    pub(crate) keys: Vec<Key>,
 }
 
 impl Target<Message> for Toolkit {
-    fn input(&mut self, _event: &Event, _pointer: Option<Point>, _now: Instant, _out: &mut Vec<Message>) -> Routed {
+    fn input(&mut self, event: &Event, _pointer: Option<Point>, _now: Instant, _out: &mut Vec<Message>) -> Routed {
+        if let Event::Key(KeyEvent::Pressed { key, .. }) = event {
+            self.keys.push(*key);
+        }
         Routed::Passed
     }
 
@@ -700,3 +705,5 @@ fn focus_moving_in_scrolls_so_the_painted_ring_is_never_cut() {
         "s0's ring is above the container, cut away"
     );
 }
+
+mod keys;

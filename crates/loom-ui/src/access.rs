@@ -226,6 +226,10 @@ pub enum Problem {
     NoValue,
     /// It is something a user acts on, and offers no action.
     NotOperable,
+    /// It is a scroll container that takes its keys from a stop
+    /// ([`Element::keys_from`](crate::Element::keys_from)) that is no focus
+    /// stop of its panel (ui-layer.md, section 5, rule 12).
+    KeysFromNoStop,
 }
 
 impl fmt::Display for Problem {
@@ -237,6 +241,7 @@ impl fmt::Display for Problem {
             Self::NoName => "it has no name",
             Self::NoValue => "it has no value of the kind its role needs",
             Self::NotOperable => "a user acts on it, and it offers no action",
+            Self::KeysFromNoStop => "it takes its keys from an element that is no focus stop of its panel",
         })
     }
 }
