@@ -203,6 +203,14 @@ impl Window {
             .max_by_key(|key| key.keys().len())
     }
 
+    /// The element that takes `key` before the element with UI ID `id`:
+    /// the nearest on or around it that names the key
+    /// ([`Element::takes_first`](crate::Element::takes_first)), in its panel.
+    pub(crate) fn takes_first(&self, id: &UiId, key: loom_ui_core::Key) -> Option<&UiId> {
+        let panel = self.panel_of(id)?;
+        self.records[panel].layout.takes_first(id, key)
+    }
+
     /// What the element with UI ID `id` is to a screen reader, as last
     /// laid out.
     pub(crate) fn access_of(&self, id: &UiId) -> Option<&crate::access::Access> {

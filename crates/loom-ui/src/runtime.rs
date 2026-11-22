@@ -862,6 +862,33 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
     }
 
+    /// A key pressed while the focus is on or inside an element that takes
+    /// it first ([`Element::takes_first`](crate::Element::takes_first)):
+    /// that element's app message, through [`App::panel_key`], before the
+    /// focused element hears the key (section 6, rule 6, step 2b). Only in
+    /// a layer that takes input now. Returns whether the app took the key.
+    fn panel_key(&mut self, event: &Event, batch: &mut Vec<A::Message>) -> bool {
+        let Event::Key(press @ KeyEvent::Pressed { key, .. }) = event else {
+            return false;
+        };
+        let Some(focused) = self.focus.id() else {
+            return false;
+        };
+        if !in_input_layer(&self.panels, &self.app, focused) {
+            return false;
+        }
+        let Some(owner) = self.panels.takes_first(focused, *key) else {
+            return false;
+        };
+        match self.app.panel_key(owner, press) {
+            Some(message) => {
+                batch.push(message);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The arrows, Space, and Enter on a focused radio of a group (section
     /// 6, rule 9; the WAI-ARIA radio group pattern). Down and Right move to
     /// the next radio and choose it, Up and Left to the one before, both
@@ -1145,6 +1172,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 let composing = matches!(event, Event::Key(_)) && self.composing();
                 let (mut taken, moved) = if composing { (false, false) } else { self.tab(&event) };
                 redraw |= moved;
+                if !taken && !composing {
+                    taken = self.panel_key(&event, &mut batch);
+                }
                 if !taken && !composing {
                     let (activated, changed) = self.activate(&event);
                     taken = activated;

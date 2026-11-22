@@ -100,6 +100,18 @@ pub trait App {
         next.map_or(TabStep::Leave, |next| TabStep::To(next.clone()))
     }
 
+    /// The message for `key`, pressed while the focus is on or inside the
+    /// element `id` that takes it first ([`Element::takes_first`](crate::Element::takes_first)),
+    /// before the focused element hears it (ui-layer.md, section 6,
+    /// rule 6, step 2b). `Some` takes the key: the message runs this turn,
+    /// and neither the focused element nor the target hears the press.
+    /// `None` passes it on, as if no element took it first. It reads state
+    /// and changes none.
+    fn panel_key(&self, id: &UiId, key: &loom_ui_core::KeyEvent) -> Option<Self::Message> {
+        let _ = (id, key);
+        None
+    }
+
     /// The message for something a text field of the runtime's did, if
     /// the app wants one: `id` is the field's UI ID. The field's text is
     /// the app's (ui-layer.md, section 8, rule 2): an app that wants an

@@ -1040,3 +1040,232 @@ fn an_app_with_no_tree_hears_no_screen_reader() {
     assert_eq!(runtime.counts().updates, 0);
     assert!(driver.accessibility().is_none());
 }
+
+/// What the combobox test app hears.
+#[derive(Debug, Clone, PartialEq)]
+enum ComboMsg {
+    /// The element that takes keys first took this key.
+    Panel(UiId, Key),
+    /// The search field changed.
+    Edited(String),
+    /// Focus this element.
+    Focus(UiId),
+    /// Show the panel in this layer, under the input layer or not.
+    Below(bool),
+}
+
+/// A browser as the combobox pattern has it: a column that takes Up, Down,
+/// Enter, Escape, and Tab first (Tab, which it may not take, is dropped),
+/// holding a search field and, beside the column, a button that is not
+/// inside it. The app answers Up, Down, and Enter, and lets Escape pass.
+#[derive(Default)]
+struct Combo {
+    heard: Vec<ComboMsg>,
+    search: String,
+    below: bool,
+}
+
+impl App for Combo {
+    type Message = ComboMsg;
+
+    fn update(&mut self, message: ComboMsg, _cx: &Context<'_, ComboMsg>) -> Effects<ComboMsg> {
+        let effects = match &message {
+            ComboMsg::Edited(text) => {
+                self.search = text.clone();
+                Effects::none()
+            }
+            ComboMsg::Focus(id) => Effects::focus(id.clone()),
+            ComboMsg::Below(below) => {
+                self.below = *below;
+                Effects::none()
+            }
+            ComboMsg::Panel(..) => Effects::none(),
+        };
+        self.heard.push(message);
+        effects
+    }
+
+    fn view(&self, view: &mut crate::view::View) {
+        use crate::access::{Access, Action, Role};
+        use crate::element::{Element, Length};
+        let search = self.search.clone();
+        view.panel_with(UiId::panel("browser"), Layer::Overlays, &search, |search| {
+            let style = crate::layout::tests::STYLE;
+            let field = Element::field(search.clone(), style)
+                .key("search")
+                .width(Length::Fixed(200.0))
+                .access(Access::new(Role::TextInput, "Search"));
+            let combo = Element::column([field]).key("combo").takes_first([
+                Key::Up,
+                Key::Down,
+                Key::Enter,
+                Key::Escape,
+                Key::Tab,
+            ]);
+            let outside = Element::text("Close", style)
+                .key("close")
+                .focusable()
+                .access(Access::new(Role::Button, "Close").action(Action::Click));
+            Element::column([combo, outside])
+        });
+    }
+
+    fn window(&self) -> crate::app::WindowSpec {
+        crate::app::WindowSpec::default()
+    }
+
+    fn input(&self) -> crate::app::InputState {
+        crate::app::InputState {
+            layer: if self.below { Layer::Question } else { Layer::Overlays },
+            canvas_focused: false,
+            target_first: false,
+        }
+    }
+
+    fn panel_key(&self, id: &UiId, key: &KeyEvent) -> Option<ComboMsg> {
+        let KeyEvent::Pressed { key, .. } = key else {
+            return None;
+        };
+        matches!(key, Key::Up | Key::Down | Key::Enter).then(|| ComboMsg::Panel(id.clone(), *key))
+    }
+
+    fn field_event(&self, _id: &UiId, event: &crate::field::FieldEvent) -> Option<ComboMsg> {
+        match event {
+            crate::field::FieldEvent::Edited(text) => Some(ComboMsg::Edited(text.clone())),
+            _ => None,
+        }
+    }
+}
+
+/// A target that keeps every event it hears and sends nothing.
+#[derive(Default)]
+struct Keys {
+    events: Vec<Event>,
+}
+
+impl Target<ComboMsg> for Keys {
+    fn input(&mut self, event: &Event, _pointer: Option<Point>, _now: Instant, _out: &mut Vec<ComboMsg>) -> Routed {
+        self.events.push(event.clone());
+        Routed::Taken
+    }
+
+    fn focus(&mut self, _target: &FocusTarget, _select: Selection) {}
+
+    fn scroll_into_view(&mut self, _id: &UiId) {}
+
+    fn focused(&self) -> Option<UiId> {
+        None
+    }
+
+    fn needs_redraw(&mut self, _updates: usize) -> bool {
+        false
+    }
+}
+
+/// `key` pressed with no modifiers.
+fn press(key: Key) -> DriverEvent {
+    DriverEvent::Input {
+        event: Event::Key(KeyEvent::Pressed {
+            key,
+            modifiers: Modifiers::default(),
+            text: match key {
+                Key::Character(c) => Some(c.to_string()),
+                _ => None,
+            },
+            repeat: false,
+        }),
+        pointer: None,
+    }
+}
+
+/// The combobox app with the search field focused.
+fn combo() -> Harness<Combo, Keys> {
+    let mut harness = Harness::new(
+        Combo::default(),
+        Keys::default(),
+        WindowState::new(Size::new(800.0, 600.0)),
+        Instant::now(),
+    );
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    let search = UiId::panel("browser").with("combo").with("search");
+    harness.send(ComboMsg::Focus(search.clone()));
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    assert_eq!(harness.runtime().focused(), Some(&search));
+    harness
+}
+
+/// The keys the app heard that the element taking keys first took.
+fn taken(harness: &Harness<Combo, Keys>) -> Vec<Key> {
+    harness
+        .app()
+        .heard
+        .iter()
+        .filter_map(|message| match message {
+            ComboMsg::Panel(_, key) => Some(*key),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Section 6, rule 6, step 2b: Up, Down, and Enter over the focused
+/// search field go to the element around it that takes them first, named
+/// by its UI ID, and neither the field nor the target hears them; a key it
+/// does not name, a letter, goes to the field as before.
+#[test]
+fn an_element_takes_its_keys_before_the_focused_field() {
+    let mut harness = combo();
+    for key in [Key::Up, Key::Down, Key::Enter] {
+        harness.step(press(key));
+    }
+    assert_eq!(taken(&harness), [Key::Up, Key::Down, Key::Enter]);
+    let owner = harness.app().heard.iter().find_map(|message| match message {
+        ComboMsg::Panel(id, _) => Some(id.clone()),
+        _ => None,
+    });
+    assert_eq!(owner, Some(UiId::panel("browser").with("combo")));
+    assert!(
+        harness.runtime().target().events.is_empty(),
+        "the target heard none of them"
+    );
+    harness.step(press(Key::Character('s')));
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.app().search, "s", "a letter is the field's");
+}
+
+/// A key the element names but the app lets pass goes on as if nothing took
+/// it first: Escape, which the field does not take, reaches the target.
+/// Tab is never taken first, though the element named it.
+#[test]
+fn a_key_the_app_passes_goes_on() {
+    let mut harness = combo();
+    harness.step(press(Key::Escape));
+    assert!(taken(&harness).is_empty());
+    assert!(
+        harness
+            .runtime()
+            .target()
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::Key(KeyEvent::Pressed { key: Key::Escape, .. }))),
+        "Escape went on to the target"
+    );
+    harness.step(press(Key::Tab));
+    assert!(taken(&harness).is_empty(), "Tab is not taken first");
+}
+
+/// Only the focus's own ancestors are asked: with the focus on a button
+/// beside the element, its keys are not taken first. Nor are they while a
+/// layer above takes input.
+#[test]
+fn only_around_the_focus_and_in_the_input_layer() {
+    let mut harness = combo();
+    harness.send(ComboMsg::Focus(UiId::panel("browser").with("close")));
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    harness.step(press(Key::Down));
+    assert!(taken(&harness).is_empty(), "the button is not inside it");
+
+    let mut harness = combo();
+    harness.send(ComboMsg::Below(true));
+    harness.step(press(Key::Down));
+    assert!(taken(&harness).is_empty(), "a layer above takes input");
+}

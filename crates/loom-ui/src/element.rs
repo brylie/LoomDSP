@@ -50,7 +50,7 @@
 //! on, so a link that wraps is hit on both lines and nowhere between.
 
 use crate::access::Access;
-use loom_ui_core::{Color, Face, IdKey, Span, TextStyle, UiId, Weight};
+use loom_ui_core::{Color, Face, IdKey, Key, Span, TextStyle, UiId, Weight};
 use std::num::NonZeroU16;
 use std::ops::Range;
 
@@ -414,6 +414,7 @@ pub struct Element {
     /// For a scroll container, the focus stop whose unused scroll keys move
     /// it ([`Element::keys_from`]).
     pub(crate) keys_from: Option<UiId>,
+    pub(crate) keys_first: Vec<Key>,
     pub(crate) children: Vec<Element>,
 }
 
@@ -438,6 +439,7 @@ impl Element {
             access: None,
             hover: None,
             keys_from: None,
+            keys_first: Vec::new(),
             children,
         }
     }
@@ -801,6 +803,22 @@ impl Element {
     /// Only an element with a key has it.
     pub fn hover_text(mut self, text: impl Into<String>) -> Self {
         self.hover = Some(text.into());
+        self
+    }
+
+    /// Takes `keys` before the focused element inside it (ui-layer.md,
+    /// section 6, rule 6, step 2b): while the focus is on it or inside it,
+    /// a press of one of these keys goes to
+    /// [`App::panel_key`](crate::App::panel_key) with this element's UI ID
+    /// first, and a key the app answers `None` for goes on to the focused
+    /// element as before. A browser's list keys over its search field are
+    /// the case it is for: in WAI-ARIA's combobox, Up and Down move the
+    /// list's highlight and never the caret. The nearest such element
+    /// around the focus that names the key is asked, in the focus's own
+    /// panel. Tab is never taken this way. It needs a key.
+    #[must_use]
+    pub fn takes_first(mut self, keys: impl IntoIterator<Item = Key>) -> Self {
+        self.keys_first = keys.into_iter().filter(|key| *key != Key::Tab).collect();
         self
     }
 
