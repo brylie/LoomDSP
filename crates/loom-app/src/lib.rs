@@ -75,6 +75,7 @@ mod qa_tests;
 mod question;
 mod recent;
 mod recovery;
+mod runtime_fields;
 mod scene;
 mod screenshot;
 mod script_vars;
@@ -496,6 +497,10 @@ enum Message {
     /// after a press: a press elsewhere ends a draft whose field never had
     /// focus, which a change alone would miss.
     FocusMoved(Option<loom_ui_core::UiId>),
+    /// A runtime text field's paste could not read the clipboard: said in
+    /// the status line, never shown as an empty clipboard (ui-layer.md,
+    /// section 8, rule 2).
+    FieldPasteRefused,
     /// Tab was pressed. It closes a text field on the main view.
     TextFieldTab {
         backwards: bool,
@@ -617,6 +622,8 @@ impl Message {
                 | Self::StartWatching
                 | Self::RetryCommit(_)
                 | Self::WindowRescaled
+                // Only says a refused paste in the status line.
+                | Self::FieldPasteRefused
         )
     }
 
@@ -753,6 +760,8 @@ impl Message {
             | Self::StartWatching
             | Self::RetryCommit(_)
             | Self::WindowRescaled
+            // It only says a refused paste in the status line.
+            | Self::FieldPasteRefused
             | Self::ControlFrame(_)
             | Self::Located { .. }
             | Self::Captured { .. }
@@ -1853,6 +1862,9 @@ impl App {
             Message::Matrix(event) => self.matrix_message(event),
             Message::MatrixKey(key) => self.matrix_key_message(key),
             Message::ControlFrame(now) => self.control_frame(now),
+            Message::FieldPasteRefused => {
+                self.alerts.warn(crate::clipboard::COULD_NOT_READ.to_string());
+            }
             Message::TextFieldTab { backwards } => {
                 self.text_field_tab(self.focus.clone().as_ref(), backwards);
             }
@@ -2140,6 +2152,7 @@ impl App {
             | Message::StartWatching
             | Message::RetryCommit(_)
             | Message::ControlFrame(_)
+            | Message::FieldPasteRefused
             | Message::TextFieldTab { .. }
             | Message::TabFrom { .. }
             | Message::EnterFields { .. }

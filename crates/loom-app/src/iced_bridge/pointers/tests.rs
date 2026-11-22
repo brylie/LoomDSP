@@ -72,7 +72,12 @@ fn focuses(message: &Message) -> Option<UiId> {
 /// The subtractive patch with `view`'s panels added.
 fn ui_with(view: fn(&mut View)) -> Ui {
     let mut ui = Ui::open("subtractive.ron");
-    ui.with_test_panels(TestPanels { view, clicked, focuses });
+    ui.with_test_panels(TestPanels {
+        view,
+        clicked,
+        focuses,
+        fields: |_, _| None,
+    });
     ui
 }
 

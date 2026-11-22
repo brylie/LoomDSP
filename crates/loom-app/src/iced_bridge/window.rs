@@ -20,7 +20,7 @@
 //! draw.
 
 use super::tasks::{self, Sink, Stuck};
-use super::{Bridged, FocusAnswer, Hosted, IcedTarget, focus_query, question_task};
+use super::{Bridged, FocusAnswer, Hosted, IcedTarget, answer_task, focus_query};
 use crate::{App, Message};
 use iced::advanced::renderer::Style;
 use iced::advanced::widget::Operation;
@@ -326,8 +326,9 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
         // The turn's window work, one after another, as the bridge chained
         // it: focus and scrolls, the window questions, then the focus query.
         let mut window = Task::batch(parts.target.take_tasks());
+        let field = parts.panels.focused_field().cloned();
         for question in app.take_window_questions() {
-            window = window.chain(question_task(question).map(Bridged::App));
+            window = window.chain(answer_task(question, field.as_ref()).map(Bridged::App));
         }
         if app.take_focus_question() {
             window = window.chain(focus_query(Bridged::Focus));

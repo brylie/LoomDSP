@@ -324,6 +324,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.focus.id()
     }
 
+    /// The focused element when it is one of the runtime's text fields, as
+    /// last laid out: what [`Context::field_has_focus`](crate::Context::field_has_focus)
+    /// asks, for a driver outside a turn. It follows the focus, so a field
+    /// whose panel closed, or that a layout took away, no longer counts.
+    pub fn focused_field(&self) -> Option<&UiId> {
+        self.focus.id().filter(|id| self.panels.fields.has(id))
+    }
+
     /// Every focus stop of the runtime's elements, in focus order, as last
     /// laid out (section 6, rule 2). A router reads it to tell the
     /// runtime's elements from a toolkit's.

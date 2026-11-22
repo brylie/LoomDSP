@@ -126,6 +126,9 @@ pub(crate) enum Event {
     LocateAfterLayout,
     /// A screen reader asked for an action.
     Action(ActionRequest),
+    /// What one of the runtime's text fields reports changed: its text,
+    /// caret, selection, or scroll (ui-layer.md, section 7, rule 7).
+    FieldChanged,
 }
 
 /// What the app keeps for the accessibility tree between events. It
@@ -611,11 +614,18 @@ impl crate::App {
         ids
     }
 
-    /// The UI ID the tree gave node `node`, for the harness
+    /// The UI ID the tree gave node `node`: for the runtime's text actions
+    /// on its fields (`App::access_target`), and for the harness
     /// (`ui_test/a11y.rs`).
-    #[cfg(any(test, feature = "test-ui"))]
     pub(crate) fn a11y_ui_id(&self, node: accesskit::NodeId) -> Option<loom_ui_core::UiId> {
         self.a11y.ids.id(node.0).cloned()
+    }
+
+    /// The node ID the tree gives the part `id`, for a test that acts on it
+    /// as a screen reader would.
+    #[cfg(test)]
+    pub(crate) fn a11y_node_of(&mut self, id: &loom_ui_core::UiId) -> accesskit::NodeId {
+        accesskit::NodeId(self.a11y.ids.number(id))
     }
 
     /// The tree as it is now, with the canvas placed by `view`.
@@ -1012,6 +1022,7 @@ impl crate::App {
                 self.a11y.flush_live = true;
                 self.a11y_rebuild();
             }
+            Event::FieldChanged => self.a11y_rebuild(),
             Event::LocateAfterLayout => {
                 if self.a11y.active {
                     self.a11y_read_places();

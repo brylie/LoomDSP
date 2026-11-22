@@ -104,6 +104,13 @@ impl PaintState<'_> {
 }
 
 impl<A: App> Panels<'_, A> {
+    /// The focused element when it is one of the runtime's text fields, as
+    /// [`Runtime::focused_field`](crate::Runtime::focused_field) gives it,
+    /// for a layer that drives the window between turns.
+    pub fn focused_field(&self) -> Option<&UiId> {
+        self.focus.id().filter(|id| self.window.fields.has(id))
+    }
+
     /// Lays out what changed since the last call, and settles the focus
     /// on what is laid out, as [`Runtime::lay_out`](crate::Runtime::lay_out)
     /// does. When that gives one of the runtime's elements the focus, the

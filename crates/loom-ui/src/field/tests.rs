@@ -2398,3 +2398,25 @@ fn a_single_line_fields_runs_are_cut_every_255_characters() {
 }
 
 mod many;
+
+/// `Runtime::focused_field` names the focus only while it is one of the
+/// runtime's text fields: not a button, and not a field that a layout took
+/// away, so a driver never reads a field that is gone.
+#[test]
+fn focused_field_follows_the_focus() {
+    let Some((mut harness, mut text)) = form("ab", true) else {
+        return;
+    };
+    let ok = UiId::panel("form").with("ok");
+    assert_eq!(harness.runtime().focused_field(), Some(&name()), "the field has focus");
+    harness.send(Message::Focus(ok.clone()));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.runtime().focused(), Some(&ok));
+    assert_eq!(harness.runtime().focused_field(), None, "a button is no field");
+    harness.send(Message::Focus(name()));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.runtime().focused_field(), Some(&name()));
+    harness.send(Message::Remove);
+    harness.lay_out(&mut text);
+    assert_eq!(harness.runtime().focused_field(), None, "the field is gone");
+}
