@@ -454,3 +454,43 @@ fn both_toolkits_read_the_same_role_tokens() {
         }
     }
 }
+
+/// Help's links read at 4.5:1 or more against the dialog they sit on
+/// (WCAG 2.2, 1.4.3), always. Against the body text beside them, a link
+/// that reaches less than 3:1 cannot be told apart by colour alone, so it
+/// must be underlined (1.4.1, technique G183); at 3:1 or more the
+/// underline is optional. Today's link colour is 1.65:1 against the body
+/// text, which is why the link token underlines.
+#[test]
+fn help_links_read_and_stand_apart_from_the_text() {
+    use loom_canvas::contrast_ratio;
+    let theme = crate::tests::app().theme();
+    let dialog = super::dialog(&theme);
+    let link = super::link(&theme);
+    let on_dialog = contrast_ratio(link.colour, dialog.fill);
+    assert!(on_dialog >= 4.5, "on the dialog: {on_dialog:.2}:1");
+    let beside_text = contrast_ratio(link.colour, dialog.text);
+    assert!(
+        beside_text >= 3.0 || link.underline,
+        "{beside_text:.2}:1 against the body text, and no underline"
+    );
+    let quiet = contrast_ratio(loom_canvas::iced_convert::ToCore::to_core(super::QUIET), dialog.fill);
+    assert!(quiet >= 4.5, "quiet text on the dialog: {quiet:.2}:1");
+}
+
+/// The module browser's highlighted row keeps its text readable on its
+/// fill, and its outline stands out at 3:1 or more against the panel
+/// (1.4.3, 1.4.11).
+#[test]
+fn the_highlighted_row_reads_and_stands_out() {
+    use loom_canvas::contrast_ratio;
+    let theme = crate::tests::app().theme();
+    let panel = super::floating_panel(&theme);
+    let row = super::highlighted_row(&theme);
+    let text = contrast_ratio(panel.text, row.fill);
+    assert!(text >= 4.5, "text on the row: {text:.2}:1");
+    let quiet = contrast_ratio(loom_canvas::iced_convert::ToCore::to_core(super::QUIET), row.fill);
+    assert!(quiet >= 4.5, "quiet text on the row: {quiet:.2}:1");
+    let outline = contrast_ratio(row.border, panel.fill);
+    assert!(outline >= 3.0, "the outline: {outline:.2}:1");
+}

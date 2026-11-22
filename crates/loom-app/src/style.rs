@@ -496,7 +496,121 @@ pub fn markdown(theme: &Theme) -> iced_markdown::Settings {
     settings.h5_size = CONTROL.into();
     settings.h6_size = CONTROL.into();
     settings.code_size = SMALL.into();
+    // The link token, which `loom-ui`'s help takes too (with its underline).
+    settings.style.link_color = {
+        use loom_canvas::iced_convert::ToIced as _;
+        link(theme).colour.to_iced()
+    };
     settings
+}
+
+/// How a dialog over the canvas looks: help and Your patches. Today's
+/// look, the palette's weak background with a corner of 2, now a token so
+/// `loom-ui`'s panels take it (plan 3.2, rows 5b and 6).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DialogLook {
+    /// The panel's fill.
+    pub fill: loom_ui_core::Color,
+    /// Its text.
+    pub text: loom_ui_core::Color,
+    /// The radius of its corners.
+    pub radius: f32,
+}
+
+/// The dialog look in `theme`.
+pub fn dialog(theme: &Theme) -> DialogLook {
+    use loom_canvas::iced_convert::ToCore as _;
+    let palette = theme.extended_palette();
+    DialogLook {
+        fill: palette.background.weak.color.to_core(),
+        text: palette.background.weak.text.to_core(),
+        radius: 2.0,
+    }
+}
+
+/// How dark help's backdrop is: black at this alpha, as today.
+pub const HELP_SCRIM: f32 = 0.55;
+
+/// How dark Your patches' backdrop is: black at this alpha, as today, the
+/// question's too.
+pub const PATCHES_SCRIM: f32 = 0.4;
+
+/// How a link in help's text looks: the theme's primary colour, as help
+/// shows links today, and an underline, since the colour alone is too
+/// close to the body text to tell a link apart (WCAG 2.2, 1.4.1).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinkLook {
+    /// The colour of its words and its line.
+    pub colour: loom_ui_core::Color,
+    /// It is underlined. Required while the colour is under 3:1 against
+    /// the body text (WCAG 2.2, 1.4.1, technique G183), which a test checks.
+    pub underline: bool,
+}
+
+/// The link look in `theme`.
+pub fn link(theme: &Theme) -> LinkLook {
+    use loom_canvas::iced_convert::ToCore as _;
+    LinkLook {
+        colour: theme.extended_palette().primary.base.color.to_core(),
+        underline: true,
+    }
+}
+
+/// How the module browser's floating panel looks: the palette's base
+/// background, a 1 px outline in its strong colour, and a corner of 6, as
+/// today.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FloatingLook {
+    /// The panel's fill.
+    pub fill: loom_ui_core::Color,
+    /// Its text.
+    pub text: loom_ui_core::Color,
+    /// Its outline's colour.
+    pub border: loom_ui_core::Color,
+    /// Its outline's width.
+    pub border_width: f32,
+    /// The radius of its corners.
+    pub radius: f32,
+}
+
+/// The floating panel look in `theme`.
+pub fn floating_panel(theme: &Theme) -> FloatingLook {
+    use loom_canvas::iced_convert::ToCore as _;
+    let palette = theme.extended_palette();
+    FloatingLook {
+        fill: palette.background.base.color.to_core(),
+        text: palette.background.base.text.to_core(),
+        border: palette.background.strong.color.to_core(),
+        border_width: 1.0,
+        radius: 6.0,
+    }
+}
+
+/// How a browser's highlighted row looks: a lifted grey with a 1 px
+/// outline in the primary colour and a corner of 4, as today, so its
+/// quieter text stays readable on it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RowLook {
+    /// The row's fill.
+    pub fill: loom_ui_core::Color,
+    /// Its outline's colour.
+    pub border: loom_ui_core::Color,
+    /// Its outline's width.
+    pub border_width: f32,
+    /// The radius of its corners.
+    pub radius: f32,
+}
+
+/// The highlighted row look in `theme`.
+pub fn highlighted_row(theme: &Theme) -> RowLook {
+    use loom_canvas::iced_convert::ToCore as _;
+    let palette = theme.extended_palette();
+    RowLook {
+        fill: palette.background.weak.color.to_core(),
+        border: palette.primary.base.color.to_core(),
+        border_width: 1.0,
+        radius: 4.0,
+    }
 }
 
 #[cfg(test)]

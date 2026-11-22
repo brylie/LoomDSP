@@ -1030,13 +1030,14 @@ fn inside(at: Point, area: Rect) -> Point {
 }
 
 fn panel_style(theme: &Theme) -> container::Style {
-    let palette = theme.extended_palette();
+    use loom_canvas::iced_convert::ToIced as _;
+    let look = style::floating_panel(theme);
     container::Style {
-        background: Some(palette.background.base.color.into()),
+        background: Some(look.fill.to_iced().into()),
         border: iced::Border {
-            color: palette.background.strong.color,
-            width: 1.0,
-            radius: 6.0.into(),
+            color: look.border.to_iced(),
+            width: look.border_width,
+            radius: look.radius.into(),
         },
         shadow: iced::Shadow {
             color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
@@ -1048,18 +1049,20 @@ fn panel_style(theme: &Theme) -> container::Style {
 }
 
 /// The highlighted row: a lifted grey with an orange outline, like a
-/// selected card, so its quieter text stays readable on it.
+/// selected card, so its quieter text stays readable on it. From the
+/// style token (`style::highlighted_row`), which `loom-ui`'s rows take too.
 pub(crate) fn row_style(theme: &Theme, highlighted: bool) -> container::Style {
+    use loom_canvas::iced_convert::ToIced as _;
     if !highlighted {
         return container::Style::default();
     }
-    let palette = theme.extended_palette();
+    let look = style::highlighted_row(theme);
     container::Style {
-        background: Some(palette.background.weak.color.into()),
+        background: Some(look.fill.to_iced().into()),
         border: iced::Border {
-            color: palette.primary.base.color,
-            width: 1.0,
-            radius: 4.0.into(),
+            color: look.border.to_iced(),
+            width: look.border_width,
+            radius: look.radius.into(),
         },
         ..container::Style::default()
     }

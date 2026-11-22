@@ -737,14 +737,14 @@ impl PatchBrowser {
         let panel = container(panel)
             .padding(16)
             .width(720)
-            .style(container::rounded_box)
+            .style(crate::help::dialog_style)
             .id(crate::places::widget_id(&patches_id()));
         opaque(
             container(panel)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .center(Length::Fill)
-                .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
+                .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, style::PATCHES_SCRIM))),
         )
     }
 }

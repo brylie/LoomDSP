@@ -299,7 +299,7 @@ impl Help {
         .width(Length::Fill)
         .max_width(720)
         .height(Length::Fill)
-        .style(container::rounded_box);
+        .style(|theme: &Theme| dialog_style(theme));
         // The panel takes its own clicks; the backdrop around it closes help.
         // The panel is named by its UI ID, so the window says where it is.
         let panel = crate::inspector::ids::named(&crate::overlays::access::help_id(), panel);
@@ -308,10 +308,23 @@ impl Help {
             .center_y(Length::Fill)
             .padding(30)
             .style(|_: &Theme| container::Style {
-                background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.55).into()),
+                background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, style::HELP_SCRIM).into()),
                 ..container::Style::default()
             });
         iced::widget::mouse_area(backdrop).on_press(Message::CloseHelp).into()
+    }
+}
+
+/// The dialog's panel, from the style token (`style::dialog`), which
+/// `loom-ui`'s panels take too. Your patches uses it as well.
+pub(crate) fn dialog_style(theme: &Theme) -> container::Style {
+    use loom_canvas::iced_convert::ToIced as _;
+    let look = style::dialog(theme);
+    container::Style {
+        background: Some(look.fill.to_iced().into()),
+        text_color: Some(look.text.to_iced()),
+        border: iced::border::rounded(look.radius),
+        ..container::Style::default()
     }
 }
 
