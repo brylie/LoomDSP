@@ -126,10 +126,15 @@ impl App for Shown {
 pub(crate) struct Toolkit {
     /// Every element it was asked to bring into view.
     pub(crate) scrolled: Vec<UiId>,
+    /// Every key pressed that reached it.
+    pub(crate) keys: Vec<Key>,
 }
 
 impl Target<Message> for Toolkit {
-    fn input(&mut self, _event: &Event, _pointer: Option<Point>, _now: Instant, _out: &mut Vec<Message>) -> Routed {
+    fn input(&mut self, event: &Event, _pointer: Option<Point>, _now: Instant, _out: &mut Vec<Message>) -> Routed {
+        if let Event::Key(KeyEvent::Pressed { key, .. }) = event {
+            self.keys.push(*key);
+        }
         Routed::Passed
     }
 
@@ -730,3 +735,5 @@ fn a_link_moves_with_its_scroll_container() {
     let hit = window.hit(middle).map(|(_, hit)| format!("{hit:?}"));
     assert!(hit.is_some_and(|hit| hit.contains("saw")), "hit where it shows now");
 }
+
+mod keys;

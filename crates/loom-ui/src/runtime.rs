@@ -960,22 +960,33 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if self.app.input().canvas_focused || !self.in_input_layer(&id) {
             return (false, false);
         }
-        let shift_only = modifiers.shift && plain(*modifiers);
-        let change: fn(f32, f32, f32, f32) -> f32 = match key {
-            Key::Up if modifiers.none() => |at, line, _, _| at - line,
-            Key::Down if modifiers.none() => |at, line, _, _| at + line,
-            Key::PageUp if modifiers.none() => |at, line, page, _| at - (page - line).max(line),
-            Key::PageDown if modifiers.none() => |at, line, page, _| at + (page - line).max(line),
-            Key::Space if modifiers.none() => |at, _, page, _| at + page,
-            Key::Space if shift_only => |at, _, page, _| at - page,
-            Key::Home if modifiers.none() => |_, _, _, _| 0.0,
-            Key::End if modifiers.none() => |_, _, _, most| most,
-            _ => return (false, false),
+        let Some(change) = scroll_change(*key, *modifiers) else {
+            return (false, false);
         };
         let moved = self
             .panels
             .scroll_container(&id, |at, page, most| change(at, line, page, most));
         (true, moved)
+    }
+
+    /// A scroll key the focused element did not use goes to the nearest
+    /// scroll container around it, or to one that takes its keys from it
+    /// (section 6, rule 6, step 3; section 5, rule 12). Returns whether a
+    /// container moved, which takes the key.
+    fn bubble_scroll_key(&mut self, event: &Event) -> bool {
+        let Event::Key(KeyEvent::Pressed { key, modifiers, .. }) = event else {
+            return false;
+        };
+        let Some(id) = self.focus.id().cloned() else {
+            return false;
+        };
+        if self.app.input().canvas_focused || !self.in_input_layer(&id) {
+            return false;
+        }
+        let Some(change) = scroll_change(*key, *modifiers) else {
+            return false;
+        };
+        self.panels.scroll_by_key(&id, change)
     }
 
     /// A screen reader's scroll action (section 7, rule 28): ScrollUp,
@@ -1187,6 +1198,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     if used {
                         // A key a field took is the field's alone, so a
                         // toolkit that heard it first drops it too.
+                        self.target.kept(&event);
+                    } else if self.bubble_scroll_key(&event) {
+                        // A scroll key the focused element left moved a
+                        // container around it, and goes no further.
+                        redraw = true;
                         self.target.kept(&event);
                     } else {
                         redraw |= self.route(&event, pointer, now, &mut batch);
@@ -1576,5 +1592,26 @@ pub(crate) fn live_arm<A: App>(window: &Window, app: &A, focus: &Focus, pointer:
     let unmoved = focus.moves == *moves && focus.id() == Some(armed);
     (unmoved && activatable(window, app, armed).is_some_and(Activation::on_space)).then(|| armed.clone())
 }
+
+/// How a scroll key moves a container, from its offset, one line, one page,
+/// and the most it can move (section 5, rule 12; the browsers' keys, as the
+/// APG has no pattern): Up and Down one line, Page Up and Page Down a page
+/// less one line, Space and Shift+Space a page, and Home and End the top and
+/// the bottom. `None` for any other key, or with another modifier.
+fn scroll_change(key: Key, modifiers: Modifiers) -> Option<crate::window::scroll::ScrollChange> {
+    let shift_only = modifiers.shift && plain(modifiers);
+    Some(match key {
+        Key::Up if modifiers.none() => |at, line, _, _| at - line,
+        Key::Down if modifiers.none() => |at, line, _, _| at + line,
+        Key::PageUp if modifiers.none() => |at, line, page, _| at - (page - line).max(line),
+        Key::PageDown if modifiers.none() => |at, line, page, _| at + (page - line).max(line),
+        Key::Space if modifiers.none() => |at, _, page, _| at + page,
+        Key::Space if shift_only => |at, _, page, _| at - page,
+        Key::Home if modifiers.none() => |_, _, _, _| 0.0,
+        Key::End if modifiers.none() => |_, _, _, most| most,
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests;

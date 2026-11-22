@@ -190,6 +190,9 @@ pub(crate) struct Record {
     pub(crate) clip: Option<Rect>,
     /// For a scroll container: its style, and how far it is scrolled.
     pub(crate) scroll: Option<ScrollState>,
+    /// For a scroll container, the focus stop whose unused scroll keys move
+    /// it (section 5, rule 12).
+    pub(crate) keys_from: Option<UiId>,
     /// For a radio group, a radio, or a radio's mark: which.
     pub(crate) radio: Option<RadioPart>,
     /// For a link inside a rich text: its bytes in its parent's text. It
@@ -461,6 +464,22 @@ impl Layout {
         let scope = self.panel.clone();
         let node = self.add(root, None, &scope, Parent::Stack, false);
         self.root = Some(Root { node, width, height });
+        // A container that takes its keys from a stop needs that stop in the
+        // panel, which may come after it in the tree.
+        let missing: Vec<UiId> = self
+            .records
+            .iter()
+            .filter(|record| {
+                record
+                    .keys_from
+                    .as_ref()
+                    .is_some_and(|stop| !self.by_id.get(stop).is_some_and(|at| self.records[*at].focusable))
+            })
+            .filter_map(|record| record.id.clone())
+            .collect();
+        for id in missing {
+            self.problem(Some(id), Problem::KeysFromNoStop);
+        }
         // A container's offset goes with it.
         let (by_id, records) = (&self.by_id, &self.records);
         self.offsets
@@ -817,6 +836,7 @@ impl Layout {
             focusable,
             access,
             hover,
+            keys_from,
             children,
             ..
         } = element;
@@ -917,6 +937,8 @@ impl Layout {
         } else {
             access
         };
+        // Only a container with a UI ID takes its keys from a stop.
+        let keys_from = keys_from.filter(|_| kept.is_some());
         self.records.push(Record {
             node,
             parent,
@@ -937,6 +959,7 @@ impl Layout {
                 offset: 0.0,
                 most: 0.0,
             }),
+            keys_from,
             radio,
             inline: None,
             words: Vec::new(),
@@ -958,8 +981,11 @@ impl Layout {
         // A scroll container whose content has no focus stop is one itself,
         // so a keyboard user can scroll it (WCAG 2.2, SC 2.1.1).
         if scrollbar.is_some() && self.records[index].id.is_some() {
+            // One that takes its keys from a named stop is never a stop
+            // itself: that stop moves it, and Tab would stop twice.
             let inside = self.records[index + 1..].iter().any(|record| record.focusable);
-            let stop = !inside && is_stop(true, self.records[index].access.as_ref());
+            let named = self.records[index].keys_from.is_some();
+            let stop = !inside && !named && is_stop(true, self.records[index].access.as_ref());
             self.records[index].focusable = stop;
             if stop && self.records[index].access.is_none() {
                 let id = self.records[index].id.clone();
@@ -1034,6 +1060,7 @@ impl Layout {
             wrap_width: 0.0,
             clip: None,
             scroll: None,
+            keys_from: None,
             radio: None,
             inline: Some(link.range),
             words: Vec::new(),
