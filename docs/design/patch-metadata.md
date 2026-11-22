@@ -78,7 +78,19 @@ Two questions pick one of the six Creative Commons 4.0 licences. A third answer 
 
 Every licence except `CC0-1.0` requires credit to the authors, which is why the authors field matters. Each answer shows a one-sentence explanation in plain words, and the chooser links to the licence's own page. The app explains; it does not give legal advice.
 
-With a screen reader, the chooser is a dialog named by its title. Each question is a radio group whose answers carry their explanations as descriptions; **Other** is a radio button with its text field after it, and the field's text is typed, not used, since Enter there would use it. What the answers give is read as text, and **Use this licence** is disabled until they give a licence. Opened from Preferences, it hides Preferences until it closes ([UI layer](ui-layer.md), section 7, rule 27).
+With a screen reader, the chooser is a dialog named by its title. Each question is a radio group whose answers carry their explanations as descriptions; **Other** is a radio group holding one radio, with its text field after it (see Keys below), and the field's text is typed, not used, since Enter there would use it. What the answers give is read as text, and **Use this licence** is disabled until they give a licence. Opened from Preferences, it hides Preferences until it closes ([UI layer](ui-layer.md), section 7, rule 27).
+
+**Keys** (from row 3c of the UI layer plan, the chooser is `loom-ui`'s; Brylie's standing rule of 2026-11-20 is to follow the WAI-ARIA default where there is doubt, here the APG's modal dialog pattern, keyboard interaction):
+
+- **Opening it** focuses the first question's group: its chosen answer, or its first when none is. That is the pattern's first focusable element. A screen reader's Click on **Choose** opens it the same way, so no field under it keeps the keys.
+- **Tab and Shift+Tab** move through the chooser and wrap at its ends: the first question, the second when it shows, **Other**, the Other field, Clear, Cancel, and **Use this licence**. **Other** is a radio group of its own, holding one radio, since a radio always sits in a group (UI layer, section 6, rule 9), and its field is the stop after it. Use is skipped while it is turned off ([UI layer](ui-layer.md), section 6, rule 2). The focus stays inside, as in the question: SC 2.1.2 allows it because Escape always leaves.
+- **In a question,** the arrows choose, and Space chooses the focused answer (UI layer, section 6, rule 9). Typing in the Other field chooses **Other**.
+- **Enter** in the Other field is Use when Use is on, as above. On a button, Enter is that button's. In a question it does nothing.
+- **Escape** closes the chooser, as Cancel does, from anywhere in it, the Other field included. The exception is while an input method is composing in the field: that Escape is the composition's. *Departure from before row 3c:* the field took the first Escape, and a second one closed the chooser.
+- **The questions and what they give scroll** in the runtime's scroll container (UI layer, section 5, rule 12), between the title and the buttons, which stay in view. Focus moving to a part reveals it, and the wheel scrolls.
+- **Closing it** gives the focus back by UI layer, section 6, rule 4. Over Preferences, which Iced still draws, focus goes to Preferences' root, as decided 2026-11-12.
+
+The dialog is named by its title and has no description, since nothing stands between the title and the first question.
 
 ### Credit for parts
 
