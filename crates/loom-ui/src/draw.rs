@@ -557,14 +557,22 @@ fn paint_field(
             clip: shows,
         });
     }
+    // A multi-line field's text wraps at the width its editor wraps at, so
+    // the letters sit on the lines its caret and selection do (section 8,
+    // rule 7); a single-line field's runs on, to scroll inside its box.
+    let many = state.lines() == crate::field::Lines::Many;
     painter.text(&TextRun {
         text: state.text(),
         anchor: start,
-        bounds: Size::new(state.text_width().max(content.width), content.height),
+        bounds: if many {
+            Size::new(state.shown_width(), content.height)
+        } else {
+            Size::new(state.text_width().max(content.width), content.height)
+        },
         align: Align::Left,
         vertical: Vertical::Top,
         style: text.style,
-        wrap: false,
+        wrap: many,
         colour: style.text,
         clip: shows,
     });

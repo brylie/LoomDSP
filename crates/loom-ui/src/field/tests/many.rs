@@ -650,3 +650,28 @@ fn on_a_mac_end_after_an_edit_shows_the_end_once_laid_out() {
     assert!(most > 0.0);
     assert_eq!(f64::from(most), scrolled_by(&mut harness, &mut text), "End's end shows");
 }
+
+/// A text area's text is painted wrapped, at the width its editor wraps at,
+/// so its letters sit on the lines its caret and selection do.
+#[test]
+fn a_text_area_is_painted_wrapped_at_its_width() {
+    use crate::paint::testing::{Painted, Recorder};
+    let long = "alpha beta gamma delta epsilon zeta eta theta";
+    let Some((mut harness, mut text)) = notes(long) else {
+        return;
+    };
+    harness.lay_out(&mut text);
+    let mut recorder = Recorder::default();
+    let (_, _, mut panels) = harness.parts();
+    panels.paint(Layer::Panels, &mut recorder, &super::PANEL);
+    let run = recorder
+        .painted
+        .iter()
+        .find_map(|piece| match piece {
+            Painted::Text { text, run } if text == long => Some(*run),
+            _ => None,
+        })
+        .expect("the area's text is painted");
+    assert!(run.wrap, "it wraps");
+    assert!(run.bounds.width <= 160.0, "at the area's width: {:?}", run.bounds);
+}

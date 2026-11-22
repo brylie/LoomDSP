@@ -518,6 +518,12 @@ impl FieldState {
         self.lines
     }
 
+    /// The width its text shows in, as the last layout gave it: the width
+    /// a multi-line field wraps at, for its editor and its painting alike.
+    pub(crate) fn shown_width(&self) -> f32 {
+        self.width
+    }
+
     /// `text` made to fit the field: one line, or many with its breaks
     /// kept. Every text that comes in other than by typing goes through
     /// this: a paste, an input method's commit, and a screen reader's.
