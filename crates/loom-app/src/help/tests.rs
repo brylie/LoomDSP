@@ -618,3 +618,51 @@ fn enter_follows_a_focused_link_and_the_page_opens_at_its_top() {
         "with the ring: Enter is a key"
     );
 }
+
+/// F1 over a browser whose search field has the keys takes the focus to
+/// help's Close, with the ring, since F1 is a key; the next turn keeps it
+/// there; and Escape gives the keys back to the browser's field (#883,
+/// row 1; help-pages.md, Keys, links, and focus).
+#[test]
+fn f1_over_a_browser_focuses_close_and_escape_gives_the_field_back() {
+    use crate::input_owner::InputOwner;
+    for (owner, field) in [
+        (InputOwner::Browser, crate::browser::search_id()),
+        (InputOwner::Patches, crate::patches::text_fields()[0].clone()),
+    ] {
+        let mut ui = Ui::open("subtractive.ron");
+        crate::input_owner::tests::open_overlay(&mut ui, owner);
+        let at = ui.field(&field);
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        assert_eq!(
+            ui.app().focus.as_ref(),
+            Some(&field),
+            "{owner:?}: the field has the keys"
+        );
+        ui.tap(Key::Named(Named::F1), Modifiers::default());
+        let _ = ui.redraw();
+        let close = crate::overlays::access::help_id().with("close");
+        assert_eq!(ui.runtime().focused(), Some(&close), "{owner:?}: Close has the focus");
+        assert_eq!(
+            ui.runtime().focus_ring().map(|(id, _)| id),
+            Some(close.clone()),
+            "{owner:?}: ringed"
+        );
+        let _ = ui.redraw();
+        assert_eq!(
+            ui.runtime().focused(),
+            Some(&close),
+            "{owner:?}: the next turn keeps it"
+        );
+        ui.tap(Key::Named(Named::Escape), Modifiers::default());
+        let _ = ui.redraw();
+        assert!(ui.app().overlays.help.is_none(), "{owner:?}: help closed");
+        assert_eq!(
+            ui.focused_field(),
+            Some(field),
+            "{owner:?}: the field has the keys again"
+        );
+    }
+}

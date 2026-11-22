@@ -912,9 +912,9 @@ impl Target<Heard> for Keys {
 }
 
 /// A focus effect moves the runtime's focus inside an update, and its
-/// report waits in the queue. When the very next driver event is a key,
-/// the report runs before the key's update, since a turn takes what waits
-/// first: the app's copy never drifts (section 7, rule 7).
+/// report runs right after that update, in the same turn, so it comes
+/// before the next key's update too: the app's copy never drifts (section
+/// 7, rule 7).
 #[test]
 fn a_report_waiting_in_the_queue_runs_before_the_next_key() {
     use crate::headless::Headless;
@@ -931,8 +931,12 @@ fn a_report_waiting_in_the_queue_runs_before_the_next_key() {
     runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
     runtime.lay_out(&mut Mono::default());
     runtime.waker().send(Heard::Focus(id("bar", "b")));
-    let next = runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
-    assert!(next.again, "the report waits for the next turn");
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    assert_eq!(
+        runtime.app().heard,
+        [Heard::Focus(id("bar", "b")), Heard::Moved(Some(id("bar", "b")))],
+        "the report ran in the update's own turn"
+    );
     let key = DriverEvent::Input {
         event: Event::Key(KeyEvent::Pressed {
             key: Key::Character('k'),
@@ -1106,4 +1110,37 @@ fn a_placeholder_is_the_fields_hint_not_its_value() {
     assert_eq!(node.placeholder(), Some("Search modules"));
     assert_eq!(node.value(), Some(""));
     assert_eq!(node.label(), Some("Search"));
+}
+
+/// Two messages in one turn, the first of which moves the focus by an
+/// effect: the report runs between them, so the second sees the app's
+/// copy current (section 7, rule 7). Help closing over a browser, which
+/// gives the focus back to its field while another message waits, is the
+/// case that found it.
+#[test]
+fn a_report_runs_between_two_messages_of_one_turn() {
+    use crate::headless::Headless;
+    let mut runtime = crate::Runtime::new(
+        Copy {
+            copy: None,
+            heard: Vec::new(),
+        },
+        Keys,
+        WindowState::new(Size::new(400.0, 200.0)),
+        std::sync::Arc::new(|| {}),
+    );
+    let mut driver = Headless::new();
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    runtime.lay_out(&mut Mono::default());
+    runtime.waker().send(Heard::Focus(id("bar", "b")));
+    runtime.waker().send(Heard::Key);
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    assert_eq!(
+        runtime.app().heard,
+        [
+            Heard::Focus(id("bar", "b")),
+            Heard::Moved(Some(id("bar", "b"))),
+            Heard::Key
+        ]
+    );
 }

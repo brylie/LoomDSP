@@ -1977,9 +1977,6 @@ impl App {
             self.run_files.finish();
             self.effect(loom_ui::Effects::quit());
         } else if !was_help_open && self.overlays.help.is_some() {
-            // The focus goes to Close, with a ring only when help was
-            // opened from the keyboard (help-pages.md; section 6, rule 4).
-            self.effect(loom_ui::Effects::focus_as_input(help::Help::first_stop()));
             if matches!(
                 before_help,
                 input_owner::InputOwner::Browser | input_owner::InputOwner::Patches
@@ -1989,6 +1986,10 @@ impl App {
                     self.effect(loom_ui::Effects::unfocus());
                 }
             }
+            // Then the focus goes to Close, with a ring only when help was
+            // opened from the keyboard (help-pages.md; section 6, rule 4).
+            // After the unfocus, which would drop it.
+            self.effect(loom_ui::Effects::focus_as_input(help::Help::first_stop()));
         } else if was_help_open && self.overlays.help.is_none() {
             let owner = self.input_owner();
             let field = self

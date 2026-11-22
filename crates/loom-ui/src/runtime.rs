@@ -1457,6 +1457,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             }
             updates += 1;
             redraw |= self.update(message, now, driver);
+            // A focus an update's effects moved is the next thing the app
+            // hears, before the turn's other messages, as a focus an event
+            // moved is the first (`App::focus_moved`): the app's copy of the
+            // focus is then never behind while it handles one.
+            if !self.exited
+                && let Some(report) = self.panels().focus_report()
+            {
+                updates += 1;
+                redraw |= self.update(report, now, driver);
+            }
         }
         // What a field reports changed: one notice, asked for after the
         // turn's updates, so the app's answer is built from its model with
