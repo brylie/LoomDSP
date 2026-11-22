@@ -28,6 +28,8 @@ impl App {
         self.toolbar_panel(view);
         self.breadcrumb_panel(view);
         self.bar_panel(view);
+        self.question_panel(view);
+        self.menu_panel(view);
     }
 
     /// True when the canvas holds the keys (ui-layer.md, section 6, rule 1;
@@ -51,7 +53,9 @@ impl App {
     /// reach any of them; Tab meets the toolbar as one stop
     /// ([`Self::top_stops`]).
     pub(crate) fn our_stops(&self) -> Vec<UiId> {
-        let mut stops = self.toolbar_stops();
+        let mut stops = self.question_stops();
+        stops.extend(self.menu_stops());
+        stops.extend(self.toolbar_stops());
         stops.extend(self.breadcrumb_stops());
         stops.extend(self.bar_stops());
         stops
@@ -70,6 +74,19 @@ impl App {
     /// where Tab goes.
     pub(crate) fn tab_from(&self, from: &UiId, next: Option<&UiId>, back: bool) -> loom_ui::TabStep<Message> {
         use loom_ui::TabStep;
+        // The question keeps Tab among its answers, wrapping at both ends
+        // (section 6, rule 6, step 2; the WAI-ARIA dialog pattern).
+        // As a Move, which wraps and takes the focus along, so Tab from a
+        // script, which reaches the question as its key, gives the same.
+        if self.question_stops().contains(from) {
+            let by = if back { -1 } else { 1 };
+            return TabStep::Send(Message::Question(crate::question::Message::Move(by)));
+        }
+        // Tab on a menu item closes the menu and moves on from what opened
+        // it (the WAI-ARIA menu pattern; section 6, rule 8).
+        if self.menu_stops().contains(from) {
+            return TabStep::Send(Message::MenuTab { back });
+        }
         let (top, bar) = (self.top_stops(), self.bar_stops());
         let to = |stop: Option<&UiId>| stop.map_or(TabStep::Leave, |stop| TabStep::To(stop.clone()));
         // Any toolbar button stands for the toolbar's one stop.

@@ -135,6 +135,10 @@ pub struct Runtime<A: App, T> {
     counts: Counts,
     /// Which of the runtime's own elements has keyboard focus.
     focus: Focus,
+    /// The focus each overlay opened over, to give back when it closes
+    /// (section 6, rule 4): the input layer it was saved from, the element,
+    /// and whether it showed a ring. Last opened last.
+    saved_focus: Vec<(Layer, UiId, bool)>,
     /// What is hovered and pressed among the runtime's own elements.
     pointer: Pointer,
     /// The text field that had focus when the runtime last looked, so it
@@ -175,6 +179,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             exited: false,
             counts: Counts::default(),
             focus: Focus::default(),
+            saved_focus: Vec::new(),
             pointer: Pointer::default(),
             field_focus: None,
             target_seen: None,
@@ -475,6 +480,57 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.focus.set(None);
         self.focus.ring = false;
         true
+    }
+
+    /// Saves and gives back the runtime's focus around an overlay (section
+    /// 6, rule 4), from `before`, the input layer and the focus the turn
+    /// started with. When the input layer rose above the element that had
+    /// the focus, that element is saved. When the layer dropped, every
+    /// overlay above it is gone: the focus saved from the layer it is now
+    /// takes the focus again, with the ring it had, if nothing of the input
+    /// layer has it. An element that has gone since is moved to its panel's
+    /// first stop by the next layout (`Focus::settle`). Returns true when
+    /// the focus changed.
+    fn keep_focus_across_overlays(&mut self, before: (Layer, Option<UiId>, bool)) -> bool {
+        let (was, focus, ring) = before;
+        let now = self.app.input().layer;
+        if now > was {
+            if let Some(id) = focus
+                && self.panels.layer_of(&id).is_some_and(|layer| layer < now)
+            {
+                self.saved_focus.push((was, id, ring));
+            }
+            return false;
+        }
+        if now >= was {
+            return false;
+        }
+        let mut back = None;
+        while let Some((layer, ..)) = self.saved_focus.last()
+            && *layer >= now
+        {
+            let saved = self.saved_focus.pop().expect("there is a last");
+            if saved.0 == now {
+                back = Some(saved);
+            }
+        }
+        let Some((_, id, ring)) = back else {
+            return false;
+        };
+        let held = self
+            .focus
+            .id()
+            .and_then(|focused| self.panels.layer_of(focused))
+            .is_some_and(|layer| layer == now);
+        if held || !self.panels.stops().contains(&id) && self.panels.panel_of(&id).is_none() {
+            return false;
+        }
+        self.release_target();
+        let changed = self.focus.id() != Some(&id);
+        self.focus.wanted = None;
+        self.focus.set(Some(id));
+        self.focus.ring = ring;
+        changed
     }
 
     /// Moves the runtime's focus to `to`, from the keyboard or an effect,
@@ -1160,8 +1216,15 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // What shows as pressed is painted from the runtime's own state,
         // so a change of it needs a frame, though no panel is built again
         // (visual-system.md, Role tokens): an input event, or an update
-        // that raises the input layer or turns the element off.
+        // that raises the input layer or turns the element off. So does
+        // whether the focus ring shows, which a raised input layer hides
+        // with no panel built again (section 6, rule 3).
         let pressed = self.panels().shown_pressed();
+        let ringed = self.focus_ring().map(|(id, _)| id);
+        // The input layer and the focus as the turn starts: an overlay that
+        // opens in it moves the focus into itself in the same turn, so what
+        // to give back when it closes is read now.
+        let before = (self.app.input().layer, self.focus.id().cloned(), self.focus.ring);
         let mut redraw = self.follow_target();
         self.field_left(&mut batch, now);
         // A scroll since the last turn, by the pointer between turns or by
@@ -1211,6 +1274,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                         // A scroll key the focused element left moved a
                         // container around it, and goes no further.
                         redraw = true;
+                        self.target.kept(&event);
+                    } else if let Event::Key(key @ KeyEvent::Pressed { .. }) = &event
+                        && self.app.input().layer == Layer::Question
+                    {
+                        // An open question has every key (section 6, rule
+                        // 6, step 2): the app's question keys, or Panic,
+                        // and none goes on to the target.
+                        batch.extend(self.app.question_key(key));
                         self.target.kept(&event);
                     } else {
                         redraw |= self.route(&event, pointer, now, &mut batch);
@@ -1287,6 +1358,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
 
         redraw |= self.target.needs_redraw(updates);
         redraw |= self.panels().shown_pressed() != pressed;
+        redraw |= self.keep_focus_across_overlays(before);
+        redraw |= self.focus_ring().map(|(id, _)| id) != ringed;
 
         // 5. Draw only when something visible changed.
         let draw = redraw && !self.exited;
@@ -1584,7 +1657,8 @@ pub(crate) fn activatable<A: App>(window: &Window, app: &A, id: &UiId) -> Option
         return None;
     }
     match access.role() {
-        crate::access::Role::Button => Some(Activation::Button),
+        // A menu item is a button in a list (section 3, rule 4).
+        crate::access::Role::Button | crate::access::Role::MenuItem => Some(Activation::Button),
         crate::access::Role::Switch => Some(Activation::Switch),
         crate::access::Role::Link => Some(Activation::Link),
         _ => None,

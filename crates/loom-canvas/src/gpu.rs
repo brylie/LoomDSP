@@ -8,7 +8,9 @@ use crate::theme::Palette;
 use crate::tile_text::{self, TextKind};
 use crate::trace::{Segment, TraceGeometry};
 use bytemuck::{Pod, Zeroable};
-use loom_ui::paint::{InstanceBuffer, PaintList, PaintRenderer, SHAPE_ATTRIBUTES, Shape, Target, packed};
+use loom_ui::paint::{
+    INSTANCE_ATTRIBUTES, InstanceBuffer, PaintList, PaintRenderer, SHAPE_ATTRIBUTES, Shape, Target, packed,
+};
 use loom_ui_core::{Color, Point, Rect, Size};
 
 /// Corner radius of tiles, in world units.
@@ -582,10 +584,16 @@ impl CanvasRenderer {
             })
         };
 
+        // A shape's instance has five vec4s, the last its shadow's blur;
+        // the canvas's own instances have four.
         let instance_layout = |stride: usize| wgpu::VertexBufferLayout {
             array_stride: stride as u64,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &SHAPE_ATTRIBUTES,
+            attributes: if stride == std::mem::size_of::<Shape>() {
+                &SHAPE_ATTRIBUTES
+            } else {
+                &INSTANCE_ATTRIBUTES
+            },
         };
 
         Self {

@@ -570,6 +570,40 @@ fn focus_falls_back_when_its_element_goes() {
     assert_eq!(harness.runtime().focused(), None, "its panel is gone");
 }
 
+/// A menu placed under an element that goes is not drawn, so its items
+/// are no stops: the focus on one falls back as for an element that went,
+/// and Tab never reaches them (section 5, rule 13; section 6, rule 4).
+#[test]
+fn a_placed_root_whose_anchor_goes_has_no_stops() {
+    let menu = || {
+        (
+            UiId::panel("menu"),
+            Layer::Overlays,
+            row(&["m1", "m2"]).placed(crate::element::Placement::Under(id("bar", "b"))),
+        )
+    };
+    let mut harness = showing(vec![panel("bar", row(&["a", "b"])), menu()]);
+    harness.step(tab(false));
+    assert_eq!(
+        harness.runtime().focused(),
+        Some(&id("menu", "m1")),
+        "the menu reads first"
+    );
+    harness.send(Message::Show(vec![panel("bar", row(&["a"])), menu()]));
+    harness.lay_out(&mut Mono::default());
+    assert_eq!(harness.runtime().focused(), None, "the hidden item lost the focus");
+    let mut reached = Vec::new();
+    for _ in 0..4 {
+        harness.step(tab(false));
+        reached.extend(harness.runtime().focused().cloned());
+    }
+    assert!(reached.contains(&id("bar", "a")), "Tab still moves: {reached:?}");
+    assert!(
+        reached.iter().all(|stop| !stop.is_under(&UiId::panel("menu"))),
+        "Tab never reaches the hidden menu: {reached:?}"
+    );
+}
+
 /// The nodes, by name and role, nested as the elements are, with a slot's
 /// panel inside the node around the slot; bounds in physical pixels; and
 /// focus reported on the focused stop (section 7, rules 1, 5, and 8).

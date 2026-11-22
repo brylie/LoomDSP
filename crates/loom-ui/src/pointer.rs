@@ -144,10 +144,26 @@ impl<A: App> Panels<'_, A> {
         let input = self.app.input().layer;
         self.pointer.thumb.is_some()
             || self.keeps_hint(event, point)
+            || !self.pressed_outside(input, event, point).is_empty()
             || self
                 .window
                 .hit_in(point, |layer| Side::of(layer) == Side::Above && layer >= input)
                 .is_some()
+    }
+
+    /// The panels a press at `point` is outside of, when `event` is a press
+    /// of any button and the input layer, above the target, has panels that
+    /// close on one (section 5, rule 14): each such panel, if the press is
+    /// inside none of them. Empty otherwise, and for a press inside one.
+    fn pressed_outside(&self, input: Layer, event: &Event, point: Point) -> Vec<UiId> {
+        if !matches!(event, Event::Pointer(PointerEvent::Pressed(_))) || Side::of(input) != Side::Above {
+            return Vec::new();
+        }
+        let roots = self.window.closing_roots(input);
+        if roots.iter().any(|(_, at)| at.contains(point)) {
+            return Vec::new();
+        }
+        roots.into_iter().map(|(root, _)| root).collect()
     }
 
     /// True for a move onto the hover text showing, or between it and its
@@ -229,16 +245,37 @@ impl<A: App> Panels<'_, A> {
         over.then(|| pressed.clone())
     }
 
-    /// True when the element with UI ID `id` is a button, a switch, or a
-    /// link, which a pointer press does not focus: each acts, and none
+    /// True when the element with UI ID `id` is a menu item.
+    fn is_menu_item(&self, id: &UiId) -> bool {
+        self.window
+            .access_of(id)
+            .is_some_and(|access| access.role() == crate::access::Role::MenuItem)
+    }
+
+    /// True when the element with UI ID `id` is a button, a switch, a
+    /// link, or a menu item, which a pointer press does not focus: each acts, and none
     /// takes input the keys would then go to.
     fn takes_no_press_focus(&self, id: &UiId) -> bool {
         self.window.access_of(id).is_some_and(|access| {
             matches!(
                 access.role(),
-                crate::access::Role::Button | crate::access::Role::Switch | crate::access::Role::Link
+                crate::access::Role::Button
+                    | crate::access::Role::Switch
+                    | crate::access::Role::Link
+                    | crate::access::Role::MenuItem
             )
         })
+    }
+
+    /// Offers a pointer event to the runtime's layers above the target, as
+    /// the runtime's own routing does first, for a driver that delivers an
+    /// event itself outside a turn, such as a script's: a press outside a
+    /// closing menu is taken and told, and one on a dialog's scrim is held.
+    pub fn pointer_above_target(&mut self, event: &Event, point: Point) -> Heard {
+        let input = self.app.input();
+        let heard = self.pointer_above(input, event, point);
+        self.report_focus();
+        heard
     }
 
     /// Offers a pointer event to the runtime's layers above the target.
@@ -310,6 +347,25 @@ impl<A: App> Panels<'_, A> {
                 redraw: on_source && self.note_hover_motion(),
             };
         }
+        // Section 5, rule 14: a press outside a panel of the input layer
+        // that closes on one is taken, and told to the app.
+        let outside = if side == Side::Above {
+            self.pressed_outside(input.layer, event, point)
+        } else {
+            Vec::new()
+        };
+        if !outside.is_empty() {
+            self.pointer.space = None;
+            for root in &outside {
+                if let Some(message) = self.app.pressed_outside(root) {
+                    self.waker.send(message);
+                }
+            }
+            return Heard {
+                taken: true,
+                redraw: false,
+            };
+        }
         let hit = self.window.hit_in(point, keep).map(|(layer, hit)| match hit {
             Hit::Element(id) => (layer, Some(id.clone())),
             Hit::Blocked => (layer, None),
@@ -335,7 +391,22 @@ impl<A: App> Panels<'_, A> {
         let at = id.map(|id| (layer, id));
         let mut redraw = false;
         match pointer {
-            PointerEvent::Moved => redraw = self.hover(at),
+            PointerEvent::Moved => {
+                redraw = self.hover(at.clone());
+                // Section 6, rule 8: the pointer moving over a menu item
+                // focuses it, with no ring, as native menus move their
+                // highlight; the keys then go on from there.
+                if let Some((_, id)) = &at
+                    && self.is_menu_item(id)
+                    && self.focus.id() != Some(id)
+                {
+                    self.focus.wanted = None;
+                    self.focus.set(Some(id.clone()));
+                    self.focus.ring = false;
+                    self.focus.release_owed = true;
+                    redraw = true;
+                }
+            }
             PointerEvent::Pressed(button) => {
                 self.pointer.space = None;
                 redraw = self.hover(at.clone());

@@ -1058,21 +1058,27 @@ fn a_delete_that_deletes_nothing_opens_no_run() {
     assert_eq!(bench.field.steps(), (0, 1));
 }
 
-/// A field in a layer below the one taking input, such as a panel under
-/// an open question, edits nothing: its keys go on to the target.
+/// A field in a layer below the one taking input edits nothing. Under an
+/// overlay, its keys go on to the target; under an open question, the
+/// runtime keeps every press from the target (section 6, rule 6, step 2),
+/// so the target hears none.
 #[test]
 fn a_covered_field_takes_no_keys() {
-    let Some((mut harness, mut text)) = form("ab", true) else {
-        return;
-    };
-    harness.send(Message::Cover(Layer::Question));
-    harness.lay_out(&mut text);
-    harness.step(key_in(Key::Character('x'), Modifiers::NONE, Some("x")));
-    harness.step(key_in(Key::Backspace, Modifiers::NONE, None));
-    harness.lay_out(&mut text);
-    assert_eq!(harness.app().text, "ab");
-    assert_eq!(harness.runtime().target().heard, [Key::Character('x'), Key::Backspace]);
-    assert!(harness.runtime().target().kept.is_empty());
+    for (layer, heard) in [
+        (Layer::Overlays, vec![Key::Character('x'), Key::Backspace]),
+        (Layer::Question, Vec::new()),
+    ] {
+        let Some((mut harness, mut text)) = form("ab", true) else {
+            return;
+        };
+        harness.send(Message::Cover(layer));
+        harness.lay_out(&mut text);
+        harness.step(key_in(Key::Character('x'), Modifiers::NONE, Some("x")));
+        harness.step(key_in(Key::Backspace, Modifiers::NONE, None));
+        harness.lay_out(&mut text);
+        assert_eq!(harness.app().text, "ab", "{layer:?}");
+        assert_eq!(harness.runtime().target().heard, heard, "{layer:?}");
+    }
 }
 
 /// Focus that leaves a field and comes back within one turn still leaves

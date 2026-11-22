@@ -7,11 +7,7 @@
 //! (`Message::allowed_during_question` in `lib.rs`), and each question
 //! carries what to do after its answer.
 
-use crate::Element;
 use crate::files;
-use crate::style::{self, button};
-use iced::Length;
-use iced::widget::{column, container, opaque, row, space, text};
 use loom_patch::Patch;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -223,65 +219,36 @@ impl Question {
             primary: self.primary.name(),
         }
     }
-
-    /// The question, as a panel over everything else. The highlight has an
-    /// outline as well as a colour, so it does not rest on colour alone.
-    pub fn view(&self) -> Element<'_, Message> {
-        let (title, words) = self.words();
-        let mut buttons = row![space::horizontal()].spacing(8);
-        for (i, &answer) in self.answers().iter().enumerate() {
-            let press = button(text(answer.label()).size(style::CONTROL)).on_press(Message::Answer(answer));
-            let press = if answer == self.primary {
-                press.style(style::primary)
-            } else {
-                press
-            };
-            // Each answer is named by its UI ID, so the window says where it
-            // is (`overlays/access.rs`).
-            let press = crate::inspector::ids::named(&crate::overlays::access::answer_id(answer.name()), press);
-            buttons = buttons.push(container(press).padding(2).style(style::card(i == self.highlight)));
-        }
-        let panel = column![
-            text(title).size(style::TITLE),
-            text(words).size(style::BODY),
-            buttons.align_y(iced::Alignment::Center),
-        ]
-        .spacing(12);
-        opaque(
-            container(crate::inspector::ids::named(
-                &crate::overlays::access::question_id(),
-                container(panel).padding(16).width(460).style(container::rounded_box),
-            ))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center(Length::Fill)
-            .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
-        )
-    }
 }
 
-/// The keys an open question owns, whether or not a widget used them: a
-/// focused text field keeps its focus behind the question, and would take
-/// Enter for itself. A held Enter does not repeat, so one press cannot both
-/// raise a question and answer it.
-pub fn key(event: iced::Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<crate::Message> {
-    use iced::keyboard::{Event, Key, key::Named};
-    let iced::Event::Keyboard(Event::KeyPressed {
+/// What a key press means while the question owns the input, from the
+/// runtime, which keeps every press from Iced then (ui-layer.md, section 6,
+/// rule 6, step 2; `App::question_key`): the question's own keys (Tab,
+/// Shift+Tab, and the arrows move among the answers; Enter gives the
+/// highlighted one and Escape the safe one, neither on a repeat), or the
+/// panic shortcut, which is always heard (panic.md). Every other key, Backspace, Delete, and the editing
+/// shortcuts among them, means nothing and goes no further.
+pub(crate) fn key_of(key: &loom_ui_core::KeyEvent) -> Option<crate::Message> {
+    use loom_ui_core::{Key, KeyEvent};
+    let KeyEvent::Pressed {
         key, modifiers, repeat, ..
-    }) = event
+    } = key
     else {
         return None;
     };
     let message = match key {
-        Key::Named(Named::Tab) if modifiers.shift() => Message::Move(-1),
-        Key::Named(Named::Tab | Named::ArrowRight | Named::ArrowDown) => Message::Move(1),
-        Key::Named(Named::ArrowLeft | Named::ArrowUp) => Message::Move(-1),
-        Key::Named(Named::Enter) if !repeat => Message::Activate,
-        Key::Named(Named::Escape) if !repeat => Message::Escape,
+        Key::Character('.') if modifiers.shortcut() && !repeat => return Some(crate::Message::Panic),
+        Key::Tab if modifiers.shift => Message::Move(-1),
+        Key::Tab | Key::Right | Key::Down => Message::Move(1),
+        Key::Left | Key::Up => Message::Move(-1),
+        Key::Enter if !repeat => Message::Activate,
+        Key::Escape if !repeat => Message::Escape,
         _ => return None,
     };
     Some(crate::Message::Question(message))
 }
+
+mod panel;
 
 #[cfg(test)]
 mod tests;

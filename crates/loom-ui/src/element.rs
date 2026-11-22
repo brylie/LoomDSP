@@ -50,7 +50,7 @@
 //! on, so a link that wraps is hit on both lines and nowhere between.
 
 use crate::access::Access;
-use loom_ui_core::{Color, Face, IdKey, Span, TextStyle, UiId, Weight};
+use loom_ui_core::{Color, Face, IdKey, Point, Span, TextStyle, UiId, Weight};
 use std::num::NonZeroU16;
 use std::ops::Range;
 
@@ -152,6 +152,21 @@ pub(crate) struct Look {
     /// when it is painted, so a hover or a press redraws it without
     /// building its panel again.
     pub(crate) states: Option<Looks>,
+    /// A soft shadow under its box (section 5, rule 15).
+    pub(crate) shadow: Option<ShadowStyle>,
+}
+
+/// A soft shadow under an element's box, from an app's token (section 5,
+/// rule 15): its colour, how far it is moved from the box, and how wide
+/// its edge fades.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShadowStyle {
+    /// Its colour, alpha included.
+    pub colour: Color,
+    /// How far it is moved from the box, in logical pixels.
+    pub offset: loom_ui_core::Vector,
+    /// How wide its edge fades, in logical pixels.
+    pub blur: f32,
 }
 
 impl Look {
@@ -321,6 +336,17 @@ pub(crate) enum Kind {
     Slot(UiId),
 }
 
+/// Where an overlay's root panel goes (ui-layer.md, section 5, rule 13),
+/// in place of filling the window from its top-left corner.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Placement {
+    /// Its top-left corner at this point in the window.
+    At(Point),
+    /// Under the element with this UI ID, in another panel, its left edge
+    /// at that element's, read from the layout already made.
+    Under(UiId),
+}
+
 /// A link inside a rich text: the bytes of the text it covers, and what
 /// it is as a part of its own.
 #[derive(Debug, Clone, PartialEq)]
@@ -417,6 +443,12 @@ pub struct Element {
     /// it ([`Element::keys_from`]).
     pub(crate) keys_from: Option<UiId>,
     pub(crate) children: Vec<Element>,
+    /// Where a root panel goes; `None` fills the window. Only a panel's
+    /// root reads it.
+    pub(crate) placement: Option<Placement>,
+    /// A root panel hears a press outside it (section 5, rule 14). Only a
+    /// panel's root reads it.
+    pub(crate) closes_outside: bool,
 }
 
 impl Element {
@@ -441,6 +473,8 @@ impl Element {
             hover: None,
             keys_from: None,
             children,
+            placement: None,
+            closes_outside: false,
         }
     }
 
@@ -863,6 +897,31 @@ impl Element {
     /// so nothing under it is hit: a panel over the layer below.
     pub fn opaque(mut self) -> Self {
         self.opaque = true;
+        self
+    }
+
+    /// Casts a soft shadow under the element's box, drawn first and cut
+    /// only by its panel's clip (section 5, rule 15).
+    pub fn shadow(mut self, shadow: ShadowStyle) -> Self {
+        self.look.shadow = Some(shadow);
+        self
+    }
+
+    /// On a panel's root: places the panel at `placement`, at its content
+    /// size, moved in to stay inside the window, instead of filling the
+    /// window (section 5, rule 13). A root under an element that is gone
+    /// shows nothing until the element is back.
+    pub fn placed(mut self, placement: Placement) -> Self {
+        self.placement = Some(placement);
+        self
+    }
+
+    /// On a panel's root: a press of any mouse button outside the panel,
+    /// while its layer takes input, is taken and told to the app through
+    /// [`App::pressed_outside`](crate::App::pressed_outside) (section 5,
+    /// rule 14).
+    pub fn closes_on_press_outside(mut self) -> Self {
+        self.closes_outside = true;
         self
     }
 }

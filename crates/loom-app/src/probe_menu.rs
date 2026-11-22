@@ -2,17 +2,12 @@
 //! meter places that module next to it, already connected. Spec:
 //! `docs/design/panels.md`, Add scope and Add meter.
 
-use crate::Element;
-use crate::style::{self, button};
-use iced::Length;
-use iced::widget::{column, container, text};
-use loom_canvas::iced_convert::ToIced as _;
 use loom_canvas::{GRID, PortRef, tile_size};
 use loom_core::ModuleDescriptor;
 use loom_ui_core::{Point, Rect, Size};
 
 /// Width of the menu.
-const WIDTH: f32 = 140.0;
+pub(crate) const WIDTH: f32 = 140.0;
 /// Height of one item.
 const ITEM_HEIGHT: f32 = 26.0;
 const PADDING: f32 = 4.0;
@@ -83,28 +78,10 @@ impl ProbeMenu {
         }
     }
 
-    /// The menu, placed at its corner. The app lays it over the window.
-    pub fn view(&self, highlight: Option<usize>) -> Element<'_, Message> {
-        let item = |at: usize, key: &'static str, label: &'static str, probe: Probe| {
-            crate::inspector::ids::named(
-                &crate::menus::probe_id().with(key),
-                button(text(label).size(style::CONTROL))
-                    .on_press(Message::Pick(probe))
-                    .width(Length::Fill)
-                    .height(ITEM_HEIGHT)
-                    .style(style::menu_item(highlight == Some(at))),
-            )
-        };
-        let menu = column![
-            item(0, "scope", "Add scope", Probe::Scope),
-            item(1, "meter", "Add meter", Probe::Meter)
-        ]
-        .padding(PADDING)
-        .width(WIDTH);
-        let menu = crate::inspector::ids::named(&crate::menus::probe_id(), container(menu).style(style::canvas_menu));
-        iced::widget::pin(iced::widget::opaque(menu))
-            .position(self.at.to_iced())
-            .into()
+    /// The menu's top-left corner, in window coordinates, moved inside the
+    /// canvas when it opened.
+    pub fn at(&self) -> Point {
+        self.at
     }
 }
 

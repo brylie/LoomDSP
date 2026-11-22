@@ -12,9 +12,14 @@ use super::{PaintList, Shape, Target};
 use bytemuck::{Pod, Zeroable};
 use loom_ui_core::Rect;
 
-/// The vertex layout of a [`Shape`], and of a glyph quad, which has the
-/// same four vectors: four `vec4<f32>`s at locations 0 to 3.
-pub const SHAPE_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
+/// The vertex layout of a [`Shape`]: five `vec4<f32>`s at locations 0 to
+/// 4, the last a soft shadow's blur (ui-layer.md, section 5, rule 15).
+pub const SHAPE_ATTRIBUTES: [wgpu::VertexAttribute; 5] =
+    wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4];
+
+/// The vertex attributes of an instance of four `vec4`s: a glyph, and a
+/// host's own instances that are not shapes, such as the canvas's cables.
+pub const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
     wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4];
 
 /// The globals of `paint.wgsl`, as its `Globals` struct lays them out.
@@ -134,14 +139,14 @@ pub struct PaintRenderer {
 }
 
 /// One pipeline over `paint.wgsl`'s stages `vertex` and `fragment`, reading
-/// instances of `stride` bytes laid out as [`SHAPE_ATTRIBUTES`].
+/// instances of `stride` bytes laid out as `attributes`.
 fn pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
     module: &wgpu::ShaderModule,
     format: wgpu::TextureFormat,
     (label, vertex, fragment): (&str, &str, &str),
-    stride: usize,
+    (stride, attributes): (usize, &[wgpu::VertexAttribute]),
 ) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
@@ -152,7 +157,7 @@ fn pipeline(
             buffers: &[wgpu::VertexBufferLayout {
                 array_stride: stride as u64,
                 step_mode: wgpu::VertexStepMode::Instance,
-                attributes: &SHAPE_ATTRIBUTES,
+                attributes,
             }],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         },
@@ -225,7 +230,7 @@ impl PaintRenderer {
             &module,
             format,
             ("loom-ui shapes", "vs_shape", "fs_shape"),
-            std::mem::size_of::<Shape>(),
+            (std::mem::size_of::<Shape>(), &SHAPE_ATTRIBUTES),
         );
         let glyphs_pipeline = pipeline(
             device,
@@ -233,7 +238,7 @@ impl PaintRenderer {
             &module,
             format,
             ("loom-ui glyphs", "vs_glyph", "fs_glyph"),
-            std::mem::size_of::<GlyphQuad>(),
+            (std::mem::size_of::<GlyphQuad>(), &INSTANCE_ATTRIBUTES),
         );
         let screen = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("loom-ui paint globals"),

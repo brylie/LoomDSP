@@ -378,7 +378,37 @@ impl Window {
         self.drawn.clear();
         for (_, root) in roots {
             let window = Rect::new(Point::ORIGIN, size);
-            self.place(&root, Point::ORIGIN, size, window, text, &mut laid);
+            let placement = self
+                .records
+                .get(&root)
+                .and_then(|record| record.layout.placement().cloned());
+            let Some(placement) = placement else {
+                self.place(&root, Point::ORIGIN, size, window, text, &mut laid);
+                continue;
+            };
+            // Section 5, rule 13: at its content size, where it asks,
+            // moved in to stay inside the window. An anchor in a lower
+            // layer was placed earlier in this pass.
+            let anchor = match &placement {
+                crate::element::Placement::At(point) => Some(*point),
+                crate::element::Placement::Under(id) => self.bounds(id).map(|at| Point::new(at.x, at.y + at.height)),
+            };
+            let Some(anchor) = anchor else {
+                // Under an element that is gone: not placed, so nothing
+                // of it is drawn or hit until the element comes back.
+                continue;
+            };
+            self.compute(&root, size, text, &mut laid);
+            let content = self
+                .records
+                .get(&root)
+                .map_or(Size::ZERO, |record| record.layout.size());
+            let origin = Point::new(
+                anchor.x.min(size.width - content.width).max(0.0),
+                anchor.y.min(size.height - content.height).max(0.0),
+            );
+            // Cut only by the window, so its shadow shows (rule 15).
+            self.place(&root, origin, size, window, text, &mut laid);
         }
         self.laid_out_at = Some(size);
         self.order_stops();
@@ -472,17 +502,9 @@ impl Window {
         depth
     }
 
-    /// Lays the panel keyed `key` out at `size`, if it needs it, places it
-    /// at `origin`, and then places the panels in its slots.
-    fn place(
-        &mut self,
-        key: &UiId,
-        origin: Point,
-        size: Size,
-        clip: Rect,
-        text: &mut dyn TextMeasure,
-        laid: &mut Laid,
-    ) {
+    /// Lays the panel keyed `key` out within `size`, if it changed since
+    /// it was last laid out there.
+    fn compute(&mut self, key: &UiId, size: Size, text: &mut dyn TextMeasure, laid: &mut Laid) {
         let Some(mut record) = self.records.remove(key) else {
             return;
         };
@@ -500,6 +522,24 @@ impl Window {
             record.stale = false;
             record.slot = Some(size);
         }
+        self.records.insert(key.clone(), record);
+    }
+
+    /// Lays the panel keyed `key` out at `size`, if it needs it, places it
+    /// at `origin`, and then places the panels in its slots.
+    fn place(
+        &mut self,
+        key: &UiId,
+        origin: Point,
+        size: Size,
+        clip: Rect,
+        text: &mut dyn TextMeasure,
+        laid: &mut Laid,
+    ) {
+        self.compute(key, size, text, laid);
+        let Some(mut record) = self.records.remove(key) else {
+            return;
+        };
         record.origin = origin;
         record.clip = clip;
         let offset = Vector::new(origin.x, origin.y);
@@ -532,11 +572,16 @@ impl Window {
     /// Where the element with UI ID `id` is in the window: its panel is the
     /// one whose key starts the ID, the longest such key if several do.
     pub(crate) fn bounds(&self, id: &UiId) -> Option<Rect> {
-        let (_, record) = self
+        let (key, record) = self
             .records
             .iter()
             .filter(|(key, _)| id == *key || id.is_under(key))
             .max_by_key(|(key, _)| key.keys().len())?;
+        // A placed panel whose anchor was gone at the last layout is
+        // nowhere (section 5, rule 13).
+        if record.layout.placement().is_some() && !self.drawn.contains(key) {
+            return None;
+        }
         // A panel's own key gives its place: its slot, or the window.
         let bounds = if id.keys().len() == record.layout.panel().keys().len() {
             Rect::new(Point::ORIGIN, record.slot.unwrap_or_else(|| record.layout.size()))
@@ -603,6 +648,25 @@ impl Window {
             }
             ask(record, point - Vector::new(record.origin.x, record.origin.y))
         })
+    }
+
+    /// The root panels in `layer` that close on a press outside them, as
+    /// last laid out, each with the box its elements take (section 5, rule
+    /// 13).
+    pub(crate) fn closing_roots(&self, layer: Layer) -> Vec<(UiId, Rect)> {
+        self.drawn
+            .iter()
+            .filter(|key| {
+                let record = &self.records[*key];
+                record.parent.is_none() && record.layer == layer && record.layout.closes_outside()
+            })
+            // The panel's own box: its laid-out size where it is, not the
+            // window it was laid out in.
+            .map(|key| {
+                let record = &self.records[key];
+                (key.clone(), Rect::new(record.origin, record.layout.size()))
+            })
+            .collect()
     }
 
     /// The corner radius of the element with UI ID `id`, as last laid out,

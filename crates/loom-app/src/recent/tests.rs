@@ -608,3 +608,123 @@ fn open_makes_no_library_folder_it_does_not_need() {
     assert_eq!(fake::asked(), [Asked::Open(Some(dir.0.clone()))]);
     assert!(!library.exists());
 }
+
+/// Opened from the keyboard (Enter on the focused Recent button), the list
+/// starts on its first item and shows each file's folder as a second line;
+/// Tab closes it and moves on, as the WAI-ARIA menu pattern does
+/// (ui-layer.md, section 6, rule 8; plan 3.2, row 3b).
+#[test]
+fn from_the_keyboard_the_list_starts_on_its_first_item_and_tab_leaves_it() {
+    let dir = TempDir::new("recent-keys");
+    let files = patches(&dir.0, 2);
+    let mut ui = Ui::with_app(app());
+    assert!(ui.app_mut().open_path(&files[0]));
+    assert!(ui.app_mut().open_path(&files[1]));
+    ui.redraw();
+    let button = crate::toolbar::toolbar_id().with("recent");
+    ui.a11y_action(&button, accesskit::Action::Focus);
+    ui.redraw();
+    assert_eq!(ui.runtime().focused(), Some(&button), "the Recent button has the keys");
+    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    ui.redraw();
+    let rows = ui.app().ui_snapshot().recent.expect("the list is open");
+    let first = crate::menus::recent_id().with(rows[0].path.display().to_string().as_str());
+    assert_eq!(ui.runtime().focused(), Some(&first), "it starts on its first item");
+    assert!(ui.runtime().focus_ring().is_some(), "with a ring, from the keyboard");
+    assert!(ui.text(&rows[0].folder).is_some(), "the folder is a second line");
+    ui.tap(Key::Named(Named::Tab), Modifiers::empty());
+    ui.redraw();
+    assert_eq!(ui.app().ui_snapshot().recent, None, "Tab closed it");
+    assert!(
+        !ui.runtime()
+            .focused()
+            .is_some_and(|focus| focus.is_under(&crate::menus::recent_id())),
+        "and the focus moved on"
+    );
+}
+
+/// The highlighted item, which is the focused one, has one look whichever
+/// way it got there: the weak fill, here from the keys (Brylie's decision,
+/// 2026-11-20; row 3b). The item below it has none.
+#[test]
+fn the_highlighted_item_has_the_weak_fill() {
+    use loom_canvas::iced_convert::ToCore as _;
+    let dir = TempDir::new("recent-look");
+    let files = patches(&dir.0, 2);
+    let mut ui = Ui::with_app(app());
+    assert!(ui.app_mut().open_path(&files[0]));
+    assert!(ui.app_mut().open_path(&files[1]));
+    ui.send(AppMessage::OpenRecent);
+    ui.redraw();
+    ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
+    ui.redraw();
+    let rows = ui.app().ui_snapshot().recent.expect("the list is open");
+    let id = |at: usize| crate::menus::recent_id().with(rows[at].path.display().to_string().as_str());
+    let first = ui.runtime().bounds(&id(0)).expect("laid out");
+    let second = ui.runtime().bounds(&id(1)).expect("laid out");
+    assert_eq!(ui.runtime().focused(), Some(&id(0)), "the keys highlighted the first");
+    let weak = ui.app().theme().extended_palette().background.weak.color.to_core();
+    let quads = ui.painted_quads(loom_ui::Layer::Overlays);
+    assert!(
+        quads.iter().any(|quad| quad.rect == first && quad.fill == weak),
+        "the first has the fill"
+    );
+    assert!(
+        !quads.iter().any(|quad| quad.rect == second && quad.fill == weak),
+        "the second has none"
+    );
+    assert!(
+        quads.iter().any(|quad| is_ring_around(quad, first)),
+        "the keys put the ring on top"
+    );
+    let quiet = crate::style::QUIET.to_core();
+    for (row, name) in [(first, "first"), (second, "second")] {
+        assert!(
+            quads
+                .iter()
+                .any(|quad| quad.rect == row && quad.border == quiet && quad.border_width == crate::style::MENU_BORDER),
+            "the {name} has the 1 px quiet border, as every row does"
+        );
+    }
+}
+
+/// A row the pointer moves over has the same weak fill as one the keys
+/// reached, and no focus ring (section 6, rule 8).
+#[test]
+fn a_hovered_item_has_the_weak_fill_and_no_ring() {
+    use loom_canvas::iced_convert::ToCore as _;
+    let dir = TempDir::new("recent-hover-look");
+    let files = patches(&dir.0, 2);
+    let mut ui = Ui::with_app(app());
+    assert!(ui.app_mut().open_path(&files[0]));
+    assert!(ui.app_mut().open_path(&files[1]));
+    ui.send(AppMessage::OpenRecent);
+    ui.redraw();
+    let rows = ui.app().ui_snapshot().recent.expect("the list is open");
+    let id = |at: usize| crate::menus::recent_id().with(rows[at].path.display().to_string().as_str());
+    let second = ui.runtime().bounds(&id(1)).expect("laid out");
+    ui.move_to(second.center());
+    ui.redraw();
+    assert_eq!(ui.runtime().focused(), Some(&id(1)), "the pointer focused the second");
+    let weak = ui.app().theme().extended_palette().background.weak.color.to_core();
+    let quads = ui.painted_quads(loom_ui::Layer::Overlays);
+    assert!(
+        quads.iter().any(|quad| quad.rect == second && quad.fill == weak),
+        "the hovered row has the fill"
+    );
+    assert!(
+        !quads.iter().any(|quad| is_ring_around(quad, second)),
+        "the pointer shows no ring"
+    );
+}
+
+/// True when `quad` is a focus ring: an unfilled border drawn outside
+/// `bounds` on every side.
+fn is_ring_around(quad: &loom_ui::paint::Quad, bounds: loom_ui_core::Rect) -> bool {
+    quad.fill.a == 0.0
+        && quad.border_width > 0.0
+        && quad.rect.x < bounds.x
+        && quad.rect.y < bounds.y
+        && quad.rect.x + quad.rect.width > bounds.x + bounds.width
+        && quad.rect.y + quad.rect.height > bounds.y + bounds.height
+}

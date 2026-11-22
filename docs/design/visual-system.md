@@ -174,6 +174,20 @@ Kept problems survive opening another patch, except as the table says.
 
 - **Disabled toolbar buttons say why.** Hold note and Recent have hover text with the reason while disabled, as Undo and Redo do.
 
+### Overlays
+
+**Status:** Agreed (Brylie, 2026-11-20), for plan 3.2, row 3. Each look is a token in `style.rs`, so `loom-ui`'s overlays and anything Iced still draws read the same values.
+
+| Token | What it is | Value |
+|---|---|---|
+| `SCRIM` | The full-window wash behind a dialog (the question, the licence chooser) | Black at 40% opacity, as today |
+| `OVERLAY_PANEL` | A dialog's box: fill, border, and radius | Matched to the box Iced draws today, measured when the token is built, so the gate shows no change |
+| `MENU_PANEL` | A menu's box over the canvas: the base fill, a 1 px quiet border, radius 6 | As today's probe menu |
+| `MENU_SHADOW` | The shadow under a menu | Black at 35% opacity, offset 4 px down, blur 12 px, as today |
+| `MENU_ITEM` | A menu item's looks: a 1 px quiet border and radius 3 always; a weak fill while hovered, pressed, or highlighted, however the highlight got there; the focus ring on top when the keys moved it | As today's menu items, without Iced's 2 px primary border on the highlight (Brylie's decision, 2026-11-20): the focus ring marks keyboard focus instead |
+
+*Why:* the dialogs and menus were drawn with Iced's own box and its palette, which are not ours. Tokens keep the look the same while it moves, and give later menus and popovers one source.
+
 ## Rules
 
 1. **Sizes and colours come only from the token module.** No `.size(N)`, `text_size(N)`, `.radius(N)`, or `.border(N, ...)` literal appears in `crates/loom-app/src`, in any folder, outside `style.rs` and test files, and no `loom-ui` element's `.background(...)` or `.colour(...)` builds a colour inline; a test checks the sources. *Why:* five named sizes are easy to keep consistent, and a future theme (FR-PANEL-06) changes them in one place.

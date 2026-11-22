@@ -6,11 +6,7 @@
 //! [`Rig`](crate::settings::Rig) and outlives each engine. A failed read or
 //! write never stops an open or a save: it is only a convenience.
 
-use crate::Element;
 use crate::files;
-use crate::style::{self, button};
-use iced::widget::{column, container, row, space, text, tooltip};
-use iced::{Length, Point};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -18,8 +14,8 @@ use std::path::{Path, PathBuf};
 pub const FILE_NAME: &str = "recent.ron";
 /// How many patches the list holds.
 const MAX_FILES: usize = 10;
-/// Where the list opens, under the file buttons in the toolbar.
-pub const LIST_AT: Point = Point::new(8.0, 44.0);
+/// The width of the list, in logical pixels.
+pub(crate) const LIST_WIDTH: f32 = 280.0;
 
 /// What `recent.ron` holds.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -140,39 +136,6 @@ pub enum Message {
     Pick(usize),
     /// Escape, or a click outside.
     Close,
-}
-
-/// The open list, with the row its keys are on outlined. Each row, and the
-/// list, sit in a container named by its UI ID (`menus.rs`).
-pub fn view(rows: &[Row], highlight: Option<usize>) -> Element<'_, Message> {
-    let mut list = column![].spacing(2);
-    for (i, row_data) in rows.iter().enumerate() {
-        let name = text(&row_data.name).size(style::CONTROL);
-        // Dimmed, and hover text says where it was: a shape alone cannot
-        // show that a file has gone.
-        let name = if row_data.missing {
-            name.color(style::QUIET)
-        } else {
-            name
-        };
-        let line = row![name, space::horizontal()];
-        let entry = button(line)
-            .style(style::outlined(style::plain, highlight == Some(i)))
-            .width(Length::Fill)
-            .on_press(Message::Pick(i));
-        let entry = crate::inspector::ids::named(
-            &crate::menus::recent_id().with(row_data.path.display().to_string().as_str()),
-            entry,
-        );
-        let hover = container(text(&row_data.folder).size(style::BODY))
-            .padding(6)
-            .style(container::rounded_box);
-        list = list.push(tooltip(entry, hover, tooltip::Position::Right));
-    }
-    crate::inspector::ids::named(
-        &crate::menus::recent_id(),
-        container(list).padding(6).width(280).style(container::rounded_box),
-    )
 }
 
 /// What a drop of `dropped` files comes to.

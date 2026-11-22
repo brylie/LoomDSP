@@ -98,7 +98,7 @@ fn still(model: &CanvasModel<'_>, still: Still) -> CanvasInput {
 }
 
 /// The kinds of what was painted from `from` on, as one letter each:
-/// `B`egin, `Q`uad, `T`ext, `E`nd.
+/// `B`egin, `Q`uad, `S`egment, shadow (`D`), `T`ext, `E`nd.
 fn kinds(recorder: &Recorder, from: usize) -> String {
     recorder.painted[from..]
         .iter()
@@ -106,6 +106,7 @@ fn kinds(recorder: &Recorder, from: usize) -> String {
             Painted::Begin(_) => 'B',
             Painted::Quad(_) => 'Q',
             Painted::Segment(_) => 'S',
+            Painted::Shadow(_) => 'D',
             Painted::Text { .. } | Painted::Spans { .. } => 'T',
             Painted::End => 'E',
         })

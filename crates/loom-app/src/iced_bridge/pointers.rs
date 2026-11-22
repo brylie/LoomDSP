@@ -193,6 +193,7 @@ pub(crate) fn hand_scripted(
             redraw |= match delivery {
                 Delivery::Unused => panels.pointer_below(&event, Point::new(at.x, at.y)),
                 Delivery::Captured => panels.pointer_taken(&event),
+                Delivery::Above => panels.pointer_above_target(&event, Point::new(at.x, at.y)),
             }
             .redraw;
         }
