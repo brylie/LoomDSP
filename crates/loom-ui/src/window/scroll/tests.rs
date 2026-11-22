@@ -49,6 +49,8 @@ pub(crate) enum Message {
     Focus(UiId),
     /// Make the nodes from the last layout and keep them.
     Describe,
+    /// A slider with this UI ID moved, in a phase of its gesture.
+    Slid(UiId, f32, crate::SlidePhase),
 }
 
 /// Builds the panels from the version shown and the radio chosen.
@@ -67,6 +69,8 @@ pub(crate) struct Shown {
     ids: IdTable,
     /// The nodes from the last `Describe`.
     pub(crate) nodes: Option<AccessNodes>,
+    /// Every report from a slider, in order.
+    pub(crate) slid: Vec<(UiId, f32, crate::SlidePhase)>,
 }
 
 impl App for Shown {
@@ -82,6 +86,7 @@ impl App for Shown {
             Message::Reveal(id) => return Effects::scroll_into_view(id),
             Message::Focus(id) => return Effects::focus(id),
             Message::Describe => self.nodes = Some(cx.access_nodes(&mut self.ids)),
+            Message::Slid(id, position, phase) => self.slid.push((id, position, phase)),
         }
         Effects::none()
     }
@@ -101,6 +106,10 @@ impl App for Shown {
 
     fn clicked(&self, id: &UiId) -> Option<Message> {
         Some(Message::Clicked(id.clone()))
+    }
+
+    fn slid(&self, id: &UiId, position: f32, phase: crate::SlidePhase) -> Option<Message> {
+        Some(Message::Slid(id.clone(), position, phase))
     }
 
     fn access_target(&self, node: NodeId) -> Option<UiId> {
@@ -162,6 +171,7 @@ pub(crate) fn showing(build: Build) -> Harness<Shown, Toolkit> {
         clicks: Vec::new(),
         ids: IdTable::default(),
         nodes: None,
+        slid: Vec::new(),
     };
     let window = WindowState::new(Size::new(400.0, 200.0));
     let mut harness = Harness::new(app, Toolkit::default(), window, Instant::now());
@@ -292,9 +302,9 @@ fn nested(_: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
     ))
 }
 
-/// A slider row and nine text rows, with no other stop, in a container.
+/// A slider and nine text rows in a container.
 fn with_slider(_: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
-    let slider = Element::text("Level", STYLE).key("level").access(
+    let slider = Element::slider(crate::Slider::new(0.5)).key("level").access(
         Access::new(Role::Slider, "Level")
             .value(Value::Number {
                 value: 0.5,
@@ -372,10 +382,10 @@ fn a_wheel_at_an_inner_end_passes_to_the_container_around_it() {
     assert_eq!(offset(&harness, &outer), 36.0, "the rest went to the outer one");
 }
 
-/// With Ctrl held, a wheel over a slider is the slider's: no container
-/// scrolls. Without it, the container does.
+/// Section 5, rule 16: the wheel over a slider scrolls the container, with
+/// Ctrl held as without it, since the wheel never moves a slider.
 #[test]
-fn ctrl_with_the_wheel_over_a_slider_stays_the_sliders() {
+fn the_wheel_over_a_slider_scrolls_with_or_without_ctrl() {
     let mut harness = showing(with_slider);
     let on_slider = Point::new(10.0, 10.0);
     let ctrl = Modifiers {
@@ -388,14 +398,14 @@ fn ctrl_with_the_wheel_over_a_slider_stays_the_sliders() {
     };
     step(&mut harness, held);
     step(&mut harness, wheel(-1.0, on_slider));
-    assert_eq!(offset(&harness, &list()), 0.0, "the slider's");
+    assert_eq!(offset(&harness, &list()), 48.0, "with Ctrl, the container's");
     let let_go = DriverEvent::Input {
         event: Event::Key(KeyEvent::ModifiersChanged(Modifiers::NONE)),
         pointer: None,
     };
     step(&mut harness, let_go);
-    step(&mut harness, wheel(-1.0, on_slider));
-    assert_eq!(offset(&harness, &list()), 48.0, "the container's");
+    step(&mut harness, wheel(1.0, on_slider));
+    assert_eq!(offset(&harness, &list()), 0.0, "without it, the container's");
 }
 
 /// Dragging the thumb scrolls in proportion, and a press on the gutter
@@ -647,6 +657,8 @@ fn painted_ring(harness: &mut Harness<Shown, Toolkit>) -> (Rect, Rect) {
         selection: Color::BLACK,
         quiet: Color::WHITE,
         mark: Color::WHITE,
+        primary: Color::rgb(0.3, 0.6, 1.0),
+        track: Color::rgb(0.4, 0.4, 0.4),
         ring: crate::focus::RingStyle {
             color: RING,
             width: 2.0,

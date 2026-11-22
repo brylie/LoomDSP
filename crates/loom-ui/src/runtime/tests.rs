@@ -834,6 +834,8 @@ fn paint_counts_what_it_painted() {
         },
         quiet: loom_ui_core::Color::rgb(0.6, 0.6, 0.6),
         mark: loom_ui_core::Color::rgb(0.9, 0.9, 0.9),
+        primary: loom_ui_core::Color::rgb(0.3, 0.6, 1.0),
+        track: loom_ui_core::Color::rgb(0.4, 0.4, 0.4),
     };
     let mut recorder = crate::paint::testing::Recorder::default();
     runtime.paint(Layer::Panels, &mut recorder, &style);
@@ -865,6 +867,8 @@ fn paint_before_lay_out_panics() {
         },
         quiet: loom_ui_core::Color::rgb(0.6, 0.6, 0.6),
         mark: loom_ui_core::Color::rgb(0.9, 0.9, 0.9),
+        primary: loom_ui_core::Color::rgb(0.3, 0.6, 1.0),
+        track: loom_ui_core::Color::rgb(0.4, 0.4, 0.4),
     };
     runtime.paint(Layer::Panels, &mut crate::paint::testing::Recorder::default(), &style);
 }

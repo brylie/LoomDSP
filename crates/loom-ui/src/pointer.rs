@@ -21,10 +21,14 @@
 //!
 //! A scroll container's bar and the wheel are the pointer's too (section 5,
 //! rule 12). The wheel scrolls the innermost container under the pointer,
-//! and what it cannot take passes out, then on to whatever is next; with
-//! Ctrl held over a slider, it is the slider's. A press on the thumb drags
-//! it until the release, wherever the pointer goes; a press above or below
-//! it moves one page toward the press.
+//! and what it cannot take passes out, then on to whatever is next. It
+//! never moves a slider, with or without a modifier (rule 16). A press on
+//! the thumb drags it until the release, wherever the pointer goes; a press
+//! above or below it moves one page toward the press.
+//!
+//! A left press on a slider drags it until the release, wherever the
+//! pointer goes, as a bar's thumb does; the drag reaches the app through
+//! [`App::slid`] ([`crate::slider`]).
 //!
 //! [`Routed::Later`]: crate::Routed::Later
 
@@ -34,6 +38,7 @@ use crate::hit::Hit;
 use crate::view::Layer;
 use crate::window::ThumbDrag;
 use loom_ui_core::{Event, Modifiers, Point, PointerButton, PointerEvent, ScrollDelta, UiId};
+use std::time::Instant;
 
 /// How many lines of body text one step of a wheel scrolls (section 5,
 /// rule 12).
@@ -62,9 +67,16 @@ pub(crate) struct Pointer {
     /// The press on a scroll container's bar that is held, until the
     /// release: the thumb it drags, if it went down on the thumb.
     pub(crate) thumb: Option<ThumbDrag>,
-    /// The modifier keys held, as last reported: Ctrl with the wheel over
-    /// a slider is the slider's.
+    /// The modifier keys held, as last reported: Shift during a slider's
+    /// drag makes it finer.
     pub(crate) modifiers: Modifiers,
+    /// The sliders' drag, group of keys, and last press (section 5, rule
+    /// 16).
+    pub(crate) slide: crate::slider::Sliding,
+    /// The moment of the latest turn, for a double-click on a slider. The
+    /// runtime sets it at the start of each turn, since it never reads the
+    /// clock.
+    pub(crate) now: Option<Instant>,
 }
 
 impl Pointer {
@@ -253,14 +265,16 @@ impl<A: App> Panels<'_, A> {
     }
 
     /// True when the element with UI ID `id` is a button, a switch, a
-    /// link, or a menu item, which a pointer press does not focus: each acts, and none
-    /// takes input the keys would then go to.
+    /// check box, a link, or a menu item, which a pointer press does not
+    /// focus: each acts, and none takes input the keys would then go to
+    /// (section 6, rule 3; section 5, rule 17).
     fn takes_no_press_focus(&self, id: &UiId) -> bool {
         self.window.access_of(id).is_some_and(|access| {
             matches!(
                 access.role(),
                 crate::access::Role::Button
                     | crate::access::Role::Switch
+                    | crate::access::Role::CheckBox
                     | crate::access::Role::Link
                     | crate::access::Role::MenuItem
             )
@@ -276,6 +290,39 @@ impl<A: App> Panels<'_, A> {
         let heard = self.pointer_above(input, event, point);
         self.report_focus();
         heard
+    }
+
+    /// Sends the app's message for each of `reports` from a slider, for
+    /// the next turn ([`App::slid`]).
+    pub(crate) fn report_slid(&self, reports: impl IntoIterator<Item = crate::slider::Slid>) {
+        for (id, position, phase) in reports {
+            if let Some(message) = self.app.slid(&id, position, phase) {
+                self.waker.send(message);
+            }
+        }
+    }
+
+    /// Starts a drag, or a reset, on the slider `id` for a left press at
+    /// `point`, unless it is turned off. Returns true when it was a slider
+    /// that took the press.
+    fn press_slider(&mut self, id: &UiId, point: Point) -> bool {
+        let Some((slider, bounds)) = self.window.slider_of(id) else {
+            return false;
+        };
+        if self
+            .window
+            .access_of(id)
+            .is_some_and(crate::access::Access::is_disabled)
+        {
+            return false;
+        }
+        let shift = self.pointer.modifiers.shift;
+        let reports = self
+            .pointer
+            .slide
+            .press(id, slider, bounds, point, shift, self.pointer.now);
+        self.report_slid(reports);
+        true
     }
 
     /// Offers a pointer event to the runtime's layers above the target.
@@ -317,6 +364,26 @@ impl<A: App> Panels<'_, A> {
                     taken: true,
                     redraw: false,
                 },
+            };
+        }
+        // A held drag on a slider has the pointer until it is let go, too.
+        if self.pointer.slide.drags() {
+            match pointer {
+                PointerEvent::Moved => {
+                    let shift = self.pointer.modifiers.shift;
+                    let report = self.pointer.slide.moved(point, shift);
+                    self.report_slid(report);
+                }
+                PointerEvent::Released(PointerButton::Left) => {
+                    let report = self.pointer.slide.released();
+                    self.report_slid(report);
+                    self.pointer.pressed = None;
+                }
+                _ => {}
+            }
+            return Heard {
+                taken: true,
+                redraw: false,
             };
         }
         if let PointerEvent::Scrolled(delta) = pointer
@@ -413,8 +480,12 @@ impl<A: App> Panels<'_, A> {
                 let before = self.focus.id().cloned();
                 self.focus_in(point, |layer| Side::of(layer) == side && layer >= input.layer);
                 redraw |= self.focus.id() != before.as_ref();
+                // A press on a slider drags it or resets it, and is no click.
                 if *button == PointerButton::Left {
-                    self.pointer.pressed = at;
+                    let slider = at.as_ref().is_some_and(|(_, id)| self.press_slider(&id.clone(), point));
+                    if !slider {
+                        self.pointer.pressed = at;
+                    }
                 }
             }
             PointerEvent::Released(PointerButton::Left) => {
@@ -433,20 +504,10 @@ impl<A: App> Panels<'_, A> {
     /// A wheel or a touch pad's scroll at `point`, in the layers `keep`
     /// allows: the containers under it take what they can. Taken only when
     /// one moved, so a wheel no container can use goes on. `None` with no
-    /// container under the point, or with Ctrl held over a slider, whose
-    /// turn it is: the event is then offered as any other is.
+    /// container under the point: the event is then offered as any other
+    /// is. Over a slider it scrolls too, since the wheel never moves one
+    /// (section 5, rule 16).
     fn wheel(&mut self, delta: ScrollDelta, point: Point, keep: impl Fn(Layer) -> bool + Copy) -> Option<Heard> {
-        let over_slider = self.pointer.modifiers.control
-            && matches!(
-                self.window.hit_in(point, keep),
-                Some((_, Hit::Element(id))) if self
-                    .window
-                    .access_of(id)
-                    .is_some_and(|access| access.role() == crate::access::Role::Slider)
-            );
-        if over_slider {
-            return None;
-        }
         // Positive is a scroll up, which moves the content down: a smaller
         // offset.
         let by = |line: f32| match delta {

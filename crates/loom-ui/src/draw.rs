@@ -42,7 +42,7 @@ use crate::element::State;
 use crate::field::{FieldState, Fields};
 use crate::focus::Focus;
 use crate::layout::{Layout, RadioPart, Record, cut};
-use crate::paint::{Align, PanelStyle, Quad, TextPainter, TextRun, Vertical};
+use crate::paint::{Align, PanelStyle, Quad, Segment, TextPainter, TextRun, Vertical};
 use crate::pointer::Pointer;
 use crate::runtime::Counts;
 use crate::view::Layer;
@@ -400,6 +400,12 @@ impl Layout {
             if let Some(RadioPart::Mark { selected }) = record.radio {
                 paint_mark(bounds, selected, painter, style);
             }
+            if let Some(on) = record.check {
+                paint_check(bounds, on, painter, style);
+            }
+            if let Some(slider) = &record.slider {
+                paint_slider(bounds, slider, painter, style);
+            }
             if let Some(text) = self.text(index) {
                 let content = moved(record.content, by);
                 // Its own clip too: a text that clips cuts its own letters.
@@ -514,6 +520,71 @@ fn paint_mark(bounds: Rect, selected: bool, painter: &mut dyn TextPainter, style
             radius: MARK_DOT / 2.0,
         });
     }
+}
+
+/// The thickness of a check box's border, in logical pixels (section 5,
+/// rule 17).
+const CHECK_BORDER: f32 = 1.5;
+
+/// The radius of a check box's corners, in logical pixels.
+const CHECK_RADIUS: f32 = 2.0;
+
+/// The thickness of a check box's check mark, in logical pixels.
+const CHECK_STROKE: f32 = 2.0;
+
+/// Paints a check box's box in `bounds`: its border, and a check mark in
+/// the primary colour when it is `on`.
+fn paint_check(bounds: Rect, on: bool, painter: &mut dyn TextPainter, style: &PanelStyle) {
+    painter.quad(Quad {
+        rect: bounds,
+        fill: Color::TRANSPARENT,
+        border: style.mark,
+        border_width: CHECK_BORDER,
+        radius: CHECK_RADIUS,
+    });
+    if on {
+        // A tick: down from the left, then up to the right.
+        let at = |x: f32, y: f32| Point::new(bounds.x + x * bounds.width, bounds.y + y * bounds.height);
+        let (start, low, end) = (at(0.24, 0.52), at(0.42, 0.70), at(0.76, 0.32));
+        for (from, to) in [(start, low), (low, end)] {
+            painter.segment(Segment {
+                from,
+                to,
+                width: CHECK_STROKE,
+                colour: style.primary,
+            });
+        }
+    }
+}
+
+/// Paints a slider in `bounds`: its track across the middle, the part of
+/// it filled from the minimum or the middle to the thumb, and the round
+/// thumb at its position.
+fn paint_slider(bounds: Rect, slider: &crate::slider::Slider, painter: &mut dyn TextPainter, style: &PanelStyle) {
+    use crate::slider::{Fill, THUMB, TRACK, thumb_centre, travel};
+    let middle = bounds.y + bounds.height / 2.0;
+    let (left, length) = travel(bounds);
+    let track = |from: f32, to: f32| {
+        Rect::new(
+            Point::new(from.min(to), middle - TRACK / 2.0),
+            Size::new((to - from).abs(), TRACK),
+        )
+    };
+    painter.quad(Quad::filled(track(left, left + length), style.track, TRACK / 2.0));
+    let thumb = thumb_centre(bounds, slider.position());
+    let start = match slider.fill() {
+        Fill::FromMin => left,
+        Fill::FromMiddle => left + length / 2.0,
+    };
+    painter.quad(Quad::filled(track(start, thumb.x), style.primary, TRACK / 2.0));
+    painter.quad(Quad::filled(
+        Rect::new(
+            Point::new(thumb.x - THUMB / 2.0, thumb.y - THUMB / 2.0),
+            Size::new(THUMB, THUMB),
+        ),
+        style.primary,
+        THUMB / 2.0,
+    ));
 }
 
 /// `value` in logical pixels, moved to the nearest whole physical pixel

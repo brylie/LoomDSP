@@ -199,6 +199,10 @@ pub(crate) struct Record {
     pub(crate) keys_from: Option<UiId>,
     /// For a radio group, a radio, or a radio's mark: which.
     pub(crate) radio: Option<RadioPart>,
+    /// For a slider: what it shows and how it moves (section 5, rule 16).
+    pub(crate) slider: Option<crate::slider::Slider>,
+    /// For a check box's box: whether it is on (section 5, rule 17).
+    pub(crate) check: Option<bool>,
     /// For a link inside a rich text: its bytes in its parent's text. It
     /// has no node of its own; its place comes from where the text sets
     /// those bytes.
@@ -831,7 +835,7 @@ impl Layout {
         let style = style(&element, around);
         let shrinks = (element.width == Length::Shrink, element.height == Length::Shrink);
         let inside = match element.kind {
-            Kind::Row | Kind::Radio => Parent::Row,
+            Kind::Row | Kind::Radio | Kind::CheckBox => Parent::Row,
             Kind::Column | Kind::RadioGroup => Parent::Column,
             Kind::Scroll(_) => Parent::Scroll,
             _ => Parent::Stack,
@@ -847,6 +851,14 @@ impl Layout {
                 selected: matches!(&element.access, Some(access) if access.is_on()),
             }),
             Kind::RadioMark { selected } => Some(RadioPart::Mark { selected }),
+            _ => None,
+        };
+        let slider = match element.kind {
+            Kind::Slider(slider) => Some(slider),
+            _ => None,
+        };
+        let check = match element.kind {
+            Kind::CheckMark { on } => Some(on),
             _ => None,
         };
         let Element {
@@ -982,6 +994,8 @@ impl Layout {
             }),
             keys_from,
             radio,
+            slider,
+            check,
             inline: None,
             words: Vec::new(),
             pieces: Vec::new(),
@@ -1083,6 +1097,8 @@ impl Layout {
             scroll: None,
             keys_from: None,
             radio: None,
+            slider: None,
+            check: None,
             inline: Some(link.range),
             words: Vec::new(),
             pieces: Vec::new(),
@@ -1151,13 +1167,19 @@ fn style(element: &Element, around: Parent) -> Style {
             style.display = Display::Flex;
             style.flex_direction = FlexDirection::Column;
         }
-        Kind::Radio => {
+        Kind::Radio | Kind::CheckBox => {
             // The mark at the top, beside the label's first line.
             style.display = Display::Flex;
             style.flex_direction = FlexDirection::Row;
             style.align_items = AlignItems::START;
         }
-        Kind::Text { .. } | Kind::Field { .. } | Kind::Space | Kind::Slot(_) | Kind::RadioMark { .. } => {}
+        Kind::Text { .. }
+        | Kind::Field { .. }
+        | Kind::Space
+        | Kind::Slot(_)
+        | Kind::RadioMark { .. }
+        | Kind::Slider(_)
+        | Kind::CheckMark { .. } => {}
     }
     if element.wrap {
         style.flex_wrap = FlexWrap::Wrap;
