@@ -76,7 +76,9 @@ description = "Run every test with line coverage, and fail under LOOM_COVERAGE_M
 # code is left out of the measurement. Doc tests are not measured; the
 # `doctest` task runs them.
 run = [
-  '''if [ "${LOOM_COVERAGE_CLEAN:-all}" = workspace ]; then cargo llvm-cov clean --workspace; else cargo llvm-cov clean; fi''',
+  # A mise template, not a shell `if`, so the line runs in any shell,
+  # including cmd on Windows.
+  '''cargo llvm-cov clean{% if get_env(name="LOOM_COVERAGE_CLEAN", default="all") == "workspace" %} --workspace{% endif %}''',
   '''cargo llvm-cov nextest --workspace --profile ci --ignore-filename-regex 'device_tests\.rs$' --lcov --output-path target/lcov.info''',
   '''cargo llvm-cov report --ignore-filename-regex 'device_tests\.rs$' --cobertura --output-path target/cobertura.xml''',
   '''cargo llvm-cov report --ignore-filename-regex 'device_tests\.rs$' --fail-under-lines {{env.LOOM_COVERAGE_MIN}}''',
