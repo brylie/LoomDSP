@@ -65,7 +65,7 @@ Then build and run the checks:
 ```sh
 cargo build --workspace
 mise run check        # the local check: fmt, clippy, typos, the file rules, and every test, with no coverage build
-mise run check-full   # every check CI runs, coverage included, except the minimum Rust version and the Windows and Linux tests
+mise run check-full   # every check CI runs, coverage included, except the minimum Rust version and the tests on the other systems
 mise run test         # just the tests
 mise run coverage     # tests with line coverage; fails under the minimum
 mise run coverage-html   # browse which lines the tests reach
@@ -121,8 +121,8 @@ Every pull request runs these jobs. All must pass before merging: the main branc
 |---|---|---|
 | Format | `rustfmt` style | `mise run fmt` |
 | Clippy | Lint groups set in the workspace `Cargo.toml`: correctness, suspicious, complexity, perf, style, cargo | `mise run clippy` |
-| Test | All tests on Linux, macOS (Apple Silicon), and Windows, plus benchmarks compile. Nextest isolates each test in its own process. Cargo runs the doc tests. | `mise run test` (on your OS) |
-| Coverage | Line coverage of all tests (run with [nextest](https://nexte.st)), at least the minimum. Sends coverage and test results to Codecov, and coverage to GitHub | `mise run coverage` |
+| Test | All tests on macOS (Apple Silicon) and Windows. Nextest isolates each test in its own process. Cargo runs the doc tests. Linux is tested by the Coverage job. | `mise run test` (on your OS) |
+| Coverage | All tests on Linux (run with [nextest](https://nexte.st)) with line coverage, at least the minimum, then the doc tests and the benchmark build. Sends coverage and test results to Codecov, and coverage to GitHub | `mise run coverage` |
 | Docs | API docs build without warnings | `mise run docs` |
 | MSRV | Still builds with Rust 1.100 | `mise run msrv` |
 | WebAssembly | Engine crates build for `wasm32-unknown-unknown` | `mise run wasm` |
@@ -151,7 +151,7 @@ Besides "CI success", the main branch ruleset has a coverage gate from [GitHub C
 **Line coverage.** A pull request is blocked when its line coverage is under 80%, or more than 1 percentage point below `main`. The Coverage job uploads a Cobertura report (`target/cobertura.xml`) with [`actions/upload-code-coverage`](https://github.com/actions/upload-code-coverage), and a bot comments on the pull request with the total and the files that changed. It also sends the coverage (`target/lcov.info`) and the test results to [Codecov](https://codecov.io/gh/brylie/LoomDSP), which comments on the pull request too. Codecov adds two statuses: the lines a pull request changes need 80% coverage (`codecov/patch`), and total coverage may not fall by more than 5% (`codecov/project`).
 
 - The Coverage job itself fails under 80%, so the minimum holds even when the upload does not happen. *Open point:* GitHub Code Quality is only on GitHub Team and Enterprise Cloud plans. On this repository's plan the upload returns "404 Not Found", so the step only warns, and the "1 point below `main`" rule and the pull request comment do not work yet.
-- CI enforces the minimum: the Coverage job runs on every pull request and fails under it. `mise run check` does not measure coverage, because an instrumented build of the workspace costs far more CPU than the plain test run. `mise run coverage`, or `mise run check-full`, checks the minimum on your machine when you want it before pushing. It starts with `cargo llvm-cov clean`, because test binaries that older trees left in a reused target folder would otherwise count as unrun code and lower the total. The minimum is `LOOM_COVERAGE_MIN` in `mise.toml`. It must stay equal to the ruleset's value.
+- CI enforces the minimum: the Coverage job runs on every pull request and fails under it. `mise run check` does not measure coverage, because an instrumented build of the workspace costs far more CPU than the plain test run. `mise run coverage`, or `mise run check-full`, checks the minimum on your machine when you want it before pushing. It starts with `cargo llvm-cov clean`, because test binaries that older trees left in a reused target folder would otherwise count as unrun code and lower the total. CI sets `LOOM_COVERAGE_CLEAN=workspace`, which cleans only the workspace's own builds: its cache holds dependency builds only, so it has no old test binaries, and a full clean would rebuild every dependency. The minimum is `LOOM_COVERAGE_MIN` in `mise.toml`. It must stay equal to the ruleset's value.
 - The "no more than 1 point below `main`" rule is checked only on GitHub, because it needs the coverage of `main` to compare with. If your change adds code, add tests for it in the same pull request.
 - Code that needs audio or MIDI hardware cannot be reached by tests. Keep it thin, and put the logic it calls where tests can reach it, as the app does with the `devices::Host` trait.
 

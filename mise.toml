@@ -62,8 +62,13 @@ description = "Run every test with line coverage, and fail under LOOM_COVERAGE_M
 # instrumented build and profile from earlier runs. Without it, `cargo
 # llvm-cov report` also reads test binaries that older trees left in a
 # reused target folder, and counts their code as unrun, so files a change
-# never touched can fall to near 0%. `clean --workspace` is not enough: it
-# keeps binaries of tests the current tree no longer has. The second
+# never touched can fall to near 0%. `clean --workspace` is not enough
+# there: it keeps binaries of tests the current tree no longer has.
+# CI sets LOOM_COVERAGE_CLEAN=workspace, and then only the workspace's own
+# builds and profiles go. CI's target folder comes from rust-cache, which
+# saves dependency builds only and never a workspace crate, so it holds no
+# old test binaries, and a full clean would only throw away the dependency
+# builds it just restored (about 2 minutes to build again). The second
 # command runs the tests and writes the lcov file for Codecov. The others
 # write the Cobertura file for GitHub and report the same data per file
 # with the minimum. Tests that
@@ -71,7 +76,7 @@ description = "Run every test with line coverage, and fail under LOOM_COVERAGE_M
 # code is left out of the measurement. Doc tests are not measured; the
 # `doctest` task runs them.
 run = [
-  "cargo llvm-cov clean",
+  '''if [ "${LOOM_COVERAGE_CLEAN:-all}" = workspace ]; then cargo llvm-cov clean --workspace; else cargo llvm-cov clean; fi''',
   '''cargo llvm-cov nextest --workspace --profile ci --ignore-filename-regex 'device_tests\.rs$' --lcov --output-path target/lcov.info''',
   '''cargo llvm-cov report --ignore-filename-regex 'device_tests\.rs$' --cobertura --output-path target/cobertura.xml''',
   '''cargo llvm-cov report --ignore-filename-regex 'device_tests\.rs$' --fail-under-lines {{env.LOOM_COVERAGE_MIN}}''',
@@ -188,7 +193,7 @@ depends = ["fmt", "clippy", "typos", "adr-status", "test-placement", "portable"]
 run = """cargo nextest run --workspace --test-threads "${LOOM_TEST_THREADS:-$(( ($(getconf _NPROCESSORS_ONLN) + 1) / 2 ))}""""
 
 [tasks.check-full]
-description = "Run everything CI runs (all but msrv and the three-OS test matrix), coverage included"
+description = "Run everything CI runs (all but msrv and the macOS and Windows test jobs), coverage included"
 # coverage runs every test except doc tests, so `test` is not listed again;
 # `doctest` covers the rest.
 depends = ["fmt", "clippy", "typos", "adr-status", "test-placement", "portable", "ui-no-toolkit", "worktree-targets", "deny", "docs", "wasm", "coverage", "doctest"]

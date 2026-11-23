@@ -31,6 +31,15 @@ env:
   # in the clippy, docs, and wasm tasks, which set them as errors themselves.
   RUSTFLAGS: -D warnings
   RUSTDOCFLAGS: -D warnings
+  # Debug and test builds keep file and line tables only, so a panic's
+  # backtrace still names the line, but there is no full debug info for a
+  # debugger that nobody attaches in CI. Each test build links about 70 test
+  # binaries, and smaller ones compile, link, and cache faster. Debug
+  # assertions are a separate setting and stay on, so the no-allocation test
+  # still runs. Line coverage reads the coverage map that `-C
+  # instrument-coverage` writes, not the debug info. Benchmarks use the
+  # bench profile and are not affected.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   fmt:
@@ -63,39 +72,37 @@ jobs:
       fail-fast: false
       matrix:
         # macos-latest is Apple Silicon, so this also covers aarch64.
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Linux is tested by the Coverage job, which runs every test there
+        # (and the doc tests and the benchmark build), so a third run of the
+        # same tests on Linux would add a runner and catch nothing new.
+        os: [macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: jdx/mise-action@v5
-      # Mesa's software Vulkan (lavapipe, on llvmpipe) gives the Ubuntu
-      # runner a GPU adapter, as on the coverage job. It is the only Vulkan
-      # device there, so wgpu picks it with no setting; if a runner ever
-      # has a second, WGPU_ADAPTER_NAME=llvmpipe picks this one.
-      - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev mesa-vulkan-drivers
       - uses: Swatinem/rust-cache@v2
       # Debug build on purpose: the no-allocation test (NFR-RT-06) is only
       # active with debug assertions.
       - run: mise run test
         env:
-          # Every runner has a GPU adapter: Metal on macOS, DX12 on Windows,
-          # and Mesa's software Vulkan on Ubuntu. So the drawing tests
-          # (crates/loom-app/tests/screenshot.rs, the harness's captures,
-          # and the layout comparison) must draw and compile canvas.wgsl
-          # for that backend, and fail, naming the cause, if no adapter is
-          # found. Event tests need no GPU at all (plan for leaving Iced,
-          # step 2.3).
+          # Every runner has a GPU adapter: Metal on macOS and DX12 on
+          # Windows (and Mesa's software Vulkan on the Coverage job). So the
+          # drawing tests (crates/loom-app/tests/screenshot.rs, the
+          # harness's captures, and the layout comparison) must draw and
+          # compile canvas.wgsl for that backend, and fail, naming the
+          # cause, if no adapter is found. Event tests need no GPU at all
+          # (plan for leaving Iced, step 2.3).
           LOOM_REQUIRE_GPU: "1"
-      - name: Benchmarks compile
-        run: cargo bench -p loom-modules --no-run
 
   # Line coverage. The job fails under LOOM_COVERAGE_MIN percent (mise.toml),
   # the same minimum as the "Restrict code coverage" rule of the main branch
   # ruleset, and is part of "CI success", which the ruleset requires. Reports
   # go to Codecov (coverage and test results) and to GitHub Code Quality.
   # Docs: https://docs.github.com/en/code-security/how-tos/maintain-quality-code/set-up-code-coverage
+  # It is also the Linux test job: the Test matrix runs only macOS and
+  # Windows. Linux is tested at the pull request's head commit here, not
+  # at the merge commit; the other two runners test the merge commit.
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
@@ -113,18 +120,37 @@ jobs:
           # numbers match the diff.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: jdx/mise-action@v5
-      # Mesa's software Vulkan adapter lets headless screenshot tests exercise
-      # the canvas shader and GPU buffers on the coverage runner.
+      # Mesa's software Vulkan (lavapipe, on llvmpipe) gives this runner a
+      # GPU adapter, so headless screenshot tests exercise the canvas shader
+      # and GPU buffers. It is the only Vulkan device here, so wgpu picks it
+      # with no setting; if a runner ever has a second,
+      # WGPU_ADAPTER_NAME=llvmpipe picks this one.
       - run: sudo apt-get update && sudo apt-get install -y libasound2-dev mesa-vulkan-drivers
       - uses: Swatinem/rust-cache@v2
       # Runs the tests once with nextest (its `ci` profile writes a JUnit
       # report for Codecov), writes target/lcov.info and
       # target/cobertura.xml, and fails under LOOM_COVERAGE_MIN. Doc tests
-      # are not run here; the Test job runs them.
+      # are not measured; the next step runs them.
       - name: Tests with line coverage
         run: mise run coverage
         env:
+          # The drawing tests must find the adapter, as in the Test job.
           LOOM_REQUIRE_GPU: "1"
+          # Keep the dependency builds rust-cache restored; clean only the
+          # workspace's own (the coverage task in mise.toml says why).
+          LOOM_COVERAGE_CLEAN: workspace
+      # The rest of what `mise run test` runs on the other two systems.
+      # These run after a coverage failure too, so one push shows every
+      # failure.
+      - name: Doc tests
+        if: ${{ !cancelled() }}
+        run: mise run doctest
+      # On one system only: the benchmarks have no platform code, so a
+      # build break shows here. On Windows this step took over a minute of
+      # the slowest job.
+      - name: Benchmarks compile
+        if: ${{ !cancelled() }}
+        run: cargo bench -p loom-modules --no-run
       - name: Coverage summary
         if: ${{ !cancelled() && hashFiles('target/lcov.info') != '' }}
         run: |
