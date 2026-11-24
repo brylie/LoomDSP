@@ -54,6 +54,9 @@ struct Layers {
     reports: bool,
     /// A second menu over the first, placed at (100, 50).
     stacked: bool,
+    /// The overlay is a dialog, not the menu: an opaque panel with 30 px
+    /// of room around its one button, room that is no stop.
+    padded: bool,
     heard: Vec<Message>,
 }
 
@@ -83,9 +86,15 @@ impl App for Layers {
             Element::row([button("a", 40.0), b]).width(Length::FILL)
         });
         if self.overlay {
-            view.panel_with(UiId::panel("menu"), Layer::Overlays, &(), |_| {
-                Element::row([menu_item("item", 20.0)]).closes_on_press_outside()
-            });
+            if self.padded {
+                view.panel_with(UiId::panel("dialog"), Layer::Overlays, &(), |_| {
+                    Element::column([button("ok", 20.0)]).padding(30.0).opaque()
+                });
+            } else {
+                view.panel_with(UiId::panel("menu"), Layer::Overlays, &(), |_| {
+                    Element::row([menu_item("item", 20.0)]).closes_on_press_outside()
+                });
+            }
         }
         if self.stacked {
             view.panel_with(UiId::panel("sub"), Layer::Overlays, &(), |_| {
@@ -223,6 +232,7 @@ fn harness(overlay: bool, answer: Routed) -> Harness<Layers, Fake> {
         runs: false,
         reports: false,
         stacked: false,
+        padded: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -904,6 +914,7 @@ fn the_app_decides_tab_at_the_end_of_a_run() {
         runs: true,
         reports: false,
         stacked: false,
+        padded: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -1476,6 +1487,7 @@ fn reporting() -> Harness<Layers, Fake> {
         runs: false,
         reports: true,
         stacked: false,
+        padded: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -1596,6 +1608,7 @@ fn a_press_inside_the_lower_of_two_menus_closes_only_the_upper() {
         runs: false,
         reports: false,
         stacked: true,
+        padded: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -1627,4 +1640,35 @@ fn a_press_inside_the_lower_of_two_menus_closes_only_the_upper() {
         [UiId::panel("menu"), UiId::panel("sub")],
         "outside both: both, lower first"
     );
+}
+
+/// While an overlay owns the input, a press on no stop keeps the focus
+/// where it was, so the user keeps their place (section 6, rule 3).
+#[test]
+fn a_press_on_no_stop_over_an_overlay_keeps_the_focus() {
+    let app = Layers {
+        overlay: true,
+        input: Layer::Canvas,
+        canvas: false,
+        runs: false,
+        reports: false,
+        stacked: false,
+        padded: true,
+        heard: Vec::new(),
+    };
+    let target = Fake {
+        answer: Routed::Passed,
+        taken_from: 350.0,
+        heard: Vec::new(),
+        focus: None,
+    };
+    let mut harness = Harness::new(app, target, WindowState::new(Size::new(400.0, 200.0)), Instant::now());
+    harness.lay_out(&mut Mono::default());
+    harness.send(Message::Input(Layer::Overlays));
+    let item = UiId::panel("dialog").with("ok");
+    harness.send(Message::Refocus(vec![item.clone()]));
+    assert_eq!(harness.runtime().focused(), Some(&item));
+    // Inside the dialog's room, above its button: the overlay's own, no stop.
+    click(&mut harness, 10.0, 10.0);
+    assert_eq!(harness.runtime().focused(), Some(&item), "kept over the overlay");
 }

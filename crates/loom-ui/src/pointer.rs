@@ -552,7 +552,10 @@ impl<A: App> Panels<'_, A> {
                     self.waker.send(message);
                 }
                 let before = self.focus.id().cloned();
-                self.focus_in(point, |layer| Side::of(layer) == side && layer >= input.layer);
+                // Over an overlay or a question, a press on no stop keeps
+                // the focus where it was (section 6, rule 3).
+                let modal = input.layer > Layer::Panels;
+                self.focus_in(point, modal, |layer| Side::of(layer) == side && layer >= input.layer);
                 redraw |= self.focus.id() != before.as_ref();
                 // A press on a slider drags it or resets it, and is no click.
                 if *button == PointerButton::Left {
@@ -645,7 +648,7 @@ impl<A: App> Panels<'_, A> {
     /// the target its release when a stop takes it, as
     /// [`Runtime::focus_at`](crate::Runtime::focus_at) does.
     pub(crate) fn focus_at(&mut self, point: Point) {
-        self.focus_in(point, |_| true);
+        self.focus_in(point, false, |_| true);
     }
 
     /// [`Panels::focus_at`] among the panels of the layers `keep` allows,
@@ -655,7 +658,7 @@ impl<A: App> Panels<'_, A> {
     /// section 6, rule 3; Brylie's decision, 2026-11-19). Tab and a screen
     /// reader's Focus still reach it. A field, or a press on no stop,
     /// moves the focus as before.
-    fn focus_in(&mut self, point: Point, keep: impl Fn(Layer) -> bool) {
+    fn focus_in(&mut self, point: Point, modal: bool, keep: impl Fn(Layer) -> bool) {
         // A press in a select's open list leaves the focus on the select
         // (section 5, rule 18).
         if self.window.select.is_some()
@@ -678,6 +681,15 @@ impl<A: App> Panels<'_, A> {
         }
         let to = self.window.focus_at_in(point, keep).flatten().cloned();
         if to.as_ref().is_some_and(|id| self.takes_no_press_focus(id)) {
+            return;
+        }
+        // While an overlay or a question owns the input, a press on no stop
+        // (its backdrop, padding, or a label) keeps the focus where it was,
+        // so the user keeps their place in the dialog, as a click on a part
+        // of a modal dialog that takes no focus does on the web (the
+        // WAI-ARIA dialog pattern). A focus that is gone falls back by
+        // section 6, rule 4.
+        if modal && to.is_none() && self.focus.id().is_some() {
             return;
         }
         self.focus.wanted = None;
