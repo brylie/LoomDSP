@@ -833,15 +833,37 @@ impl App {
             .find(|k| c.eq_ignore_ascii_case(&k.to_string()))
     }
 
-    pub(crate) fn clipboard_command(&mut self, message: &Message) {
-        let text = match self.clipboard_key(message) {
-            Some('c') => self.copy(),
-            Some('x') => self.cut(),
-            Some('d') => {
+    /// Runs a shortcut on the patch, once the check found no text field
+    /// with focus (`shortcut.rs`).
+    pub(crate) fn run_shortcut(&mut self, shortcut: crate::shortcut::Shortcut) {
+        use crate::shortcut::Shortcut;
+        let text = match shortcut {
+            Shortcut::Undo => {
+                self.undo();
+                None
+            }
+            Shortcut::Redo => {
+                self.redo();
+                None
+            }
+            Shortcut::OpenSelected => {
+                self.open_selected();
+                None
+            }
+            Shortcut::MakeSubpatch => {
+                self.make_subpatch();
+                None
+            }
+            Shortcut::DissolveSubpatch => {
+                self.dissolve_subpatch();
+                None
+            }
+            Shortcut::Duplicate => {
                 self.duplicate();
                 None
             }
-            _ => None,
+            Shortcut::Copy => self.copy(),
+            Shortcut::Cut => self.cut(),
         };
         if let Some(text) = text {
             self.effect(loom_ui::Effects::clipboard_write(text));
@@ -897,14 +919,26 @@ impl App {
     }
 
     /// Pastes clipboard text with its top-left corner at a world point.
-    pub(crate) fn paste(&mut self, world: Point, text: Option<String>) {
+    pub(crate) fn paste(&mut self, world: Point, text: loom_ui::ClipboardText) {
+        // A read that could not complete is said so, never shown as an
+        // empty clipboard (ui-layer.md, section 8, rule 2), even during a
+        // drag: it changes nothing. The status line is what a screen reader
+        // announces.
+        if text == loom_ui::ClipboardText::Refused {
+            self.alerts.warn(clipboard::COULD_NOT_READ.to_string());
+            return;
+        }
         self.close_slider_gesture();
         if self.session.edits.gesture_open() {
             return;
         }
-        let Some(text) = text else {
-            self.alerts.warn(clipboard::NOTHING_TO_PASTE.to_string());
-            return;
+        let text = match text {
+            loom_ui::ClipboardText::Text(text) => text,
+            loom_ui::ClipboardText::Empty => {
+                self.alerts.warn(clipboard::NOTHING_TO_PASTE.to_string());
+                return;
+            }
+            loom_ui::ClipboardText::Refused => return,
         };
         match clipboard::Group::from_text(&text, self.session.controller.registry()) {
             Ok(group) => {

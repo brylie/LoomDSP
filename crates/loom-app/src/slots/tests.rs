@@ -451,7 +451,10 @@ fn a_pasted_slot_swaps_independently_and_undoes_as_one_step() {
     let (app, slot, svf) = with_slot();
     let mut ui = crate::ui_test::Ui::with_app(app);
     let text = ui.app_mut().copy().unwrap();
-    ui.app_mut().paste(loom_ui_core::Point::new(600.0, 240.0), Some(text));
+    ui.app_mut().paste(
+        loom_ui_core::Point::new(600.0, 240.0),
+        loom_ui::ClipboardText::Text(text),
+    );
     let snapshot = ui.app().ui_snapshot();
     assert_eq!(snapshot.undo.as_deref(), Some("paste Filter"), "{:?}", snapshot.status);
     let [copy] = snapshot.selection.as_slice() else {

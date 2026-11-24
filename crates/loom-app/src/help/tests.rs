@@ -90,7 +90,8 @@ fn help_from_focused_browser_preserves_search() {
     assert_eq!(help.id, "loom.filter.svf");
     assert!(!help.inputs.is_empty());
     assert!(help.notes.contains("Example patch"));
-    assert!(ui.text("Open example").is_some());
+    let example = crate::overlays::access::help_id().with("body").with("example");
+    assert!(ui.app().help_stops().contains(&example), "Open example is a stop");
     ui.tap(Key::Named(Named::Escape), Modifiers::default());
     assert!(ui.app().overlays.help.is_none());
     assert_eq!(
@@ -141,14 +142,18 @@ fn help_close_stays_visible_while_scrolling() {
     let _ = ui.app_mut().send(Message::Canvas(CanvasEvent::Select(vec![4])));
     ui.tap(Key::Named(Named::F1), Modifiers::default());
     let before = ui.text("Close").expect("close action");
-    let scroll_before = ui.scroll_translation("module-help-content").expect("help scroll area");
-    ui.move_to(Point::new(700.0, 600.0));
+    let body = body_id(&ui);
+    let scroll_before = ui.runtime().scroll_offset(&body).expect("help scroll area");
+    let _ = ui.redraw();
+    let middle = ui.runtime().bounds(&body).expect("the body is laid out").center();
+    ui.move_to(middle);
     ui.step(&[iced::Event::Mouse(mouse::Event::WheelScrolled {
         delta: mouse::ScrollDelta::Lines { x: 0.0, y: -12.0 },
     })]);
     let after = ui.text("Close").expect("close action remains visible");
     assert_eq!(before, after);
-    let scroll_after = ui.scroll_translation("module-help-content").expect("help scroll area");
+    let _ = ui.redraw();
+    let scroll_after = ui.runtime().scroll_offset(&body).expect("help scroll area");
     assert_ne!(scroll_before, scroll_after, "the content scrolled");
     ui.move_to(after.center());
     ui.press();
@@ -170,7 +175,7 @@ fn example_button_honors_unsaved_changes() {
     assert!(ui.app().unsaved());
     ui.tap(Key::Named(Named::F1), Modifiers::default());
     let _ = files::fake::asked();
-    let at = ui.text("Open example").expect("example button").center();
+    let at = tab_to_example(&mut ui);
     ui.move_to(at);
     ui.press();
     ui.release();
@@ -181,6 +186,9 @@ fn example_button_honors_unsaved_changes() {
     assert!(ui.app().overlays.help.is_some(), "cancellation keeps the help open");
     assert!(ui.app().unsaved());
 
+    // The answer came as a message, not through the window: a frame lays
+    // the window out without the question's panel, as one would.
+    let _ = ui.redraw();
     ui.press();
     ui.release();
     assert!(ui.app().overlays.question.is_some(), "it asks again");
@@ -228,7 +236,7 @@ fn example_button_saves_the_old_patch_when_requested() {
     ui.tap(Key::Named(Named::F1), Modifiers::default());
     let _ = files::fake::asked();
     files::fake::answer_save(Some(destination.clone()));
-    let at = ui.text("Open example").expect("example button").center();
+    let at = tab_to_example(&mut ui);
     ui.move_to(at);
     ui.press();
     ui.release();
@@ -331,17 +339,27 @@ fn help_wraps_inside_and_closes_from_the_backdrop() {
     // The panel ends 20 px right of its Close button.
     let right = close.x + close.width + 20.0;
     let help = ui.app().overlays.help.as_ref().unwrap().model.clone();
-    for entry in help.params.iter().chain(&help.inputs).chain(&help.outputs) {
-        let text = ui.text(entry.description).expect("an entry's description");
-        assert!(
-            text.x + text.width <= right,
-            "{} runs past the panel",
-            entry.description
-        );
+    let body = crate::overlays::access::help_id().with("body");
+    let _ = ui.redraw();
+    for (key, entries) in [
+        ("parameters", &help.params),
+        ("inputs", &help.inputs),
+        ("outputs", &help.outputs),
+    ] {
+        for entry in entries {
+            // Where the entry is laid out, scrolled into view or not.
+            let id = body.clone().with(key).with(entry.name);
+            let text = ui.runtime().bounds(&id).expect("an entry's place");
+            assert!(
+                text.x + text.width <= right,
+                "{} runs past the panel",
+                entry.description
+            );
+        }
     }
-    // "Parameters" shows only in help; the summary is also in the
-    // inspector, outside the overlay.
-    let heading = ui.text("Parameters").expect("a help heading");
+    // The title in help's own box, read from the runtime's layout, since
+    // the inspector under help shows the module's name too.
+    let heading = ui.runtime().text_bounds(help.name).expect("help's title");
     click(&mut ui, heading.center());
     assert!(ui.app().overlays.help.is_some(), "a click inside keeps help open");
     click(&mut ui, Point::new(10.0, crate::WINDOW.height / 2.0));
@@ -385,4 +403,266 @@ fn the_browser_shows_the_id_under_the_description() {
     assert!(ui.text(second.id).is_none(), "no ID on other rows");
     // Each row shows its family (ADR-0029).
     assert!(ui.text(first.family.label()).is_some(), "the row's family");
+}
+
+/// The UI ID of the open help page's scrolling body.
+fn body_id(ui: &Ui) -> loom_ui_core::UiId {
+    let _ = ui;
+    crate::overlays::access::help_id().with("body")
+}
+
+/// Tabs through help until Open example has the focus, which brings it
+/// into view, and gives its centre.
+fn tab_to_example(ui: &mut Ui) -> Point {
+    let example = crate::overlays::access::help_id().with("body").with("example");
+    for _ in 0..64 {
+        if ui.runtime().focused() == Some(&example) {
+            let _ = ui.redraw();
+            return ui.text("Open example").expect("the button shows").center();
+        }
+        ui.tap(Key::Named(Named::Tab), Modifiers::default());
+    }
+    panic!(
+        "Tab never reached Open example: the focus is on {:?}",
+        ui.runtime().focused()
+    );
+}
+
+/// Help opened with F1, a key, takes the focus to its Close button with a
+/// ring; opened by the pointer, without one (help-pages.md, Keys, links,
+/// and focus; the pointer case is `iced_bridge::pointers` tests').
+#[test]
+fn help_opened_from_the_keyboard_shows_the_ring_on_close() {
+    let mut ui = Ui::open("subtractive.ron");
+    let _ = ui.app_mut().send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.tap(Key::Named(Named::F1), Modifiers::default());
+    let _ = ui.redraw();
+    let close = crate::overlays::access::help_id().with("close");
+    assert_eq!(ui.runtime().focused(), Some(&close));
+    assert_eq!(ui.runtime().focus_ring().map(|(id, _)| id), Some(close));
+}
+
+/// Down and Page Down from Close scroll the body, which takes its keys
+/// from Close (WCAG 2.2, 2.1.1), and Close stays where it is.
+#[test]
+fn the_scroll_keys_move_the_body_from_close() {
+    let mut ui = Ui::open("subtractive.ron");
+    let _ = ui.app_mut().send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.tap(Key::Named(Named::F1), Modifiers::default());
+    let _ = ui.redraw();
+    let body = body_id(&ui);
+    let offset = |ui: &mut Ui| {
+        let _ = ui.redraw();
+        ui.runtime().scroll_offset(&body).expect("the body scrolls").0
+    };
+    let start = offset(&mut ui);
+    ui.tap(Key::Named(Named::ArrowDown), Modifiers::default());
+    let down = offset(&mut ui);
+    assert!(down > start, "Down scrolls: {start} then {down}");
+    ui.tap(Key::Named(Named::PageDown), Modifiers::default());
+    let page = offset(&mut ui);
+    assert!(page > down, "Page Down scrolls further: {down} then {page}");
+    assert_eq!(
+        ui.runtime().focused(),
+        Some(&crate::overlays::access::help_id().with("close"))
+    );
+}
+
+/// Tab moves through help's stops in reading order, Close, the links, and
+/// Open example, and wraps back to Close; Shift+Tab goes the other way
+/// (the WAI-ARIA modal dialog pattern).
+#[test]
+fn tab_cycles_helps_stops_in_order() {
+    let mut ui = Ui::open("subtractive.ron");
+    let _ = ui.app_mut().send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.tap(Key::Named(Named::F1), Modifiers::default());
+    let _ = ui.redraw();
+    let stops = ui.app().help_stops();
+    assert!(stops.len() > 2, "Close, a link or Open example: {stops:?}");
+    let mut met = vec![ui.runtime().focused().cloned().expect("Close has the focus")];
+    for _ in 1..stops.len() {
+        ui.tap(Key::Named(Named::Tab), Modifiers::default());
+        let _ = ui.redraw();
+        met.push(ui.runtime().focused().cloned().expect("a stop has the focus"));
+    }
+    assert_eq!(met, stops, "in reading order");
+    ui.tap(Key::Named(Named::Tab), Modifiers::default());
+    let _ = ui.redraw();
+    assert_eq!(ui.runtime().focused(), stops.first(), "it wraps to Close");
+    ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
+    let _ = ui.redraw();
+    assert_eq!(ui.runtime().focused(), stops.last(), "Shift+Tab wraps back");
+}
+
+/// Escape closes help and gives the focus back to the runtime's stop that
+/// had it, as section 6, rule 4 says: here, a toolbar button.
+#[test]
+fn escape_gives_the_focus_back() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
+    let _ = ui.redraw();
+    let before = ui
+        .runtime()
+        .focused()
+        .cloned()
+        .expect("a stop of the bar has the focus");
+    ui.tap(Key::Named(Named::F1), Modifiers::default());
+    let _ = ui.redraw();
+    assert_ne!(ui.runtime().focused(), Some(&before), "help took the focus");
+    ui.tap(Key::Named(Named::Escape), Modifiers::default());
+    let _ = ui.redraw();
+    assert!(ui.app().overlays.help.is_none());
+    assert_eq!(ui.runtime().focused(), Some(&before), "the focus came back");
+}
+
+/// A link to a page help cannot open, such as an explainer, is plain text:
+/// no stop and no link node; a link to a bundled page is both
+/// (help-pages.md, Keys, links, and focus; Brylie's choice).
+#[test]
+fn a_link_help_cannot_follow_is_plain_text() {
+    let mut ui = Ui::open("subtractive.ron");
+    let meter = ui
+        .app()
+        .modules
+        .iter()
+        .copied()
+        .find(|d| d.id == "loom.display.meter")
+        .expect("the meter is registered");
+    let help = Help::new(meter);
+    let targets: Vec<String> = help
+        .model
+        .lead
+        .iter()
+        .chain(&help.model.tail)
+        .flat_map(|block| block.links().iter().map(|link| link.target.clone()))
+        .collect();
+    assert!(
+        targets.iter().any(|t| t.contains("../learn/")),
+        "the page links an explainer: {targets:?}"
+    );
+    ui.app_mut().overlays.help = Some(help);
+    let _ = ui.redraw();
+    assert!(!ui.app().bundled("../learn/output-safety.md"));
+    let tree = ui.a11y_tree();
+    let links: Vec<String> = tree
+        .names()
+        .into_iter()
+        .filter(|name| name == "Output safety")
+        .collect();
+    let link_nodes = links
+        .iter()
+        .filter(|name| tree.node(name).role() == accesskit::Role::Link)
+        .count();
+    assert_eq!(link_nodes, 0, "no link node for an explainer");
+}
+
+/// Enter on a focused link follows it to its page, which opens at its top
+/// with the focus on Close again, ringed; Space on it follows nothing and
+/// scrolls the body a page, as a page's Space does (the WAI-ARIA link
+/// pattern).
+#[test]
+fn enter_follows_a_focused_link_and_the_page_opens_at_its_top() {
+    let mut ui = Ui::open("subtractive.ron");
+    let _ = ui.app_mut().send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.tap(Key::Named(Named::F1), Modifiers::default());
+    let _ = ui.redraw();
+    let first = ui.app().overlays.help.as_ref().unwrap().model.id;
+    let stops = ui.app().help_stops();
+    let link = stops
+        .iter()
+        .find(|stop| {
+            stop.keys()
+                .last()
+                .is_some_and(|key| key.to_string().starts_with("link-"))
+        })
+        .cloned()
+        .expect("the page has a bundled link");
+    for _ in 0..stops.len() {
+        if ui.runtime().focused() == Some(&link) {
+            break;
+        }
+        ui.tap(Key::Named(Named::Tab), Modifiers::default());
+        let _ = ui.redraw();
+    }
+    assert_eq!(ui.runtime().focused(), Some(&link));
+    let body = body_id(&ui);
+    let (before, most) = ui.runtime().scroll_offset(&body).expect("the body scrolls");
+    ui.tap(Key::Named(Named::Space), Modifiers::default());
+    let _ = ui.redraw();
+    assert_eq!(
+        ui.app().overlays.help.as_ref().unwrap().model.id,
+        first,
+        "Space follows nothing"
+    );
+    let (after, _) = ui.runtime().scroll_offset(&body).expect("the body scrolls");
+    assert!(
+        after > before || before == most,
+        "Space scrolls the body a page, as a page's does"
+    );
+    assert_eq!(ui.runtime().focused(), Some(&link), "and the link keeps the focus");
+    ui.tap(Key::Named(Named::Enter), Modifiers::default());
+    let _ = ui.redraw();
+    let _ = ui.redraw();
+    assert_ne!(
+        ui.app().overlays.help.as_ref().unwrap().model.id,
+        first,
+        "Enter followed it"
+    );
+    let (offset, _) = ui.runtime().scroll_offset(&body_id(&ui)).expect("the body scrolls");
+    assert_eq!(offset, 0.0, "the new page shows from its top");
+    let close = crate::overlays::access::help_id().with("close");
+    assert_eq!(ui.runtime().focused(), Some(&close), "the focus is on Close again");
+    assert_eq!(
+        ui.runtime().focus_ring().map(|(id, _)| id),
+        Some(close),
+        "with the ring: Enter is a key"
+    );
+}
+
+/// F1 over a browser whose search field has the keys takes the focus to
+/// help's Close, with the ring, since F1 is a key; the next turn keeps it
+/// there; and Escape gives the keys back to the browser's field (#883,
+/// row 1; help-pages.md, Keys, links, and focus).
+#[test]
+fn f1_over_a_browser_focuses_close_and_escape_gives_the_field_back() {
+    use crate::input_owner::InputOwner;
+    for (owner, field) in [
+        (InputOwner::Browser, crate::browser::search_id()),
+        (InputOwner::Patches, crate::patches::text_fields()[0].clone()),
+    ] {
+        let mut ui = Ui::open("subtractive.ron");
+        crate::input_owner::tests::open_overlay(&mut ui, owner);
+        let at = ui.field(&field);
+        ui.move_to(at);
+        ui.press();
+        ui.release();
+        assert_eq!(
+            ui.app().focus.as_ref(),
+            Some(&field),
+            "{owner:?}: the field has the keys"
+        );
+        ui.tap(Key::Named(Named::F1), Modifiers::default());
+        let _ = ui.redraw();
+        let close = crate::overlays::access::help_id().with("close");
+        assert_eq!(ui.runtime().focused(), Some(&close), "{owner:?}: Close has the focus");
+        assert_eq!(
+            ui.runtime().focus_ring().map(|(id, _)| id),
+            Some(close.clone()),
+            "{owner:?}: ringed"
+        );
+        let _ = ui.redraw();
+        assert_eq!(
+            ui.runtime().focused(),
+            Some(&close),
+            "{owner:?}: the next turn keeps it"
+        );
+        ui.tap(Key::Named(Named::Escape), Modifiers::default());
+        let _ = ui.redraw();
+        assert!(ui.app().overlays.help.is_none(), "{owner:?}: help closed");
+        assert_eq!(
+            ui.focused_field(),
+            Some(field),
+            "{owner:?}: the field has the keys again"
+        );
+    }
 }

@@ -48,16 +48,11 @@ pub(crate) enum Kind {
     /// A window over the rest that owns the input: help, Your patches,
     /// Preferences. Its label is its title.
     Dialog,
-    /// A dialog that asks before going on: the question. Its description is
-    /// the sentence under its title.
-    AlertDialog,
     /// A menu over the rest that owns the input: the tile menu, the probe
     /// menu, the Recent list.
     Menu,
     /// One item of a menu. Click picks it.
     MenuItem,
-    /// A link in text. Click follows it.
-    Link,
     /// A list of options to pick from, one selected, such as the module
     /// browser's results. Its children are list box options, each told its
     /// position and the list's size.

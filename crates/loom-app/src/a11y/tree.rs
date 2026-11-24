@@ -427,6 +427,22 @@ pub(crate) fn tree(
     children.extend(groups.breadcrumb);
     children.push(frame.tabs(snapshot.matrix.tab));
     let bar = groups.bar;
+    // The runtime's overlay that owns the input (row 3b): an alert dialog
+    // for the question, named by its title, or a menu, modal, around the
+    // panel's nodes (section 7, rule 27).
+    let overlay_root = frames.ours_overlay.as_ref().map(|(_, _, id)| id.clone());
+    let groups_overlay = match &frames.ours_overlay {
+        Some((role, name, id)) => {
+            let covered = std::mem::replace(&mut frame.covered, false);
+            let dialog = frame.group(groups.overlay, *role, name, id);
+            frame.covered = covered;
+            if let Some((_, node)) = frame.nodes.last_mut().filter(|_| !dialog.is_empty()) {
+                node.set_modal();
+            }
+            dialog
+        }
+        None => groups.overlay,
+    };
     // The open panel, drawn beside the canvas: each of its parts, and the
     // panel itself marked as cutting off what it scrolls out of view.
     let outline = snapshot.matrix.tab == Tab::Outline && frames.jump.is_empty();
@@ -635,11 +651,28 @@ pub(crate) fn tree(
     children.extend(bar);
     // Last, as it is drawn on top.
     children.extend(overlay);
+    children.extend(groups_overlay);
     // A text field that has keyboard focus has it, whatever the canvas
     // last said (section 6, rule 5). Then a panel part the keys act on,
     // such as the matrix's chosen cell, since the panel hears the keys
     // before the canvas does (section 6, rule 6).
-    let focus = field_focus.or(overlay_focus).or(item_focus).or(ours.focus).or(focus);
+    // Within the runtime's overlay that owns the input, focus is on its
+    // part that has the runtime's focus, or else on the overlay itself
+    // (section 7, rule 27).
+    let ours_focus = match &overlay_root {
+        Some(root) => ours
+            .focus
+            .filter(|node| table.id(node.0).is_some_and(|id| id.is_under(root)))
+            .or_else(|| Some(node_id(table, root))),
+        None => ours.focus,
+    };
+    // While the runtime's overlay owns the input, nothing it covers has
+    // focus: not a field, a panel part, or an Iced overlay below it.
+    let focus = if overlay_root.is_some() {
+        ours_focus
+    } else {
+        field_focus.or(overlay_focus).or(item_focus).or(ours_focus).or(focus)
+    };
     let root_node = node_id(table, &window_id());
     let mut root = Node::new(Role::Window);
     root.set_label(snapshot.title.clone());
@@ -728,6 +761,11 @@ pub(crate) struct Frames {
     /// highlighted item, the question's highlighted answer, or else the
     /// overlay itself.
     pub overlay_focus: Option<UiId>,
+    /// The runtime's overlay that owns the input, if one is open (row 3b):
+    /// the role, name, and UI ID of the node around its panel's nodes, an
+    /// alert dialog for the question and a menu for the probe menu or
+    /// Recent.
+    pub ours_overlay: Option<(Role, String, UiId)>,
 }
 
 /// The UI ID a fixed text names. The texts are this app's own constants,
@@ -886,16 +924,14 @@ impl Frame<'_> {
             Kind::List => Role::List,
             Kind::ListItem => Role::ListItem,
             Kind::Dialog => Role::Dialog,
-            Kind::AlertDialog => Role::AlertDialog,
             Kind::Menu => Role::Menu,
             Kind::MenuItem => Role::MenuItem,
-            Kind::Link => Role::Link,
             Kind::ListBox => Role::ListBox,
             Kind::ListBoxOption => Role::ListBoxOption,
         });
         // A dialog or a menu owns the input while it is open, as the pointer
         // finds: nothing outside it can be reached (section 7, rule 27).
-        if matches!(item.kind, Kind::Dialog | Kind::AlertDialog | Kind::Menu) {
+        if matches!(item.kind, Kind::Dialog | Kind::Menu) {
             node.set_modal();
         }
         // A list says how many rows it has, and each row its place, so a
@@ -941,10 +977,7 @@ impl Frame<'_> {
             node.set_active_descendant(node_id(self.table, active));
         }
         if item.enabled {
-            if matches!(
-                item.kind,
-                Kind::Button | Kind::Check | Kind::Option | Kind::MenuItem | Kind::Link
-            ) {
+            if matches!(item.kind, Kind::Button | Kind::Check | Kind::Option | Kind::MenuItem) {
                 node.add_action(Action::Click);
             }
             // An option offers Click only when it can be picked: a file that
@@ -1041,13 +1074,33 @@ impl Frame<'_> {
             .iter()
             .flat_map(|(_, _, tops)| tops.iter().copied())
             .collect();
+        // The runtime's overlays (the question, row 3b) own the input
+        // while they are open: they are reported and act, while what they
+        // cover is hidden (section 7, rule 27).
+        let overlay_roots: Vec<&UiId> = ours
+            .roots
+            .iter()
+            .filter(|(_, layer, _)| *layer >= loom_ui::Layer::Overlays)
+            .map(|(root, _, _)| root)
+            .collect();
+        let in_overlay = |table: &IdTable, node: NodeId| {
+            table
+                .id(node.0)
+                .is_some_and(|id| overlay_roots.iter().any(|root| id == *root || id.is_under(root)))
+        };
         for (id, node) in &ours.nodes {
             let mut node = node.clone();
-            if self.covered {
+            if self.covered && !in_overlay(self.table, *id) {
                 node.set_hidden();
             }
             self.nodes.push((*id, node));
         }
+        let overlay: Vec<NodeId> = ours
+            .roots
+            .iter()
+            .filter(|(_, layer, _)| *layer >= loom_ui::Layer::Overlays)
+            .flat_map(|(_, _, tops)| tops.iter().copied())
+            .collect();
         let under = |panel: &UiId| -> Vec<NodeId> {
             tops.iter()
                 .copied()
@@ -1069,6 +1122,7 @@ impl Frame<'_> {
                 &crate::breadcrumb::breadcrumb_id(),
             ),
             bar: self.group(bar, Role::Group, "Status bar", &crate::stats_bar::stats_id()),
+            overlay,
         }
     }
 
@@ -1114,6 +1168,8 @@ struct Ours {
     breadcrumb: Vec<NodeId>,
     /// The stats bar's group.
     bar: Vec<NodeId>,
+    /// The top nodes of the runtime's overlay that owns the input.
+    overlay: Vec<NodeId>,
 }
 
 /// Sets a slider's value, range, and step from the parameter it moves.

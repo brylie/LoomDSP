@@ -1173,7 +1173,8 @@ fn drive(ui: &mut crate::ui_test::Ui, line: &str) -> (Answer, Vec<Message>) {
             return (answer, messages);
         }
         messages.extend(ui.redraw());
-        messages.extend(ui.deliver(Message::ControlFrame(Instant::now())));
+        let now = ui.now();
+        messages.extend(ui.deliver(Message::ControlFrame(now)));
     }
     (receiver.try_recv().expect("answered after drawing"), messages)
 }
@@ -1372,7 +1373,8 @@ fn a_real_release_during_a_script_drag_is_not_lost() {
     let mut answer = None;
     for _ in 0..50 {
         ui.redraw();
-        let _ = ui.app_mut().send(Message::ControlFrame(Instant::now()));
+        let ui_now = ui.now();
+        let _ = ui.app_mut().send(Message::ControlFrame(ui_now));
         if let Ok(a) = receiver.try_recv() {
             answer = Some(a);
             break;
@@ -1602,6 +1604,9 @@ fn routed_names(messages: Vec<Message>) -> Vec<String> {
                 "ControlFrame",
                 "Located",
                 "FocusMoved",
+                // A script's Tab inside help, which moves the focus as the
+                // runtime's own Tab does with no message of its own.
+                "HelpTab",
                 "TypeFocus",
                 "Telemetry",
             ]
@@ -2573,16 +2578,18 @@ fn locate_takes_an_overlay_ui_id() {
         crate::question::AfterDiscard::New,
     ));
     let _ = ui.redraw();
-    let places = ui.places();
-    let found = Found {
-        canvas: places.canvas,
-        text: None,
-        places,
-        ours: None,
-    };
-    let cancel = locate(ui.app(), "question/cancel", &found).unwrap();
-    let label = ui.text("Cancel").expect("the question shows Cancel");
-    assert!(cancel.contains(label.center()), "the answer holds its label");
+    // The question is the runtime's (row 3b): `locate` finds its answer in
+    // the runtime's layout.
+    let reply = run_ui(&mut ui, r#"{"cmd": "locate", "target": "question/cancel"}"#).expect("found");
+    let cancel = ui
+        .runtime()
+        .bounds(&crate::overlays::access::answer_id("cancel"))
+        .expect("laid out");
+    let at = loom_ui_core::Point::new(
+        reply["x"].as_f64().expect("an x") as f32,
+        reply["y"].as_f64().expect("a y") as f32,
+    );
+    assert!(cancel.contains(at), "{reply:?} in {cancel:?}");
 
     // The module browser's parts are found by UI ID too.
     ui.app_mut().overlays.question = None;

@@ -103,6 +103,9 @@ bytemuck = { version = "1", features = ["derive"] }
 # rule 8). Pinned: Parley breaks its API about every two months, so it is
 # upgraded on purpose, behind our own types.
 parley = "=0.12.0"
+# Help's notes (docs/design/help-pages.md): the version Iced's markdown
+# already brings, so the lock file holds one. MIT (ADR-0006).
+pulldown-cmark = { version = "0.12.2", default-features = false }
 # Parley's font discovery, named here only to turn on `fontconfig-dlopen`:
 # on Linux, fontconfig is loaded when the app runs, not linked when it
 # builds, so a build needs no libfontconfig headers and the binary no hard

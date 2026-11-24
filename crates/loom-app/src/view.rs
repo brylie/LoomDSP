@@ -6,7 +6,7 @@ use crate::Element;
 use crate::edits::ArrowGroup;
 use crate::matrix::{Event as MatrixEvent, Tab as RightTab};
 use crate::style::button;
-use crate::{App, Message, browser, inspector, matrix, pointer, probe_menu, recent, style};
+use crate::{App, Message, browser, inspector, matrix, pointer, style};
 use iced::Length;
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, tooltip};
 use loom_canvas::iced_convert::ToIced as _;
@@ -16,6 +16,8 @@ impl App {
     pub(crate) fn view(&self) -> Element<'_, Message> {
         let mut canvas = PatchCanvas::new(&self.session.scene, &self.session.selection, Message::Canvas)
             .drawn(&self.canvas_drawn)
+            .clock(&self.clock)
+            .display_scale(self.window_scale)
             .values(&self.session.values)
             .window_drag_line(self.session.gestures.assign_drag().is_some())
             .traces(&self.session.traces)
@@ -92,14 +94,8 @@ impl App {
                 .on_press(Message::Browser(browser::Message::Close));
             layers = layers.push(outside).push(open.view().map(Message::Browser));
         }
-        if let Some(menu) = self.overlays.probe_menu() {
-            let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
-                .on_press(Message::ProbeMenu(probe_menu::Message::Close))
-                .on_right_press(Message::ProbeMenu(probe_menu::Message::Close));
-            layers = layers
-                .push(outside)
-                .push(menu.view(self.overlays.menu_highlight()).map(Message::ProbeMenu));
-        }
+        // The probe menu and Recent are the runtime's, in its Overlays
+        // layer over everything Iced draws (row 3b, `menus/panel.rs`).
         if let Some((module, at)) = self.overlays.tile_menu() {
             let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
                 .on_press(Message::CloseTileMenu)
@@ -147,7 +143,7 @@ impl App {
             }
             let panel = column![
                 iced::widget::text(menu.label).size(style::HEADING),
-                iced::widget::scrollable(items)
+                iced::widget::scrollable(items).id(crate::places::widget_id(&crate::cable_picker::list_id()))
             ]
             .spacing(6);
             let panel = crate::inspector::ids::named(
@@ -162,17 +158,6 @@ impl App {
                 .push(outside)
                 .push(iced::widget::center(iced::widget::opaque(panel)));
         }
-        if let Some(rows) = self.overlays.recent_rows() {
-            let outside = mouse_area(space::horizontal().width(Length::Fill).height(Length::Fill))
-                .on_press(Message::Recent(recent::Message::Close))
-                .on_right_press(Message::Recent(recent::Message::Close));
-            layers = layers.push(outside).push(
-                iced::widget::pin(iced::widget::opaque(
-                    recent::view(rows, self.overlays.menu_highlight()).map(Message::Recent),
-                ))
-                .position(recent::LIST_AT),
-            );
-        }
         if let Some(window) = self.preferences_view() {
             layers = layers.push(window);
         }
@@ -183,14 +168,10 @@ impl App {
         if let Some(chooser) = &self.overlays.chooser {
             layers = layers.push(crate::licence_chooser::view(chooser.model()));
         }
-        // Over the dialogs, because F1 opens it from them (help-pages.md).
-        if let Some(help) = &self.overlays.help {
-            layers = layers.push(iced::widget::opaque(help.view(self.theme())));
-        }
-        // Over everything: a question must be answered first.
-        if let Some(question) = &self.overlays.question {
-            layers = layers.push(question.view().map(Message::Question));
-        }
+        // Help is the runtime's, in its Overlays layer, over the dialogs
+        // Iced draws, because F1 opens it from them (help-pages.md; row 6).
+        // The question is the runtime's, in its Question layer, over
+        // everything Iced draws (row 3b).
         // The control channel's pointer events go in here, as a real
         // pointer's would (control-channel.md, Pointer commands).
         let listeners = self.listeners();

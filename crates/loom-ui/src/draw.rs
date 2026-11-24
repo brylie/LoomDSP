@@ -22,7 +22,12 @@
 //!   wide, snapped to whole physical pixels so it stays sharp at any scale,
 //!   and steady, so a still window draws nothing;
 //! - an element that clips starts a layer cut to its bounds, and ends it
-//!   after its last child. The cut is a rectangle, even on round corners.
+//!   after its last child. The cut is a rectangle, even on round corners;
+//! - a scroll container's thumb is painted after its layer ends, so the
+//!   content never covers it (section 5, rule 12);
+//! - a radio's mark is a ring in the panel style's mark colour, with a dot
+//!   inside when the radio is chosen, and a radio's note is in its quiet
+//!   colour (section 6, rule 9).
 //!
 //! Each panel is painted inside a layer cut to its slot, and to every clip
 //! around the slot, so what overflows a slot shows nowhere, as it is hit
@@ -36,8 +41,8 @@ use crate::app::App;
 use crate::element::State;
 use crate::field::{FieldState, Fields};
 use crate::focus::Focus;
-use crate::layout::{Layout, Record, cut};
-use crate::paint::{Align, PanelStyle, Quad, TextPainter, TextRun, Vertical};
+use crate::layout::{Layout, RadioPart, Record, cut};
+use crate::paint::{Align, PanelStyle, Quad, Segment, TextPainter, TextRun, Vertical};
 use crate::pointer::Pointer;
 use crate::runtime::Counts;
 use crate::view::Layer;
@@ -99,6 +104,13 @@ impl PaintState<'_> {
 }
 
 impl<A: App> Panels<'_, A> {
+    /// The focused element when it is one of the runtime's text fields, as
+    /// [`Runtime::focused_field`](crate::Runtime::focused_field) gives it,
+    /// for a layer that drives the window between turns.
+    pub fn focused_field(&self) -> Option<&UiId> {
+        self.focus.id().filter(|id| self.window.fields.has(id))
+    }
+
     /// Lays out what changed since the last call, and settles the focus
     /// on what is laid out, as [`Runtime::lay_out`](crate::Runtime::lay_out)
     /// does. When that gives one of the runtime's elements the focus, the
@@ -108,8 +120,53 @@ impl<A: App> Panels<'_, A> {
         self.counts.panels_laid_out += laid.panels;
         self.counts.elements_laid_out += laid.elements;
         self.focus.settle(self.window);
+        self.reveal();
+        self.reveal_caret();
         self.place_hint(text);
         self.report_focus();
+    }
+
+    /// Brings the element a keyboard focus move or a scroll effect named
+    /// into view, once the layout is current (section 5, rule 12). Returns
+    /// true when a container moved.
+    pub(crate) fn reveal(&mut self) -> bool {
+        if !self.window.is_settled(self.size) {
+            return false;
+        }
+        let Some(id) = self.window.reveal.take() else {
+            return false;
+        };
+        self.window.scroll_to_show(&id)
+    }
+
+    /// Brings a multi-line field's caret into view after an edit or a caret
+    /// move in it, or its start or end after Home or End on a Mac
+    /// (section 8, rule 7). It runs only right after a layout,
+    /// never in the turn of the edit: there the view is not yet rebuilt
+    /// with the edit, so a box that grows a line would still have its old
+    /// height. The caret's place is read now, from the field as this layout
+    /// left it. Returns true when a container moved.
+    fn reveal_caret(&mut self) -> bool {
+        if !self.window.is_settled(self.size) {
+            return false;
+        }
+        let Some((id, show)) = self.window.caret_reveal.take() else {
+            return false;
+        };
+        match show {
+            crate::window::FieldShow::Edge(edge) => self.window.scroll_to_show_edge(&id, edge),
+            crate::window::FieldShow::Caret => {
+                let Some(caret) = self
+                    .window
+                    .fields
+                    .get(&id)
+                    .and_then(crate::field::FieldState::focus_rect)
+                else {
+                    return false;
+                };
+                self.window.scroll_to_show_inside(&id, caret)
+            }
+        }
     }
 
     /// Finds a named element or visible text in the current layout.
@@ -213,6 +270,47 @@ impl<A: App> Panels<'_, A> {
         );
         self.counts.panels_painted += painted.panels;
         self.counts.elements_painted += painted.elements;
+        // The focus ring, over every panel of the focused element's layer,
+        // so a panel painted later in the layer does not cover it, and cut
+        // only by the window and the scroll containers around the element,
+        // so a part scrolled out of view leaves no ring outside its
+        // container (section 6, rule 3; section 5, rule 12).
+        if let Some((id, bounds)) = crate::runtime::shown_ring(self.window, self.app, self.focus)
+            && self.window.layer_of(&id) == Some(layer)
+        {
+            let whole = Rect::new(Point::ORIGIN, self.size);
+            let shows = self.window.ring_clip(&id).map_or(whole, |clip| cut(whole, clip));
+            painter.begin_layer(shows);
+            // A link that wraps has a ring around its words on each line,
+            // not one around both lines and the words between.
+            let pieces = self.window.pieces(&id);
+            let radius = self.window.radius_of(&id);
+            if pieces.is_empty() {
+                painter.quad(ring(bounds, radius, style.ring));
+            }
+            for piece in pieces {
+                painter.quad(ring(piece, radius, style.ring));
+            }
+            painter.end_layer();
+        }
+    }
+}
+
+/// The focus ring around an element with `bounds` and corner `radius`: an
+/// outline `style.width` wide, `style.offset` outside the bounds, with
+/// corners that follow the element's. The outline is drawn inside the
+/// quad's box, so the box grows by the offset and the width.
+pub(crate) fn ring(bounds: Rect, radius: f32, style: crate::focus::RingStyle) -> Quad {
+    let grow = style.offset + style.width;
+    Quad {
+        rect: Rect::new(
+            Point::new(bounds.x - grow, bounds.y - grow),
+            Size::new(bounds.width + 2.0 * grow, bounds.height + 2.0 * grow),
+        ),
+        fill: Color::TRANSPARENT,
+        border: style.color,
+        border_width: style.width,
+        radius: radius + grow,
     }
 }
 
@@ -267,6 +365,7 @@ impl Layout {
                 }
                 open.pop();
                 painter.end_layer();
+                paint_thumb(&records[clipping], by, painter);
             }
             while let Some(&(tinting, _)) = tints.last() {
                 if is_around(records, tinting, index) {
@@ -284,6 +383,14 @@ impl Layout {
                 tints.push((index, shown.text));
             }
             let tint = tints.last().and_then(|(_, colour)| *colour);
+            if let Some(shadow) = look.shadow {
+                painter.shadow(crate::paint::Shadow {
+                    rect: Rect::new(bounds.position() + shadow.offset, bounds.size()),
+                    radius: look.radius,
+                    colour: shadow.colour,
+                    blur: shadow.blur,
+                });
+            }
             if look.draws_box() {
                 let (border_width, border) = look.border.unwrap_or((0.0, Color::TRANSPARENT));
                 painter.quad(Quad {
@@ -296,6 +403,18 @@ impl Layout {
                     border_width,
                     radius: look.radius,
                 });
+            }
+            if let Some(RadioPart::Mark { selected }) = record.radio {
+                paint_mark(bounds, selected, painter, style);
+            }
+            if let Some(on) = record.check {
+                paint_check(bounds, on, painter, style);
+            }
+            if let Some(slider) = &record.slider {
+                paint_slider(bounds, slider, painter, style);
+            }
+            if let Some(glyph) = record.glyph {
+                paint_glyph(bounds, glyph, painter);
             }
             if let Some(text) = self.text(index) {
                 let content = moved(record.content, by);
@@ -327,7 +446,7 @@ impl Layout {
                     }
                     continue;
                 }
-                painter.text(&TextRun {
+                let run = TextRun {
                     text: text.text,
                     anchor: content.position(),
                     // A wrapping text breaks its lines at the width it was
@@ -340,20 +459,161 @@ impl Layout {
                     vertical: Vertical::Top,
                     style: text.style,
                     wrap: text.wrap,
-                    colour: text.colour.or(tint).unwrap_or(style.text),
+                    colour: text
+                        .colour
+                        .or(text.quiet.then_some(style.quiet))
+                        .or(tint)
+                        .unwrap_or(style.text),
                     clip: shows,
-                });
+                };
+                if text.spans.is_empty() {
+                    painter.text(&run);
+                } else {
+                    painter.text_spans(&run, text.spans);
+                }
             }
             if look.clip {
                 painter.begin_layer(bounds);
                 open.push(index);
             }
         }
-        for _ in open {
+        for clipping in open.into_iter().rev() {
             painter.end_layer();
+            paint_thumb(&records[clipping], by, painter);
         }
         records.len() as u64
     }
+}
+
+/// The thickness of a radio mark's ring, in logical pixels.
+const MARK_RING: f32 = 1.5;
+
+/// The size of the dot in a chosen radio's mark, in logical pixels.
+const MARK_DOT: f32 = 6.0;
+
+/// Paints a scroll container's thumb, moved by `by`, when its content
+/// overflows: over its own clip's layer, which has ended, so the content
+/// never covers it. A record that is no container paints nothing.
+fn paint_thumb(record: &Record, by: Vector, painter: &mut dyn TextPainter) {
+    let (Some(scroll), Some(thumb)) = (record.scroll, record.thumb()) else {
+        return;
+    };
+    painter.quad(Quad {
+        rect: moved(thumb, by),
+        fill: scroll.style.thumb,
+        border: Color::TRANSPARENT,
+        border_width: 0.0,
+        radius: scroll.style.radius,
+    });
+}
+
+/// Paints a radio's mark in `bounds`: a ring, and a dot inside it when the
+/// radio is `selected`.
+fn paint_mark(bounds: Rect, selected: bool, painter: &mut dyn TextPainter, style: &PanelStyle) {
+    painter.quad(Quad {
+        rect: bounds,
+        fill: Color::TRANSPARENT,
+        border: style.mark,
+        border_width: MARK_RING,
+        radius: bounds.width.min(bounds.height) / 2.0,
+    });
+    if selected {
+        let centre = Point::new(bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0);
+        painter.quad(Quad {
+            rect: Rect::new(
+                Point::new(centre.x - MARK_DOT / 2.0, centre.y - MARK_DOT / 2.0),
+                Size::new(MARK_DOT, MARK_DOT),
+            ),
+            fill: style.mark,
+            border: Color::TRANSPARENT,
+            border_width: 0.0,
+            radius: MARK_DOT / 2.0,
+        });
+    }
+}
+
+/// The thickness of a check box's border, in logical pixels (section 5,
+/// rule 17).
+const CHECK_BORDER: f32 = 1.5;
+
+/// The radius of a check box's corners, in logical pixels.
+const CHECK_RADIUS: f32 = 2.0;
+
+/// The thickness of a check box's check mark, in logical pixels.
+const CHECK_STROKE: f32 = 2.0;
+
+/// Paints a check box's box in `bounds`: its border, and a check mark in
+/// the primary colour when it is `on`.
+fn paint_check(bounds: Rect, on: bool, painter: &mut dyn TextPainter, style: &PanelStyle) {
+    painter.quad(Quad {
+        rect: bounds,
+        fill: Color::TRANSPARENT,
+        border: style.mark,
+        border_width: CHECK_BORDER,
+        radius: CHECK_RADIUS,
+    });
+    if on {
+        // A tick: down from the left, then up to the right.
+        let at = |x: f32, y: f32| Point::new(bounds.x + x * bounds.width, bounds.y + y * bounds.height);
+        let (start, low, end) = (at(0.24, 0.52), at(0.42, 0.70), at(0.76, 0.32));
+        for (from, to) in [(start, low), (low, end)] {
+            painter.segment(Segment {
+                from,
+                to,
+                width: CHECK_STROKE,
+                colour: style.primary,
+            });
+        }
+    }
+}
+
+/// Paints a drawn mark in `bounds`: a select's V, or a chosen option's
+/// tick, in two strokes.
+fn paint_glyph(bounds: Rect, glyph: crate::select::Glyph, painter: &mut dyn TextPainter) {
+    use crate::select::Glyph;
+    let at = |x: f32, y: f32| Point::new(bounds.x + x * bounds.width, bounds.y + y * bounds.height);
+    let (points, colour) = match glyph {
+        Glyph::Opens(colour) => ([at(0.15, 0.35), at(0.5, 0.7), at(0.85, 0.35)], colour),
+        Glyph::Tick(colour) => ([at(0.1, 0.55), at(0.4, 0.85), at(0.9, 0.2)], colour),
+    };
+    for (from, to) in [(points[0], points[1]), (points[1], points[2])] {
+        painter.segment(Segment {
+            from,
+            to,
+            width: CHECK_STROKE * 0.75,
+            colour,
+        });
+    }
+}
+
+/// Paints a slider in `bounds`: its track across the middle, the part of
+/// it filled from the minimum or the middle to the thumb, and the round
+/// thumb at its position.
+fn paint_slider(bounds: Rect, slider: &crate::slider::Slider, painter: &mut dyn TextPainter, style: &PanelStyle) {
+    use crate::slider::{Fill, THUMB, TRACK, thumb_centre, travel};
+    let middle = bounds.y + bounds.height / 2.0;
+    let (left, length) = travel(bounds);
+    let track = |from: f32, to: f32| {
+        Rect::new(
+            Point::new(from.min(to), middle - TRACK / 2.0),
+            Size::new((to - from).abs(), TRACK),
+        )
+    };
+    painter.quad(Quad::filled(track(left, left + length), style.track, TRACK / 2.0));
+    let thumb = thumb_centre(bounds, slider.position());
+    let start = match slider.fill() {
+        Fill::FromMin => left,
+        Fill::FromMiddle => left + length / 2.0,
+    };
+    painter.quad(Quad::filled(track(start, thumb.x), style.primary, TRACK / 2.0));
+    painter.quad(Quad::filled(
+        Rect::new(
+            Point::new(thumb.x - THUMB / 2.0, thumb.y - THUMB / 2.0),
+            Size::new(THUMB, THUMB),
+        ),
+        style.primary,
+        THUMB / 2.0,
+    ));
 }
 
 /// `value` in logical pixels, moved to the nearest whole physical pixel
@@ -387,14 +647,40 @@ fn paint_field(
             radius: 0.0,
         });
     }
+    // The placeholder, while nothing is typed or being composed. The caret
+    // still shows over it, at the start, where typing will go.
+    if let Some((hint, colour)) = text
+        .placeholder
+        .filter(|_| state.text().is_empty() && !state.composing())
+    {
+        painter.text(&TextRun {
+            text: hint,
+            anchor: start,
+            bounds: Size::new(content.width, content.height),
+            align: Align::Left,
+            vertical: Vertical::Top,
+            style: text.style,
+            wrap: false,
+            colour,
+            clip: shows,
+        });
+    }
+    // A multi-line field's text wraps at the width its editor wraps at, so
+    // the letters sit on the lines its caret and selection do (section 8,
+    // rule 7); a single-line field's runs on, to scroll inside its box.
+    let many = state.lines() == crate::field::Lines::Many;
     painter.text(&TextRun {
         text: state.text(),
         anchor: start,
-        bounds: Size::new(state.text_width().max(content.width), content.height),
+        bounds: if many {
+            Size::new(state.shown_width(), content.height)
+        } else {
+            Size::new(state.text_width().max(content.width), content.height)
+        },
         align: Align::Left,
         vertical: Vertical::Top,
         style: text.style,
-        wrap: false,
+        wrap: many,
         colour: style.text,
         clip: shows,
     });

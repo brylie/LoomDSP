@@ -68,6 +68,52 @@ pub trait App {
         None
     }
 
+    /// The message for a key press that nothing of the runtime's took while
+    /// the Question layer takes input (section 6, rule 6, step 2): the
+    /// question's keys, or a key that is always heard, such as Panic. The
+    /// runtime keeps every such press from the target, whatever this
+    /// answers, so no key reaches a field, the canvas, or a shortcut under
+    /// an open question, whichever toolkit drew it. Its release goes on as
+    /// usual. It reads state and changes none.
+    fn question_key(&self, key: &loom_ui_core::KeyEvent) -> Option<Self::Message> {
+        let _ = key;
+        None
+    }
+
+    /// The message for a press outside the panel `root`, whose root asks
+    /// for it ([`Element::closes_on_press_outside`](crate::Element::closes_on_press_outside)),
+    /// while its layer takes input: usually, close it (section 5, rule
+    /// 13). The runtime takes the press, so nothing under the panel sees it.
+    /// Any mouse button counts. The message runs on the next turn, as a
+    /// click's does. It reads state and changes none.
+    fn pressed_outside(&self, root: &UiId) -> Option<Self::Message> {
+        let _ = root;
+        None
+    }
+
+    /// The message for the slider with UI ID `id` moving to `position`,
+    /// from 0 to 1 along its travel, in `phase` of its gesture (ui-layer.md,
+    /// section 5, rule 16): a drag, a double-click's reset, a group of keys,
+    /// or a screen reader's Increment or Decrement. Each phase carries the
+    /// position to show now, so the app sets it at every one, and makes one
+    /// undo step from Start to End. It arrives on the next turn. It reads
+    /// state and changes none.
+    fn slid(&self, id: &UiId, position: f32, phase: crate::SlidePhase) -> Option<Self::Message> {
+        let _ = (id, position, phase);
+        None
+    }
+
+    /// The message for the option at `index` chosen in the select with UI
+    /// ID `id` (ui-layer.md, section 5, rule 18): from its open list, by a
+    /// key, a press, or a screen reader, or a screen reader's Increment or
+    /// Decrement, which steps one option. Only a choice that differs from
+    /// the chosen option is reported. It arrives on the next turn. It reads
+    /// state and changes none.
+    fn chose(&self, id: &UiId, index: usize) -> Option<Self::Message> {
+        let _ = (id, index);
+        None
+    }
+
     /// How hover text looks (ui-layer.md, section 5, rule 11), from the
     /// app's style tokens. The default is plain and readable.
     fn hint_style(&self) -> crate::HintStyle {
@@ -100,6 +146,18 @@ pub trait App {
         next.map_or(TabStep::Leave, |next| TabStep::To(next.clone()))
     }
 
+    /// The message for `key`, pressed while the focus is on or inside the
+    /// element `id` that takes it first ([`Element::takes_first`](crate::Element::takes_first)),
+    /// before the focused element hears it (ui-layer.md, section 6,
+    /// rule 6, step 2b). `Some` takes the key: the message runs this turn,
+    /// and neither the focused element nor the target hears the press.
+    /// `None` passes it on, as if no element took it first. It reads state
+    /// and changes none.
+    fn panel_key(&self, id: &UiId, key: &loom_ui_core::KeyEvent) -> Option<Self::Message> {
+        let _ = (id, key);
+        None
+    }
+
     /// The message for something a text field of the runtime's did, if
     /// the app wants one: `id` is the field's UI ID. The field's text is
     /// the app's (ui-layer.md, section 8, rule 2): an app that wants an
@@ -126,7 +184,7 @@ pub trait App {
 
     /// The message for "what a field reports to a screen reader changed":
     /// its text, its caret, its selection, or its scroll (section 7, rule
-    /// 7). An edit gives both: [`FieldEvent::Edited`](crate::FieldEvent::Edited)
+    /// 7), or a scroll container's offset (rule 28). An edit gives both: [`FieldEvent::Edited`](crate::FieldEvent::Edited)
     /// through [`App::field_event`], then this notice in the same turn. The runtime asks at most once per turn,
     /// after that turn's updates have run, field messages included, so the
     /// answer is built from a model that holds them, and runs it as one
@@ -249,6 +307,17 @@ impl<'a, M> Context<'a, M> {
     /// out yet. Tells a part of the runtime's own from a toolkit's.
     pub fn holds(&self, id: &UiId) -> bool {
         self.panels.is_some_and(|panels| panels.panel_of(id).is_some())
+    }
+
+    /// True when the element with focus is one of the runtime's text
+    /// fields. A key the field left, such as an app shortcut, must not act
+    /// on what is behind the field while it does (section 6, rule 6, step
+    /// 6). False outside a runtime, where a toolkit's focus is asked of its
+    /// window instead.
+    pub fn field_has_focus(&self) -> bool {
+        self.panels
+            .zip(self.focused.as_ref())
+            .is_some_and(|(panels, id)| panels.fields.has(id))
     }
 
     /// Where the runtime's element with UI ID `id` is in the window, in

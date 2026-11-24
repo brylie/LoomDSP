@@ -487,10 +487,8 @@ impl App {
     }
 
     /// True when an assignment from `source` onto parameter `index` of
-    /// `target` is refused, with the reason in the status bar: the source is
-    /// a port tile, or the target is on another level and no sub-patch tile
-    /// of the source's level exposes it (rule 4; sub-patches.md, Editor
-    /// model). Through an exposed parameter the assignment reaches inside.
+    /// `target` is refused, with the reason in the status bar. The endpoints
+    /// must be represented together at a patch level (sub-patches.md, Editor model).
     pub(crate) fn refuses_assignment(&mut self, source: OutputRef, target: ModuleId, index: usize) -> bool {
         let allowed = self.allows_assignment(source, target, index);
         if !allowed {
@@ -507,18 +505,9 @@ impl App {
     /// [`refuses_assignment`]: Self::refuses_assignment
     pub(crate) fn allows_assignment(&self, source: OutputRef, target: ModuleId, index: usize) -> bool {
         let session = &self.session;
-        let graph = session.controller.graph();
-        graph.node(source.module).is_some()
-            && graph.node(target).is_some_and(|node| {
-                let source_level = session.hierarchy.level_of(source.module);
-                source_level == session.hierarchy.level_of(target)
-                    || node.descriptor.params.get(index).is_some_and(|spec| {
-                        session
-                            .hierarchy
-                            .surface_for(&source_level, &(target, spec.name.to_string()))
-                            .is_some()
-                    })
-            })
+        session
+            .hierarchy
+            .can_save_assignment(session.controller.graph(), source, target, index)
     }
 
     /// After an assignment is added or retargeted in a nested patch: puts

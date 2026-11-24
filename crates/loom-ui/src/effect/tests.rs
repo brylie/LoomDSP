@@ -7,7 +7,7 @@ enum Msg {
     Picked(Option<PathBuf>),
     Pressed(Choice),
     Captured(bool),
-    Pasted(Option<String>),
+    Pasted(crate::ClipboardText),
     Done(u32),
     Drawn,
 }
@@ -173,7 +173,10 @@ fn a_reply_makes_the_message_for_its_answer() {
     let Some(Effect::ClipboardRead(reply)) = effects.next() else {
         panic!("a clipboard read comes fourth");
     };
-    assert_eq!(reply.give(Some("osc".into())), Msg::Pasted(Some("osc".into())));
+    assert_eq!(
+        reply.give(crate::ClipboardText::Text("osc".into())),
+        Msg::Pasted(crate::ClipboardText::Text("osc".into()))
+    );
 }
 
 /// Section 2, rule 4's shape: work sends its result through the waker,

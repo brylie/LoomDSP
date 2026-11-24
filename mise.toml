@@ -8,7 +8,8 @@
 # The tasks below are the one list of quality checks. The git hooks
 # (prek.toml) and CI (.github/workflows/ci.yml) run these same tasks, so a
 # check that passes on your machine passes in CI. Run them by hand with
-# `mise run <task>`, or all of them with `mise run check`.
+# `mise run <task>`. `mise run check` is the local check, and
+# `mise run check-full` runs everything CI runs, coverage included.
 
 [tools]
 # clippy and rustfmt for the lint and format checks, llvm-tools for coverage,
@@ -26,6 +27,10 @@ prek = "latest"
 "aqua:crate-ci/typos" = "latest"
 "aqua:EmbarkStudios/cargo-deny" = "latest"
 gh = "latest"
+# A shared compile cache, so worktrees reuse each other's builds of the
+# same dependencies (scripts/rustc-wrapper.sh). A command-line tool only,
+# never linked into the crates (Apache-2.0).
+"aqua:mozilla/sccache" = "latest"
 
 [env]
 # Minimum line coverage, in percent. It must match the "Restrict code
@@ -53,14 +58,27 @@ run = ["cargo nextest run --workspace", "mise run doctest"]
 description = "Run every test with line coverage, and fail under LOOM_COVERAGE_MIN"
 # Debug build like `test`, so the no-allocation test still runs. The tests
 # run with nextest; its `ci` profile (.config/nextest.toml) writes a JUnit
-# report for Codecov's test results. The first command is a normal coverage
-# run: it clears the data of earlier runs, so a removed test cannot leave
-# its old coverage behind, and it writes the lcov file for Codecov. The
-# others write the Cobertura file for GitHub and report the same data per
-# file with the minimum. Tests that need hardware live in `device_tests.rs`
-# files and are ignored, so their code is left out of the measurement. Doc
-# tests are not measured; the `doctest` task runs them.
+# report for Codecov's test results. The first command removes every
+# instrumented build and profile from earlier runs. Without it, `cargo
+# llvm-cov report` also reads test binaries that older trees left in a
+# reused target folder, and counts their code as unrun, so files a change
+# never touched can fall to near 0%. `clean --workspace` is not enough
+# there: it keeps binaries of tests the current tree no longer has.
+# CI sets LOOM_COVERAGE_CLEAN=workspace, and then only the workspace's own
+# builds and profiles go. CI's target folder comes from rust-cache, which
+# saves dependency builds only and never a workspace crate, so it holds no
+# old test binaries, and a full clean would only throw away the dependency
+# builds it just restored (about 2 minutes to build again). The second
+# command runs the tests and writes the lcov file for Codecov. The others
+# write the Cobertura file for GitHub and report the same data per file
+# with the minimum. Tests that
+# need hardware live in `device_tests.rs` files and are ignored, so their
+# code is left out of the measurement. Doc tests are not measured; the
+# `doctest` task runs them.
 run = [
+  # A mise template, not a shell `if`, so the line runs in any shell,
+  # including cmd on Windows.
+  '''cargo llvm-cov clean{% if get_env(name="LOOM_COVERAGE_CLEAN", default="all") == "workspace" %} --workspace{% endif %}''',
   '''cargo llvm-cov nextest --workspace --profile ci --ignore-filename-regex 'device_tests\.rs$' --lcov --output-path target/lcov.info''',
   '''cargo llvm-cov report --ignore-filename-regex 'device_tests\.rs$' --cobertura --output-path target/cobertura.xml''',
   '''cargo llvm-cov report --ignore-filename-regex 'device_tests\.rs$' --fail-under-lines {{env.LOOM_COVERAGE_MIN}}''',
@@ -165,7 +183,19 @@ description = "Regenerate the module help pages in docs/modules from the descrip
 run = "cargo run -p loom-cli -- modules --markdown docs/modules"
 
 [tasks.check]
-description = "Run the checks CI runs (all but msrv and the three-OS test matrix)"
+description = "The local check: fmt, clippy, typos, the file rules, and every test, with no coverage build"
+# The quick checks first, then every test once with nextest. No coverage:
+# an instrumented build of the workspace costs far more CPU than a plain
+# test run, and CI measures coverage on every pull request, so CI is the
+# coverage gate. `check-full` runs everything CI runs, coverage included.
+# The tests use half the cores, rounded up (LOOM_TEST_THREADS overrides
+# it), as the worktree's `[build] jobs` does (setup-worktree-target.sh),
+# so agents on one machine leave each other room.
+depends = ["fmt", "clippy", "typos", "adr-status", "test-placement", "portable"]
+run = """cargo nextest run --workspace --test-threads "${LOOM_TEST_THREADS:-$(( ($(getconf _NPROCESSORS_ONLN) + 1) / 2 ))}""""
+
+[tasks.check-full]
+description = "Run everything CI runs (all but msrv and the macOS and Windows test jobs), coverage included"
 # coverage runs every test except doc tests, so `test` is not listed again;
 # `doctest` covers the rest.
 depends = ["fmt", "clippy", "typos", "adr-status", "test-placement", "portable", "ui-no-toolkit", "worktree-targets", "deny", "docs", "wasm", "coverage", "doctest"]

@@ -37,8 +37,8 @@ fn keys_add_connect_edit_and_save_with_the_pointer_outside() {
     add(&mut ui, "constant");
     add(&mut ui, "svf");
     ui.tap(Key::Character("c".into()), Modifiers::empty());
-    choose(&mut ui, "SVF In");
-    choose(&mut ui, "Constant Out");
+    choose(&mut ui, "SVF In (input)");
+    choose(&mut ui, "Constant Out (output)");
     let connections = ui.app().session.scene.cables().len();
     assert_eq!(connections, 1);
 
@@ -99,8 +99,11 @@ fn cable_picker_cancels_and_disconnects() {
         index: 0,
     };
     let jump_label = ui.app().session.patch_map.structure.named_port(input);
-    assert_eq!(ui.app().menu_model().unwrap().items[0].label, jump_label);
-    choose(&mut ui, "SVF In");
+    assert_eq!(
+        ui.app().menu_model().unwrap().items[0].label,
+        format!("{jump_label} (input)")
+    );
+    choose(&mut ui, "SVF In (input)");
     let structure = &ui.app().session.patch_map.structure;
     let wire = structure.cables.iter().find(|wire| wire.to == input).unwrap();
     let jump_label = structure.named_port(wire.from);
@@ -110,14 +113,72 @@ fn cable_picker_cancels_and_disconnects() {
             .unwrap()
             .items
             .iter()
-            .any(|row| row.label == jump_label)
+            .any(|row| row.label == format!("{jump_label} (output)"))
     );
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
     assert_eq!(ui.app().session.scene.cables().len(), count);
     ui.tap(Key::Character("c".into()), Modifiers::empty());
-    choose(&mut ui, "SVF In");
+    choose(&mut ui, "SVF In (input)");
     choose(&mut ui, "Disconnect cable");
     assert_eq!(ui.app().session.scene.cables().len(), count - 1);
     ui.tap(Key::Character("z".into()), Modifiers::COMMAND);
     assert_eq!(ui.app().session.scene.cables().len(), count);
+}
+
+/// A long port list distinguishes matching names and reveals the first row on the next stage.
+#[test]
+fn the_next_cable_picker_stage_starts_at_the_top() {
+    use iced::advanced::widget::{Id, Operation, operation::Scrollable};
+
+    /// Reads the cable picker's offset through Iced's layout.
+    struct Offset(Option<f32>);
+    impl Operation for Offset {
+        fn traverse(&mut self, visit: &mut dyn FnMut(&mut dyn Operation)) {
+            visit(self);
+        }
+
+        fn scrollable(
+            &mut self,
+            id: Option<&Id>,
+            _: iced::Rectangle,
+            _: iced::Rectangle,
+            translation: iced::Vector,
+            _: &mut dyn Scrollable,
+        ) {
+            if id == Some(&crate::places::widget_id(&super::list_id())) {
+                self.0 = Some(translation.y);
+            }
+        }
+    }
+
+    let mut ports = String::new();
+    for (first, direction) in [(1, "input"), (51, "output")] {
+        for offset in 0..16 {
+            let id = first + offset;
+            ports.push_str(&format!(
+                r#"PatchModule(id: {id}, kind: "loom.struct.{direction}@1", label: Some("Signal {offset}")),"#
+            ));
+        }
+    }
+    let mut ui = Ui::with_app(crate::tests::app_with_text(&format!(
+        r#"Patch(version: 1, subpatches: {{"ports": SubPatch(
+            metadata: Metadata(name: "Ports"), modules: [{ports}],
+        )}}, modules: [PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("ports"))])"#
+    )));
+    ui.send(crate::Message::Canvas(loom_canvas::CanvasEvent::Select(vec![1])));
+    ui.tap(Key::Character("c".into()), Modifiers::empty());
+    let model = ui.app().menu_model().unwrap();
+    assert!(model.items.iter().any(|item| item.label == "Ports Signal 0 (input)"));
+    assert!(model.items.iter().any(|item| item.label == "Ports Signal 0 (output)"));
+    let offset = |ui: &mut Ui| {
+        let mut offset = Offset(None);
+        ui.with_ui(|view, renderer, _| view.operate(renderer, &mut offset));
+        offset.0.unwrap()
+    };
+    ui.tap(Key::Named(Named::End), Modifiers::empty());
+    assert!(offset(&mut ui) > 0.0);
+    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    let model = ui.app().menu_model().unwrap();
+    assert_eq!(model.highlight, Some(0));
+    assert_eq!(offset(&mut ui), 0.0);
 }

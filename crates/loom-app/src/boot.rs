@@ -217,7 +217,7 @@ impl App {
             animating: args.bench.bench,
             dev_tools: args.dev || args.bench.reporter().is_some(),
             still: None,
-            history_key: None,
+            pending_shortcut: None,
             a11y: if args.bench.measure_tree {
                 crate::a11y::Access::measured()
             } else {
@@ -225,6 +225,7 @@ impl App {
             },
             effects: loom_ui::Effects::none(),
             posted: Vec::new(),
+            clock: crate::clock::Clock::default(),
             window_questions: std::cell::RefCell::default(),
             control_replies: crate::control::Replies::new(),
             watching: false,

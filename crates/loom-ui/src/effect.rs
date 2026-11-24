@@ -55,6 +55,38 @@ pub mod names {
     pub const ACCESSIBILITY: &str = "accessibility tree";
 }
 
+/// What a clipboard read found (ui-layer.md, section 8, rule 2). A read
+/// that could not complete is [`Refused`](Self::Refused), never empty, so the
+/// app can tell the user: the browser or the system did not allow it, or the
+/// backend failed, such as a clipboard another app holds on Windows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClipboardText {
+    /// The clipboard's text.
+    Text(String),
+    /// The clipboard holds no text.
+    Empty,
+    /// The read could not complete.
+    Refused,
+}
+
+impl ClipboardText {
+    /// `text` as a read's answer: empty when there is none or it is empty.
+    pub fn from_text(text: Option<String>) -> Self {
+        match text {
+            Some(text) if !text.is_empty() => Self::Text(text),
+            _ => Self::Empty,
+        }
+    }
+
+    /// The text, if the read found some.
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            Self::Text(text) => Some(text),
+            Self::Empty | Self::Refused => None,
+        }
+    }
+}
+
 /// Turns the answer to an effect into one of the app's messages.
 pub struct Reply<T, M>(Box<dyn FnOnce(T) -> M + Send>);
 
@@ -248,15 +280,19 @@ pub enum Effect<M> {
         /// What happens to a text field's selection.
         select: Selection,
     },
+    /// Move the keyboard focus to one of the runtime's elements, with a
+    /// ring only if the latest input was a key ([`Effects::focus_as_input`]).
+    FocusAsInput(UiId),
     /// Scroll so the element with this UI ID is in view.
     ScrollIntoView(UiId),
     /// Put this text on the clipboard.
     ClipboardWrite(String),
-    /// Read the clipboard. The reply gets its text, or `None` when it holds
-    /// no text, and its message arrives on the next turn. Reading is an
-    /// effect, not a call inside `update`, so `update` never waits on the
-    /// system, and it works the same where a read cannot answer at once.
-    ClipboardRead(Reply<Option<String>, M>),
+    /// Read the clipboard. The reply gets what the read found
+    /// ([`ClipboardText`]: its text, nothing, or a refusal), and its message
+    /// arrives on the next turn. Reading is an effect, not a call inside
+    /// `update`, so `update` never waits on the system, and it works the
+    /// same where a read cannot answer at once.
+    ClipboardRead(Reply<ClipboardText, M>),
     /// Show a file dialog. The reply gets the path chosen, or `None`.
     FileDialog {
         /// What the dialog shows.
@@ -306,7 +342,7 @@ impl<M> Effect<M> {
     /// The effect's stable name, from [`names`].
     pub fn name(&self) -> &'static str {
         match self {
-            Self::Focus { .. } => names::FOCUS,
+            Self::Focus { .. } | Self::FocusAsInput(_) => names::FOCUS,
             Self::ScrollIntoView(_) => names::SCROLL_INTO_VIEW,
             Self::ClipboardWrite(_) => names::CLIPBOARD_WRITE,
             Self::ClipboardRead(_) => names::CLIPBOARD_READ,
@@ -331,6 +367,7 @@ impl<M> fmt::Debug for Effect<M> {
                 .field("target", target)
                 .field("select", select)
                 .finish(),
+            Self::FocusAsInput(id) => f.debug_tuple("FocusAsInput").field(id).finish(),
             Self::ScrollIntoView(id) => f.debug_tuple("ScrollIntoView").field(id).finish(),
             Self::ClipboardWrite(text) => f.debug_tuple("ClipboardWrite").field(text).finish(),
             Self::ClipboardRead(_) => f.write_str("ClipboardRead"),
@@ -402,6 +439,17 @@ impl<M> Effects<M> {
         })
     }
 
+    /// Focus the element with `id`, showing the ring only when the latest
+    /// input was a key press, as a browser decides `:focus-visible` when a
+    /// script moves the focus (ui-layer.md, section 6, rule 3). For an
+    /// overlay that a click or a key may open: from the keyboard, the user
+    /// must see where the focus went; from the pointer, a ring would show
+    /// for no keyboard use. Only one of the runtime's own elements takes
+    /// it; any other ID is the target's, as with [`Effects::focus`].
+    pub fn focus_as_input(id: UiId) -> Self {
+        Self::one(Effect::FocusAsInput(id))
+    }
+
     /// Focus the text field with `id`, with all of its text selected.
     pub fn focus_and_select_all(id: UiId) -> Self {
         Self::one(Effect::Focus {
@@ -438,8 +486,8 @@ impl<M> Effects<M> {
         Self::one(Effect::ClipboardWrite(text.into()))
     }
 
-    /// Read the clipboard, and make a message from its text.
-    pub fn clipboard_read(reply: impl FnOnce(Option<String>) -> M + Send + 'static) -> Self {
+    /// Read the clipboard, and make a message from what the read found.
+    pub fn clipboard_read(reply: impl FnOnce(ClipboardText) -> M + Send + 'static) -> Self {
         Self::one(Effect::ClipboardRead(Reply::new(reply)))
     }
 

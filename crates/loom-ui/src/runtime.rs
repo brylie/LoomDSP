@@ -44,8 +44,8 @@ use crate::routing::{Routed, Target};
 use crate::view::{Layer, View};
 use crate::waker::{Wake, Waker};
 use crate::window::Window;
-use accesskit::{Action as KitAction, ActionData};
-use loom_ui_core::{Event, Key, KeyEvent, Platform, Point, PointerEvent, Rect, Size, TextMeasure, UiId};
+use accesskit::{Action as KitAction, ActionData, ScrollUnit};
+use loom_ui_core::{Event, Key, KeyEvent, Modifiers, Platform, Point, PointerEvent, Rect, Size, TextMeasure, UiId};
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
@@ -125,6 +125,8 @@ pub struct Runtime<A: App, T> {
     /// The app changed outside a turn ([`Runtime::mark_view_stale`], for
     /// tests), so the next turn builds its view again even with no update.
     view_stale: bool,
+    /// The text typed into a select's type-ahead (section 6, rule 12).
+    typed: crate::select::Typed,
     /// The layouts of the panels that have elements.
     panels: Window,
     spec: Option<WindowSpec>,
@@ -135,6 +137,10 @@ pub struct Runtime<A: App, T> {
     counts: Counts,
     /// Which of the runtime's own elements has keyboard focus.
     focus: Focus,
+    /// The focus each overlay opened over, to give back when it closes
+    /// (section 6, rule 4): the input layer it was saved from, the element,
+    /// and whether it showed a ring. Last opened last.
+    saved_focus: Vec<(Layer, UiId, bool)>,
     /// What is hovered and pressed among the runtime's own elements.
     pointer: Pointer,
     /// The text field that had focus when the runtime last looked, so it
@@ -167,6 +173,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             window,
             view: None,
             view_stale: false,
+            typed: crate::select::Typed::default(),
             panels: Window::default(),
             spec: None,
             deadline: None,
@@ -175,6 +182,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             exited: false,
             counts: Counts::default(),
             focus: Focus::default(),
+            saved_focus: Vec::new(),
             pointer: Pointer::default(),
             field_focus: None,
             target_seen: None,
@@ -315,6 +323,18 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// driver calls it before it draws, and before it reads bounds or hits.
     pub fn lay_out(&mut self, text: &mut dyn TextMeasure) {
         self.panels().lay_out(text);
+        // A select that left the layout, scrolled out of view, or changed
+        // its options closes its list at once, and one that moved has its
+        // list built again where it is now, so no stale list is drawn.
+        self.check_select();
+        if std::mem::take(&mut self.panels.select_changed) {
+            self.build_view();
+            self.panels().lay_out(text);
+        }
+        // A list this layout closed is told to the app in the next turn.
+        if self.panels.select_reported {
+            self.waker().nudge();
+        }
         self.release_if_owed();
     }
 
@@ -322,6 +342,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// toolkit still draws keep theirs in the routing target.
     pub fn focused(&self) -> Option<&UiId> {
         self.focus.id()
+    }
+
+    /// The focused element when it is one of the runtime's text fields, as
+    /// last laid out: what [`Context::field_has_focus`](crate::Context::field_has_focus)
+    /// asks, for a driver outside a turn. It follows the focus, so a field
+    /// whose panel closed, or that a layout took away, no longer counts.
+    pub fn focused_field(&self) -> Option<&UiId> {
+        self.focus.id().filter(|id| self.panels.fields.has(id))
     }
 
     /// Every focus stop of the runtime's elements, in focus order, as last
@@ -336,8 +364,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// that is not a stop, focus comes in from outside: the first stop, or
     /// the last when `back` is set. [`FocusStep::PastEnd`] past either end.
     /// It moves nothing.
+    ///
+    /// A radio group is one stop on the way (section 6, rule 9).
     pub fn focus_step(&self, from: Option<&UiId>, back: bool) -> FocusStep {
-        self.step_among(self.panels.stops().iter().collect(), from, back)
+        self.step_among(self.panels.tab_stops(from), from, back)
     }
 
     /// [`Runtime::focus_step`] among `stops` only, in focus order.
@@ -358,8 +388,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     fn tab_step(&self, input: Layer, back: bool) -> FocusStep {
         let stops = self
             .panels
-            .stops()
-            .iter()
+            .tab_stops(self.focus.id())
+            .into_iter()
             .filter(|stop| self.panels.layer_of(stop).is_some_and(|layer| layer >= input))
             .collect();
         self.step_among(stops, self.focus.id(), back)
@@ -382,6 +412,20 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         panels.report_focus();
         self.release_if_owed();
         self.focus.id().cloned()
+    }
+
+    /// The highlighted option of a select's open list, or `None` while no
+    /// list is open, for tests.
+    #[cfg(test)]
+    pub(crate) fn select_highlight(&self) -> Option<usize> {
+        self.panels.select.as_ref().map(|open| open.highlight)
+    }
+
+    /// How far the runtime's scroll container with UI ID `id` is scrolled,
+    /// and the most it can be, in logical pixels, as last placed (section
+    /// 5, rule 12). `None` for an ID that is no such container.
+    pub fn scroll_offset(&self, id: &UiId) -> Option<(f32, f32)> {
+        self.panels.scroll_of(id)
     }
 
     /// Where the first of the runtime's text elements that reads `text` is
@@ -409,12 +453,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.pointer.hovered.as_ref().map(|(_, id)| id)
     }
 
-    /// The element with focus and where its ring goes, in logical pixels,
-    /// when the keyboard put the focus there. `None` after a press, or with
-    /// no focus.
+    /// The element with focus and its bounds, in logical pixels, when its
+    /// ring shows: the keyboard put the focus there, and the element is in
+    /// a layer that takes input. `None` after a press, with no focus, or
+    /// under an open question or panel (section 6, rule 3). What paints the
+    /// ring reads the same answer.
     pub fn focus_ring(&self) -> Option<(UiId, Rect)> {
-        let focus = self.focus.id().filter(|_| self.focus.ring)?;
-        Some((focus.clone(), self.panels.bounds(focus)?))
+        shown_ring(&self.panels, &self.app, &self.focus)
     }
 
     /// Tells the routing target to let go of its focus, because one of the
@@ -459,10 +504,74 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         true
     }
 
+    /// Saves and gives back the runtime's focus around an overlay (section
+    /// 6, rule 4), from `before`, the input layer and the focus the turn
+    /// started with. When the input layer rose above the element that had
+    /// the focus, that element is saved. When the layer dropped, every
+    /// overlay above it is gone: the focus saved from the layer it is now
+    /// takes the focus again, with the ring it had, if nothing of the input
+    /// layer has it. An element that has gone since is moved to its panel's
+    /// first stop by the next layout (`Focus::settle`). Returns true when
+    /// the focus changed.
+    fn keep_focus_across_overlays(&mut self, before: (Layer, Option<UiId>, bool)) -> bool {
+        let (was, focus, ring) = before;
+        let now = self.app.input().layer;
+        if now > was {
+            if let Some(id) = focus
+                && self.panels.layer_of(&id).is_some_and(|layer| layer < now)
+            {
+                self.saved_focus.push((was, id, ring));
+            }
+            return false;
+        }
+        if now >= was {
+            return false;
+        }
+        let mut back = None;
+        while let Some((layer, ..)) = self.saved_focus.last()
+            && *layer >= now
+        {
+            let saved = self.saved_focus.pop().expect("there is a last");
+            if saved.0 == now {
+                back = Some(saved);
+            }
+        }
+        let Some((_, id, ring)) = back else {
+            return false;
+        };
+        let held = self
+            .focus
+            .id()
+            .and_then(|focused| self.panels.layer_of(focused))
+            .is_some_and(|layer| layer == now);
+        if held || !self.panels.stops().contains(&id) && self.panels.panel_of(&id).is_none() {
+            return false;
+        }
+        self.release_target();
+        let changed = self.focus.id() != Some(&id);
+        self.focus.wanted = None;
+        self.focus.set(Some(id));
+        self.focus.ring = ring;
+        changed
+    }
+
+    /// After a focus effect: each one may move focus off a field, even one
+    /// that a later effect of the same update moves back, so the field
+    /// leaves at each, and the app hears of it on the next turn.
+    fn field_left_after_focus(&mut self, now: Instant) {
+        let mut later = Vec::new();
+        self.field_left(&mut later, now);
+        self.pending.extend(later);
+    }
+
     /// Moves the runtime's focus to `to`, from the keyboard or an effect,
-    /// so a ring shows. Returns true when it changed.
+    /// so a ring shows, and brings it into view (section 5, rule 12).
+    /// Returns true when it changed.
     fn focus_to(&mut self, to: Option<UiId>) -> bool {
         self.focus.wanted = None;
+        if to.is_some() {
+            self.panels.reveal.clone_from(&to);
+        }
         let changed = self.focus.id() != to.as_ref() || (to.is_some() && !self.focus.ring);
         self.focus.set(to);
         self.focus.ring = self.focus.id().is_some();
@@ -627,7 +736,33 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if used.committed {
             batch.extend(self.app.field_event(&id, &FieldEvent::Committed(text())));
         }
-        (used.taken, used.redraw)
+        // Home or End in a multi-line field on a Mac shows its start or end,
+        // and the caret stays; any other edit or caret move shows the caret.
+        // Either waits for a current layout, and the last asked for wins.
+        // Home and End move nothing, so they ask for a redraw, whose layout
+        // then scrolls.
+        if let Some(edge) = used.reveal {
+            self.panels.caret_reveal = Some((id.clone(), crate::window::FieldShow::Edge(edge)));
+        } else if used.edited || used.redraw {
+            self.follow_caret(&id);
+        }
+        (used.taken, used.redraw || used.reveal.is_some())
+    }
+
+    /// Asks for the caret of the field `id` to be kept in view after an
+    /// edit or a caret move in it, when it shows many lines: the containers
+    /// around it follow at the next layout, which has the field's new
+    /// height (section 8, rule 7). A single-line field scrolls inside
+    /// itself instead.
+    fn follow_caret(&mut self, id: &UiId) {
+        let many = self
+            .panels
+            .fields
+            .get(id)
+            .is_some_and(|field| field.lines() == crate::field::Lines::Many);
+        if many {
+            self.panels.caret_reveal = Some((id.clone(), crate::window::FieldShow::Caret));
+        }
     }
 
     /// Whether the input method is composing in the focused field, while
@@ -711,6 +846,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             return Some(false);
         };
         let used = self.panels.fields.act(&field, action, now);
+        if used.changed {
+            self.follow_caret(&field);
+        }
         if used.edited {
             let text = self
                 .panels
@@ -762,13 +900,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.panels.fields.get(id).map(crate::field::FieldState::text)
     }
 
-    /// What the keyboard can activate the element with UI ID `id` as, now:
-    /// `Some(true)` for a button, `Some(false)` for a switch, `None` when it
-    /// is neither, offers no Click, is turned off, or is in a layer below
-    /// the one taking input. The press and the release of Space both ask,
-    /// so an element that stopped being clickable while Space was held
-    /// clicks nothing.
-    fn activatable(&self, id: &UiId) -> Option<bool> {
+    /// What the keyboard can activate the element with UI ID `id` as, now
+    /// ([`activatable`]).
+    fn activatable(&self, id: &UiId) -> Option<Activation> {
         activatable(&self.panels, &self.app, id)
     }
 
@@ -778,8 +912,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     }
 
     /// Keyboard activation of the focused element (section 3, rule 4):
-    /// Enter clicks a button when it goes down, and Space clicks a button
-    /// or a switch when it comes up on the element it went down on.
+    /// Enter clicks a button or a link when it goes down, and Space clicks
+    /// a button or a switch when it comes up on the element it went down
+    /// on.
     /// Escape, any move of the focus, or a pointer press while Space is held
     /// cancels it, and so does the element no longer being clickable when
     /// Space comes up. Repeats click nothing. The click reaches the app
@@ -824,7 +959,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let Some(id) = self.focus.id().cloned() else {
             return (false, false);
         };
-        let Some(button) = self.activatable(&id) else {
+        let Some(activation) = self.activatable(&id) else {
             return (false, false);
         };
         let KeyEvent::Pressed {
@@ -835,13 +970,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         };
         let plain = !(modifiers.control || modifiers.alt || modifiers.meta);
         match key {
-            Key::Enter if button && plain => {
+            Key::Enter if activation.on_enter() && plain => {
                 if !repeat {
                     self.click(&id);
                 }
                 (true, false)
             }
-            Key::Space if plain => {
+            Key::Space if activation.on_space() && plain => {
                 if !repeat {
                     self.pointer.space = Some((id, self.focus.moves));
                 }
@@ -849,6 +984,431 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             }
             _ => (false, false),
         }
+    }
+
+    /// A key pressed while the focus is on or inside an element that takes
+    /// it first ([`Element::takes_first`](crate::Element::takes_first)):
+    /// that element's app message, through [`App::panel_key`], before the
+    /// focused element hears the key (section 6, rule 6, step 2b). Only in
+    /// a layer that takes input now. Returns whether the app took the key.
+    fn panel_key(&mut self, event: &Event, batch: &mut Vec<A::Message>) -> bool {
+        let Event::Key(press @ KeyEvent::Pressed { key, .. }) = event else {
+            return false;
+        };
+        // While the canvas has the keyboard, its keys are its own (section
+        // 6, rule 1), as for every other key step of the runtime's.
+        if self.app.input().canvas_focused {
+            return false;
+        }
+        // Escape with a Space held on a button cancels that click first
+        // (section 3, rule 4), so it is left to the activation step.
+        if *key == Key::Escape && self.live_arm().is_some() {
+            return false;
+        }
+        let Some(focused) = self.focus.id() else {
+            return false;
+        };
+        if !self.in_input_layer(focused) {
+            return false;
+        }
+        let Some(owner) = self.panels.takes_first(focused, *key) else {
+            return false;
+        };
+        match self.app.panel_key(owner, press) {
+            Some(message) => {
+                batch.push(message);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The arrows, Space, and Enter on a focused radio of a group (section
+    /// 6, rule 9; the WAI-ARIA radio group pattern). Down and Right move to
+    /// the next radio and choose it, Up and Left to the one before, both
+    /// wrapping; Space chooses the focused radio if it is not chosen; Enter
+    /// is taken and does nothing, so a dialog around the group does not act
+    /// on it. Each choice reaches the app as [`App::clicked`] on the next
+    /// turn. A key the radio takes shows the ring (rule 3). Returns whether
+    /// the key was taken, and whether anything that shows changed.
+    fn radio_key(&mut self, event: &Event) -> (bool, bool) {
+        let Event::Key(KeyEvent::Pressed {
+            key, modifiers, repeat, ..
+        }) = event
+        else {
+            return (false, false);
+        };
+        let Some(id) = self.focus.id().cloned() else {
+            return (false, false);
+        };
+        let Some(chosen) = self.panels.radio_chosen(&id) else {
+            return (false, false);
+        };
+        if self.app.input().canvas_focused || !self.in_input_layer(&id) || !plain(*modifiers) {
+            return (false, false);
+        }
+        let ring = !self.focus.ring;
+        match key {
+            Key::Down | Key::Right | Key::Up | Key::Left => {
+                let back = matches!(key, Key::Up | Key::Left);
+                let Some(next) = self.panels.radio_step(&id, back) else {
+                    return (true, false);
+                };
+                let moved = self.focus_to(Some(next.clone()));
+                self.click(&next);
+                (true, moved)
+            }
+            Key::Space => {
+                if !chosen && !repeat {
+                    self.click(&id);
+                }
+                self.focus.ring = true;
+                (true, ring)
+            }
+            Key::Enter => {
+                self.focus.ring = true;
+                (true, ring)
+            }
+            _ => (false, false),
+        }
+    }
+
+    /// The WAI-ARIA select-only combobox pattern's keys on a focused select
+    /// (section 6, rule 12). Closed, the keys that open it open its list on
+    /// the chosen, the first, or the last option, or on what type-ahead
+    /// finds. Open, they move the highlight, choose, or close; Tab chooses
+    /// and is not taken, so it moves the focus on after. Returns whether
+    /// the key was taken, and whether anything that shows changed.
+    fn select_key(&mut self, event: &Event, now: Instant) -> (bool, bool) {
+        use crate::select::{Closed, OpenKey, closed_key, moved, open_key};
+        let Event::Key(KeyEvent::Pressed {
+            key, modifiers, text, ..
+        }) = event
+        else {
+            return (false, false);
+        };
+        let Some(id) = self.focus.id().cloned() else {
+            return (false, false);
+        };
+        let Some((select, _, _)) = self.panels.select_of(&id) else {
+            return (false, false);
+        };
+        if select.options.is_empty() || self.app.input().canvas_focused || !self.in_input_layer(&id) {
+            return (false, false);
+        }
+        let ring = !self.focus.ring;
+        let count = select.options.len();
+        let open = self.panels.select.clone().filter(|open| open.id == id);
+        let text = text.as_deref();
+        match open {
+            None => {
+                let Some(action) = closed_key(*key, *modifiers, text) else {
+                    return (false, false);
+                };
+                let at = match action {
+                    Closed::OpenOnChosen => select.chosen.unwrap_or(0),
+                    Closed::OpenOnFirst => 0,
+                    Closed::OpenOnLast => count - 1,
+                    Closed::Type => {
+                        let from = select.chosen.unwrap_or(count - 1);
+                        self.typed
+                            .find(&id, text.unwrap_or_default(), now, &select.options, from)
+                            .unwrap_or(from.min(count - 1))
+                    }
+                };
+                self.panels().open_select(&id, select, at);
+            }
+            Some(open) => {
+                let Some(action) = open_key(*key, *modifiers, text) else {
+                    return (false, false);
+                };
+                match action {
+                    OpenKey::Move(by) => self.panels().highlight_option(moved(open.highlight, by, count)),
+                    OpenKey::First => self.panels().highlight_option(0),
+                    OpenKey::Last => self.panels().highlight_option(count - 1),
+                    OpenKey::Choose => self.panels().choose_highlighted(),
+                    OpenKey::ChooseAndTab => {
+                        self.panels().choose_highlighted();
+                        return (false, true);
+                    }
+                    OpenKey::Close => self.panels().close_select(),
+                    OpenKey::Type => {
+                        if let Some(found) =
+                            self.typed
+                                .find(&id, text.unwrap_or_default(), now, &open.select.options, open.highlight)
+                        {
+                            self.panels().highlight_option(found);
+                        }
+                    }
+                }
+            }
+        }
+        self.focus.ring = true;
+        (true, ring)
+    }
+
+    /// A screen reader's action on a select or its open list (section 7,
+    /// rule 32): Expand focuses the select and opens its list on the chosen
+    /// option, Collapse
+    /// closes it with no choice, Increment and Decrement step the chosen
+    /// option by one, and Click on an option chooses it. `None` for any
+    /// other action or element, which goes on. Returns whether anything
+    /// that shows changed.
+    fn select_action(&mut self, event: &AccessEvent) -> Option<bool> {
+        let AccessEvent::Action(request) = event else {
+            return None;
+        };
+        let target = self.app.access_target(request.target_node)?;
+        if let Some(index) = crate::select::option_index(&target) {
+            if request.action != KitAction::Click {
+                return None;
+            }
+            let open = self.panels.select.clone()?;
+            if index >= open.select.options.len() {
+                return Some(false);
+            }
+            self.panels().highlight_option(index);
+            self.panels().choose_highlighted();
+            return Some(true);
+        }
+        let (select, _, _) = self.panels.select_of(&target)?;
+        if !matches!(
+            request.action,
+            KitAction::Expand | KitAction::Collapse | KitAction::Increment | KitAction::Decrement
+        ) {
+            return None;
+        }
+        if select.options.is_empty() || !self.in_input_layer(&target) {
+            return Some(false);
+        }
+        let last = select.options.len() - 1;
+        match request.action {
+            KitAction::Expand => {
+                // A screen reader's cursor may be on the select while the
+                // keyboard focus is elsewhere: Expand focuses it first, as
+                // its Focus action would, since the list stays open only
+                // while the select has the focus.
+                self.release_target();
+                self.focus_to(Some(target.clone()));
+                let at = select.chosen.unwrap_or(0);
+                self.panels().open_select(&target, select, at);
+            }
+            KitAction::Collapse => self.panels().close_select(),
+            KitAction::Increment => {
+                let to = select.chosen.map_or(0, |at| (at + 1).min(last));
+                self.panels().choose_option(&target, select.chosen, to);
+            }
+            _ => {
+                let to = select.chosen.map_or(0, |at| at.saturating_sub(1));
+                self.panels().choose_option(&target, select.chosen, to);
+            }
+        }
+        Some(true)
+    }
+
+    /// Closes a select's open list, with no choice, when it must close on
+    /// its own (section 5, rule 18): the select left the layout, has no
+    /// options or other options, or is scrolled out of view; the focus is
+    /// not on it; or a layer above it, such as an overlay or a question,
+    /// takes the input. A list that stays open takes the app's current
+    /// choice, and is built again when its select moved.
+    fn check_select(&mut self) {
+        let Some(open) = self.panels.select.clone() else {
+            return;
+        };
+        let now = self.panels.select_of(&open.id);
+        // Where things are is known only once the window is laid out again
+        // after a rebuild; until then only what the select offers is read.
+        let settled = self.panels.is_settled(self.window.size);
+        let gone = match &now {
+            None => true,
+            Some((select, _, shows)) => select.options != open.select.options || (settled && !shows),
+        };
+        let input = self.app.input();
+        let covered = self.panels.layer_of(&open.id).is_none_or(|layer| layer < input.layer);
+        if gone || covered || input.canvas_focused || self.focus.id() != Some(&open.id) {
+            self.panels().close_select();
+            return;
+        }
+        // Still open: the list follows the app's choice, for its tick and
+        // for what a choice compares with, and follows its select when the
+        // select moves or the window changes height.
+        let Some((select, bounds, _)) = now else {
+            return;
+        };
+        let moved = settled
+            && open
+                .anchor
+                .is_some_and(|anchor| anchor != (bounds, self.window.size.height));
+        if let Some(kept) = self.panels.select.as_mut()
+            && (kept.select.chosen != select.chosen || moved)
+        {
+            kept.select.chosen = select.chosen;
+            self.panels.select_changed = true;
+            self.panels.select_reported = true;
+        }
+    }
+
+    /// The WAI-ARIA slider pattern's keys on a focused slider (section 6,
+    /// rule 10): the arrows by its key step, or its fine step with Shift,
+    /// Home and End to the ends, and Page Up and Page Down by its page
+    /// step. Each reaches the app through [`App::slid`] on the next turn,
+    /// in a group of keys that closes 500 ms after its last. A key it
+    /// takes at an end moves nothing and is still taken. A key it does not
+    /// take, such as Space, goes on to the container around it. Returns
+    /// whether the key was taken, and whether the ring came on.
+    fn slider_key(&mut self, event: &Event, now: Instant) -> (bool, bool) {
+        let Event::Key(KeyEvent::Pressed { key, modifiers, .. }) = event else {
+            return (false, false);
+        };
+        let Some(id) = self.focus.id().cloned() else {
+            return (false, false);
+        };
+        let Some((slider, _)) = self.panels.slider_of(&id) else {
+            return (false, false);
+        };
+        let off = self
+            .panels
+            .access_of(&id)
+            .is_some_and(crate::access::Access::is_disabled);
+        if off || self.app.input().canvas_focused || !self.in_input_layer(&id) {
+            return (false, false);
+        }
+        let from = self.pointer.slide.key_base(&id, slider.position());
+        let Some(to) = slider.after_key(from, *key, *modifiers) else {
+            return (false, false);
+        };
+        let reports = self.pointer.slide.key(&id, from, to, now);
+        self.panels().report_slid(reports);
+        let ring = !self.focus.ring;
+        self.focus.ring = true;
+        (true, ring)
+    }
+
+    /// A screen reader's Increment or Decrement on a slider (section 7,
+    /// rules 5 and 30): one key step, as one Start, Move, and End. Taken
+    /// even on a slider that is turned off or below the input layer, where
+    /// it does nothing. `None` for any other action, or another element,
+    /// which goes on. Returns whether anything that shows changed.
+    fn slider_action(&mut self, event: &AccessEvent) -> Option<bool> {
+        let AccessEvent::Action(request) = event else {
+            return None;
+        };
+        let up = match request.action {
+            KitAction::Increment => true,
+            KitAction::Decrement => false,
+            _ => return None,
+        };
+        let target = self.app.access_target(request.target_node)?;
+        let (slider, _) = self.panels.slider_of(&target)?;
+        let off = self
+            .panels
+            .access_of(&target)
+            .is_some_and(crate::access::Access::is_disabled);
+        if off || !self.in_input_layer(&target) {
+            return Some(false);
+        }
+        let reports = self
+            .pointer
+            .slide
+            .step(&target, slider.position(), slider.after_step(up));
+        self.panels().report_slid(reports);
+        Some(false)
+    }
+
+    /// The scroll keys on a focused scroll container, which is a stop only
+    /// when nothing inside is (section 5, rule 12; the browsers' keys, as
+    /// the APG has no pattern): Up and Down one line, Page Up and Page Down
+    /// a page less one line, Space and Shift+Space a page, and Home and End
+    /// the top and the bottom. Returns whether the key was taken, and
+    /// whether the content moved.
+    fn scroll_key(&mut self, event: &Event) -> (bool, bool) {
+        let Event::Key(KeyEvent::Pressed { key, modifiers, .. }) = event else {
+            return (false, false);
+        };
+        let Some(id) = self.focus.id().cloned() else {
+            return (false, false);
+        };
+        let Some(line) = self.panels.scroll_line(&id) else {
+            return (false, false);
+        };
+        if self.app.input().canvas_focused || !self.in_input_layer(&id) {
+            return (false, false);
+        }
+        let Some(change) = scroll_change(*key, *modifiers) else {
+            return (false, false);
+        };
+        let moved = self
+            .panels
+            .scroll_container(&id, |at, page, most| change(at, line, page, most));
+        (true, moved)
+    }
+
+    /// A scroll key the focused element did not use goes to the nearest
+    /// scroll container around it, or to one that takes its keys from it
+    /// (section 6, rule 6, step 3; section 5, rule 12). Returns whether a
+    /// container moved, which takes the key.
+    fn bubble_scroll_key(&mut self, event: &Event) -> bool {
+        let Event::Key(KeyEvent::Pressed { key, modifiers, .. }) = event else {
+            return false;
+        };
+        let Some(id) = self.focus.id().cloned() else {
+            return false;
+        };
+        if self.app.input().canvas_focused || !self.in_input_layer(&id) {
+            return false;
+        }
+        let Some(change) = scroll_change(*key, *modifiers) else {
+            return false;
+        };
+        self.panels.scroll_by_key(&id, change)
+    }
+
+    /// A screen reader's scroll action (section 7, rule 28): ScrollUp,
+    /// ScrollDown, or SetScrollOffset on one of the runtime's scroll
+    /// containers, or ScrollIntoView on a part inside one, which scrolls
+    /// as a focus move does. Returns whether a container moved, or `None`
+    /// for an event that is not such an action, which goes to the app.
+    fn scroll_action(&mut self, event: &AccessEvent) -> Option<bool> {
+        let AccessEvent::Action(request) = event else {
+            return None;
+        };
+        if !matches!(
+            request.action,
+            KitAction::ScrollUp | KitAction::ScrollDown | KitAction::SetScrollOffset | KitAction::ScrollIntoView
+        ) {
+            return None;
+        }
+        let target = self.app.access_target(request.target_node)?;
+        if request.action == KitAction::ScrollIntoView {
+            if !self.panels.in_container(&target) {
+                return None;
+            }
+            return Some(self.panels.scroll_to_show(&target));
+        }
+        let line = self.panels.scroll_line(&target)?;
+        let moved = match (request.action, &request.data) {
+            (KitAction::SetScrollOffset, Some(ActionData::SetScrollOffset(point))) => {
+                // In the node's own space, which is physical pixels.
+                let scale = if self.window.scale > 0.0 {
+                    self.window.scale
+                } else {
+                    1.0
+                };
+                let to = point.y as f32 / scale;
+                self.panels.scroll_container(&target, |_, _, _| to)
+            }
+            (KitAction::SetScrollOffset, _) => false,
+            (action, data) => {
+                let down = action == KitAction::ScrollDown;
+                let item = matches!(data, Some(ActionData::ScrollUnit(ScrollUnit::Item)));
+                self.panels.scroll_container(&target, |at, page, _| {
+                    let by = if item { line } else { page };
+                    if down { at + by } else { at - by }
+                })
+            }
+        };
+        Some(moved)
     }
 
     /// Sends the app's message for a click on `id`, for the next turn.
@@ -960,6 +1520,12 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         driver: &mut impl Driver<A::Message>,
     ) -> Next {
         self.counts.turns += 1;
+        self.pointer.now = Some(now);
+        // A layout since the last turn may have taken a select's list away.
+        self.check_select();
+        // A group of keys on a slider closes 500 ms after its last key.
+        let closed = self.pointer.slide.close_keys_if(now, self.focus.id());
+        self.panels().report_slid(closed);
         self.release_if_owed();
         // The target's own element may have taken the keyboard since the
         // last turn; then a layout between turns, or that, may have moved
@@ -967,11 +1533,20 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // What shows as pressed is painted from the runtime's own state,
         // so a change of it needs a frame, though no panel is built again
         // (visual-system.md, Role tokens): an input event, or an update
-        // that raises the input layer or turns the element off.
+        // that raises the input layer or turns the element off. So does
+        // whether the focus ring shows, which a raised input layer hides
+        // with no panel built again (section 6, rule 3).
         let pressed = self.panels().shown_pressed();
+        let ringed = self.focus_ring().map(|(id, _)| id);
+        // The input layer and the focus as the turn starts: an overlay that
+        // opens in it moves the focus into itself in the same turn, so what
+        // to give back when it closes is read now.
+        let before = (self.app.input().layer, self.focus.id().cloned(), self.focus.ring);
         let mut redraw = self.follow_target();
         self.field_left(&mut batch, now);
-        let mut reported = self.panels.fields.take_changed();
+        // A scroll since the last turn, by the pointer between turns or by
+        // a layout's reveal, changed what the tree reports too.
+        let mut reported = self.panels.fields.take_changed() | self.panels.take_scrolled();
         // Paste answers that came since the last turn.
         let changed = self.take_pastes(now, &mut batch);
         redraw |= changed;
@@ -980,15 +1555,45 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // 2. Route the event.
         match event {
             DriverEvent::Input { event, pointer } => {
+                self.note_modifiers(&event);
                 // While the input method composes in a focused field, every
                 // key is the input method's, Tab and Space too: the field
                 // takes them before Tab or a button can.
                 let composing = matches!(event, Event::Key(_)) && self.composing();
-                let (mut taken, moved) = if composing { (false, false) } else { self.tab(&event) };
-                redraw |= moved;
+                // A focused select's keys come first, so Tab from an open
+                // list chooses before it moves the focus (section 6, rule 12).
+                let (mut taken, changed) = if composing {
+                    (false, false)
+                } else {
+                    self.select_key(&event, now)
+                };
+                redraw |= changed;
+                if !taken {
+                    let (tabbed, moved) = if composing { (false, false) } else { self.tab(&event) };
+                    taken = tabbed;
+                    redraw |= moved;
+                }
+                if !taken && !composing {
+                    taken = self.panel_key(&event, &mut batch);
+                }
                 if !taken && !composing {
                     let (activated, changed) = self.activate(&event);
                     taken = activated;
+                    redraw |= changed;
+                }
+                if !taken && !composing {
+                    let (used, changed) = self.radio_key(&event);
+                    taken = used;
+                    redraw |= changed;
+                }
+                if !taken && !composing {
+                    let (used, changed) = self.slider_key(&event, now);
+                    taken = used;
+                    redraw |= changed;
+                }
+                if !taken && !composing {
+                    let (used, changed) = self.scroll_key(&event);
+                    taken = used;
                     redraw |= changed;
                 }
                 if taken {
@@ -1000,6 +1605,19 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     if used {
                         // A key a field took is the field's alone, so a
                         // toolkit that heard it first drops it too.
+                        self.target.kept(&event);
+                    } else if self.bubble_scroll_key(&event) {
+                        // A scroll key the focused element left moved a
+                        // container around it, and goes no further.
+                        redraw = true;
+                        self.target.kept(&event);
+                    } else if let Event::Key(key @ KeyEvent::Pressed { .. }) = &event
+                        && self.app.input().layer == Layer::Question
+                    {
+                        // An open question has every key (section 6, rule
+                        // 6, step 2): the app's question keys, or Panic,
+                        // and none goes on to the target.
+                        batch.extend(self.app.question_key(key));
                         self.target.kept(&event);
                     } else {
                         redraw |= self.route(&event, pointer, now, &mut batch);
@@ -1017,7 +1635,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     redraw |= changed;
                     reported |= changed;
                 }
-                None => batch.extend(self.app.accessibility_event(&event)),
+                None => match self.select_action(&event).or_else(|| self.slider_action(&event)) {
+                    Some(changed) => redraw |= changed,
+                    None => match self.scroll_action(&event) {
+                        Some(moved) => redraw |= moved,
+                        None => batch.extend(self.app.accessibility_event(&event)),
+                    },
+                },
             },
             DriverEvent::RedrawRequested => redraw = true,
             DriverEvent::Frame => {
@@ -1031,6 +1655,17 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // Tab, or a press the target handed back, may have moved focus off
         // a field: the app hears of it in this turn.
         self.field_left(&mut batch, now);
+        // Focus leaving a slider closes its group of keys.
+        let closed = self.pointer.slide.close_keys_if(now, self.focus.id());
+        self.panels().report_slid(closed);
+        // Or a select its list.
+        self.check_select();
+        // A keyboard focus move shows its element now, when the layout is
+        // current; otherwise the next layout does it.
+        redraw |= self.panels().reveal();
+        let scrolled = self.panels.take_scrolled();
+        redraw |= scrolled;
+        reported |= scrolled;
 
         // 3. One update per message, each followed by its own effects. A
         // focus effect that moves focus off a field is looked at as it
@@ -1043,7 +1678,22 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             }
             updates += 1;
             redraw |= self.update(message, now, driver);
+            // A focus an update's effects moved is the next thing the app
+            // hears, before the turn's other messages, as a focus an event
+            // moved is the first (`App::focus_moved`): the app's copy of the
+            // focus is then never behind while it handles one.
+            if !self.exited
+                && let Some(report) = self.panels().focus_report()
+            {
+                updates += 1;
+                redraw |= self.update(report, now, driver);
+            }
         }
+        // An overlay an update opened closes a select's list under it, and
+        // a list that opened, closed, or moved its highlight changes what
+        // the tree reports: its expanded state and active descendant.
+        self.check_select();
+        reported |= std::mem::take(&mut self.panels.select_reported);
         // What a field reports changed: one notice, asked for after the
         // turn's updates, so the app's answer is built from its model with
         // the field's messages in it.
@@ -1057,8 +1707,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.counts.updates += updates as u64;
 
         // 4. What changed.
-        // Taken first, so any rebuild uses up a stale view.
-        let stale = std::mem::take(&mut self.view_stale);
+        // Taken first, so any rebuild uses up a stale view. A select's list
+        // that opened, closed, or moved its highlight is built again too.
+        let listed = std::mem::take(&mut self.panels.select_changed);
+        redraw |= listed;
+        let stale = std::mem::take(&mut self.view_stale) || listed;
         if updates > 0 || self.view.is_none() || stale {
             redraw |= self.rebuild(driver);
             // A layer the input layer rose above holds no hover or press.
@@ -1067,6 +1720,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
 
         redraw |= self.target.needs_redraw(updates);
         redraw |= self.panels().shown_pressed() != pressed;
+        redraw |= self.keep_focus_across_overlays(before);
+        redraw |= self.focus_ring().map(|(id, _)| id) != ringed;
 
         // 5. Draw only when something visible changed.
         let draw = redraw && !self.exited;
@@ -1085,7 +1740,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             deadline: if self.exited {
                 None
             } else {
-                self.deadline.as_ref().map(|deadline| deadline.at)
+                // The app's deadline, or a slider's group of keys closing,
+                // whichever is sooner.
+                let app = self.deadline.as_ref().map(|deadline| deadline.at);
+                match (app, self.pointer.slide.deadline()) {
+                    (Some(app), Some(keys)) => Some(app.min(keys)),
+                    (app, keys) => app.or(keys),
+                }
             },
         }
     }
@@ -1099,6 +1760,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // with no position to route by (section 3, rule 4).
         if let Event::Pointer(PointerEvent::Pressed(_)) = event {
             self.pointer.space = None;
+            // A press closes a slider's group of keys, wherever it is
+            // (section 5, rule 16).
+            let closed = self.pointer.slide.close_keys();
+            self.panels().report_slid(closed);
         }
         let point = match (event, pointer) {
             (Event::Pointer(PointerEvent::LeftWindow), _) => {
@@ -1127,6 +1792,25 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         redraw
     }
 
+    /// Keeps the held modifiers from a key event, for Shift during a
+    /// slider's drag (section 5, rule 16).
+    fn note_modifiers(&mut self, event: &Event) {
+        // What the latest press came from, for a focus effect that follows
+        // it (`Effects::focus_as_input`).
+        match event {
+            Event::Key(KeyEvent::Pressed { .. }) => self.focus.by_key = true,
+            Event::Pointer(loom_ui_core::PointerEvent::Pressed(_)) => self.focus.by_key = false,
+            _ => {}
+        }
+        match event {
+            Event::Key(KeyEvent::ModifiersChanged(modifiers) | KeyEvent::Pressed { modifiers, .. }) => {
+                self.pointer.modifiers = *modifiers;
+            }
+            Event::WindowUnfocused => self.pointer.modifiers = Modifiers::NONE,
+            _ => {}
+        }
+    }
+
     /// Moves everything wakers sent into `pending`, in order, and the
     /// paste answers drivers gave into `pasted`.
     fn drain_queue(&mut self) {
@@ -1140,18 +1824,30 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// and the field takes input; drops it otherwise, so a slow clipboard
     /// never types into another place or after the user moved on (section
     /// 8, rule 2). An
-    /// edit reaches the app as `Edited`, in `batch`. Returns whether a
+    /// edit reaches the app as `Edited`, in `batch`. A paste whose read was
+    /// refused reaches the app as `PasteRefused` whatever focus did since,
+    /// so a refusal never goes unheard. Returns whether a
     /// field changed what it shows.
     fn take_pastes(&mut self, now: Instant, batch: &mut Vec<A::Message>) -> bool {
         self.pasted.extend(self.paste_answers.1.try_iter());
         let mut changed = false;
-        while let Some((field, moves, text)) = self.pasted.pop_front() {
-            let Some(text) = text else { continue };
+        while let Some((field, moves, answer)) = self.pasted.pop_front() {
+            let text = match answer {
+                crate::ClipboardText::Text(text) => text,
+                crate::ClipboardText::Empty => continue,
+                crate::ClipboardText::Refused => {
+                    batch.extend(self.app.field_event(&field, &FieldEvent::PasteRefused));
+                    continue;
+                }
+            };
             if moves != self.focus.moves || self.focus.id() != Some(&field) || !self.field_takes_input(&field) {
                 continue;
             }
             let used = self.panels.fields.paste(&field, &text, now);
             changed |= used.redraw;
+            if used.redraw {
+                self.follow_caret(&field);
+            }
             if used.edited {
                 let text = self
                     .panels
@@ -1196,15 +1892,28 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let mut redraw = false;
         for effect in effects {
             match effect {
+                Effect::FocusAsInput(id) => {
+                    let quiet = !self.focus.by_key;
+                    redraw |= self.focus_effect(&FocusTarget::Element(id.clone()), Selection::Keep);
+                    if quiet {
+                        if self.focus.id() == Some(&id) {
+                            self.focus.ring = false;
+                        } else if self.focus.wanted.as_ref() == Some(&id) {
+                            self.focus.wanted_quiet = Some(id);
+                        }
+                    }
+                    self.field_left_after_focus(now);
+                }
                 Effect::Focus { target, select } => {
                     redraw |= self.focus_effect(&target, select);
-                    // Each focus effect may move focus off a field, even
-                    // one that a later effect of the same update moves
-                    // back: the field leaves at each, and the app hears of
-                    // it on the next turn.
-                    let mut later = Vec::new();
-                    self.field_left(&mut later, now);
-                    self.pending.extend(later);
+                    self.field_left_after_focus(now);
+                }
+                // The runtime's own element is its own to scroll, once its
+                // layout is current (section 5, rule 12); a toolkit's is
+                // the target's, as before.
+                Effect::ScrollIntoView(id) if self.panels.panel_of(&id).is_some() => {
+                    self.panels.reveal = Some(id);
+                    redraw |= self.panels().reveal();
                 }
                 Effect::ScrollIntoView(id) => self.target.scroll_into_view(&id),
                 Effect::ClipboardWrite(text) => driver.clipboard_write(text),
@@ -1243,8 +1952,49 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// window spec to the driver, and asks for the next deadline. Returns
     /// true when a panel changed.
     fn rebuild(&mut self, driver: &mut impl Driver<A::Message>) -> bool {
+        let changed = self.build_view();
+        let spec = self.app.window();
+        if self.spec.as_ref() != Some(&spec) {
+            driver.window(&spec);
+            self.spec = Some(spec);
+        }
+        self.deadline = self.app.next_deadline();
+        changed
+    }
+
+    /// Builds the view again from the app, with a select's open list as a
+    /// panel of the runtime's in the Overlays layer (section 5, rule 18),
+    /// and hands it to the window. Returns true when anything drawn may
+    /// differ.
+    fn build_view(&mut self) -> bool {
         let mut view = View::new();
         self.app.view(&mut view);
+        if let Some(mut open) = self.panels.select.clone()
+            && let Some(bounds) = self.panels.bounds(&open.id)
+        {
+            let anchor = Some((bounds, self.window.size.height));
+            if let Some(kept) = self.panels.select.as_mut() {
+                kept.anchor = anchor;
+            }
+            open.anchor = anchor;
+            let model = crate::select::ListModel {
+                open,
+                bounds,
+                window: self.window.size.height,
+            };
+            // At least as high as its select's layer, so a select in a
+            // question has its list where the question's input goes.
+            let layer = self
+                .panels
+                .layer_of(&model.open.id)
+                .map_or(Layer::Overlays, |layer| layer.max(Layer::Overlays));
+            view.panel_with(
+                UiId::panel(crate::select::LIST_PANEL),
+                layer,
+                &model,
+                crate::select::build_list,
+            );
+        }
         let changed = match &self.view {
             Some(last) => view.changed_since(last),
             None => view.len(),
@@ -1254,17 +2004,27 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let synced = self.panels.sync(view.built(self.view.as_ref()));
         self.counts.duplicate_keys += synced.dropped;
         self.view = Some(view);
-
-        let spec = self.app.window();
-        if self.spec.as_ref() != Some(&spec) {
-            driver.window(&spec);
-            self.spec = Some(spec);
-        }
-        self.deadline = self.app.next_deadline();
         // A new order of panels, or a panel in another slot, is drawn
         // differently even when no model changed.
         changed > 0 || synced.composition
     }
+}
+
+/// The focused element and its bounds when its focus ring shows (section
+/// 6, rule 3): the keyboard put the focus there, and the element is in a
+/// layer that takes input, so no ring shows under an open question or
+/// panel. One answer for [`Runtime::focus_ring`] and for painting.
+pub(crate) fn shown_ring<A: App>(window: &Window, app: &A, focus: &crate::focus::Focus) -> Option<(UiId, Rect)> {
+    let id = focus.id().filter(|_| focus.ring)?;
+    if !in_input_layer(window, app, id) {
+        return None;
+    }
+    Some((id.clone(), window.bounds(id)?))
+}
+
+/// True when no modifier but Shift is held.
+fn plain(modifiers: Modifiers) -> bool {
+    !(modifiers.control || modifiers.alt || modifiers.meta)
 }
 
 /// True when the element with UI ID `id` in `window` is in a layer that
@@ -1275,13 +2035,38 @@ pub(crate) fn in_input_layer<A: App>(window: &Window, app: &A, id: &UiId) -> boo
     window.layer_of(id).is_some_and(|its| its >= layer)
 }
 
+/// Which keys click an element the keyboard can activate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Activation {
+    /// A button: Enter when it goes down, Space when it comes up.
+    Button,
+    /// A switch or a check box: Space only, as the WAI-ARIA switch and
+    /// checkbox patterns say (section 6, rule 11).
+    Switch,
+    /// A link: Enter only, as WAI-ARIA's link pattern has it. Space
+    /// stays the page's, to scroll.
+    Link,
+}
+
+impl Activation {
+    /// True when Enter clicks it.
+    pub(crate) fn on_enter(self) -> bool {
+        matches!(self, Self::Button | Self::Link)
+    }
+
+    /// True when Space clicks it.
+    pub(crate) fn on_space(self) -> bool {
+        matches!(self, Self::Button | Self::Switch)
+    }
+}
+
 /// What the keyboard can activate the element with UI ID `id` in `window`
-/// as, now, with `app`'s input state: `Some(true)` for a button,
-/// `Some(false)` for a switch, `None` when it is neither, offers no Click,
-/// is turned off, or is in a layer below the one taking input. The press
-/// and the release of Space both ask, so an element that stopped being
-/// clickable while Space was held clicks nothing.
-pub(crate) fn activatable<A: App>(window: &Window, app: &A, id: &UiId) -> Option<bool> {
+/// as, now, with `app`'s input state: a button, a switch, or a link, or
+/// `None` when it is none of them, offers no Click, is turned off, or is in
+/// a layer below the one taking input. The press and the release of Space
+/// both ask, so an element that stopped being clickable while Space was
+/// held clicks nothing.
+pub(crate) fn activatable<A: App>(window: &Window, app: &A, id: &UiId) -> Option<Activation> {
     // While the canvas has the keyboard, its keys are its own (section 6,
     // rule 1): no element of ours is activated by them.
     if app.input().canvas_focused || !in_input_layer(window, app, id) {
@@ -1292,8 +2077,10 @@ pub(crate) fn activatable<A: App>(window: &Window, app: &A, id: &UiId) -> Option
         return None;
     }
     match access.role() {
-        crate::access::Role::Button => Some(true),
-        crate::access::Role::Switch => Some(false),
+        // A menu item is a button in a list (section 3, rule 4).
+        crate::access::Role::Button | crate::access::Role::MenuItem => Some(Activation::Button),
+        crate::access::Role::Switch | crate::access::Role::CheckBox => Some(Activation::Switch),
+        crate::access::Role::Link => Some(Activation::Link),
         _ => None,
     }
 }
@@ -1305,7 +2092,28 @@ pub(crate) fn activatable<A: App>(window: &Window, app: &A, id: &UiId) -> Option
 pub(crate) fn live_arm<A: App>(window: &Window, app: &A, focus: &Focus, pointer: &Pointer) -> Option<UiId> {
     let (armed, moves) = pointer.space.as_ref()?;
     let unmoved = focus.moves == *moves && focus.id() == Some(armed);
-    (unmoved && activatable(window, app, armed).is_some()).then(|| armed.clone())
+    (unmoved && activatable(window, app, armed).is_some_and(Activation::on_space)).then(|| armed.clone())
 }
+
+/// How a scroll key moves a container, from its offset, one line, one page,
+/// and the most it can move (section 5, rule 12; the browsers' keys, as the
+/// APG has no pattern): Up and Down one line, Page Up and Page Down a page
+/// less one line, Space and Shift+Space a page, and Home and End the top and
+/// the bottom. `None` for any other key, or with another modifier.
+fn scroll_change(key: Key, modifiers: Modifiers) -> Option<crate::window::scroll::ScrollChange> {
+    let shift_only = modifiers.shift && plain(modifiers);
+    Some(match key {
+        Key::Up if modifiers.none() => |at, line, _, _| at - line,
+        Key::Down if modifiers.none() => |at, line, _, _| at + line,
+        Key::PageUp if modifiers.none() => |at, line, page, _| at - (page - line).max(line),
+        Key::PageDown if modifiers.none() => |at, line, page, _| at + (page - line).max(line),
+        Key::Space if modifiers.none() => |at, _, page, _| at + page,
+        Key::Space if shift_only => |at, _, page, _| at - page,
+        Key::Home if modifiers.none() => |_, _, _, _| 0.0,
+        Key::End if modifiers.none() => |_, _, _, most| most,
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests;

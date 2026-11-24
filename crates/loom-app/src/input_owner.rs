@@ -8,7 +8,7 @@
 //! the headless `Ui` all go through [`heard_messages`] or the same two listeners,
 //! so a test sees what the app does.
 
-use crate::{App, Message, panic, patches, question, recent, settings};
+use crate::{App, Message, panic, patches, recent, settings};
 use crate::{controls, matrix, subscriptions};
 use iced::event::Status;
 use iced::keyboard::{self, Key, key::Named};
@@ -141,10 +141,13 @@ impl Listening {
     /// The listeners, each with whether it hears events, in the order their
     /// messages are applied. `Key` comes first, so a key no widget used
     /// reaches the overlay that has it before anything closes that overlay.
-    fn rows(self) -> [(bool, Listener); 8] {
-        // An open question has the keys, except Panic's. One key must not
-        // answer it and also reach what is behind it, once the answer has
-        // closed it (files.md, Asking before losing work).
+    fn rows(self) -> [(bool, Listener); 7] {
+        // An open question has every key, Panic's included: the runtime
+        // keeps each press from Iced and gives it to `question::key_of`
+        // (ui-layer.md, section 6, rule 6, step 2), so no listener here
+        // hears one. They stay off while it is open anyway, so one key
+        // cannot answer it and also reach what is behind it once the answer
+        // has closed it (files.md, Asking before losing work).
         [
             (self.open, app_key),
             // The matrix owns arrows and Escape even when a child widget uses
@@ -160,7 +163,6 @@ impl Listening {
             // when text focus may have moved (panel-widgets.md, Typing a value).
             (self.open && self.value_draft, controls::value_draft_event),
             (self.open, controls::text_focus_event),
-            (!self.open, question::key),
         ]
     }
 

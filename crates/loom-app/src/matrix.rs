@@ -10,7 +10,7 @@ use iced::widget::{
     checkbox, column, container, mouse_area, pick_list, row, scrollable, slider, space, text, text_input,
 };
 use iced::{Length, keyboard};
-use loom_core::{AssignmentId, Graph, ModuleId, OutputRef};
+use loom_core::{AssignmentId, Graph, ModuleId, ModuleNames, OutputRef};
 use serde::Serialize;
 use std::fmt;
 
@@ -254,7 +254,7 @@ impl State {
         }
         let picking = |column| self.add.is_some() || self.edit.as_ref().is_some_and(|edit| edit.column == column);
         let mut sources = if picking(Column::Source) {
-            source_picks(graph, &names, level)
+            source_picks(graph, hierarchy, &names, level)
         } else {
             Vec::new()
         };
@@ -264,15 +264,16 @@ impl State {
             && let Some(assignment) = graph.assignment(edit.id)
         {
             let output = assignment.source;
-            if let Err(at) = sources.binary_search_by_key(&output, |pick| pick.output) {
-                sources.insert(
+            match sources.binary_search_by_key(&output, |pick| pick.output) {
+                Ok(at) => sources[at].label.clone_from(&row.source),
+                Err(at) => sources.insert(
                     at,
                     SourcePick {
                         output,
                         label: row.source.clone(),
                         edit_only: true,
                     },
-                );
+                ),
             }
             edit.choice = sources
                 .binary_search_by_key(&edit.source.unwrap_or(output), |pick| pick.output)
@@ -339,7 +340,7 @@ pub(crate) fn sources(
     hierarchy: &loom_patch::Hierarchy,
     level: &loom_patch::ModulePath,
 ) -> Vec<SourcePick> {
-    source_picks(graph, &modulation::Names::new(graph, hierarchy), level)
+    source_picks(graph, hierarchy, &modulation::Names::new(graph, hierarchy), level)
 }
 
 /// Targets offered by the matrix at this patch level.
@@ -351,9 +352,14 @@ pub(crate) fn targets(
     target_picks(graph, &modulation::Names::new(graph, hierarchy), level)
 }
 
-/// Sources offered by the matrix, in module and port order.
-fn source_picks(graph: &Graph, names: &modulation::Names<'_>, level: &loom_patch::ModulePath) -> Vec<SourcePick> {
-    modulation::sources(graph)
+/// Visible sources, ordered by the flat output the assignment stores.
+fn source_picks(
+    graph: &Graph,
+    hierarchy: &loom_patch::Hierarchy,
+    names: &modulation::Names<'_>,
+    level: &loom_patch::ModulePath,
+) -> Vec<SourcePick> {
+    let mut picks: Vec<_> = modulation::sources(graph)
         .into_iter()
         .filter(|output| names.on_level(output.module, level))
         .map(|output| SourcePick {
@@ -361,7 +367,30 @@ fn source_picks(graph: &Graph, names: &modulation::Names<'_>, level: &loom_patch
             label: names.source(output),
             edit_only: false,
         })
-        .collect()
+        .collect();
+    for (tile, kind) in hierarchy.structural_tiles(level) {
+        if !matches!(kind, loom_patch::Tile::Instance(_)) || hierarchy.slot_of_part(tile).is_some() {
+            continue;
+        }
+        let local = hierarchy.path_of(tile).last();
+        for (_, port) in hierarchy.instance_ports(tile).1 {
+            let label = names.structural_endpoint(level, tile, &port);
+            let Some((module, port)) = hierarchy.source_behind(graph, level, &(local, port)) else {
+                continue;
+            };
+            if let (Some(port), Some(label)) = (graph.node(module).and_then(|node| node.output_index(&port)), label) {
+                picks.push(SourcePick {
+                    output: OutputRef { module, port },
+                    label,
+                    edit_only: false,
+                });
+            }
+        }
+    }
+    picks.sort_by_key(|pick| pick.output);
+    // Two surface ports can expose one output. Keep one pick per assignment identity.
+    picks.dedup_by_key(|pick| pick.output);
+    picks
 }
 
 /// Parameters with a knob, toggle, or radio control, in module order.
@@ -388,7 +417,7 @@ fn target_picks(graph: &Graph, names: &modulation::Names<'_>, level: &loom_patch
                     let label = if names.on_level(module, level) {
                         names.target(module, param)
                     } else {
-                        names.surface_target(level, module, param)?.2
+                        names.structural_target(level, module, param)?
                     };
                     Some(TargetPick { module, param, label })
                 })

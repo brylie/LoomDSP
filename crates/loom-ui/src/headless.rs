@@ -13,7 +13,7 @@
 
 use crate::app::{App, WindowSpec};
 use crate::driver::Driver;
-use crate::effect::{Choice, FileRequest, Image, Job, NoGpu, Question, Reply, names};
+use crate::effect::{Choice, ClipboardText, FileRequest, Image, Job, NoGpu, Question, Reply, names};
 use crate::event::{DriverEvent, WindowState};
 use crate::routing::Target;
 use crate::runtime::{Next, Runtime};
@@ -35,6 +35,8 @@ const MOST_TURNS: usize = 10_000;
 #[derive(Debug)]
 pub struct Headless {
     clipboard: Option<String>,
+    /// Every read is refused, as a browser or a held clipboard would.
+    refuse_reads: bool,
     files: VecDeque<Option<PathBuf>>,
     choices: VecDeque<Choice>,
     captures: VecDeque<Result<Image, NoGpu>>,
@@ -52,6 +54,7 @@ impl Headless {
     pub fn new() -> Self {
         Self {
             clipboard: None,
+            refuse_reads: false,
             files: VecDeque::new(),
             choices: VecDeque::new(),
             captures: VecDeque::new(),
@@ -88,6 +91,21 @@ impl Headless {
     /// The clipboard's text.
     pub fn clipboard(&self) -> Option<&str> {
         self.clipboard.as_deref()
+    }
+
+    /// Makes every clipboard read answer [`ClipboardText::Refused`], or
+    /// stops it, so a test can follow a refusal.
+    pub fn refuse_reads(&mut self, refuse: bool) {
+        self.refuse_reads = refuse;
+    }
+
+    /// What a read finds now.
+    fn read(&self) -> ClipboardText {
+        if self.refuse_reads {
+            ClipboardText::Refused
+        } else {
+            ClipboardText::from_text(self.clipboard.clone())
+        }
     }
 
     /// Every file dialog shown, in order.
@@ -147,14 +165,14 @@ impl<M> Driver<M> for Headless {
         self.clipboard = Some(text);
     }
 
-    fn clipboard_read(&mut self, reply: Reply<Option<String>, M>, waker: &Waker<M>) {
-        waker.send(reply.give(self.clipboard.clone()));
+    fn clipboard_read(&mut self, reply: Reply<ClipboardText, M>, waker: &Waker<M>) {
+        waker.send(reply.give(self.read()));
     }
 
     /// Answers at once from the fake clipboard; the runtime puts the text
     /// in on the next turn.
     fn clipboard_paste(&mut self, paste: crate::Paste) {
-        paste.give(self.clipboard.clone());
+        paste.give(self.read());
     }
 
     fn file_dialog(&mut self, request: FileRequest, reply: Reply<Option<PathBuf>, M>, waker: &Waker<M>) {

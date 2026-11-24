@@ -41,14 +41,19 @@
 //! this crate's API.
 
 use crate::access::{Access, Problem};
-use crate::element::{Align, Element, Kind, Length, Look, Padding};
-use loom_ui_core::{Color, Point, Rect, Size, TextMeasure, TextStyle, UiId, Vector};
+use crate::element::{Align, Element, Kind, Length, Link, Look, Padding};
+use loom_ui_core::{Color, Key, Point, Rect, Size, Span, TextMeasure, TextStyle, UiId, Vector};
 use std::collections::HashMap;
+use std::ops::Range;
 use taffy::style_helpers::line;
 use taffy::{
     AlignContent, AlignItems, AvailableSpace, Dimension, Display, FlexDirection, FlexWrap, LengthPercentage,
-    LengthPercentageAuto, NodeId, Style, TaffyTree,
+    LengthPercentageAuto, NodeId, Overflow, Style, TaffyTree,
 };
+
+mod scroll;
+
+pub(crate) use scroll::{BarPart, ScrollState};
 
 /// How many sizes a wrapping text keeps: the narrowest it can be, its one
 /// line, and the width it was given.
@@ -78,6 +83,10 @@ pub struct Layout {
     /// Focus stops and accessed elements that break a rule, in tree order:
     /// its UI ID where it has one, and what is wrong.
     problems: Vec<(Option<UiId>, Problem)>,
+    /// How far each scroll container is scrolled, by its UI ID: widget
+    /// state the runtime keeps across rebuilds (ui-layer.md, section 5,
+    /// rule 12). It goes with the container.
+    offsets: HashMap<UiId, f32>,
 }
 
 /// The space offered along one axis.
@@ -113,9 +122,9 @@ impl Constraint {
 /// What layout asks for sizes it cannot work out alone: the size of a
 /// text, and the size of the panel in a shrink slot.
 pub(crate) trait Measure {
-    /// The size of `text` in `style`, wrapped at `wrap_width` or on one
-    /// line, as [`TextMeasure::measure`] gives it.
-    fn text(&mut self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size;
+    /// What sets and measures text: sizes, and where a range of a text
+    /// lies.
+    fn text(&mut self) -> &mut dyn TextMeasure;
     /// The size of the panel keyed `panel`, in slot number `index` of the
     /// panel keyed `owner`, in `constraint`.
     fn slot(&mut self, owner: &UiId, panel: &UiId, index: usize, constraint: Constraint) -> Size;
@@ -126,8 +135,8 @@ pub(crate) trait Measure {
 struct Alone<'a>(&'a mut dyn TextMeasure);
 
 impl Measure for Alone<'_> {
-    fn text(&mut self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size {
-        self.0.measure(text, style, wrap_width)
+    fn text(&mut self) -> &mut dyn TextMeasure {
+        self.0
     }
 
     fn slot(&mut self, _owner: &UiId, _panel: &UiId, _index: usize, _constraint: Constraint) -> Size {
@@ -141,6 +150,10 @@ struct Root {
     node: NodeId,
     width: Length,
     height: Length,
+    /// Where the panel goes, when not over the whole window.
+    placement: Option<crate::element::Placement>,
+    /// It hears a press outside it.
+    closes_outside: bool,
 }
 
 /// One element, as the layout keeps it.
@@ -179,6 +192,57 @@ pub(crate) struct Record {
     /// What of it shows, cut by every clipping element around it, in the
     /// panel. `None` when nothing around it clips.
     pub(crate) clip: Option<Rect>,
+    /// For a scroll container: its style, and how far it is scrolled.
+    pub(crate) scroll: Option<ScrollState>,
+    /// For a scroll container, the focus stop whose unused scroll keys move
+    /// it (section 5, rule 12).
+    pub(crate) keys_from: Option<UiId>,
+    /// The stop's unused scroll keys move it ([`Element::scrolls_from`]).
+    pub(crate) scrolls_from_keys: bool,
+    /// For a radio group, a radio, or a radio's mark: which.
+    pub(crate) radio: Option<RadioPart>,
+    /// The keys it takes before the focused element inside it
+    /// ([`Element::takes_first`]). Only an element with a UI ID has them.
+    pub(crate) keys_first: Vec<Key>,
+    /// For a slider: what it shows and how it moves (section 5, rule 16).
+    pub(crate) slider: Option<crate::slider::Slider>,
+    /// For a check box's box: whether it is on (section 5, rule 17).
+    pub(crate) check: Option<bool>,
+    /// For a select: what it shows (section 5, rule 18).
+    pub(crate) select: Option<Box<crate::select::Select>>,
+    /// For a drawn mark: which.
+    pub(crate) glyph: Option<crate::select::Glyph>,
+    /// For a link inside a rich text: its bytes in its parent's text. It
+    /// has no node of its own; its place comes from where the text sets
+    /// those bytes.
+    pub(crate) inline: Option<Range<usize>>,
+    /// For a link: where its words are, one rectangle per line, from its
+    /// paragraph's content corner, as the text was last measured. A scroll
+    /// moves the paragraph, and these with it, with no new measure.
+    words: Vec<Rect>,
+    /// For a link: where its words are, one rectangle per line, in the
+    /// panel. Its bounds hold them all. Empty for any other element.
+    pub(crate) pieces: Vec<Rect>,
+}
+
+/// The part of a radio group a record is (ui-layer.md, section 6, rule 9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RadioPart {
+    /// The group.
+    Group,
+    /// One radio: the record of the group around it, if any, and whether
+    /// it is the chosen one.
+    Radio {
+        /// The group's record.
+        group: Option<usize>,
+        /// It is chosen.
+        selected: bool,
+    },
+    /// A radio's round mark.
+    Mark {
+        /// Its radio is chosen.
+        selected: bool,
+    },
 }
 
 impl Record {
@@ -196,7 +260,12 @@ impl Record {
 
     /// True when `point` is on the part of it that shows.
     pub(crate) fn shows(&self, point: Point) -> bool {
-        self.bounds.contains(point) && self.clip.is_none_or(|clip| clip.contains(point))
+        let on = if self.pieces.is_empty() {
+            self.bounds.contains(point)
+        } else {
+            self.pieces.iter().any(|piece| piece.contains(point))
+        };
+        on && self.clip.is_none_or(|clip| clip.contains(point))
     }
 }
 
@@ -221,6 +290,8 @@ pub(crate) fn cut(a: Rect, b: Rect) -> Rect {
 pub(crate) struct TextPaint<'a> {
     /// The text.
     pub(crate) text: &'a str,
+    /// How its pieces are set and painted; empty for plain text.
+    pub(crate) spans: &'a [Span],
     /// How it is set.
     pub(crate) style: TextStyle,
     /// Lines break to fit the width.
@@ -229,6 +300,10 @@ pub(crate) struct TextPaint<'a> {
     pub(crate) colour: Option<Color>,
     /// It is a text field's text, which the field paints from its editor.
     pub(crate) field: bool,
+    /// It is a radio's note, in the quiet colour unless it sets its own.
+    pub(crate) quiet: bool,
+    /// A field's placeholder and its colour, shown while it is empty.
+    pub(crate) placeholder: Option<(&'a str, Color)>,
 }
 
 /// What a leaf's node holds: a text, or a slot.
@@ -296,12 +371,17 @@ impl Leaf {
 /// since the panel last rebuilt.
 pub(crate) struct TextLeaf {
     text: String,
+    spans: Vec<Span>,
     style: TextStyle,
     wrap: bool,
     colour: Option<Color>,
+    /// It is a radio's note.
+    quiet: bool,
     /// It is a text field's: one line, at least one em wide and one line
     /// tall, so an empty field still has room for its caret and a press.
     field: bool,
+    /// A field's placeholder and its colour.
+    placeholder: Option<(String, Color)>,
     /// The size on one line, for text that does not wrap.
     line: Option<Size>,
     /// The last sizes of wrapping text, by the width it was given (`None`
@@ -319,9 +399,9 @@ impl TextLeaf {
         measure: &mut dyn Measure,
     ) -> Size {
         if !self.wrap {
-            let (text, style, field) = (&self.text, self.style, self.field);
+            let (text, spans, style, field) = (&self.text, &self.spans, self.style, self.field);
             return *self.line.get_or_insert_with(|| {
-                let size = measure.text(text, style, None);
+                let size = measure.text().measure_spans(text, spans, style, None);
                 if field {
                     Size::new(
                         size.width.max(style.size),
@@ -343,7 +423,7 @@ impl TextLeaf {
         if let Some((_, size)) = self.wrapped.iter().flatten().find(|(kept, _)| *kept == key) {
             return *size;
         }
-        let size = measure.text(&self.text, self.style, width);
+        let size = measure.text().measure_spans(&self.text, &self.spans, self.style, width);
         self.wrapped.rotate_left(1);
         self.wrapped[WRAPPED_SIZES - 1] = Some((key, size));
         size
@@ -358,6 +438,9 @@ enum Parent {
     Row,
     /// A column: height is the main axis.
     Column,
+    /// A scroll container: a column whose child keeps its own height, so it
+    /// never shrinks to fit.
+    Scroll,
     /// A stack, or no parent: both sizes stretch.
     Stack,
 }
@@ -376,6 +459,7 @@ impl Layout {
             size: Size::ZERO,
             slots: Vec::new(),
             problems: Vec::new(),
+            offsets: HashMap::new(),
         }
     }
 
@@ -394,9 +478,46 @@ impl Layout {
         self.problems.clear();
         self.duplicates = 0;
         let (width, height) = (root.width, root.height);
+        let (placement, closes_outside) = (root.placement.clone(), root.closes_outside);
         let scope = self.panel.clone();
         let node = self.add(root, None, &scope, Parent::Stack, false);
-        self.root = Some(Root { node, width, height });
+        self.root = Some(Root {
+            node,
+            width,
+            height,
+            placement,
+            closes_outside,
+        });
+        // A container that takes its keys from a stop needs that stop in the
+        // panel, which may come after it in the tree.
+        let missing: Vec<UiId> = self
+            .records
+            .iter()
+            .filter(|record| {
+                record
+                    .keys_from
+                    .as_ref()
+                    .is_some_and(|stop| !self.by_id.get(stop).is_some_and(|at| self.records[*at].focusable))
+            })
+            .filter_map(|record| record.id.clone())
+            .collect();
+        for id in missing {
+            self.problem(Some(id), Problem::KeysFromNoStop);
+        }
+        // A container's offset goes with it.
+        let (by_id, records) = (&self.by_id, &self.records);
+        self.offsets
+            .retain(|id, _| by_id.get(id).is_some_and(|index| records[*index].scroll.is_some()));
+    }
+
+    /// Where the panel goes, when its root says (section 5, rule 13).
+    pub(crate) fn placement(&self) -> Option<&crate::element::Placement> {
+        self.root.as_ref().and_then(|root| root.placement.as_ref())
+    }
+
+    /// True when the panel's root hears a press outside it.
+    pub(crate) fn closes_outside(&self) -> bool {
+        self.root.as_ref().is_some_and(|root| root.closes_outside)
     }
 
     /// Lays the tree out in `available`, the space the panel has. The root
@@ -451,15 +572,33 @@ impl Layout {
                 )
             })
             .expect("every node is in the tree");
+        self.place();
+        self.measure_links(measure);
+        self.place_links();
+        self.size = self.records.first().map_or(Size::ZERO, |root| root.bounds.size());
+    }
+
+    /// Places every element from the computed layout, moving what is in a
+    /// scroll container up by the container's offset. A scroll needs only
+    /// this, not a new layout.
+    pub(crate) fn place(&mut self) {
         // Parents come before their children, so each parent's place is
         // known when its children are placed.
         for index in 0..self.records.len() {
+            if self.records[index].inline.is_some() {
+                continue;
+            }
             let layout = self
                 .tree
                 .layout(self.records[index].node)
                 .expect("every node is in the tree");
+            // What is in a scroll container moves up by its offset.
+            let shift = self.records[index]
+                .parent
+                .and_then(|parent| self.records[parent].scroll)
+                .map_or(0.0, |scroll| scroll.offset);
             let origin = match self.records[index].parent {
-                Some(parent) => self.records[parent].bounds.position(),
+                Some(parent) => self.records[parent].bounds.position() - Vector::new(0.0, shift),
                 None => Point::ORIGIN,
             };
             self.records[index].bounds = Rect::new(
@@ -472,7 +611,7 @@ impl Layout {
             // box is where a child at its edge sits.
             let exact = self.tree.unrounded_layout(self.records[index].node);
             let corner = match self.records[index].parent {
-                Some(parent) => self.records[parent].unrounded,
+                Some(parent) => self.records[parent].unrounded - Vector::new(0.0, shift),
                 None => Point::ORIGIN,
             } + Vector::new(exact.location.x, exact.location.y);
             let (border, padding, size) = (exact.border, exact.padding, exact.size);
@@ -492,8 +631,79 @@ impl Layout {
             self.records[index].clip = self.records[index]
                 .parent
                 .and_then(|parent| self.records[parent].inner_clip());
+            // A container's offset stays inside what its content allows,
+            // which may have shrunk since it was set.
+            if self.records[index].scroll.is_some() {
+                let most = self
+                    .tree
+                    .layout(self.records[index].node)
+                    .expect("every node is in the tree")
+                    .scroll_height()
+                    .round();
+                let id = self.records[index].id.clone();
+                let wanted = id.as_ref().and_then(|id| self.offsets.get(id)).copied().unwrap_or(0.0);
+                let offset = wanted.clamp(0.0, most);
+                if let Some(scroll) = &mut self.records[index].scroll {
+                    scroll.offset = offset;
+                    scroll.most = most;
+                }
+                if let Some(id) = id {
+                    self.offsets.insert(id, offset);
+                }
+            }
         }
-        self.size = self.records.first().map_or(Size::ZERO, |root| root.bounds.size());
+        self.place_links();
+    }
+
+    /// Asks the text where each link of a rich text sets its words, once
+    /// the text itself is placed: from the same layout that paints them, at
+    /// the width they are painted at, relative to the paragraph.
+    fn measure_links(&mut self, measure: &mut dyn Measure) {
+        for index in 0..self.records.len() {
+            let (Some(range), Some(parent)) = (self.records[index].inline.clone(), self.records[index].parent) else {
+                continue;
+            };
+            let paragraph = &self.records[parent];
+            let words = match self.tree.get_node_context(paragraph.node) {
+                Some(Leaf::Text(leaf)) => measure.text().span_rects(
+                    &leaf.text,
+                    &leaf.spans,
+                    leaf.style,
+                    leaf.wrap.then_some(paragraph.wrap_width),
+                    range,
+                ),
+                _ => Vec::new(),
+            };
+            self.records[index].words = words;
+        }
+    }
+
+    /// Places each link where its paragraph is now, from the words last
+    /// measured: after a layout, and after a scroll, which moves the
+    /// paragraph and measures nothing.
+    fn place_links(&mut self) {
+        for index in 0..self.records.len() {
+            let (Some(_), Some(parent)) = (&self.records[index].inline, self.records[index].parent) else {
+                continue;
+            };
+            let paragraph = &self.records[parent];
+            let (origin, clip) = (paragraph.content.position(), paragraph.inner_clip());
+            let pieces: Vec<Rect> = self.records[index]
+                .words
+                .iter()
+                .map(|piece| Rect::new(origin + Vector::new(piece.x, piece.y), piece.size()))
+                .collect();
+            let bounds = pieces
+                .iter()
+                .copied()
+                .reduce(Rect::union)
+                .unwrap_or(Rect::new(origin, Size::ZERO));
+            let record = &mut self.records[index];
+            record.bounds = bounds;
+            record.content = bounds;
+            record.clip = clip;
+            record.pieces = pieces;
+        }
     }
 
     /// The panel's key.
@@ -510,6 +720,26 @@ impl Layout {
     /// `None` when no element has it.
     pub fn bounds(&self, id: &UiId) -> Option<Rect> {
         self.by_id.get(id).map(|index| self.records[*index].bounds)
+    }
+
+    /// The nearest element on or around the element with UI ID `id` that
+    /// takes `key` before it ([`Element::takes_first`]), in this panel.
+    pub(crate) fn takes_first(&self, id: &UiId, key: Key) -> Option<&UiId> {
+        let mut at = self.by_id.get(id).copied();
+        while let Some(index) = at {
+            let record = &self.records[index];
+            if record.keys_first.contains(&key) {
+                return record.id.as_ref();
+            }
+            at = record.parent;
+        }
+        None
+    }
+
+    /// Where the words of the link with UI ID `id` are, one rectangle per
+    /// line, in the panel. Empty for any other element.
+    pub(crate) fn pieces(&self, id: &UiId) -> &[Rect] {
+        self.by_id.get(id).map_or(&[], |index| &self.records[*index].pieces)
     }
 
     /// Every UI ID in the panel, in tree order. A table that keeps state by
@@ -574,13 +804,20 @@ impl Layout {
 
     /// The text of the record at `index`, when it is a text element.
     pub(crate) fn text(&self, index: usize) -> Option<TextPaint<'_>> {
+        // A link shares its paragraph's node, and the paragraph paints it.
+        if self.records[index].inline.is_some() {
+            return None;
+        }
         match self.tree.get_node_context(self.records[index].node)? {
             Leaf::Text(leaf) => Some(TextPaint {
                 text: &leaf.text,
+                spans: &leaf.spans,
                 style: leaf.style,
                 wrap: leaf.wrap,
                 colour: leaf.colour,
                 field: leaf.field,
+                quiet: leaf.quiet,
+                placeholder: leaf.placeholder.as_ref().map(|(text, colour)| (text.as_str(), *colour)),
             }),
             Leaf::Slot { .. } => None,
         }
@@ -621,10 +858,41 @@ impl Layout {
         let style = style(&element, around);
         let shrinks = (element.width == Length::Shrink, element.height == Length::Shrink);
         let inside = match element.kind {
-            Kind::Row => Parent::Row,
-            Kind::Column => Parent::Column,
+            Kind::Row | Kind::Radio | Kind::CheckBox | Kind::Select(_) => Parent::Row,
+            Kind::Column | Kind::RadioGroup => Parent::Column,
+            Kind::Scroll(_) => Parent::Scroll,
             _ => Parent::Stack,
         };
+        let scrollbar = match element.kind {
+            Kind::Scroll(bar) => Some(bar),
+            _ => None,
+        };
+        let radio = match element.kind {
+            Kind::RadioGroup => Some(RadioPart::Group),
+            Kind::Radio => Some(RadioPart::Radio {
+                group: self.group_around(parent),
+                selected: matches!(&element.access, Some(access) if access.is_on()),
+            }),
+            Kind::RadioMark { selected } => Some(RadioPart::Mark { selected }),
+            _ => None,
+        };
+        let slider = match element.kind {
+            Kind::Slider(slider) => Some(slider),
+            _ => None,
+        };
+        let check = match element.kind {
+            Kind::CheckMark { on } => Some(on),
+            _ => None,
+        };
+        let select = match &element.kind {
+            Kind::Select(select) => Some(select.clone()),
+            _ => None,
+        };
+        let glyph = match element.kind {
+            Kind::Glyph(glyph) => Some(glyph),
+            _ => None,
+        };
+        let passive = element.passive;
         let Element {
             kind,
             key,
@@ -633,6 +901,9 @@ impl Layout {
             focusable,
             access,
             hover,
+            keys_from,
+            scrolls_from_keys,
+            keys_first,
             children,
             ..
         } = element;
@@ -640,19 +911,27 @@ impl Layout {
             Kind::Slot(panel) => Some(panel.clone()),
             _ => None,
         };
+        let mut links = Vec::new();
         let node = match kind {
             Kind::Text {
                 text,
+                spans,
+                links: inline,
                 style: text_style,
                 wrap,
                 colour,
+                quiet,
             } => {
+                links = inline;
                 let leaf = Leaf::Text(TextLeaf {
                     text,
+                    spans,
                     style: text_style,
                     wrap,
                     colour,
+                    quiet,
                     field: false,
+                    placeholder: None,
                     line: None,
                     wrapped: [None; WRAPPED_SIZES],
                 });
@@ -661,13 +940,20 @@ impl Layout {
             Kind::Field {
                 text,
                 style: text_style,
+                many,
+                placeholder,
             } => {
+                // A text area wraps to its width, as a wrapping text does, so
+                // it grows with its lines.
                 let leaf = Leaf::Text(TextLeaf {
                     text,
+                    spans: Vec::new(),
                     style: text_style,
-                    wrap: false,
+                    wrap: many,
                     colour: None,
+                    quiet: false,
                     field: true,
+                    placeholder,
                     line: None,
                     wrapped: [None; WRAPPED_SIZES],
                 });
@@ -690,22 +976,10 @@ impl Layout {
 
         let index = self.records.len();
         let id = key.map(|key| scope.clone().with(key));
-        let mut kept = None;
-        let mut lost = lost;
-        if let Some(id) = &id {
-            if lost {
-                // A key inside a lost element is lost with it.
-                self.duplicates += 1;
-            } else if self.by_id.contains_key(id) {
-                assert!(!self.panic_on_duplicate, "two elements have the UI ID {id}");
-                self.duplicates += 1;
-                lost = true;
-            } else {
-                self.by_id.insert(id.clone(), index);
-                kept = Some(id.clone());
-            }
-        }
-        if (focusable || access.is_some()) && id.is_none() {
+        let (kept, lost) = self.claim(id.as_ref(), index, lost);
+        let keys_first = if kept.is_some() { keys_first } else { Vec::new() };
+        // A scroll container keeps its offset by its UI ID, so it needs one.
+        if (focusable || access.is_some() || scrollbar.is_some()) && id.is_none() {
             self.problem(None, Problem::NoKey);
         }
         let hover = hover.filter(|_| kept.is_some());
@@ -716,6 +990,8 @@ impl Layout {
             Some(text) if !access.has_description() && !access.repeats(text) => access.description(text.clone()),
             _ => access,
         });
+        // A scroll container is a stop only when nothing inside is, which
+        // is known once its children are added.
         let stop = kept.is_some() && is_stop(focusable, access.as_ref());
         if let Some(problem) = access.as_ref().and_then(|access| access.problem(stop)) {
             self.problem(kept.clone(), problem);
@@ -729,6 +1005,9 @@ impl Layout {
         } else {
             access
         };
+        // Only a container with a UI ID takes its keys from a stop.
+        let keys_from = keys_from.filter(|_| kept.is_some());
+        let keys_from_kept = keys_from.is_some();
         self.records.push(Record {
             node,
             parent,
@@ -744,7 +1023,27 @@ impl Layout {
             unrounded: Point::ORIGIN,
             wrap_width: 0.0,
             clip: None,
+            scroll: scrollbar.map(|style| ScrollState {
+                style,
+                offset: 0.0,
+                most: 0.0,
+            }),
+            keys_from,
+            scrolls_from_keys: scrolls_from_keys && keys_from_kept,
+            radio,
+            keys_first,
+            slider,
+            check,
+            select,
+            glyph,
+            inline: None,
+            words: Vec::new(),
+            pieces: Vec::new(),
         });
+        let inner = id.as_ref().unwrap_or(scope).clone();
+        for link in links {
+            self.add_link(link, node, index, &inner, lost);
+        }
 
         if !children.is_empty() {
             let inner = id.as_ref().unwrap_or(scope).clone();
@@ -754,7 +1053,100 @@ impl Layout {
                 .collect();
             self.tree.set_children(node, &nodes).expect("the nodes were just added");
         }
+        // A scroll container whose content has no focus stop is one itself,
+        // so a keyboard user can scroll it (WCAG 2.2, SC 2.1.1).
+        if scrollbar.is_some() && self.records[index].id.is_some() {
+            // One that takes its keys from a named stop is never a stop
+            // itself: that stop moves it, and Tab would stop twice.
+            let inside = self.records[index + 1..].iter().any(|record| record.focusable);
+            let named = self.records[index].keys_from.is_some() || passive;
+            let stop = !inside && !named && is_stop(true, self.records[index].access.as_ref());
+            self.records[index].focusable = stop;
+            if stop && self.records[index].access.is_none() {
+                let id = self.records[index].id.clone();
+                self.problem(id, Problem::StopWithoutAccess);
+            }
+        }
         node
+    }
+
+    /// The record of the radio group around the record `parent`, or
+    /// itself: the nearest one.
+    fn group_around(&self, parent: Option<usize>) -> Option<usize> {
+        let mut at = parent;
+        while let Some(index) = at {
+            if self.records[index].radio == Some(RadioPart::Group) {
+                return Some(index);
+            }
+            at = self.records[index].parent;
+        }
+        None
+    }
+}
+
+impl Layout {
+    /// Gives `id` to the record about to be added at `index`, unless it is
+    /// inside a lost element (`lost`) or an earlier element has it. Returns
+    /// the ID it keeps, and whether what is inside it is lost.
+    fn claim(&mut self, id: Option<&UiId>, index: usize, lost: bool) -> (Option<UiId>, bool) {
+        let Some(id) = id else {
+            return (None, lost);
+        };
+        if lost {
+            // A key inside a lost element is lost with it.
+            self.duplicates += 1;
+            (None, true)
+        } else if self.by_id.contains_key(id) {
+            assert!(!self.panic_on_duplicate, "two elements have the UI ID {id}");
+            self.duplicates += 1;
+            (None, true)
+        } else {
+            self.by_id.insert(id.clone(), index);
+            (Some(id.clone()), false)
+        }
+    }
+
+    /// Adds a link of the rich text at record `parent`, whose node is
+    /// `node`, keyed under `scope`. It is a focus stop unless its access
+    /// says it is turned off, and its place is worked out after layout
+    /// ([`Layout::place_links`]).
+    fn add_link(&mut self, link: Link, node: NodeId, parent: usize, scope: &UiId, lost: bool) {
+        let index = self.records.len();
+        let id = scope.clone().with(link.key);
+        let (kept, _) = self.claim(Some(&id), index, lost);
+        let access = kept.as_ref().map(|_| link.access);
+        let stop = kept.is_some() && is_stop(true, access.as_ref());
+        if let Some(problem) = access.as_ref().and_then(|access| access.problem(stop)) {
+            self.problem(kept.clone(), problem);
+        }
+        self.records.push(Record {
+            node,
+            parent: Some(parent),
+            focusable: stop,
+            access,
+            hover: None,
+            slot: None,
+            id: kept,
+            opaque: false,
+            bounds: Rect::new(Point::ORIGIN, Size::ZERO),
+            look: Look::default(),
+            content: Rect::new(Point::ORIGIN, Size::ZERO),
+            unrounded: Point::ORIGIN,
+            wrap_width: 0.0,
+            clip: None,
+            scroll: None,
+            keys_from: None,
+            scrolls_from_keys: false,
+            radio: None,
+            keys_first: Vec::new(),
+            slider: None,
+            check: None,
+            select: None,
+            glyph: None,
+            inline: Some(link.range),
+            words: Vec::new(),
+            pieces: Vec::new(),
+        });
     }
 }
 
@@ -803,7 +1195,36 @@ fn style(element: &Element, around: Parent) -> Style {
             style.justify_items = element.align_x.map_or(AlignItems::NORMAL, items);
             style.align_items = element.align_y.map_or(AlignItems::NORMAL, items);
         }
-        Kind::Text { .. } | Kind::Field { .. } | Kind::Space | Kind::Slot(_) => {}
+        Kind::Scroll(bar) => {
+            // A column whose child keeps its own height: taffy lets it run
+            // past the container, keeps room at the right for the
+            // scrollbar, and gives how far it can scroll.
+            style.display = Display::Flex;
+            style.flex_direction = FlexDirection::Column;
+            style.overflow = taffy::Point {
+                x: Overflow::Hidden,
+                y: Overflow::Scroll,
+            };
+            style.scrollbar_width = bar.gutter();
+        }
+        Kind::RadioGroup => {
+            style.display = Display::Flex;
+            style.flex_direction = FlexDirection::Column;
+        }
+        Kind::Radio | Kind::CheckBox | Kind::Select(_) => {
+            // The mark at the top, beside the label's first line.
+            style.display = Display::Flex;
+            style.flex_direction = FlexDirection::Row;
+            style.align_items = AlignItems::START;
+        }
+        Kind::Text { .. }
+        | Kind::Field { .. }
+        | Kind::Space
+        | Kind::Slot(_)
+        | Kind::RadioMark { .. }
+        | Kind::Slider(_)
+        | Kind::CheckMark { .. }
+        | Kind::Glyph(_) => {}
     }
     if element.wrap {
         style.flex_wrap = FlexWrap::Wrap;
@@ -846,12 +1267,15 @@ fn style(element: &Element, around: Parent) -> Style {
                 style.align_self = Some(AlignItems::STRETCH);
             }
         }
-        Parent::Column => {
+        Parent::Column | Parent::Scroll => {
             if let Length::Fill(share) = element.height {
                 style.flex_grow = f32::from(share.get());
             }
             if fills(element.width) {
                 style.align_self = Some(AlignItems::STRETCH);
+            }
+            if matches!(around, Parent::Scroll) {
+                style.flex_shrink = 0.0;
             }
         }
         Parent::Stack => {

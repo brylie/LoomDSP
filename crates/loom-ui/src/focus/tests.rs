@@ -570,6 +570,40 @@ fn focus_falls_back_when_its_element_goes() {
     assert_eq!(harness.runtime().focused(), None, "its panel is gone");
 }
 
+/// A menu placed under an element that goes is not drawn, so its items
+/// are no stops: the focus on one falls back as for an element that went,
+/// and Tab never reaches them (section 5, rule 13; section 6, rule 4).
+#[test]
+fn a_placed_root_whose_anchor_goes_has_no_stops() {
+    let menu = || {
+        (
+            UiId::panel("menu"),
+            Layer::Overlays,
+            row(&["m1", "m2"]).placed(crate::element::Placement::Under(id("bar", "b"))),
+        )
+    };
+    let mut harness = showing(vec![panel("bar", row(&["a", "b"])), menu()]);
+    harness.step(tab(false));
+    assert_eq!(
+        harness.runtime().focused(),
+        Some(&id("menu", "m1")),
+        "the menu reads first"
+    );
+    harness.send(Message::Show(vec![panel("bar", row(&["a"])), menu()]));
+    harness.lay_out(&mut Mono::default());
+    assert_eq!(harness.runtime().focused(), None, "the hidden item lost the focus");
+    let mut reached = Vec::new();
+    for _ in 0..4 {
+        harness.step(tab(false));
+        reached.extend(harness.runtime().focused().cloned());
+    }
+    assert!(reached.contains(&id("bar", "a")), "Tab still moves: {reached:?}");
+    assert!(
+        reached.iter().all(|stop| !stop.is_under(&UiId::panel("menu"))),
+        "Tab never reaches the hidden menu: {reached:?}"
+    );
+}
+
 /// The nodes, by name and role, nested as the elements are, with a slot's
 /// panel inside the node around the slot; bounds in physical pixels; and
 /// focus reported on the focused stop (section 7, rules 1, 5, and 8).
@@ -878,9 +912,9 @@ impl Target<Heard> for Keys {
 }
 
 /// A focus effect moves the runtime's focus inside an update, and its
-/// report waits in the queue. When the very next driver event is a key,
-/// the report runs before the key's update, since a turn takes what waits
-/// first: the app's copy never drifts (section 7, rule 7).
+/// report runs right after that update, in the same turn, so it comes
+/// before the next key's update too: the app's copy never drifts (section
+/// 7, rule 7).
 #[test]
 fn a_report_waiting_in_the_queue_runs_before_the_next_key() {
     use crate::headless::Headless;
@@ -897,8 +931,12 @@ fn a_report_waiting_in_the_queue_runs_before_the_next_key() {
     runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
     runtime.lay_out(&mut Mono::default());
     runtime.waker().send(Heard::Focus(id("bar", "b")));
-    let next = runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
-    assert!(next.again, "the report waits for the next turn");
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    assert_eq!(
+        runtime.app().heard,
+        [Heard::Focus(id("bar", "b")), Heard::Moved(Some(id("bar", "b")))],
+        "the report ran in the update's own turn"
+    );
     let key = DriverEvent::Input {
         event: Event::Key(KeyEvent::Pressed {
             key: Key::Character('k'),
@@ -909,6 +947,194 @@ fn a_report_waiting_in_the_queue_runs_before_the_next_key() {
         pointer: None,
     };
     runtime.handle(key, Instant::now(), &mut driver);
+    assert_eq!(
+        runtime.app().heard,
+        [
+            Heard::Focus(id("bar", "b")),
+            Heard::Moved(Some(id("bar", "b"))),
+            Heard::Key
+        ]
+    );
+}
+
+/// A link inside a rich text has a node of its own, a link with Click and
+/// Focus and the bounds of its words, held by the paragraph's node when
+/// the paragraph has one, and the tree reports focus on it.
+#[test]
+fn a_link_has_a_node_of_its_own() {
+    use crate::access::{Access, Action, Role};
+    use crate::element::Inline;
+    let mut window = crate::window::Window::default();
+    let link = Inline::new("Saw").link("saw", Access::new(Role::Link, "Saw").action(Action::Click));
+    let notes = Element::rich([Inline::new("See "), link], STYLE)
+        .key("notes")
+        .access(Access::label("See Saw"));
+    window.sync(vec![(
+        UiId::panel("help"),
+        Layer::Panels,
+        Some(Element::column([notes])),
+    )]);
+    window.lay_out(Size::new(400.0, 200.0), &mut Mono::default());
+    let saw = UiId::panel("help").with("notes").with("saw");
+    assert_eq!(window.stops(), std::slice::from_ref(&saw));
+    let mut ids = IdTable::new();
+    let nodes = window.access_nodes(&mut ids, 1.0, Some(&saw));
+    let link_id = accesskit::NodeId(ids.number(&saw));
+    let notes_id = accesskit::NodeId(ids.number(&UiId::panel("help").with("notes")));
+    assert_eq!(nodes.focus, Some(link_id));
+    let node = |id| &nodes.nodes.iter().find(|(node, _)| *node == id).expect("a node").1;
+    let link = node(link_id);
+    assert_eq!(link.role(), accesskit::Role::Link);
+    assert!(link.supports_action(accesskit::Action::Click) && link.supports_action(accesskit::Action::Focus));
+    let bounds = link.bounds().expect("its words' place");
+    // STYLE is 16 pixels at the fake's 8 a character: "See " is 32 wide.
+    assert_eq!((bounds.x0, bounds.y0, bounds.x1, bounds.y1), (32.0, 0.0, 56.0, 16.0));
+    assert!(node(notes_id).children().contains(&link_id), "inside its paragraph");
+}
+
+/// A search field with a list box of `rows`, the field naming `active` as
+/// its active descendant, laid out in a window.
+fn search(rows: &[&str], active: &str) -> crate::window::Window {
+    let mut window = crate::window::Window::default();
+    let field = Element::field("", STYLE)
+        .key("search")
+        .access(Access::new(Role::TextInput, "Search modules").active_descendant(id("browser", "list").with(active)));
+    let options = rows.iter().enumerate().map(|(at, row)| {
+        Element::text(*row, STYLE).key(*row).access(
+            Access::new(Role::ListBoxOption, *row)
+                .action(Action::Click)
+                .position_in_set(at)
+                .states(States {
+                    selected: *row == active,
+                    ..States::default()
+                }),
+        )
+    });
+    let list = Element::column(options)
+        .key("list")
+        .access(Access::new(Role::ListBox, "Modules").size_of_set(rows.len()));
+    window.sync(vec![(
+        UiId::panel("browser"),
+        Layer::Overlays,
+        Some(Element::column([field, list])),
+    )]);
+    window.lay_out(Size::new(400.0, 300.0), &mut Mono::default());
+    window
+}
+
+/// The field's active descendant is the highlighted row's node, the rows
+/// say where each is in the list, and the list how many it holds
+/// (section 7, rule 27, and the browsers' rows in the role table).
+#[test]
+fn a_field_names_its_highlighted_row_as_its_active_descendant() {
+    let window = search(&["saw", "sine", "square"], "sine");
+    let mut ids = IdTable::new();
+    let nodes = window.access_nodes(&mut ids, 1.0, None);
+    let mut node = |id: &UiId| {
+        let number = NodeId(ids.number(id));
+        let found = nodes.nodes.iter().find(|(node, _)| *node == number).expect("a node");
+        (number, found.1.clone())
+    };
+    let list = id("browser", "list");
+    let (sine, sine_node) = node(&list.clone().with("sine"));
+    assert_eq!(node(&id("browser", "search")).1.active_descendant(), Some(sine));
+    assert_eq!(node(&list).1.size_of_set(), Some(3));
+    assert_eq!(node(&list.clone().with("square")).1.position_in_set(), Some(2));
+    assert_eq!(sine_node.is_selected(), Some(true));
+}
+
+/// An active descendant that names no laid-out element is left out, so the
+/// tree never names a node it does not hold.
+#[test]
+fn an_active_descendant_that_is_gone_is_left_out() {
+    let window = search(&["saw"], "sine");
+    let mut ids = IdTable::new();
+    let nodes = window.access_nodes(&mut ids, 1.0, None);
+    let field = NodeId(ids.number(&id("browser", "search")));
+    let field = &nodes.nodes.iter().find(|(node, _)| *node == field).expect("a node").1;
+    assert_eq!(field.active_descendant(), None);
+}
+
+/// AccessKit's convention, which the adapters undo for each platform: a
+/// position counts from 0, and the size is on the container, not on each
+/// item (`accesskit` 0.25.2, `lib.rs`, the doc comments of `size_of_set`
+/// and `position_in_set`). `accesskit_windows` 0.35.2 adds 1 for UIA's
+/// PositionInSet and reads SizeOfSet from the container (`node.rs`,
+/// `position_in_set` and `size_of_set`, through
+/// `size_of_set_from_container`), and `accesskit_atspi_common` 0.21.1 does
+/// the same for `posinset` and `setsize`. So the first row reports 0 and
+/// the third 2, heard as "1 of 3" and "3 of 3", and no row has a size.
+#[test]
+fn positions_count_from_zero_with_the_size_on_the_list() {
+    let window = search(&["saw", "sine", "square"], "saw");
+    let mut ids = IdTable::new();
+    let nodes = window.access_nodes(&mut ids, 1.0, None);
+    let list = id("browser", "list");
+    let mut node = |id: &UiId| {
+        let number = NodeId(ids.number(id));
+        nodes
+            .nodes
+            .iter()
+            .find(|(node, _)| *node == number)
+            .expect("a node")
+            .1
+            .clone()
+    };
+    let (first, third) = (node(&list.clone().with("saw")), node(&list.clone().with("square")));
+    assert_eq!(first.position_in_set(), Some(0), "the first item is 0");
+    assert_eq!(third.position_in_set(), Some(2), "the third item is 2");
+    assert_eq!(first.size_of_set(), None, "an item holds no size");
+    assert_eq!(node(&list).size_of_set(), Some(3), "the list holds it");
+}
+
+/// A field's placeholder reaches its node as a placeholder, never as its
+/// value, so a screen reader reads the name, then the hint, and an empty
+/// value.
+#[test]
+fn a_placeholder_is_the_fields_hint_not_its_value() {
+    let mut window = crate::window::Window::default();
+    let field = Element::field("", STYLE)
+        .key("search")
+        .placeholder("Search modules", loom_ui_core::Color::WHITE)
+        .access(Access::new(Role::TextInput, "Search"));
+    window.sync(vec![(
+        UiId::panel("browser"),
+        Layer::Panels,
+        Some(Element::column([field])),
+    )]);
+    window.lay_out(Size::new(400.0, 100.0), &mut Mono::default());
+    let mut ids = IdTable::new();
+    let nodes = window.access_nodes(&mut ids, 1.0, None);
+    let number = NodeId(ids.number(&id("browser", "search")));
+    let node = &nodes.nodes.iter().find(|(node, _)| *node == number).expect("a node").1;
+    assert_eq!(node.placeholder(), Some("Search modules"));
+    assert_eq!(node.value(), Some(""));
+    assert_eq!(node.label(), Some("Search"));
+}
+
+/// Two messages in one turn, the first of which moves the focus by an
+/// effect: the report runs between them, so the second sees the app's
+/// copy current (section 7, rule 7). Help closing over a browser, which
+/// gives the focus back to its field while another message waits, is the
+/// case that found it.
+#[test]
+fn a_report_runs_between_two_messages_of_one_turn() {
+    use crate::headless::Headless;
+    let mut runtime = crate::Runtime::new(
+        Copy {
+            copy: None,
+            heard: Vec::new(),
+        },
+        Keys,
+        WindowState::new(Size::new(400.0, 200.0)),
+        std::sync::Arc::new(|| {}),
+    );
+    let mut driver = Headless::new();
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    runtime.lay_out(&mut Mono::default());
+    runtime.waker().send(Heard::Focus(id("bar", "b")));
+    runtime.waker().send(Heard::Key);
+    runtime.handle(DriverEvent::Woken, Instant::now(), &mut driver);
     assert_eq!(
         runtime.app().heard,
         [

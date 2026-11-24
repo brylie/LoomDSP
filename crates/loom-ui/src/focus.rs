@@ -73,6 +73,13 @@ pub(crate) struct Focus {
     /// if a focus stop has it by then, and drops it otherwise; a focus that
     /// moves first drops it too.
     pub(crate) wanted: Option<UiId>,
+    /// The wanted focus that shows no ring when taken: one a focus effect
+    /// that follows a pointer press asked for ([`Effects::focus_as_input`](crate::Effects::focus_as_input)).
+    /// Kept by its UI ID, so another wanted focus never inherits it.
+    pub(crate) wanted_quiet: Option<UiId>,
+    /// The latest input that pressed something was a key, not the pointer:
+    /// what [`Effects::focus_as_input`](crate::Effects::focus_as_input) reads.
+    pub(crate) by_key: bool,
     /// A layout gave one of the runtime's elements the focus, so the
     /// routing target must let go of its own (section 6, rule 1). A layout
     /// through the driver's parts cannot reach the target, which the driver
@@ -105,14 +112,19 @@ impl Focus {
     /// its element was laid out, and owes the target its release, or moves
     /// a focus whose element is gone to the first stop of the panel that
     /// held it, or to none when that panel is gone too or has no stop
-    /// (section 6, rule 4).
-    pub(crate) fn settle(&mut self, window: &Window) {
+    /// (section 6, rule 4). A focus it takes is brought into view, as any
+    /// focus from an effect is (section 5, rule 12).
+    pub(crate) fn settle(&mut self, window: &mut Window) {
+        // The quiet mark goes with the wanted focus, taken or dropped, and
+        // counts only for the ID it was set for.
+        let quiet = self.wanted_quiet.take();
         if let Some(wanted) = self.wanted.take()
             && window.stops().contains(&wanted)
         {
             self.release_owed = true;
+            window.reveal = Some(wanted.clone());
+            self.ring = quiet.as_ref() != Some(&wanted);
             self.set(Some(wanted));
-            self.ring = true;
             return;
         }
         let Some(focus) = &self.id else {

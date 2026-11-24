@@ -203,17 +203,23 @@ impl<'a> Names<'a> {
         self.hierarchy.level_of(module) == *level && !self.hidden.contains(module)
     }
 
-    /// The control on the shown level that stands for a flat parameter.
-    pub(crate) fn surface_target(
+    /// Names the visible slot control or exposed instance parameter for a flat target.
+    pub(crate) fn structural_target(
         &self,
         level: &loom_patch::ModulePath,
         target: ModuleId,
         param: usize,
-    ) -> Option<(ModuleId, usize, String)> {
-        let name = self.graph.node(target)?.descriptor.params.get(param)?.name;
-        let (tile, index) = self.hierarchy.surface_for(level, &(target, name.to_string()))?;
-        let label = &self.hierarchy.definition_of(tile)?.exposed.get(index)?.name;
-        Some((tile, index, self.structural_endpoint(level, tile, label)?))
+    ) -> Option<String> {
+        let spec = self.graph.node(target)?.descriptor.params.get(param)?;
+        if self.hierarchy.level_of(target) == *level {
+            let tile = self.hierarchy.slot_of_part(target)?;
+            let slot = self.hierarchy.slot(tile)?;
+            return self.structural_endpoint(level, tile, slot.role_param_of(spec.name).unwrap_or(spec.name));
+        }
+        let (part, index) = self.hierarchy.surface_for(level, &(target, spec.name.to_string()))?;
+        let label = &self.hierarchy.definition_of(part)?.exposed.get(index)?.name;
+        let tile = self.hierarchy.slot_of_part(part).unwrap_or(part);
+        self.structural_endpoint(level, tile, label)
     }
 
     /// The name of a visible endpoint on a sub-patch or slot tile.
@@ -228,7 +234,8 @@ impl<'a> Names<'a> {
         let names = levels.entry(level.clone()).or_insert_with(|| {
             let mut names = InstanceNames::new();
             for (id, kind) in self.hierarchy.structural_tiles(level) {
-                if matches!(kind, loom_patch::Tile::Instance(_))
+                if matches!(kind, loom_patch::Tile::Instance(_) | loom_patch::Tile::Slot(_))
+                    && self.hierarchy.slot_of_part(id).is_none()
                     && let Some(name) = self.hierarchy.tile_name(id)
                 {
                     names.entry(name).or_insert((id, 0)).1 += 1;

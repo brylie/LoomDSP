@@ -7,13 +7,20 @@
 #
 # Run by hand:
 #   prek run                                     # checks staged files
-#   prek run --all-files                         # every pre-commit check
-#   prek run --hook-stage pre-push --all-files   # every pre-push check
+#   prek run --all-files                         # every quick check
+#   prek run --hook-stage pre-push --all-files   # the same, as a push runs them
+#   prek run --hook-stage manual --all-files     # the slow checks (CI runs them too)
 #
-# Why two stages: checks that take a second or two run on every commit, so
-# you hear about problems while the change is fresh. Slower checks (tests
-# with coverage, docs, the WebAssembly build, dependency licences) run before
-# push.
+# Why these stages: the quick checks (file checks, fmt, clippy, typos, and
+# the repository's own scripts) take seconds, so they run on every commit,
+# while the change is fresh. They run again before push, because commits
+# made by a rebase or a merge never ran the commit hooks. The slow checks
+# (tests with coverage, doc tests, docs, the WebAssembly build, and
+# cargo-deny) are in the manual stage: CI runs every one of them on the pull
+# request, and `mise run check-full` runs them all locally. Why not before
+# push: several agent sessions on one machine each ran the full check and
+# then the same checks again in the hook, and parallel full checks starve
+# the CPU.
 #
 # Every hook that needs a tool runs it through mise (`mise run` or
 # `mise exec --`), so it uses the versions pinned in mise.toml and does not
@@ -22,12 +29,12 @@
 # of these hooks fails, so run `mise trust` once per worktree (see above).
 # A repository cannot trust itself; that choice stays with the person.
 #
-# The Rust checks call the tasks in mise.toml, which CI runs too, so a push
-# that passes these hooks passes the same checks in CI. CI also runs the
-# tests on Windows and Linux and checks the minimum Rust version.
+# The Rust checks call the tasks in mise.toml, which CI runs too, so a check
+# that passes here passes the same way in CI. CI also runs the tests on
+# Windows and Linux and checks the minimum Rust version.
 
 default_install_hook_types = ["pre-commit", "pre-push"]
-default_stages = ["pre-commit"]
+default_stages = ["pre-commit", "pre-push"]
 
 # Build output, and third-party agent skills vendored into .agents/, are not
 # ours to reformat.
@@ -78,7 +85,7 @@ id = "no-commit-to-branch"
 args = ["--branch", "main"]
 
 # ---------------------------------------------------------------------------
-# Rust checks on every commit.
+# Quick checks on every commit and push.
 # ---------------------------------------------------------------------------
 
 [[repos]]
@@ -142,7 +149,8 @@ files = "^crates/.*\\.rs$"
 pass_filenames = false
 
 # ---------------------------------------------------------------------------
-# Slower checks before push.
+# Slow checks, run by hand (`prek run --hook-stage manual --all-files`), by
+# `mise run check-full`, and by CI on every pull request.
 # ---------------------------------------------------------------------------
 
 [[repos.hooks]]
@@ -156,18 +164,18 @@ language = "system"
 files = "(\\.rs|\\.ron|\\.wav|Cargo\\.toml|Cargo\\.lock|mise\\.toml)$"
 pass_filenames = false
 require_serial = true
-stages = ["pre-push"]
+stages = ["manual"]
 
 [[repos.hooks]]
 id = "doctest"
 name = "cargo test --doc (examples in the API docs)"
-# Coverage does not run doc tests, so they run here.
+# Coverage does not run doc tests, so they run as a hook of their own.
 entry = "mise run --quiet doctest"
 language = "system"
 files = "(\\.rs|\\.md|Cargo\\.toml|Cargo\\.lock)$"
 pass_filenames = false
 require_serial = true
-stages = ["pre-push"]
+stages = ["manual"]
 
 [[repos.hooks]]
 id = "cargo-doc"
@@ -177,7 +185,7 @@ language = "system"
 files = "(\\.rs|\\.md|Cargo\\.toml|Cargo\\.lock)$"
 pass_filenames = false
 require_serial = true
-stages = ["pre-push"]
+stages = ["manual"]
 
 [[repos.hooks]]
 id = "wasm"
@@ -187,7 +195,7 @@ language = "system"
 files = "(\\.rs|Cargo\\.toml|Cargo\\.lock)$"
 pass_filenames = false
 require_serial = true
-stages = ["pre-push"]
+stages = ["manual"]
 
 [[repos.hooks]]
 id = "cargo-deny"
@@ -196,4 +204,4 @@ entry = "mise run --quiet deny"
 language = "system"
 files = "(Cargo\\.toml|Cargo\\.lock|deny\\.toml)$"
 pass_filenames = false
-stages = ["pre-push"]
+stages = ["manual"]

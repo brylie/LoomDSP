@@ -1849,3 +1849,21 @@ fn outline_keyboard_enters_and_leaves_a_sub_patch() {
     assert!(ui.app().session.level.is_root());
     assert_eq!(ui.a11y_tree().focused().ui_id(), Some(&row));
 }
+
+/// Ctrl+Enter (Cmd+Enter) acts on the selection only while no text field
+/// has focus (ui-layer.md, section 6, rule 6; Brylie's decision,
+/// 2026-11-19): typing in a selected sub-patch's Authors box, it opens
+/// nothing; with the box let go, it opens the sub-patch again.
+#[test]
+fn ctrl_enter_in_a_focused_field_opens_nothing() {
+    let mut ui = Ui::with_app(nested_app());
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2])));
+    ui.focus(&crate::patch_info::part_authors_id(2));
+    assert!(ui.text_field_focused(), "the Authors box has focus");
+    ui.tap(keyboard::Key::Named(Named::Enter), Modifiers::COMMAND);
+    assert_eq!(ui.app().session.level, ModulePath::root(), "typing, it opens nothing");
+    ui.unfocus_all();
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2])));
+    ui.tap(keyboard::Key::Named(Named::Enter), Modifiers::COMMAND);
+    assert_eq!(ui.app().session.level, voice(), "with no field focused it opens");
+}

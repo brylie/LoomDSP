@@ -59,7 +59,63 @@ fn matrix_keeps_a_modulation_from_a_subpatch_output() {
 
     ui.send(Message::Matrix(Event::AddOpen));
     let model = ui.app().ui_snapshot().matrix;
-    assert!(!model.sources.iter().any(|pick| pick.output == original.source));
+    let pick = model
+        .sources
+        .iter()
+        .find(|pick| pick.output == original.source)
+        .unwrap();
+    assert_eq!(pick.label, rows[0].source);
+    assert!(!pick.edit_only);
+    assert!(model.sources.iter().any(|pick| pick.output != original.source));
+    let target = model
+        .targets
+        .iter()
+        .find(|pick| pick.module == original.target && pick.param != original.param)
+        .unwrap();
+    ui.send(Message::Matrix(Event::AddSource(pick.clone())));
+    ui.send(Message::Matrix(Event::AddTarget(target.clone())));
+    ui.send(Message::Matrix(Event::AddApply));
+    assert!(
+        ui.app()
+            .session
+            .controller
+            .graph()
+            .assignments()
+            .any(|(_, assignment)| {
+                assignment.source == pick.output
+                    && assignment.target == target.module
+                    && assignment.param == target.param
+            })
+    );
+}
+
+/// Add and Edit offer an occupied slot's control with the flat parameter identity.
+#[test]
+fn matrix_offers_an_occupied_slot_control() {
+    let mut ui = Ui::open("modulation.ron");
+    let graph = ui.app().session.controller.graph();
+    let (id, assignment) = graph.assignments().next().unwrap();
+    let assignment = *assignment;
+    ui.send(Message::MakeSlot {
+        module: assignment.target.0,
+        role: "loom.role.filter".into(),
+    });
+    let slot = ui.app().session.hierarchy.slot_of_part(assignment.target).unwrap();
+    let name = ui.app().session.hierarchy.tile_name(slot).unwrap();
+    ui.send(Message::Matrix(Event::Tab(Tab::Matrix)));
+    ui.send(Message::Matrix(Event::AddOpen));
+    let add = ui.app().ui_snapshot().matrix;
+    let pick = add
+        .targets
+        .iter()
+        .find(|pick| (pick.module, pick.param) == (assignment.target, assignment.param))
+        .unwrap();
+    assert!(pick.label.starts_with(&format!("{name}: ")));
+
+    ui.send(Message::Matrix(Event::Cancel));
+    ui.send(Message::Matrix(Event::Edit(id, Column::Target)));
+    let edit = ui.app().ui_snapshot().matrix;
+    assert!(edit.targets.contains(pick));
 }
 
 /// The outside Matrix names, filters and selects the same surface the cable reaches.
@@ -1143,7 +1199,7 @@ fn command_shortcuts_work_from_the_filter() {
     assert!(
         messages
             .iter()
-            .any(|m| matches!(m, Message::HistoryKey { typing: true, .. })),
+            .any(|m| matches!(m, Message::Shortcut { typing: true, .. })),
         "it asked about typing, and undoes nothing behind the field: {messages:?}"
     );
 }

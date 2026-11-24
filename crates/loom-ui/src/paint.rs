@@ -43,16 +43,16 @@ pub mod testing;
 mod typesetter;
 
 #[cfg(feature = "gpu")]
-pub use gpu::{InstanceBuffer, PaintCounts, PaintRenderer, SHAPE_ATTRIBUTES};
+pub use gpu::{INSTANCE_ATTRIBUTES, InstanceBuffer, PaintCounts, PaintRenderer, SHAPE_ATTRIBUTES};
 pub use list::{ListPainter, PaintList};
 #[cfg(feature = "gpu")]
 pub use plan::{Shape, Target, packed};
 pub use typesetter::Typesetter;
-pub(crate) use typesetter::{editing_contexts, properties};
+pub(crate) use typesetter::{editing_contexts, properties, span_of};
 
 // The style and the measuring trait live in `loom-ui-core`, so the layout
 // measures text with the same types (docs/design/ui-layer.md, section 1).
-pub use loom_ui_core::{TextMeasure, TextStyle, Weight};
+pub use loom_ui_core::{Face, Span, TextMeasure, TextStyle, Weight};
 
 /// The shaders that draw painted boxes and glyphs, and what a host's own
 /// shaders may build on: the globals, the move to clip space, and
@@ -72,6 +72,22 @@ pub struct PanelStyle {
     pub caret: Color,
     /// The colour behind a text field's selected text.
     pub selection: Color,
+    /// How the focus ring looks, around the element the keyboard focused
+    /// (ui-layer.md, section 6, rule 3).
+    pub ring: crate::focus::RingStyle,
+    /// The colour of quiet text, such as a radio's note, that sets none of
+    /// its own. It needs a contrast of 4.5:1 or more against the panel
+    /// (WCAG 2.2, SC 1.4.3).
+    pub quiet: Color,
+    /// The colour of a radio's mark: its ring, and its dot when chosen. It
+    /// needs a contrast of 3:1 or more against the panel (SC 1.4.11).
+    pub mark: Color,
+    /// The colour of a check box's check mark, and of a slider's thumb and
+    /// the filled part of its track (section 5, rules 16 and 17). It needs
+    /// a contrast of 3:1 or more against the panel (SC 1.4.11).
+    pub primary: Color,
+    /// The colour of the part of a slider's track that is not filled.
+    pub track: Color,
 }
 
 /// How text sits on its anchor, left to right.
@@ -161,16 +177,40 @@ pub struct Segment {
     pub colour: Color,
 }
 
+/// A soft shadow: a rounded box whose edge fades out over `blur`, half
+/// inside and half outside `rect` (ui-layer.md, section 5, rule 15).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shadow {
+    /// The box before blurring, already moved by the shadow's offset.
+    pub rect: Rect,
+    /// The radius of its corners.
+    pub radius: f32,
+    /// Its colour, alpha included.
+    pub colour: Color,
+    /// How wide the fade at its edge is, in logical pixels.
+    pub blur: f32,
+}
+
 /// Takes what an element paints, in the order it is to appear: a later
 /// piece is over an earlier one in the same layer, whether it is text or a
 /// box. So a selection highlight goes before its text, and a caret after.
 pub trait Painter {
     /// Paints one piece of text.
     fn text(&mut self, run: &TextRun<'_>);
+    /// Paints one piece of text with `spans` over it: each in its own
+    /// weight, face, and colour (the run's colour where it sets none), and
+    /// underlined where it says so. The default paints the text plain, for
+    /// a painter that does not set text.
+    fn text_spans(&mut self, run: &TextRun<'_>, spans: &[Span]) {
+        let _ = spans;
+        self.text(run);
+    }
     /// Paints one box.
     fn quad(&mut self, quad: Quad);
     /// Paints one straight mark.
     fn segment(&mut self, segment: Segment);
+    /// Paints one soft shadow.
+    fn shadow(&mut self, shadow: Shadow);
     /// Starts a layer: everything until [`end_layer`](Self::end_layer) is
     /// over everything painted before, text included, and is cut to
     /// `clip`. A floating part uses it, so its box covers the text under

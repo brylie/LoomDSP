@@ -108,7 +108,7 @@ impl Driver<Message> for Terminal {
         unimplemented!("this example has no clipboard");
     }
 
-    fn clipboard_read(&mut self, _reply: Reply<Option<String>, Message>, _waker: &Waker<Message>) {
+    fn clipboard_read(&mut self, _reply: Reply<loom_ui::ClipboardText, Message>, _waker: &Waker<Message>) {
         unimplemented!("this example has no clipboard");
     }
 

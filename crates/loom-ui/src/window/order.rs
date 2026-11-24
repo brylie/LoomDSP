@@ -13,6 +13,11 @@
 //! 3. inside a panel, its elements in the order it builds them, with the
 //!    panel in a slot at the slot's place in that order.
 //!
+//! Every radio is a focus stop, so a press or an arrow can focus any of
+//! them, but **Tab meets a radio group once** (section 6, rule 9): on the
+//! focused radio while the focus is in the group, otherwise on the chosen
+//! one, or the first when none is chosen ([`Window::tab_stops`]).
+//!
 //! **The nodes** nest as the elements do: an element's node holds the
 //! nodes of the accessed elements inside it, and a slot's panel's nodes go
 //! in the node around the slot.
@@ -20,6 +25,7 @@
 use super::Window;
 use crate::field::run_id;
 use crate::focus::AccessNodes;
+use crate::layout::RadioPart;
 use crate::view::Layer;
 use accesskit::{Node, NodeId};
 use loom_ui_core::{IdTable, Point, Rect, UiId};
@@ -31,7 +37,10 @@ impl Window {
             .order
             .iter()
             .enumerate()
-            .filter(|(_, key)| self.records[*key].parent.is_none())
+            // A root this layout did not place, such as one under an
+            // element that is gone, shows nothing, so it has no stops and
+            // focus inside it falls back (section 6, rule 4).
+            .filter(|(_, key)| self.records[*key].parent.is_none() && self.drawn.contains(key))
             .map(|(place, key)| {
                 let mut stops = Vec::new();
                 self.panel_stops(key, &mut stops);
@@ -67,7 +76,88 @@ impl Window {
         for key in &keys {
             self.panel_stops(key, &mut stops);
         }
+        self.groups = stops
+            .iter()
+            .map(|stop| {
+                let panel = self.panel_of(stop)?;
+                let layout = &self.records[panel].layout;
+                match layout.records()[layout.index_of(stop)?].radio {
+                    Some(RadioPart::Radio {
+                        group: Some(group),
+                        selected,
+                    }) => Some((panel.clone(), group, selected)),
+                    _ => None,
+                }
+            })
+            .collect();
         self.stops = stops;
+    }
+
+    /// The stops Tab moves among, in focus order, with `focus` the element
+    /// that has it: every stop, with each radio group's radios but one
+    /// left out (section 6, rule 9). That one is the focused radio while
+    /// the focus is in the group, else the chosen one, else the first.
+    pub(crate) fn tab_stops(&self, focus: Option<&UiId>) -> Vec<&UiId> {
+        let group_of = |at: usize| self.groups.get(at).cloned().flatten();
+        let focused = focus.and_then(|focus| self.stops.iter().position(|stop| stop == focus));
+        let focused_group = focused.and_then(group_of).map(|(panel, group, _)| (panel, group));
+        self.stops
+            .iter()
+            .enumerate()
+            .filter(|(at, _)| {
+                let Some((panel, group, selected)) = group_of(*at) else {
+                    return true;
+                };
+                let same = |other: usize| group_of(other).is_some_and(|(p, g, _)| p == panel && g == group);
+                if focused_group.as_ref() == Some(&(panel.clone(), group)) {
+                    return Some(*at) == focused;
+                }
+                let any_chosen = (0..self.stops.len()).any(|other| same(other) && group_of(other).is_some_and(|g| g.2));
+                if any_chosen {
+                    selected
+                } else {
+                    (0..*at).all(|other| !same(other))
+                }
+            })
+            .map(|(_, stop)| stop)
+            .collect()
+    }
+
+    /// The radio after the one with UI ID `id` in its group, or before it
+    /// when `back` is set, wrapping at the ends, among the radios that are
+    /// stops (a turned-off one is passed over). `None` when `id` is no
+    /// radio in a group.
+    pub(crate) fn radio_step(&self, id: &UiId, back: bool) -> Option<UiId> {
+        let at = self.stops.iter().position(|stop| stop == id)?;
+        let (panel, group, _) = self.groups.get(at).cloned().flatten()?;
+        let radios: Vec<&UiId> = self
+            .stops
+            .iter()
+            .enumerate()
+            .filter(|(other, _)| {
+                self.groups
+                    .get(*other)
+                    .cloned()
+                    .flatten()
+                    .is_some_and(|(p, g, _)| p == panel && g == group)
+            })
+            .map(|(_, stop)| stop)
+            .collect();
+        let here = radios.iter().position(|radio| *radio == id)?;
+        let count = radios.len();
+        let next = if back {
+            (here + count - 1) % count
+        } else {
+            (here + 1) % count
+        };
+        Some(radios[next].clone())
+    }
+
+    /// Whether the radio with UI ID `id` is the chosen one of its group:
+    /// `None` when it is no radio in a group.
+    pub(crate) fn radio_chosen(&self, id: &UiId) -> Option<bool> {
+        let at = self.stops.iter().position(|stop| stop == id)?;
+        self.groups.get(at).cloned().flatten().map(|(_, _, selected)| selected)
     }
 
     /// Adds the focus stops of the panel keyed `key` to `stops`, in build
@@ -116,6 +206,14 @@ impl Window {
             .max_by_key(|key| key.keys().len())
     }
 
+    /// The element that takes `key` before the element with UI ID `id`:
+    /// the nearest on or around it that names the key
+    /// ([`Element::takes_first`](crate::Element::takes_first)), in its panel.
+    pub(crate) fn takes_first(&self, id: &UiId, key: loom_ui_core::Key) -> Option<&UiId> {
+        let panel = self.panel_of(id)?;
+        self.records[panel].layout.takes_first(id, key)
+    }
+
     /// What the element with UI ID `id` is to a screen reader, as last
     /// laid out.
     pub(crate) fn access_of(&self, id: &UiId) -> Option<&crate::access::Access> {
@@ -127,6 +225,41 @@ impl Window {
             .find(|element| element.id.as_ref() == Some(id))?
             .access
             .as_ref()
+    }
+
+    /// The settings of the slider with UI ID `id`, and where it is in the
+    /// window, as last laid out: `None` for any other element.
+    pub(crate) fn slider_of(&self, id: &UiId) -> Option<(crate::slider::Slider, loom_ui_core::Rect)> {
+        let panel = self.panel_of(id)?;
+        let slider = self.records[panel]
+            .layout
+            .records()
+            .iter()
+            .find(|element| element.id.as_ref() == Some(id))?
+            .slider?;
+        Some((slider, self.bounds(id)?))
+    }
+
+    /// What the select with UI ID `id` shows, where it is in the window,
+    /// and what of it shows, as last laid out: `None` for any other
+    /// element.
+    pub(crate) fn select_of(&self, id: &UiId) -> Option<(crate::select::Select, loom_ui_core::Rect, bool)> {
+        let panel = self.panel_of(id)?;
+        let record = &self.records[panel];
+        let element = record
+            .layout
+            .records()
+            .iter()
+            .find(|element| element.id.as_ref() == Some(id))?;
+        let select = element.select.as_deref()?.clone();
+        // Scrolled out of view: nothing of it is left once it is cut by the
+        // clip around it in its panel, then by its panel's own clip in the
+        // window, as in a slot a container scrolled away. Both cuts go on one
+        // rectangle, so two clips that each overlap it but not each other
+        // leave nothing.
+        let bounds = self.bounds(id)?;
+        let shows = shows_through(element.bounds, element.clip, record.origin, record.clip);
+        Some((select, bounds, shows))
     }
 
     /// Whether the panel that holds the element with UI ID `id` has it in
@@ -164,7 +297,9 @@ impl Window {
     pub(crate) fn first_stop_in(&self, panel: &UiId) -> Option<UiId> {
         let mut stops = Vec::new();
         self.panel_stops(panel, &mut stops);
-        stops.into_iter().next()
+        // Only a stop in the window's order: a panel that is not drawn has
+        // none to give.
+        stops.into_iter().find(|stop| self.stops.contains(stop))
     }
 
     /// The nodes of every laid-out panel, with node IDs from `ids`, bounds
@@ -221,8 +356,46 @@ impl Window {
                 None => tops.push(child),
             };
             if let (Some(access), Some(id)) = (&element.access, &element.id) {
+                // An open select says so, and points to its list and
+                // highlight (section 7, rule 32).
+                let opened = match (&self.select, element.id.as_ref()) {
+                    (Some(open), Some(id)) if &open.id == id => Some(
+                        access
+                            .clone()
+                            .opened(crate::select::option_id(open.highlight), crate::select::list_id()),
+                    ),
+                    _ => None,
+                };
+                let access = opened.as_ref().unwrap_or(access);
                 let mut node = access.node(element.focusable);
-                let bounds = element.bounds;
+                // Only a node the tree holds (section 7, rule 13's rule
+                // for relations).
+                let held = |id: &&UiId| {
+                    self.panel_of(id)
+                        .is_some_and(|panel| self.records[panel].layout.has_node(id))
+                };
+                if let Some(active) = access.active().filter(held) {
+                    node.set_active_descendant(NodeId(ids.number(active)));
+                }
+                if let Some(list) = access.controls().filter(held) {
+                    node.set_controls(vec![NodeId(ids.number(list))]);
+                }
+                // What a scroll container cuts away is not where the part
+                // is for a screen reader either (section 7, rule 28).
+                let bounds = match element.clip {
+                    Some(clip) if !record.layout.containers_around(index).is_empty() => {
+                        crate::layout::cut(element.bounds, clip)
+                    }
+                    _ => element.bounds,
+                };
+                if let Some(scroll) = element.scroll {
+                    node.set_scroll_y(f64::from(scroll.offset));
+                    node.set_scroll_y_min(0.0);
+                    node.set_scroll_y_max(f64::from(scroll.most));
+                    node.add_action(accesskit::Action::ScrollUp);
+                    node.add_action(accesskit::Action::ScrollDown);
+                    node.add_action(accesskit::Action::SetScrollOffset);
+                }
                 let origin = record.origin;
                 let scale = f64::from(scale);
                 node.set_bounds(accesskit::Rect {
@@ -237,8 +410,14 @@ impl Window {
                 // A text field: its text as it is now, which may be ahead
                 // of the app's by this turn's edits, its runs, and its
                 // selection in them (section 7, rule 10).
+                let placeholder = record.layout.text(index).and_then(|text| text.placeholder);
                 let runs = self.fields.get(id).map(|field| {
                     node.set_value(field.text().to_owned());
+                    // A hint of what to type, read after the name; never
+                    // the value (WAI-ARIA's `aria-placeholder`).
+                    if let Some((hint, _)) = placeholder {
+                        node.set_placeholder(hint.to_owned());
+                    }
                     if !access.is_disabled() {
                         node.add_action(accesskit::Action::SetValue);
                         node.add_action(accesskit::Action::SetTextSelection);
@@ -247,17 +426,30 @@ impl Window {
                     let content = element.content;
                     let left = origin.x + content.x - field.scroll();
                     let top = origin.y + content.y;
-                    let mut runs: Vec<(NodeId, Node)> = field
+                    let many = field.lines() == crate::field::Lines::Many;
+                    // A multi-line field is a multi-line text input to a
+                    // screen reader (section 7, rule 10; section 8, rule 7).
+                    if many {
+                        node.set_role(accesskit::Role::MultilineTextInput);
+                    }
+                    let mut runs: Vec<(NodeId, Node, usize)> = field
                         .runs()
                         .into_iter()
                         .enumerate()
                         .map(|(at, run)| {
                             let mut node = Node::new(accesskit::Role::TextRun);
+                            // One line's runs sit on it; a single-line
+                            // field's run spans its content box.
+                            let (y, height) = if many {
+                                (top + run.y, run.height)
+                            } else {
+                                (top, content.height)
+                            };
                             node.set_bounds(accesskit::Rect {
                                 x0: f64::from(left + run.x) * scale,
-                                y0: f64::from(top) * scale,
+                                y0: f64::from(y) * scale,
                                 x1: f64::from(left + run.x + run.width) * scale,
-                                y1: f64::from(top + content.height) * scale,
+                                y1: f64::from(y + height) * scale,
                             });
                             let physical = |values: &[f32]| -> Vec<f32> {
                                 values.iter().map(|value| value * scale as f32).collect()
@@ -268,21 +460,24 @@ impl Window {
                             node.set_word_starts(run.word_starts);
                             node.set_text_direction(accesskit::TextDirection::LeftToRight);
                             node.set_value(run.text);
-                            (NodeId(ids.number(&run_id(id, at))), node)
+                            (NodeId(ids.number(&run_id(id, at))), node, run.line)
                         })
                         .collect();
-                    // A field is one line, so its runs are one line too:
-                    // each links to its neighbours, or a screen reader
-                    // would read 255 characters as a whole line.
-                    let ids: Vec<NodeId> = runs.iter().map(|(id, _)| *id).collect();
-                    for (at, (_, run)) in runs.iter_mut().enumerate() {
-                        if at > 0 {
-                            run.set_previous_on_line(ids[at - 1]);
+                    // The runs on one visual line link to their neighbours
+                    // on it, or a screen reader would read 255 characters
+                    // as a whole line; a run never links across lines.
+                    let ids: Vec<(NodeId, usize)> = runs.iter().map(|(id, _, line)| (*id, *line)).collect();
+                    for (at, (_, run, line)) in runs.iter_mut().enumerate() {
+                        if at > 0 && ids[at - 1].1 == *line {
+                            run.set_previous_on_line(ids[at - 1].0);
                         }
-                        if let Some(next) = ids.get(at + 1) {
-                            run.set_next_on_line(*next);
+                        if let Some(&(next, next_line)) = ids.get(at + 1)
+                            && next_line == *line
+                        {
+                            run.set_next_on_line(next);
                         }
                     }
+                    let runs: Vec<(NodeId, Node)> = runs.into_iter().map(|(id, node, _)| (id, node)).collect();
                     let ((anchor_run, anchor), (focus_run, focus)) = field.reader_selection();
                     node.set_text_selection(accesskit::TextSelection {
                         anchor: accesskit::TextPosition {
@@ -333,3 +528,26 @@ fn level(a: Option<Rect>, b: Option<Rect>) -> bool {
         _ => false,
     }
 }
+
+/// True when something of `bounds`, in its panel, is left once it is cut
+/// by `clip`, the clip around it in its panel, then moved by `origin` into
+/// the window and cut by `panel_clip`, the panel's own clip there. Both cuts
+/// go on one rectangle, so two clips that each overlap it but not each
+/// other leave nothing.
+pub(crate) fn shows_through(
+    bounds: loom_ui_core::Rect,
+    clip: Option<loom_ui_core::Rect>,
+    origin: loom_ui_core::Point,
+    panel_clip: loom_ui_core::Rect,
+) -> bool {
+    let inside = clip.map_or(bounds, |clip| crate::layout::cut(bounds, clip));
+    let in_window = loom_ui_core::Rect::new(
+        loom_ui_core::Point::new(inside.x + origin.x, inside.y + origin.y),
+        inside.size(),
+    );
+    let left = crate::layout::cut(in_window, panel_clip);
+    left.width > 0.0 && left.height > 0.0
+}
+
+#[cfg(test)]
+mod tests;

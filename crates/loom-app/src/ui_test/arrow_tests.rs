@@ -89,7 +89,7 @@ fn an_inspector_edit_after_a_release_is_its_own_step() {
 
     slide_cutoff(&mut ui, 3_000.0);
     ui.send(Message::SliderReleased);
-    ui.redraw_at(Instant::now() + PAST_GROUP);
+    ui.redraw_at(ui.now() + PAST_GROUP);
     assert_eq!(cutoff(&ui), 3_000.0);
 
     ui.click_text("Undo");
@@ -106,7 +106,7 @@ fn two_quick_arrows_are_one_step() {
     let before = steps(&ui);
     ui.tap(right(), keyboard::Modifiers::default());
     ui.tap(right(), keyboard::Modifiers::default());
-    ui.redraw_at(Instant::now() + PAST_GROUP);
+    ui.redraw_at(ui.now() + PAST_GROUP);
     assert_eq!(steps(&ui), before + 1, "one step for both taps");
     assert!(!ui.app().session.edits.gesture_open(), "the deadline closed it");
 
@@ -120,10 +120,10 @@ fn an_arrow_after_the_deadline_is_a_new_step() {
     let mut ui = open_on_cutoff();
     let before = steps(&ui);
     ui.tap(right(), keyboard::Modifiers::default());
-    ui.redraw_at(Instant::now() + PAST_GROUP);
+    ui.redraw_at(ui.now() + PAST_GROUP);
     let first = cutoff(&ui);
     ui.tap(right(), keyboard::Modifiers::default());
-    ui.redraw_at(Instant::now() + PAST_GROUP);
+    ui.redraw_at(ui.now() + PAST_GROUP);
     assert_eq!(steps(&ui), before + 2, "a step for each tap");
 
     ui.click_text("Undo");
@@ -150,7 +150,7 @@ fn an_arrow_right_after_undo_is_a_new_step() {
         Err(crate::editing::HistoryBlock::Nothing),
         "the released move is a new edit, so the undone knob step cannot come back"
     );
-    ui.redraw_at(Instant::now() + PAST_GROUP);
+    ui.redraw_at(ui.now() + PAST_GROUP);
     assert!(!ui.app().session.edits.gesture_open());
     ui.click_text("Undo");
     assert_eq!(ui.app().session.positions[&FILTER], place, "Undo takes the move back");
@@ -171,7 +171,7 @@ fn a_held_arrow_is_one_step() {
         ui.key_down(right(), true);
     }
     ui.key_up(right());
-    ui.redraw_at(Instant::now() + PAST_GROUP);
+    ui.redraw_at(ui.now() + PAST_GROUP);
     assert!(cutoff(&ui) > original, "every repeat moved the knob");
     assert_eq!(steps(&ui), before + 1, "one step for the whole hold");
     ui.click_text("Undo");
@@ -331,7 +331,7 @@ fn losing_focus_with_an_arrow_down_ends_the_group() {
 /// patch, and the history's length. `replace` replaces the patch.
 fn slide_after_replacing(mut ui: Ui, replace: impl FnOnce(&mut Ui)) {
     // Earlier than the old group's deadline, so this redraw cannot end it.
-    let early = Instant::now();
+    let early = ui.now();
     replace(&mut ui);
     ui.redraw_at(early);
     assert!(
@@ -343,7 +343,7 @@ fn slide_after_replacing(mut ui: Ui, replace: impl FnOnce(&mut Ui)) {
     assert!(ui.app().session.edits.slider_gesture_open());
     let before = steps(&ui);
 
-    ui.redraw_at(Instant::now() + PAST_GROUP);
+    ui.redraw_at(ui.now() + PAST_GROUP);
     assert!(
         ui.app().session.edits.slider_gesture_open(),
         "an old arrow group's end must not close the new patch's slider"
@@ -401,7 +401,7 @@ fn a_press_and_release_in_one_frame_still_close_the_group() {
         key_released(right(), keyboard::Modifiers::default()),
     ]);
     assert_ne!(cutoff(&ui), original);
-    ui.redraw_at(Instant::now() + PAST_GROUP);
+    ui.redraw_at(ui.now() + PAST_GROUP);
     assert!(!ui.app().session.edits.gesture_open(), "the deadline closed the group");
     assert_eq!(steps(&ui), before + 1);
 }

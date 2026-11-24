@@ -11,7 +11,7 @@
 //! before it. [`Painter::end_layer`] starts a new layer with the clip of
 //! the one before, so what follows is still over what came before.
 
-use super::{Align, Painter, Quad, Segment, TextMeasure, TextRun, TextStyle, Typesetter, Vertical};
+use super::{Align, Painter, Quad, Segment, Span, TextMeasure, TextRun, TextStyle, Typesetter, Vertical};
 use loom_ui_core::{Color, Point, Rect, Size};
 use parley::{FontData, PositionedLayoutItem};
 use std::cell::RefCell;
@@ -85,6 +85,8 @@ pub(crate) enum PaintBox {
     Quad(Quad),
     /// A rotated box.
     Segment(Segment),
+    /// A soft shadow.
+    Shadow(super::Shadow),
 }
 
 /// Everything painted in one frame, ready for the renderer.
@@ -202,9 +204,13 @@ impl<'a> ListPainter<'a> {
 
 impl Painter for ListPainter<'_> {
     fn text(&mut self, run: &TextRun<'_>) {
+        self.text_spans(run, &[]);
+    }
+
+    fn text_spans(&mut self, run: &TextRun<'_>, spans: &[Span]) {
         let wrap = run.wrap.then_some(run.bounds.width);
         let mut text = self.text.borrow_mut();
-        let layout = text.layout(run.text, run.style, wrap);
+        let layout = text.layout_spans(run.text, spans, run.style, wrap);
         // The anchor is the point `align` and `vertical` name on the
         // text's own box, as the text is set.
         let size = Size::new(layout.width(), layout.height());
@@ -217,11 +223,15 @@ impl Painter for ListPainter<'_> {
             Vertical::Top => run.anchor.y,
             Vertical::Center => run.anchor.y - size.height / 2.0,
         };
+        let mut underlines = Vec::new();
         for line in layout.lines() {
             for item in line.items() {
                 let PositionedLayoutItem::GlyphRun(glyphs) = item else {
                     continue;
                 };
+                // The brush names the span (`typesetter.rs`); 0 is none.
+                let span = super::span_of(spans, glyphs.style().brush);
+                let colour = span.and_then(|span| span.colour).unwrap_or(run.colour);
                 let shaped = glyphs.run();
                 let synthesis = shaped.synthesis();
                 let face = self.list.face(Face {
@@ -236,11 +246,38 @@ impl Painter for ListPainter<'_> {
                         face,
                         id: glyph.id,
                         origin: Point::new(left + glyph.x, top + glyph.y),
-                        colour: run.colour,
+                        colour,
                         clip: run.clip,
                     });
                 }
+                if span.is_some_and(|span| span.underline) {
+                    // At the font's own underline place and thickness, so a
+                    // link's line sits as the system's own links' do.
+                    // The offset is to the line's top, upward from the
+                    // baseline as fonts count it; a segment is placed by
+                    // its middle.
+                    let metrics = shaped.font_metrics();
+                    let width = metrics.underline_size.max(1.0);
+                    let y = top + glyphs.baseline() - metrics.underline_offset + width / 2.0;
+                    let from = left + glyphs.offset();
+                    underlines.push(Segment {
+                        from: Point::new(from, y),
+                        to: Point::new(from + glyphs.advance(), y),
+                        width,
+                        colour,
+                    });
+                }
             }
+        }
+        // After the glyphs, so a line is over the letters it crosses, and
+        // cut to the run's clip as its glyphs are, in a layer of its own
+        // inside the one open.
+        if !underlines.is_empty() {
+            self.begin_layer(run.clip);
+            for line in underlines {
+                self.list.push_box(PaintBox::Segment(line));
+            }
+            self.end_layer();
         }
     }
 
@@ -250,6 +287,10 @@ impl Painter for ListPainter<'_> {
 
     fn segment(&mut self, segment: Segment) {
         self.list.push_box(PaintBox::Segment(segment));
+    }
+
+    fn shadow(&mut self, shadow: super::Shadow) {
+        self.list.push_box(PaintBox::Shadow(shadow));
     }
 
     fn begin_layer(&mut self, clip: Rect) {
@@ -277,6 +318,21 @@ impl Painter for ListPainter<'_> {
 impl TextMeasure for ListPainter<'_> {
     fn measure(&mut self, text: &str, style: TextStyle, wrap_width: Option<f32>) -> Size {
         self.text.borrow_mut().measure(text, style, wrap_width)
+    }
+
+    fn measure_spans(&mut self, text: &str, spans: &[Span], style: TextStyle, wrap_width: Option<f32>) -> Size {
+        self.text.borrow_mut().measure_spans(text, spans, style, wrap_width)
+    }
+
+    fn span_rects(
+        &mut self,
+        text: &str,
+        spans: &[Span],
+        style: TextStyle,
+        wrap_width: Option<f32>,
+        range: Range<usize>,
+    ) -> Vec<Rect> {
+        self.text.borrow_mut().span_rects(text, spans, style, wrap_width, range)
     }
 }
 

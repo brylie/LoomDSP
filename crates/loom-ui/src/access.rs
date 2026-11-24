@@ -12,6 +12,7 @@
 //! and nothing else does (section 7, rule 22).
 
 use accesskit::{Action as KitAction, Node, Role as KitRole, Toggled};
+use loom_ui_core::UiId;
 use std::fmt;
 
 /// What an element is, as the table in section 7 names it.
@@ -69,6 +70,9 @@ pub enum Role {
     Tree,
     /// One row of a tree.
     TreeItem,
+    /// A scroll container (rule 28): its offset and its scroll actions come
+    /// from the container, not from its [`Access`].
+    ScrollView,
 }
 
 impl Role {
@@ -120,6 +124,7 @@ impl Role {
             Self::Link => KitRole::Link,
             Self::Tree => KitRole::Tree,
             Self::TreeItem => KitRole::TreeItem,
+            Self::ScrollView => KitRole::ScrollView,
         }
     }
 }
@@ -159,6 +164,10 @@ pub enum Action {
     SetValue,
     /// Open its menu.
     ShowContextMenu,
+    /// Open its list, as a closed select's.
+    Expand,
+    /// Close its list, as an open select's.
+    Collapse,
 }
 
 impl Action {
@@ -170,6 +179,8 @@ impl Action {
             Self::Decrement => KitAction::Decrement,
             Self::SetValue => KitAction::SetValue,
             Self::ShowContextMenu => KitAction::ShowContextMenu,
+            Self::Expand => KitAction::Expand,
+            Self::Collapse => KitAction::Collapse,
         }
     }
 }
@@ -200,6 +211,15 @@ pub struct Access {
     value: Option<Value>,
     states: States,
     actions: Vec<Action>,
+    /// The element the keys act on while this one keeps the focus, as a
+    /// search field's highlighted row (rule 27).
+    active: Option<UiId>,
+    /// The element it controls, as an open select its list (rule 13).
+    controls: Option<UiId>,
+    /// Where it is in its set, from 0, as a list box option.
+    position: Option<usize>,
+    /// How many items it holds, as a list box.
+    size: Option<usize>,
 }
 
 /// A way an [`Access`] breaks section 7, rule 2.
@@ -222,6 +242,10 @@ pub enum Problem {
     NoValue,
     /// It is something a user acts on, and offers no action.
     NotOperable,
+    /// It is a scroll container that takes its keys from a stop
+    /// ([`Element::keys_from`](crate::Element::keys_from)) that is no focus
+    /// stop of its panel (ui-layer.md, section 5, rule 12).
+    KeysFromNoStop,
 }
 
 impl fmt::Display for Problem {
@@ -233,6 +257,7 @@ impl fmt::Display for Problem {
             Self::NoName => "it has no name",
             Self::NoValue => "it has no value of the kind its role needs",
             Self::NotOperable => "a user acts on it, and it offers no action",
+            Self::KeysFromNoStop => "it takes its keys from an element that is no focus stop of its panel",
         })
     }
 }
@@ -247,6 +272,10 @@ impl Access {
             value: None,
             states: States::default(),
             actions: Vec::new(),
+            active: None,
+            controls: None,
+            position: None,
+            size: None,
         }
     }
 
@@ -282,6 +311,58 @@ impl Access {
         self
     }
 
+    /// Names the element the keys act on while this one keeps the focus,
+    /// by its UI ID: a search field's highlighted row, which WAI-ARIA calls
+    /// its active descendant. The runtime gives the node the row's node ID
+    /// when the tree is sent, and leaves it out while no laid-out element
+    /// has that UI ID, so the tree never names a node it does not hold.
+    #[must_use]
+    pub fn active_descendant(mut self, id: UiId) -> Self {
+        self.active = Some(id);
+        self
+    }
+
+    /// Says it is item `position` of its set, counted from 0, as a list
+    /// box's option is. The set's size goes on the container
+    /// ([`size_of_set`](Self::size_of_set)), as AccessKit has it.
+    #[must_use]
+    pub fn position_in_set(mut self, position: usize) -> Self {
+        self.position = Some(position);
+        self
+    }
+
+    /// Says it holds `size` items, as a list box says how many rows it
+    /// shows.
+    #[must_use]
+    pub fn size_of_set(mut self, size: usize) -> Self {
+        self.size = Some(size);
+        self
+    }
+
+    /// The same node shown as an open select (section 7, rule 32): it is
+    /// expanded, offers Collapse in place of Expand, names the highlighted
+    /// option `row` as its active descendant, and controls the list `list`.
+    pub(crate) fn opened(mut self, row: UiId, list: UiId) -> Self {
+        self.states.expanded = Some(true);
+        self.actions.retain(|action| *action != Action::Expand);
+        if !self.actions.contains(&Action::Collapse) {
+            self.actions.push(Action::Collapse);
+        }
+        self.active = Some(row);
+        self.controls = Some(list);
+        self
+    }
+
+    /// The element it controls, if any.
+    pub(crate) fn controls(&self) -> Option<&UiId> {
+        self.controls.as_ref()
+    }
+
+    /// The element it names as its active descendant, if any.
+    pub(crate) fn active(&self) -> Option<&UiId> {
+        self.active.as_ref()
+    }
+
     /// True when it has a description of its own.
     pub(crate) fn has_description(&self) -> bool {
         self.description.is_some()
@@ -306,6 +387,11 @@ impl Access {
     /// Its name.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// True when its value is on: a chosen radio, a checked box.
+    pub(crate) fn is_on(&self) -> bool {
+        matches!(self.value, Some(Value::On(true)))
     }
 
     /// True when it is turned off. A turned-off element is no focus stop.
@@ -379,6 +465,12 @@ impl Access {
         }
         if self.states.current {
             node.set_aria_current(accesskit::AriaCurrent::Page);
+        }
+        if let Some(position) = self.position {
+            node.set_position_in_set(position);
+        }
+        if let Some(size) = self.size {
+            node.set_size_of_set(size);
         }
         if !self.states.disabled {
             for action in &self.actions {

@@ -187,10 +187,144 @@ fn a_font_stays_loaded_while_its_canvas_lives() {
 #[test]
 fn thai_word_movement_stops_at_a_dictionary_word() {
     let Some(mut text) = text() else { return };
-    let mut editor = parley::PlainEditor::<()>::new(16.0);
+    let mut editor = parley::PlainEditor::<u16>::new(16.0);
     editor.set_text("สวัสดีครับ");
     let mut driver = editor.driver(&mut text.fonts, &mut text.layouts);
     driver.move_to_text_start();
     driver.move_word_right();
     assert_eq!(editor.raw_selection().focus().index(), "สวัสดี".len());
+}
+
+/// Spans `lens` long, in order, the middle one bold where there are three.
+fn spans(lens: &[usize]) -> Vec<Span> {
+    lens.iter()
+        .enumerate()
+        .map(|(index, &len)| Span {
+            len,
+            weight: if index == 1 { Weight::Bold } else { Weight::Regular },
+            ..Span::default()
+        })
+        .collect()
+}
+
+/// Each span's index plus 1 is its glyphs' brush, so a painter can find a
+/// glyph run's span: the runs of three spans carry brushes 1, 2, and 3, in
+/// order.
+#[test]
+fn each_span_brushes_its_glyph_runs() {
+    let Some(mut text) = text() else { return };
+    let layout = text.layout_spans("See Saw now", &spans(&[4, 3, 4]), style(12.0), None);
+    let mut brushes: Vec<u16> = Vec::new();
+    for line in layout.lines() {
+        for item in line.items() {
+            if let PositionedLayoutItem::GlyphRun(run) = item
+                && brushes.last() != Some(&run.style().brush)
+            {
+                brushes.push(run.style().brush);
+            }
+        }
+    }
+    assert_eq!(brushes, [1, 2, 3]);
+}
+
+/// Text past the last span keeps brush 0, which is no span's, so it takes
+/// the text's own style rather than the first span's.
+#[test]
+fn text_past_the_spans_has_no_span() {
+    let Some(mut text) = text() else { return };
+    let red = Span {
+        colour: Some(loom_ui_core::Color::rgb(1.0, 0.0, 0.0)),
+        underline: true,
+        ..Span::plain(1)
+    };
+    let layout = text.layout_spans("abc", &[red], style(12.0), None);
+    let mut brushes = Vec::new();
+    for line in layout.lines() {
+        for item in line.items() {
+            if let PositionedLayoutItem::GlyphRun(run) = item {
+                brushes.push(run.style().brush);
+            }
+        }
+    }
+    assert_eq!(brushes, [1, 0]);
+    assert_eq!(span_of(&[red], 0), None);
+    assert_eq!(span_of(&[red], 1), Some(&red));
+}
+
+/// A monospace span is set in another face: narrow letters take more room.
+#[test]
+fn a_mono_span_takes_the_monospace_face() {
+    let Some(mut text) = text() else { return };
+    let plain = text.measure_spans("iiiiii", &[Span::plain(6)], style(12.0), None);
+    let mono = text.measure_spans(
+        "iiiiii",
+        &[Span {
+            len: 6,
+            face: Face::Mono,
+            ..Span::default()
+        }],
+        style(12.0),
+        None,
+    );
+    assert!(mono.width > plain.width, "{mono:?} {plain:?}");
+}
+
+/// A span's colour and underline are painted, not set, so spans that
+/// differ only in them share one layout.
+#[test]
+fn colour_and_underline_key_no_layout() {
+    let Some(mut text) = text() else { return };
+    let red = Span {
+        colour: Some(loom_ui_core::Color::rgb(1.0, 0.0, 0.0)),
+        underline: true,
+        ..Span::plain(3)
+    };
+    text.take_built();
+    text.measure_spans("Saw", &[Span::plain(3)], style(12.0), None);
+    text.measure_spans("Saw", &[red], style(12.0), None);
+    assert_eq!(text.take_built(), 1);
+}
+
+/// A range on one line has one rectangle, inside the text and as tall as
+/// the line, to the pixel the line box is rounded to; a range that a wrap breaks has one per line, the second
+/// below the first.
+#[test]
+fn span_rects_give_one_rectangle_per_line() {
+    let Some(mut text) = text() else { return };
+    let line = "alpha beta gamma delta";
+    let whole = text.measure(line, style(12.0), None);
+    let one = text.span_rects(line, &[], style(12.0), None, 6..10);
+    assert_eq!(one.len(), 1, "{one:?}");
+    assert!(one[0].x > 0.0 && one[0].x + one[0].width < whole.width, "{one:?}");
+    assert!((one[0].height - whole.height).abs() <= 1.0, "{one:?} {whole:?}");
+    // Wide enough for "alpha beta" only, so "beta gamma" breaks.
+    let wrap = text.measure("alpha beta", style(12.0), None).width + 1.0;
+    let two = text.span_rects(line, &[], style(12.0), Some(wrap), 6..16);
+    assert_eq!(two.len(), 2, "{two:?}");
+    assert!(two[1].y >= two[0].y + two[0].height - 0.01, "{two:?}");
+}
+
+/// No rectangle for an empty range, one past the end, or one that cuts a
+/// character.
+#[test]
+fn span_rects_are_empty_for_no_range() {
+    let Some(mut text) = text() else { return };
+    assert!(text.span_rects("abc", &[], style(12.0), None, 1..1).is_empty());
+    assert!(text.span_rects("abc", &[], style(12.0), None, 1..9).is_empty());
+    assert!(text.span_rects("é", &[], style(12.0), None, 0..1).is_empty());
+}
+
+/// A span's brush is its index plus 1, up to the last a `u16` holds.
+#[test]
+fn a_brush_is_the_span_index_plus_one() {
+    assert_eq!(brush(0), 1);
+    assert_eq!(brush(usize::from(u16::MAX) - 1), u16::MAX);
+}
+
+/// More spans than a brush counts fail loudly in a debug build.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "more than 65534 spans")]
+fn too_many_spans_panic_in_a_debug_build() {
+    brush(usize::from(u16::MAX));
 }

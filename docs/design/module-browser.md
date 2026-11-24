@@ -77,6 +77,7 @@ The list holds four kinds of row, in this order in an empty search:
 | Click on a row | Adds that module and closes the browser. |
 | Click outside the browser | Closes the browser and adds nothing. |
 | Right-click on a library item | Opens its menu, with **Insert linked**. |
+| The menu key, or Shift+F10, on a highlighted library item | Opens its menu on its first item, so Enter picks **Insert linked** at once. On any other row it does nothing. *Why:* before, only the pointer and a screen reader could open the menu, so a keyboard user could not insert a linked sub-patch (WCAG 2.2, SC 2.1.1); these are the keys that open the canvas's menus from the keyboard ([UI layer](ui-layer.md), section 6, rule 8). |
 
 While a library item's menu is open, the menu has the keys, as every menu does ([UI layer](ui-layer.md), section 6, rule 8): Down and Up move to its item, Enter picks the item the keys are on (and does nothing before a key has moved there), and Escape closes the menu, and the browser only on a second press. Any other key closes the menu and goes on as above.
 

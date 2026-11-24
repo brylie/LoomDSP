@@ -41,12 +41,19 @@ pollster = { workspace = true, optional = true }
 # The platform's screen reader adapter in the shell's window: macOS, Windows,
 # and, with its default features, Linux through AT-SPI (section 7, rule 11).
 accesskit_winit = { version = "0.34", optional = true }
+# The system clipboard, text only (no `image-data`), with the Wayland
+# data-control protocol where a compositor offers it (ui-layer.md,
+# section 8, rule 2).
+arboard = { version = "3.7", default-features = false, features = ["wayland-data-control"], optional = true }
 
 [features]
 default = ["shell"]
 # The winit shell: a window, its GPU surface, and the loop that drives the
 # runtime (`loom_ui::shell`).
-shell = ["gpu", "dep:winit", "dep:wgpu", "dep:pollster", "dep:accesskit_winit"]
+shell = ["gpu", "clipboard", "dep:winit", "dep:wgpu", "dep:pollster", "dep:accesskit_winit"]
+# The system clipboard on a thread of its own (`loom_ui::clipboard`), for
+# any desktop driver: the winit shell, and a plugin's with no winit.
+clipboard = ["dep:arboard"]
 # The paint renderer (`paint::PaintRenderer`): wgpu, and no window.
 gpu = ["dep:wgpu"]
 # The recording painter (`paint::testing`), for other crates' tests.

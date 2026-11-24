@@ -80,7 +80,8 @@ pub enum Message {
     Close,
 }
 
-/// Keys that move the highlight or close the browser.
+/// Keys that move the highlight, open a library row's menu, or close the
+/// browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Nav {
     Up,
@@ -88,6 +89,11 @@ pub enum Nav {
     PageUp,
     PageDown,
     Escape,
+    /// The menu key, or Shift+F10: opens the highlighted library row's
+    /// menu on its first item, as a menu over the canvas opens from the
+    /// keyboard (ui-layer.md, section 6, rule 8). On any other row it does
+    /// nothing.
+    Menu,
 }
 
 /// A patch file in the library folder, as the list shows it.
@@ -400,6 +406,17 @@ impl Browser {
                 self.scroll = offset;
                 Outcome::Stay
             }
+            // The menu key opens the highlighted row's menu, as a screen
+            // reader's ShowContextMenu does, so the keyboard reaches Insert
+            // linked too.
+            Message::Key(Nav::Menu) => {
+                if let Some(row) = self.model.highlight
+                    && matches!(self.results.get(row), Some(Entry::Library(_)))
+                {
+                    self.set_menu(Some(row), Some(0));
+                }
+                Outcome::Stay
+            }
             // Escape closes a menu first, then the browser.
             Message::Key(Nav::Escape) if self.model.menu.is_some() => {
                 self.set_menu(None, None);
@@ -575,7 +592,7 @@ impl Browser {
             Nav::Down => (at + 1).min(last),
             Nav::PageUp => at.saturating_sub(ROWS),
             Nav::PageDown => (at + ROWS).min(last),
-            Nav::Escape => at,
+            Nav::Escape | Nav::Menu => at,
         });
     }
 
@@ -1013,13 +1030,14 @@ fn inside(at: Point, area: Rect) -> Point {
 }
 
 fn panel_style(theme: &Theme) -> container::Style {
-    let palette = theme.extended_palette();
+    use loom_canvas::iced_convert::ToIced as _;
+    let look = style::floating_panel(theme);
     container::Style {
-        background: Some(palette.background.base.color.into()),
+        background: Some(look.fill.to_iced().into()),
         border: iced::Border {
-            color: palette.background.strong.color,
-            width: 1.0,
-            radius: 6.0.into(),
+            color: look.border.to_iced(),
+            width: look.border_width,
+            radius: look.radius.into(),
         },
         shadow: iced::Shadow {
             color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
@@ -1031,18 +1049,20 @@ fn panel_style(theme: &Theme) -> container::Style {
 }
 
 /// The highlighted row: a lifted grey with an orange outline, like a
-/// selected card, so its quieter text stays readable on it.
+/// selected card, so its quieter text stays readable on it. From the
+/// style token (`style::highlighted_row`), which `loom-ui`'s rows take too.
 pub(crate) fn row_style(theme: &Theme, highlighted: bool) -> container::Style {
+    use loom_canvas::iced_convert::ToIced as _;
     if !highlighted {
         return container::Style::default();
     }
-    let palette = theme.extended_palette();
+    let look = style::highlighted_row(theme);
     container::Style {
-        background: Some(palette.background.weak.color.into()),
+        background: Some(look.fill.to_iced().into()),
         border: iced::Border {
-            color: palette.primary.base.color,
-            width: 1.0,
-            radius: 4.0.into(),
+            color: look.border.to_iced(),
+            width: look.border_width,
+            radius: look.radius.into(),
         },
         ..container::Style::default()
     }

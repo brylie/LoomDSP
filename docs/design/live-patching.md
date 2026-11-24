@@ -203,6 +203,36 @@ The maintainer chose to fade the setting (2026-11-15). The old setting blends in
 - **Tests #763 changes.** `gate_trigger_and_phase_inputs_switch_on_the_swap_frame` (now `gate_and_trigger_inputs_switch_on_the_swap_frame`) asserted no fade and output equal to the ideal from the swap frame for a Sine into Audio Out. After #763 that Audio Out input fades. The phase case there moves to the ramp check above, and its gate and trigger cases stay. Any other test that replugs a phase cable while it renders and expects no fade must change the same way.
 - **Load.** A patch rendered from load stays bit-identical (`tests/reference.rs`, `tests/patches.rs`): nothing fades on the first schedule, and the walk starts only from a phase cable that changed.
 
+### Fades through editor mixers
+
+**Status:** Draft ([#798](https://github.com/brylie/LoomDSP/issues/798)).
+
+Use the input that actually consumes the signal to decide where to fade. Follow old and new routes through the mixers the editor adds. For an audio, modulation, or pitch input at the end of a route, a rewire that can step still takes the rule 9 ramp. A gate, trigger, phase, or Select member input switches on the swap frame.
+
+When all reachable consumers can fade, soften the change once at the shared mixer input. With mixed fan-out, switch at the mixer and fade at the first eligible input on each continuous branch. If a route reaches no typed consumer, keep the current upstream rule. A probe only observes the route, so attaching one leaves the fade decision alone. Exact rewires, Select member changes, and slot crossfades keep their existing rules. This lets a phase played as audio fade through a Sum while a phase driving a clock moves immediately.
+
+**Acceptance:** render the same phase replug direct and through a Sum into an audio input. Both take one ramp. Add a phase consumer to the Sum and check that its samples switch on the swap frame while the audio branch still ramps. Do the equivalent test with a gate. Verify that an exact slot rewire keeps only its slot crossfade and that traversal ends on feedback routes.
+
+### Continuous phase replugs
+
+**Status:** Draft ([#786](https://github.com/brylie/LoomDSP/issues/786)).
+
+On the swap frame, suppress the downstream ramps caused solely by a phase input whose old and new paths supply the same finite phase to the reader. Compare the two paths at the same frame. The last phase of the previous block is a different sample, so comparing it with the new one would mistake normal phase advance for a jump. For the first slice, require exact equality in the representation the reader consumes. Retain the existing fade when the old path has no trustworthy continuation, a changed lane cannot be compared, or either value is non-finite. Prepare the comparisons with the schedule and avoid keeping an otherwise retired graph running just to decide a fade.
+
+Keep a ramp if another changed phase input still needs it, an ordinary cable or assignment edit calls for it, or the ramp was already playing. The equality check governs phase-induced ramps only. A width change still follows the narrowing rules.
+
+**Acceptance:** at the same edit frame, compare two locked phase sources and inserting Phase Shift at zero offset with an unedited reference. Both should be bit-identical. Cover a natural wrap, distinct phases, unavailable old values, a continuous assignment fed by that phase path, and two phase changes that reach the same input. A genuine jump retains the rule 9 ramp. Test with a swap ready at the same frame for block sizes 1, 77, and 512.
+
+### Fading voices that leave
+
+**Status:** Draft ([#764](https://github.com/brylie/LoomDSP/issues/764)).
+
+Start where the engine can separate a voice's contribution from the others, such as Audio Out or a summing editor mixer. On a width reduction, capture each retiring continuous lane's last finite value and ramp that contribution to silence in the rule 9 interval. A retired copy can stop processing at the swap. The old contribution needs only its held sample and ramp position. Surviving voices keep their values, order, and state. Keep stereo sides separate, and preallocate any storage on the control thread. If a voice reappears while its tail is fading, start the ramp into the new live contribution at the tail's current value.
+
+A generic `Voices` input may rank voices, read gate edges, or divide by its current width. Exposing a synthetic voice there would change the module's selection or normalization. The first slice keeps its new logical width visible on the swap frame. Voice selection, Average normalization, and fading through arbitrary bundle processors need a separate decision and examples before extending the rule.
+
+**Acceptance:** narrow a constant four-voice bundle to two on a summing path, and lower the copy count in a stack with a summing output. Surviving contributions match an unedited reference; compare each retiring contribution with the exact hold-to-zero ramp. Test stereo, a second edit before settling, and a retired gate that goes low immediately. Run at block sizes 1, 77, and 512 with output safety Off and the startup fade elapsed. The audio-thread allocation check covers the swap, fade, and disposal.
+
 ### Click threshold
 
 The measurements compare what the engine plays with the ideal continuation: what the patch would play if the new path had been running all along. An error that peaks above -40 dBFS (0.01) counts as a click. One below -60 dBFS (0.001) counts as inaudible. *Why:* a one-sample error near -40 dBFS is audible over quiet material, and -60 dBFS is below the noise of most rooms. The numbers are a test tool, not a perception study. A listening check confirms them (see Acceptance criteria).

@@ -44,6 +44,13 @@ impl<M> Waker<M> {
         self.send_all([message])
     }
 
+    /// Wakes the loop with no message, so it runs a turn: for widget state
+    /// that changed outside a turn and needs the view built again, such as
+    /// a select's list opened by a press a toolkit handed back late.
+    pub(crate) fn nudge(&self) {
+        (self.wake)();
+    }
+
     /// Queues `messages` for the next turn together and in order, with no
     /// other sender's message between them, then wakes the loop once.
     /// Returns false when the runtime is gone. For a driver or a thread

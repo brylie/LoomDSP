@@ -237,6 +237,10 @@ impl App {
                     self.overlays.set_menu_highlight(Some(at));
                     if menu.kind == MenuKind::Cable {
                         self.effect(loom_ui::Effects::scroll_into_view(menu.items[at].id.clone()));
+                    } else if matches!(menu.kind, MenuKind::Probe | MenuKind::Recent) {
+                        // In a runtime menu the highlight is the focus, with a
+                        // ring, as the keys put it there (row 3b).
+                        self.effect(loom_ui::Effects::focus(menu.items[at].id.clone()));
                     }
                 }
             }
@@ -244,7 +248,7 @@ impl App {
     }
 
     /// Closes the open menu of kind `kind`.
-    fn close_menu(&mut self, kind: MenuKind) {
+    pub(crate) fn close_menu(&mut self, kind: MenuKind) {
         match kind {
             MenuKind::Tile(_) | MenuKind::Cable => self.overlays.close_tile_menu(),
             MenuKind::Probe => self.overlays.close_probe_menu(),
@@ -257,6 +261,8 @@ impl App {
         self.session.scene.module(module).map(|tile| tile.title.clone())
     }
 }
+
+mod panel;
 
 #[cfg(test)]
 mod tests;

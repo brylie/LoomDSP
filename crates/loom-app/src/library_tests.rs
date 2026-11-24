@@ -152,7 +152,10 @@ fn pasting_a_sub_patch_sets_its_midi_range() {
     let original = insert(&mut ui, "Voice", false);
     let app = ui.app_mut();
     let text = app.copy().expect("the inserted tile is selected");
-    app.paste(loom_ui_core::Point::new(300.0, 300.0), Some(text));
+    app.paste(
+        loom_ui_core::Point::new(300.0, 300.0),
+        loom_ui::ClipboardText::Text(text),
+    );
     let mut selected = app.session.selection.iter().copied();
     let (Some(pasted), None) = (selected.next(), selected.next()) else {
         panic!("the pasted tile is selected");
@@ -739,7 +742,10 @@ fn pasting_a_sub_patch_tile_and_editing_inside_the_copy_leaves_the_original() {
     let copied = Patch::from_ron(&text).unwrap();
     assert_eq!(copied.subpatches.len(), 1, "the definition travels with the tile");
     assert!(copied.modules.iter().any(|m| m.is_instance()));
-    app.paste(loom_ui_core::Point::new(300.0, 300.0), Some(text.clone()));
+    app.paste(
+        loom_ui_core::Point::new(300.0, 300.0),
+        loom_ui::ClipboardText::Text(text.clone()),
+    );
     assert_eq!(app.ui_snapshot().status, "Pasted Voice");
     assert_eq!(app.ui_snapshot().undo.as_deref(), Some("paste Voice"));
     let copy = *app.session.selection.iter().next().unwrap();
@@ -831,7 +837,10 @@ fn duplicate_and_cut_carry_a_sub_patch_tile_and_paste_leaves_the_transport_out()
     });
     let inside = app.session.hierarchy.path_of(ModuleId(voice));
     app.show_level(&inside);
-    app.paste(loom_ui_core::Point::ORIGIN, Some(with_transport.to_ron().unwrap()));
+    app.paste(
+        loom_ui_core::Point::ORIGIN,
+        loom_ui::ClipboardText::Text(with_transport.to_ron().unwrap()),
+    );
     assert_eq!(
         app.ui_snapshot().status,
         "Pasted Voice. The Transport was left out: a patch has one, at the top level."

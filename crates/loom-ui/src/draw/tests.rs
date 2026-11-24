@@ -14,6 +14,15 @@ const PANEL: PanelStyle = PanelStyle {
     text: Color::rgb(0.5, 0.5, 0.5),
     caret: Color::rgb(0.9, 0.9, 0.9),
     selection: Color::rgb(0.2, 0.3, 0.6),
+    ring: crate::focus::RingStyle {
+        color: Color::WHITE,
+        width: 2.0,
+        offset: 2.0,
+    },
+    quiet: Color::rgb(0.6, 0.6, 0.6),
+    mark: Color::rgb(0.9, 0.9, 0.9),
+    primary: Color::rgb(0.3, 0.6, 1.0),
+    track: Color::rgb(0.4, 0.4, 0.4),
 };
 
 /// A red the tests set on boxes and text.
@@ -559,4 +568,208 @@ fn own_text_colour_wins_and_no_state_is_normal() {
         painted_state(button_with_looks(false), Some("b"), Some("b"), false),
         (Color::rgb(0.1, 0.1, 0.1), Color::rgb(0.1, 0.0, 0.0))
     );
+}
+
+/// Section 5, rule 15: an element's shadow paints first, under its box,
+/// moved by its offset, with the box's corners and the token's colour and
+/// blur.
+#[test]
+fn a_shadow_paints_under_its_box_moved_by_its_offset() {
+    let shadow = crate::element::ShadowStyle {
+        colour: Color::rgba(0.0, 0.0, 0.0, 0.35),
+        offset: loom_ui_core::Vector::new(0.0, 4.0),
+        blur: 12.0,
+    };
+    let root = Element::column([Element::text("ab", STYLE)])
+        .background(RED)
+        .radius(6.0)
+        .padding(4.0)
+        .shadow(shadow);
+    let painted = painted(root, Point::new(10.0, 20.0));
+    let [Painted::Shadow(cast), Painted::Quad(quad), Painted::Text { .. }] = painted.as_slice() else {
+        panic!("the shadow, the box, then the text: {painted:?}");
+    };
+    assert_eq!(quad.rect, rect(10.0, 20.0, 24.0, 24.0));
+    assert_eq!(cast.rect, rect(10.0, 24.0, 24.0, 24.0), "moved by its offset");
+    assert_eq!((cast.radius, cast.colour, cast.blur), (6.0, shadow.colour, 12.0));
+}
+
+/// A grey the placeholder tests set, unlike the panel's text colour.
+const HINT: Color = Color::rgb(0.6, 0.6, 0.6);
+
+/// What a window with one search field showing `text`, with a placeholder,
+/// paints in the panels layer, after the input method composes `composing`
+/// in it, when that is given.
+fn search_field(text: &str) -> Vec<Painted> {
+    search_field_composing(text, None)
+}
+
+/// [`search_field`], with `composing` given to the input method first.
+fn search_field_composing(text: &str, composing: Option<&str>) -> Vec<Painted> {
+    use crate::access::{Access, Role};
+    let mut window = Window::default();
+    let field = Element::field(text, STYLE)
+        .key("search")
+        .width(Length::Fixed(200.0))
+        .placeholder("Search modules", HINT)
+        .access(Access::new(Role::TextInput, "Search modules"));
+    window.sync(vec![(
+        UiId::panel("browser"),
+        Layer::Panels,
+        Some(Element::column([field])),
+    )]);
+    window.lay_out(Size::new(400.0, 100.0), &mut crate::layout::tests::Mono::default());
+    if let Some(composing) = composing {
+        let preedit = loom_ui_core::ImeEvent::Preedit {
+            text: composing.to_owned(),
+            cursor: Some((composing.len(), composing.len())),
+        };
+        let id = UiId::panel("browser").with("search");
+        window.fields.ime(&id, &preedit, std::time::Instant::now());
+    }
+    let mut recorder = Recorder::default();
+    window.paint(Layer::Panels, &mut recorder, &PANEL, None, (None, None), 1.0);
+    recorder.painted
+}
+
+/// While the input method composes in an empty field, the field shows the
+/// composition and no placeholder under it (ui-layer.md, section 8,
+/// rule 4).
+#[test]
+fn a_composition_hides_the_placeholder() {
+    let painted = search_field_composing("", Some("にほ"));
+    assert!(
+        painted.iter().all(|piece| piece.as_text() != Some("Search modules")),
+        "{painted:?}"
+    );
+    assert!(
+        painted.iter().any(|piece| piece.as_text() == Some("にほ")),
+        "{painted:?}"
+    );
+}
+
+/// An empty field paints its placeholder in its own colour, before the
+/// field's own text, so the caret comes after both; a field with text
+/// paints no placeholder.
+#[test]
+fn an_empty_field_shows_its_placeholder() {
+    let painted = search_field("");
+    let texts: Vec<(&str, Color)> = painted
+        .iter()
+        .filter_map(|piece| match piece {
+            Painted::Text { text, run } => Some((text.as_str(), run.colour)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts, [("Search modules", HINT), ("", PANEL.text)]);
+    let typed = search_field("saw");
+    assert!(
+        typed.iter().all(|piece| piece.as_text() != Some("Search modules")),
+        "no placeholder over typed text: {typed:?}"
+    );
+}
+
+/// The boxes `painted` holds, in order.
+fn quads(painted: &[Painted]) -> Vec<crate::paint::Quad> {
+    painted
+        .iter()
+        .filter_map(|piece| match piece {
+            Painted::Quad(quad) => Some(*quad),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A slider at `slider` keyed `key`, with its node.
+fn slider(slider: crate::Slider, key: &str) -> Element {
+    use crate::access::{Access, Action, Role, Value};
+    Element::slider(slider).key(key).access(
+        Access::new(Role::Slider, key)
+            .value(Value::Number {
+                value: 0.0,
+                min: 0.0,
+                max: 1.0,
+                step: None,
+            })
+            .action(Action::Increment),
+    )
+}
+
+/// Section 5, rule 16: a slider at 0.25 in 200 px paints its 4 px track
+/// across its middle, the part from the minimum to the thumb in the primary
+/// colour, then its 14 px round thumb there.
+#[test]
+fn a_slider_paints_its_track_fill_and_thumb() {
+    let painted = quads(&painted(
+        Element::column([slider(crate::Slider::new(0.25), "level")]).width(Length::FILL),
+        Point::ORIGIN,
+    ));
+    // The thumb's centre travels from 7 to 193: at 0.25 it is at 53.5.
+    assert_eq!(painted.len(), 3, "{painted:?}");
+    assert_eq!(painted[0].rect, rect(7.0, 5.0, 186.0, 4.0));
+    assert_eq!(painted[0].fill, PANEL.track);
+    assert_eq!(painted[1].rect, rect(7.0, 5.0, 46.5, 4.0));
+    assert_eq!(painted[1].fill, PANEL.primary);
+    assert_eq!(painted[2].rect, rect(46.5, 0.0, 14.0, 14.0));
+    assert_eq!((painted[2].fill, painted[2].radius), (PANEL.primary, 7.0));
+}
+
+/// A slider centred on 0 fills from the middle: below it at 0.25, from the
+/// thumb up to the middle.
+#[test]
+fn a_centred_slider_fills_from_the_middle() {
+    let painted = quads(&painted(
+        Element::column([slider(crate::Slider::new(0.25).centred(), "depth")]).width(Length::FILL),
+        Point::ORIGIN,
+    ));
+    assert_eq!(painted[1].rect, rect(53.5, 5.0, 46.5, 4.0));
+}
+
+/// Section 5, rule 17: a check box paints a 14 px box with a 1.5 px border
+/// in the mark's colour, and its check mark in the primary colour only
+/// when it is on.
+#[test]
+fn a_check_box_paints_its_box_and_its_mark_when_on() {
+    let segments = |painted: &[Painted]| {
+        painted
+            .iter()
+            .filter_map(|piece| match piece {
+                Painted::Segment(segment) => Some(*segment),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let on = painted(Element::checkbox("Follow", STYLE, true).key("follow"), Point::ORIGIN);
+    let boxes = quads(&on);
+    assert_eq!(boxes[0].rect.size(), Size::new(14.0, 14.0));
+    assert_eq!((boxes[0].border, boxes[0].border_width), (PANEL.mark, 1.5));
+    let marks = segments(&on);
+    assert_eq!(marks.len(), 2, "a tick of two strokes");
+    assert!(marks.iter().all(|mark| mark.colour == PANEL.primary));
+    let off = painted(Element::checkbox("Follow", STYLE, false).key("follow"), Point::ORIGIN);
+    assert!(segments(&off).is_empty(), "no mark when off");
+}
+
+/// Section 5, rule 18: a select paints its box from its style, its label,
+/// and the mark that says it opens: two strokes in the mark's colour.
+#[test]
+fn a_select_paints_its_box_label_and_mark() {
+    let style = crate::select::tests::SELECT;
+    let options = vec!["48 kHz".to_string(), "96 kHz".to_string()];
+    let select = Element::select(crate::Select::new("Rate", options, Some(1), style)).key("rate");
+    let painted = painted(Element::column([select]).width(Length::FILL), Point::ORIGIN);
+    let boxes = quads(&painted);
+    assert_eq!((boxes[0].fill, boxes[0].border), (style.background, style.border));
+    assert!(
+        painted.iter().any(|piece| piece.as_text() == Some("96 kHz")),
+        "{painted:?}"
+    );
+    let marks: Vec<_> = painted
+        .iter()
+        .filter_map(|piece| match piece {
+            Painted::Segment(segment) => Some(segment.colour),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(marks, [style.mark, style.mark]);
 }

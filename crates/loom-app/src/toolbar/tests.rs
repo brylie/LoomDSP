@@ -488,3 +488,85 @@ fn the_toolbar_is_one_tab_stop() {
     ui.tap(Key::Named(Named::Tab), Modifiers::default());
     assert_eq!(ui.runtime().focused(), None, "out of the toolbar, into the canvas");
 }
+
+/// The focus ring sits on the panel's colour, never on a neighbour (ui-layer.md,
+/// section 6, rule 3): its contrast is measured against the panel, which
+/// holds only while the ring, `offset` plus `width` outside its element,
+/// reaches no other filled button and no text outside its own element (a
+/// "›", a label, the status line). Every stop of the runtime's is tried at
+/// the top level, one level into a sub-patch, and two levels in, where the
+/// breadcrumb has three entries, each with the status line's × showing.
+/// The toolbar's roles are the filled ones; the breadcrumb's entries and
+/// the × are plain.
+#[test]
+fn no_focus_ring_reaches_a_neighbour() {
+    use loom_patch::ModulePath;
+    let ring = crate::style::focus_ring();
+    let reach = ring.offset + ring.width;
+    // Each level with the number of breadcrumb entries it shows.
+    let levels = [
+        (None, 0),
+        (Some(ModulePath::top(2)), 2),
+        (Some(ModulePath::top(2).child(5)), 3),
+    ];
+    for (level, entries) in levels {
+        let patch = if level.is_some() {
+            "nested-subtractive.ron"
+        } else {
+            "subtractive.ron"
+        };
+        let mut ui = crate::ui_test::Ui::open(patch);
+        if let Some(level) = level.clone() {
+            ui.send(crate::Message::OpenLevel(level));
+        }
+        ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
+        ui.redraw();
+        let filled: Vec<(loom_ui_core::UiId, loom_ui_core::Rect)> = ui
+            .app()
+            .toolbar_model()
+            .buttons
+            .iter()
+            .filter_map(|button| {
+                let id = toolbar_id().with(button.name);
+                ui.runtime().bounds(&id).map(|at| (id, at))
+            })
+            .collect();
+        assert!(!filled.is_empty(), "the toolbar is laid out");
+        let texts = ui.painted_texts(loom_ui::Layer::Panels);
+        assert!(
+            texts.iter().any(|(text, _)| text.contains("save failed")),
+            "the status line"
+        );
+        let stops = ui.app().our_stops();
+        let crumbs = ui.app().breadcrumb_stops();
+        assert_eq!(crumbs.len(), entries, "an entry per level");
+        let separators = texts.iter().filter(|(text, _)| text == "›").count();
+        assert_eq!(separators, entries.saturating_sub(1), "a separator between each");
+        for stop in stops {
+            let at = ui.runtime().bounds(&stop).expect("a stop is laid out");
+            let ringed = loom_ui_core::Rect::new(
+                loom_ui_core::Point::new(at.x - reach, at.y - reach),
+                loom_ui_core::Size::new(at.width + 2.0 * reach, at.height + 2.0 * reach),
+            );
+            for (other, fill) in &filled {
+                if *other != stop {
+                    assert!(
+                        !ringed.intersects(*fill),
+                        "{stop}'s ring reaches {other}'s fill: {ringed:?} over {fill:?}"
+                    );
+                }
+            }
+            let inside = |b: &loom_ui_core::Rect| {
+                b.x >= at.x && b.y >= at.y && b.x + b.width <= at.x + at.width && b.y + b.height <= at.y + at.height
+            };
+            for (text, at_text) in &texts {
+                if !inside(at_text) {
+                    assert!(
+                        !ringed.intersects(*at_text),
+                        "{stop}'s ring reaches the text {text:?}: {ringed:?} over {at_text:?}"
+                    );
+                }
+            }
+        }
+    }
+}

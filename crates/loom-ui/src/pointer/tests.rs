@@ -28,6 +28,10 @@ enum Message {
     Canvas(bool),
     /// Tab left the first run of stops for the target's stops after it.
     IntoTarget,
+    /// A press outside this panel, which closes on one.
+    Outside(UiId),
+    /// A key press under the question.
+    QuestionKey,
 }
 
 /// An app that shows a bar of two buttons in the panels layer, across the
@@ -69,7 +73,7 @@ impl App for Layers {
         });
         if self.overlay {
             view.panel_with(UiId::panel("menu"), Layer::Overlays, &(), |_| {
-                Element::row([button("item", 20.0)])
+                Element::row([menu_item("item", 20.0)]).closes_on_press_outside()
             });
         }
     }
@@ -90,6 +94,14 @@ impl App for Layers {
         Some(Message::Clicked(id.clone()))
     }
 
+    fn pressed_outside(&self, root: &UiId) -> Option<Message> {
+        Some(Message::Outside(root.clone()))
+    }
+
+    fn question_key(&self, _key: &loom_ui_core::KeyEvent) -> Option<Message> {
+        Some(Message::QuestionKey)
+    }
+
     fn tab_from(&self, from: &UiId, next: Option<&UiId>, back: bool) -> crate::app::TabStep<Message> {
         use crate::app::TabStep;
         let (a, b) = (UiId::panel("bar").with("a"), UiId::panel("bar").with("b"));
@@ -106,6 +118,17 @@ impl App for Layers {
             (_, _, next) => next.map_or(TabStep::Leave, |next| TabStep::To(next.clone())),
         }
     }
+}
+
+/// A menu item `width` wide and 16 high, keyed `key`: a button in a
+/// list, to a screen reader and to the keyboard.
+fn menu_item(key: &str, width: f32) -> Element {
+    Element::text(key, STYLE)
+        .key(key)
+        .width(Length::Fixed(width))
+        .min_width(width)
+        .focusable()
+        .access(Access::new(Role::MenuItem, key).action(Action::Click))
 }
 
 /// A button `width` wide and 16 high, keyed `key`.
@@ -967,4 +990,439 @@ fn a_press_the_other_toolkit_takes_reports_the_lost_press() {
     let heard = panels.pointer_taken(&Event::Pointer(PointerEvent::Pressed(PointerButton::Left)));
     assert!(panels.shown_pressed().is_none(), "the press cancelled the Space");
     assert!(heard.redraw, "the pressed look went");
+}
+
+/// The ring colour the ring tests paint with, unlike anything else.
+const RING: loom_ui_core::Color = loom_ui_core::Color::rgb(0.0, 1.0, 0.0);
+
+/// A panel style whose ring is [`RING`], 2 wide and 2 outside.
+fn ring_style() -> crate::paint::PanelStyle {
+    crate::paint::PanelStyle {
+        text: loom_ui_core::Color::WHITE,
+        caret: loom_ui_core::Color::WHITE,
+        selection: loom_ui_core::Color::BLACK,
+        quiet: loom_ui_core::Color::WHITE,
+        mark: loom_ui_core::Color::WHITE,
+        primary: loom_ui_core::Color::rgb(0.3, 0.6, 1.0),
+        track: loom_ui_core::Color::rgb(0.4, 0.4, 0.4),
+        ring: crate::focus::RingStyle {
+            color: RING,
+            width: 2.0,
+            offset: 2.0,
+        },
+    }
+}
+
+/// The rings painted in `layer`: each quad outlined in [`RING`].
+fn rings(harness: &mut Harness<Layers, Fake>, layer: Layer) -> Vec<crate::paint::Quad> {
+    harness.lay_out(&mut Mono::default());
+    let mut recorder = crate::paint::testing::Recorder::default();
+    let (_, _, mut panels) = harness.parts();
+    panels.paint(layer, &mut recorder, &ring_style());
+    recorder
+        .painted
+        .iter()
+        .filter_map(|painted| match painted {
+            crate::paint::testing::Painted::Quad(quad) if quad.border == RING => Some(*quad),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Tab, as a key press.
+fn tab_key() -> DriverEvent {
+    DriverEvent::Input {
+        event: Event::Key(loom_ui_core::KeyEvent::Pressed {
+            key: loom_ui_core::Key::Tab,
+            modifiers: loom_ui_core::Modifiers::NONE,
+            repeat: false,
+            text: None,
+        }),
+        pointer: None,
+    }
+}
+
+/// Section 6, rule 3: focus from the keyboard paints one ring around the
+/// focused element, its offset and its width outside the bounds, in the
+/// element's layer and in no other. Rows 1 and 2 kept the ring's state and
+/// painted nothing, so keyboard focus could not be seen.
+#[test]
+fn keyboard_focus_paints_a_ring_in_its_layer() {
+    let mut harness = harness(false, Routed::Passed);
+    assert!(rings(&mut harness, Layer::Panels).is_empty(), "no focus, no ring");
+    harness.step(tab_key());
+    let a = UiId::panel("bar").with("a");
+    assert_eq!(harness.runtime().focused(), Some(&a));
+    let bounds = harness.runtime().bounds(&a).expect("laid out");
+    let painted = rings(&mut harness, Layer::Panels);
+    assert_eq!(painted.len(), 1, "one ring");
+    let ring = painted[0];
+    assert_eq!(ring.rect.x, bounds.x - 4.0);
+    assert_eq!(ring.rect.y, bounds.y - 4.0);
+    assert_eq!(ring.rect.width, bounds.width + 8.0);
+    assert_eq!(ring.rect.height, bounds.height + 8.0);
+    assert_eq!(ring.border_width, 2.0);
+    assert_eq!(ring.fill, loom_ui_core::Color::TRANSPARENT);
+    assert!(rings(&mut harness, Layer::Overlays).is_empty(), "only in its own layer");
+}
+
+/// Section 6, rule 3: an element below the input layer keeps its focus
+/// but shows no ring, and `focus_ring` agrees with what is painted; the
+/// ring comes back when the layer drops.
+#[test]
+fn no_ring_shows_below_the_input_layer() {
+    let mut harness = harness(false, Routed::Passed);
+    harness.step(tab_key());
+    harness.send(Message::Input(Layer::Overlays));
+    assert_eq!(harness.runtime().focused(), Some(&UiId::panel("bar").with("a")), "kept");
+    assert_eq!(harness.runtime().focus_ring(), None);
+    assert!(rings(&mut harness, Layer::Panels).is_empty(), "under a raised layer");
+    harness.send(Message::Input(Layer::Canvas));
+    assert!(harness.runtime().focus_ring().is_some());
+    assert_eq!(rings(&mut harness, Layer::Panels).len(), 1, "back when it drops");
+}
+
+/// The ring of an element in an overlay is painted with the overlay's
+/// layer, above Iced, not with the panels below it.
+#[test]
+fn an_overlays_focus_rings_in_the_overlays_layer() {
+    let mut menu = harness(true, Routed::Passed);
+    // Tab from nothing enters while the panels take input; then the
+    // overlay takes it, and its focused item keeps its ring.
+    menu.step(tab_key());
+    assert_eq!(menu.runtime().focused(), Some(&UiId::panel("menu").with("item")));
+    menu.send(Message::Input(Layer::Overlays));
+    assert!(rings(&mut menu, Layer::Panels).is_empty());
+    assert_eq!(rings(&mut menu, Layer::Overlays).len(), 1);
+}
+
+/// An update that raises the input layer over the focused element hides
+/// its ring with no panel built again, so it asks for a frame: otherwise
+/// the last frame would keep showing the ring (CodeRabbit, #861). Dropping
+/// the layer shows it again, with a frame too.
+#[test]
+fn a_ring_shown_or_hidden_asks_for_a_frame() {
+    let mut harness = harness(false, Routed::Passed);
+    harness.step(tab_key());
+    assert!(harness.runtime().focus_ring().is_some());
+    let before = harness.driver().redraws();
+    harness.send(Message::Input(Layer::Overlays));
+    assert_eq!(harness.runtime().focus_ring(), None);
+    assert!(harness.driver().redraws() > before, "hiding the ring draws a frame");
+    let hidden = harness.driver().redraws();
+    harness.send(Message::Input(Layer::Canvas));
+    assert!(harness.driver().redraws() > hidden, "showing it again draws one");
+}
+
+/// Section 3, rule 4 (plan 3.2, row 3a): a focused menu item is activated
+/// as a button is, Enter on key down and Space on key up, each once.
+#[test]
+fn enter_and_space_click_a_focused_menu_item() {
+    use loom_ui_core::Key;
+    let item = UiId::panel("menu").with("item");
+    let mut menu = harness(true, Routed::Passed);
+    menu.step(tab_key());
+    assert_eq!(menu.runtime().focused(), Some(&item));
+    menu.step(press_key(Key::Enter, false));
+    assert_eq!(clicks(&menu), std::slice::from_ref(&item), "Enter on key down");
+    menu.step(press_key(Key::Space, false));
+    menu.step(release_key(Key::Space));
+    menu.step(DriverEvent::Woken);
+    assert_eq!(clicks(&menu), [item.clone(), item], "Space on key up");
+}
+
+/// Section 5, rule 14: with the menu's layer taking input, a press of any
+/// button outside the menu is taken, so neither the target nor the bar
+/// under it hears it, and the app hears it on the next turn; a press on the
+/// menu is the menu's own. With the panels taking input, the menu does not
+/// close on a press outside it.
+#[test]
+fn a_press_outside_a_closing_menu_is_taken_and_told() {
+    let menu = UiId::panel("menu");
+    let outside = |of: &Harness<Layers, Fake>| {
+        of.app()
+            .heard
+            .iter()
+            .filter(|heard| matches!(heard, Message::Outside(_)))
+            .count()
+    };
+    let mut menu_open = harness(true, Routed::Passed);
+    menu_open.send(Message::Input(Layer::Overlays));
+    for button in [PointerButton::Left, PointerButton::Right] {
+        let heard = menu_open.runtime().target().heard.len();
+        menu_open.step(at(200.0, 100.0, PointerEvent::Pressed(button)));
+        assert_eq!(
+            menu_open.runtime().target().heard.len(),
+            heard,
+            "{button:?}: the target heard nothing"
+        );
+    }
+    assert_eq!(outside(&menu_open), 2, "both presses were told");
+    assert!(menu_open.app().heard.contains(&Message::Outside(menu.clone())));
+    {
+        let (_, _, panels) = menu_open.parts();
+        let press = Event::Pointer(PointerEvent::Pressed(PointerButton::Left));
+        assert!(
+            panels.over_target(&press, Point::new(200.0, 100.0)),
+            "a driver keeps it from the toolkit"
+        );
+    }
+    menu_open.step(at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    assert_eq!(outside(&menu_open), 2, "a press on the menu is its own");
+
+    let mut below = harness(true, Routed::Passed);
+    below.send(Message::Input(Layer::Canvas));
+    below.step(at(200.0, 100.0, PointerEvent::Pressed(PointerButton::Left)));
+    assert_eq!(outside(&below), 0, "only while its layer takes input");
+}
+
+/// Section 6, rule 6, step 2 (plan 3.2, row 3a): while the Question layer
+/// takes input, a key press nothing of the runtime's takes goes to
+/// `App::question_key` and never to the target, so a toolkit's field or
+/// shortcut under the question hears nothing; its release still goes on.
+#[test]
+fn a_question_keeps_every_key_from_the_target() {
+    use loom_ui_core::Key;
+    let mut harness = harness(false, Routed::Passed);
+    harness.send(Message::Input(Layer::Question));
+    for key in [Key::Backspace, Key::Delete, Key::Character('d'), Key::Enter] {
+        harness.step(press_key(key, false));
+        assert!(!target_heard_press(&harness, key), "{key:?} went no further");
+    }
+    let asked = harness
+        .app()
+        .heard
+        .iter()
+        .filter(|heard| matches!(heard, Message::QuestionKey))
+        .count();
+    assert_eq!(asked, 4, "each press was the app's question key");
+    let heard = harness.runtime().target().heard.len();
+    harness.step(release_key(Key::Enter));
+    assert_eq!(harness.runtime().target().heard.len(), heard + 1, "the release goes on");
+}
+
+/// Section 6, rule 4 (plan 3.2, row 3a): an overlay saves the focus it
+/// opens over and gives it back, with its ring, when it closes, one level
+/// at a time: a question over the menu gives the menu its item back, then
+/// the menu gives the bar its button back. With no focus before, there is
+/// none to give back.
+#[test]
+fn an_overlay_gives_back_the_focus_it_opened_over() {
+    let (a, item) = (UiId::panel("bar").with("a"), UiId::panel("menu").with("item"));
+    let mut menu = harness(true, Routed::Passed);
+    menu.step(tab_key());
+    menu.step(tab_key());
+    assert_eq!(
+        menu.runtime().focused(),
+        Some(&a),
+        "the bar's button, from the keyboard"
+    );
+    menu.send(Message::Input(Layer::Overlays));
+    menu.send(Message::Refocus(vec![item.clone()]));
+    assert_eq!(menu.runtime().focused(), Some(&item), "the menu took it");
+    menu.send(Message::Input(Layer::Question));
+    menu.send(Message::Refocus(Vec::new()));
+    menu.send(Message::Input(Layer::Overlays));
+    assert_eq!(
+        menu.runtime().focused(),
+        Some(&item),
+        "the question gave the menu its item"
+    );
+    menu.send(Message::Input(Layer::Canvas));
+    assert_eq!(menu.runtime().focused(), Some(&a), "the menu gave the bar its button");
+    assert!(menu.runtime().focus_ring().is_some(), "with its ring");
+
+    let mut nothing = harness(true, Routed::Passed);
+    nothing.send(Message::Input(Layer::Overlays));
+    nothing.send(Message::Input(Layer::Canvas));
+    assert_eq!(nothing.runtime().focused(), None, "nothing to give back");
+}
+
+/// Section 6, rule 8 (plan 3.2, row 3b): the pointer moving over a menu
+/// item focuses it with no ring, so the keys go on from there; moving over
+/// a button focuses nothing.
+#[test]
+fn hovering_a_menu_item_focuses_it_without_a_ring() {
+    let item = UiId::panel("menu").with("item");
+    let mut menu = harness(true, Routed::Passed);
+    menu.send(Message::Input(Layer::Overlays));
+    menu.step(at(5.0, 5.0, PointerEvent::Moved));
+    assert_eq!(menu.runtime().focused(), Some(&item));
+    assert_eq!(menu.runtime().focus_ring(), None, "no ring from the pointer");
+
+    let mut bar = harness(false, Routed::Passed);
+    bar.send(Message::Input(Layer::Canvas));
+    bar.step(at(5.0, 5.0, PointerEvent::Moved));
+    assert_eq!(bar.runtime().focused(), None, "a button takes no focus from hover");
+}
+
+/// An app that shows one paragraph in the panels layer, "See Saw or
+/// Sine", with links on "Saw" and "Sine".
+struct Paragraph {
+    heard: Vec<Message>,
+}
+
+impl App for Paragraph {
+    type Message = Message;
+
+    fn update(&mut self, message: Message, _cx: &Context<'_, Message>) -> Effects<Message> {
+        self.heard.push(message);
+        Effects::none()
+    }
+
+    fn view(&self, view: &mut View) {
+        use crate::element::Inline;
+        view.panel_with(UiId::panel("help"), Layer::Panels, &(), |_| {
+            Element::rich(
+                [
+                    Inline::new("See "),
+                    link("Saw", "saw"),
+                    Inline::new(" or "),
+                    link("Sine", "sine"),
+                ],
+                STYLE,
+            )
+            .key("notes")
+        });
+    }
+
+    fn window(&self) -> WindowSpec {
+        WindowSpec::default()
+    }
+
+    fn input(&self) -> InputState {
+        InputState {
+            layer: Layer::Canvas,
+            canvas_focused: false,
+            target_first: false,
+        }
+    }
+
+    fn clicked(&self, id: &UiId) -> Option<Message> {
+        Some(Message::Clicked(id.clone()))
+    }
+}
+
+/// An underlined link to `key`, named by `words`.
+fn link(words: &str, key: &str) -> crate::element::Inline {
+    crate::element::Inline::new(words)
+        .underline()
+        .link(key, Access::new(Role::Link, words).action(Action::Click))
+}
+
+/// The paragraph app, laid out in a 400 by 200 window.
+fn paragraph() -> Harness<Paragraph, Fake> {
+    let target = Fake {
+        answer: Routed::Passed,
+        taken_from: 350.0,
+        heard: Vec::new(),
+        focus: None,
+    };
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let mut harness = Harness::new(Paragraph { heard: Vec::new() }, target, window, Instant::now());
+    harness.lay_out(&mut Mono::default());
+    harness
+}
+
+/// The clicks the paragraph app heard.
+fn link_clicks(harness: &Harness<Paragraph, Fake>) -> Vec<UiId> {
+    harness
+        .app()
+        .heard
+        .iter()
+        .filter_map(|message| match message {
+            Message::Clicked(id) => Some(id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Each link is a focus stop, in the order of the text, and Enter follows
+/// the focused one, as WAI-ARIA's link pattern says. Space does not: it is
+/// not the link's, so it goes on to the target, as a page's Space scrolls.
+#[test]
+fn enter_follows_a_focused_link_and_space_does_not() {
+    use loom_ui_core::Key;
+    let notes = UiId::panel("help").with("notes");
+    let mut harness = paragraph();
+    harness.step(press_key(Key::Tab, false));
+    assert_eq!(harness.runtime().focused(), Some(&notes.clone().with("saw")));
+    harness.step(press_key(Key::Tab, false));
+    assert_eq!(harness.runtime().focused(), Some(&notes.clone().with("sine")));
+    harness.step(press_key(Key::Space, false));
+    harness.step(release_key(Key::Space));
+    assert!(link_clicks(&harness).is_empty(), "Space follows no link");
+    assert!(
+        harness.runtime().target().heard.iter().any(|event| matches!(
+            event,
+            Event::Key(loom_ui_core::KeyEvent::Pressed { key: Key::Space, .. })
+        )),
+        "Space went on"
+    );
+    harness.step(press_key(Key::Enter, false));
+    assert_eq!(link_clicks(&harness), [notes.with("sine")]);
+}
+
+/// A press on a link follows it on release and takes no focus, as a
+/// button's does: the keys stay where they were.
+#[test]
+fn a_press_on_a_link_follows_it_without_focus() {
+    let mut harness = paragraph();
+    // "See " is 32 pixels at the fake's 8 a character, so "Saw" is 32 to 56.
+    harness.step(at(40.0, 8.0, PointerEvent::Moved));
+    click_paragraph(&mut harness, 40.0, 8.0);
+    assert_eq!(link_clicks(&harness), [UiId::panel("help").with("notes").with("saw")]);
+    assert_eq!(harness.runtime().focused(), None, "no focus from the press");
+}
+
+/// A left click on the paragraph app at `(x, y)`.
+fn click_paragraph(harness: &mut Harness<Paragraph, Fake>, x: f32, y: f32) {
+    harness.step(at(x, y, PointerEvent::Pressed(PointerButton::Left)));
+    harness.step(at(x, y, PointerEvent::Released(PointerButton::Left)));
+}
+
+/// Keyboard focus on a link rings its words, not the whole paragraph.
+#[test]
+fn a_focused_link_rings_its_words() {
+    let mut harness = paragraph();
+    harness.step(tab_key());
+    harness.lay_out(&mut Mono::default());
+    let mut recorder = crate::paint::testing::Recorder::default();
+    let (_, _, mut panels) = harness.parts();
+    panels.paint(Layer::Panels, &mut recorder, &ring_style());
+    let painted: Vec<crate::paint::Quad> = recorder
+        .painted
+        .iter()
+        .filter_map(|painted| match painted {
+            crate::paint::testing::Painted::Quad(quad) if quad.border == RING => Some(*quad),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(painted.len(), 1);
+    // "Saw" is 32 to 56 and 16 high; the ring is 4 outside.
+    assert_eq!(
+        painted[0].rect,
+        loom_ui_core::Rect::new(Point::new(28.0, -4.0), Size::new(32.0, 24.0))
+    );
+}
+
+/// The paragraph paints its text once, with its spans, and a link paints
+/// nothing of its own.
+#[test]
+fn a_paragraph_paints_its_links_once() {
+    let mut harness = paragraph();
+    let mut recorder = crate::paint::testing::Recorder::default();
+    let (_, _, mut panels) = harness.parts();
+    panels.paint(Layer::Panels, &mut recorder, &ring_style());
+    assert_eq!(recorder.texts(), ["See Saw or Sine"]);
+    let spans = recorder
+        .painted
+        .iter()
+        .find_map(|painted| match painted {
+            crate::paint::testing::Painted::Spans { spans, .. } => Some(spans.clone()),
+            _ => None,
+        })
+        .expect("painted with its spans");
+    assert_eq!(spans.len(), 4);
+    assert!(spans[1].underline && spans[3].underline && !spans[0].underline);
 }

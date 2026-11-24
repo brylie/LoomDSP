@@ -10,7 +10,7 @@
 //! by word walks the shaped layout, and skip with none, as the
 //! typesetter's tests do.
 
-use super::{CARET_MARGIN, FieldEvent, FieldState, TYPING_PAUSE};
+use super::{CARET_MARGIN, FieldEvent, FieldState, Lines, TYPING_PAUSE};
 use crate::access::{Access, Role, States};
 use crate::app::{App, Context, WindowSpec};
 use crate::effect::Effects;
@@ -42,6 +42,15 @@ const PANEL: PanelStyle = PanelStyle {
     text: Color::rgb(0.9, 0.9, 0.9),
     caret: Color::rgb(1.0, 1.0, 1.0),
     selection: Color::rgb(0.2, 0.3, 0.6),
+    ring: crate::focus::RingStyle {
+        color: Color::WHITE,
+        width: 2.0,
+        offset: 2.0,
+    },
+    quiet: Color::rgb(0.6, 0.6, 0.6),
+    mark: Color::rgb(0.9, 0.9, 0.9),
+    primary: Color::rgb(0.3, 0.6, 1.0),
+    track: Color::rgb(0.4, 0.4, 0.4),
 };
 
 /// A field and the contexts it edits with.
@@ -62,7 +71,7 @@ fn field_in(text: &str, width: f32) -> Option<Bench> {
     }
     let (mut fonts, mut layouts) = editing_contexts();
     let mut field = FieldState::new(text, STYLE, &mut fonts, &mut layouts);
-    field.take(text, STYLE, width, &mut fonts, &mut layouts);
+    field.take(text, STYLE, Lines::One, width, &mut fonts, &mut layouts);
     Some(Bench {
         field,
         fonts,
@@ -400,7 +409,7 @@ fn the_apps_text_is_taken() {
     let Bench {
         field, fonts, layouts, ..
     } = &mut bench;
-    field.take("hi", STYLE, 300.0, fonts, layouts);
+    field.take("hi", STYLE, Lines::One, 300.0, fonts, layouts);
     assert_eq!(field.text(), "hi");
     assert_eq!(field.selection_bytes(), (2, 2));
     assert_eq!(field.steps(), (0, 0));
@@ -484,6 +493,8 @@ enum Message {
     SetText(String),
     /// A screen reader's action the runtime left to the app.
     Reader(accesskit::Action),
+    /// Logs whether a field has focus, as the context says.
+    AskField,
 }
 
 /// An app with one field, keyed `form/name`, and a button after it. It
@@ -533,6 +544,7 @@ impl App for Form {
             Message::Remove => self.removed = true,
             Message::SetText(text) => self.text = text,
             Message::Reader(action) => self.log.push(format!("reader {action:?}")),
+            Message::AskField => self.log.push(format!("field focus {}", cx.field_has_focus())),
         }
         Effects::none()
     }
@@ -1048,21 +1060,27 @@ fn a_delete_that_deletes_nothing_opens_no_run() {
     assert_eq!(bench.field.steps(), (0, 1));
 }
 
-/// A field in a layer below the one taking input, such as a panel under
-/// an open question, edits nothing: its keys go on to the target.
+/// A field in a layer below the one taking input edits nothing. Under an
+/// overlay, its keys go on to the target; under an open question, the
+/// runtime keeps every press from the target (section 6, rule 6, step 2),
+/// so the target hears none.
 #[test]
 fn a_covered_field_takes_no_keys() {
-    let Some((mut harness, mut text)) = form("ab", true) else {
-        return;
-    };
-    harness.send(Message::Cover(Layer::Question));
-    harness.lay_out(&mut text);
-    harness.step(key_in(Key::Character('x'), Modifiers::NONE, Some("x")));
-    harness.step(key_in(Key::Backspace, Modifiers::NONE, None));
-    harness.lay_out(&mut text);
-    assert_eq!(harness.app().text, "ab");
-    assert_eq!(harness.runtime().target().heard, [Key::Character('x'), Key::Backspace]);
-    assert!(harness.runtime().target().kept.is_empty());
+    for (layer, heard) in [
+        (Layer::Overlays, vec![Key::Character('x'), Key::Backspace]),
+        (Layer::Question, Vec::new()),
+    ] {
+        let Some((mut harness, mut text)) = form("ab", true) else {
+            return;
+        };
+        harness.send(Message::Cover(layer));
+        harness.lay_out(&mut text);
+        harness.step(key_in(Key::Character('x'), Modifiers::NONE, Some("x")));
+        harness.step(key_in(Key::Backspace, Modifiers::NONE, None));
+        harness.lay_out(&mut text);
+        assert_eq!(harness.app().text, "ab", "{layer:?}");
+        assert_eq!(harness.runtime().target().heard, heard, "{layer:?}");
+    }
 }
 
 /// Focus that leaves a field and comes back within one turn still leaves
@@ -1123,7 +1141,9 @@ fn a_run_has_one_character_per_cluster() {
     assert_eq!(runs[0].text, "日本a");
     assert_eq!(runs[0].lengths, [3, 3, 1]);
     let Some(bench) = field_in("", 300.0) else { return };
-    assert_eq!(bench.field.runs(), [super::ReaderRun::default()]);
+    let empty = bench.field.runs();
+    assert_eq!(empty.len(), 1, "an empty field has one run");
+    assert!(empty[0].text.is_empty() && empty[0].lengths.is_empty());
 }
 
 /// Positions go up along the line, and every width is positive.
@@ -1925,7 +1945,7 @@ fn an_unchanged_app_text_keeps_the_composition() {
         .ime(&preedit("に"), bench.now, &mut bench.fonts, &mut bench.layouts);
     bench
         .field
-        .take("ab", STYLE, 300.0, &mut bench.fonts, &mut bench.layouts);
+        .take("ab", STYLE, Lines::One, 300.0, &mut bench.fonts, &mut bench.layouts);
     assert!(bench.field.composing());
     assert_eq!(bench.text(), "abに");
 }
@@ -2052,7 +2072,7 @@ fn a_paste_after_focus_moved_is_dropped() {
     let later = paste(&harness);
     harness.send(Message::Focus(UiId::panel("form").with("ok")));
     harness.lay_out(&mut text);
-    later.give(Some("x".to_owned()));
+    later.give(crate::ClipboardText::Text("x".to_owned()));
     harness.step(DriverEvent::Woken);
     harness.lay_out(&mut text);
     assert_eq!(harness.app().text, "ab", "focus moved");
@@ -2061,7 +2081,7 @@ fn a_paste_after_focus_moved_is_dropped() {
     harness.send(Message::Cover(Layer::Question));
     harness.lay_out(&mut text);
     let covered: Paste = paste(&harness);
-    covered.give(Some("y".to_owned()));
+    covered.give(crate::ClipboardText::Text("y".to_owned()));
     harness.step(DriverEvent::Woken);
     harness.lay_out(&mut text);
     assert_eq!(harness.app().text, "ab", "covered");
@@ -2154,7 +2174,7 @@ fn a_paste_after_focus_went_away_and_back_is_dropped() {
     harness.send(Message::Focus(name()));
     harness.lay_out(&mut text);
     assert_eq!(harness.runtime().focused(), Some(&name()));
-    asked.give(Some("x".to_owned()));
+    asked.give(crate::ClipboardText::Text("x".to_owned()));
     harness.step(DriverEvent::Woken);
     harness.lay_out(&mut text);
     assert_eq!(harness.app().text, "ab");
@@ -2228,7 +2248,7 @@ fn a_paste_during_a_composition_goes_in_after_it() {
     let asked = harness.runtime().test_paste(name());
     harness.step(ime_in(preedit("に")));
     assert_eq!(harness.runtime().focused(), Some(&name()), "focus stays on the field");
-    asked.give(Some("x".to_owned()));
+    asked.give(crate::ClipboardText::Text("x".to_owned()));
     harness.step(DriverEvent::Woken);
     harness.lay_out(&mut text);
     assert_eq!(harness.runtime().focused(), Some(&name()));
@@ -2251,7 +2271,9 @@ fn a_composition_over_a_selection_deletes_it_as_its_own_step() {
     assert!(used.edited, "the app hears the deletion");
     assert_eq!(bench.field.committed(), "");
     assert_eq!(bench.text(), "に");
-    bench.field.take("", STYLE, 300.0, &mut bench.fonts, &mut bench.layouts);
+    bench
+        .field
+        .take("", STYLE, Lines::One, 300.0, &mut bench.fonts, &mut bench.layouts);
     assert!(
         bench.field.composing(),
         "the app's text matches, so the composition stays"
@@ -2283,6 +2305,66 @@ fn the_app_hears_a_selection_a_composition_replaced() {
     assert_eq!(harness.app().text, "日");
 }
 
+/// The context tells the app when one of the runtime's fields has focus, so
+/// a shortcut the field leaves can do nothing (section 6, rule 6, step 6):
+/// true on the field, false on the button after it.
+#[test]
+fn the_context_says_when_a_field_has_focus() {
+    let Some((mut harness, mut text)) = form("", false) else {
+        return;
+    };
+    harness.send(Message::AskField);
+    harness.send(Message::Focus(UiId::panel("form").with("ok")));
+    harness.lay_out(&mut text);
+    harness.send(Message::AskField);
+    let asked: Vec<_> = harness
+        .app()
+        .log
+        .iter()
+        .filter(|entry| entry.starts_with("field focus"))
+        .cloned()
+        .collect();
+    assert_eq!(asked, ["field focus true", "field focus false"]);
+}
+
+/// A paste whose read is refused reaches the app as `PasteRefused`, so it
+/// can show a status message a screen reader hears, and changes nothing.
+/// Through the headless driver, which can be made to refuse.
+#[test]
+fn a_refused_paste_reaches_the_app() {
+    let Some((mut harness, mut text)) = form("ab", true) else {
+        return;
+    };
+    harness.driver_mut().set_clipboard(Some("x".to_owned()));
+    harness.driver_mut().refuse_reads(true);
+    let start = harness.app().log.len();
+    harness.step(key_in(Key::Character('v'), shortcut(Platform::current(), false), None));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.app().text, "ab");
+    assert_eq!(harness.app().log[start..], ["PasteRefused"]);
+}
+
+/// A refusal is heard even when focus has moved on since the paste was
+/// asked for: the user asked, so the user is told it did not work. An
+/// empty clipboard says nothing.
+#[test]
+fn a_refusal_is_heard_after_focus_moved_and_empty_says_nothing() {
+    let Some((mut harness, mut text)) = form("ab", true) else {
+        return;
+    };
+    let asked = harness.runtime().test_paste(name());
+    harness.send(Message::Focus(UiId::panel("form").with("ok")));
+    harness.lay_out(&mut text);
+    let start = harness.app().log.len();
+    asked.give(crate::ClipboardText::Refused);
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.app().log[start..], ["PasteRefused"]);
+    let empty = harness.runtime().test_paste(name());
+    empty.give(crate::ClipboardText::Empty);
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.app().log.len(), start + 1, "an empty clipboard says nothing");
+}
+
 /// While the input method composes in a focused field, Tab is the input
 /// method's: the runtime never asks the app where Tab goes (`App::tab_from`,
 /// plan 3.2, row 2), so the focus stays in the field. Once the text is
@@ -2304,4 +2386,45 @@ fn tab_while_composing_never_asks_where_tab_goes() {
     harness.step(key_in(Key::Tab, Modifiers::NONE, None));
     assert_eq!(harness.app().tabs.get(), 1, "after the commit, Tab asks");
     assert_eq!(harness.runtime().focused(), Some(&UiId::panel("form").with("ok")));
+}
+
+/// A single-line field's runs are cut every 255 characters, as before runs
+/// could end at a line: 600 characters make runs of 255, 255, and 90, and
+/// the caret at the end is at the end of the last run.
+#[test]
+fn a_single_line_fields_runs_are_cut_every_255_characters() {
+    let Some(bench) = field_in(&"x".repeat(600), 300.0) else {
+        return;
+    };
+    let lengths: Vec<usize> = bench.field.runs().iter().map(|run| run.lengths.len()).collect();
+    assert_eq!(lengths, [255, 255, 90]);
+    assert!(
+        bench.field.runs().iter().all(|run| run.line == 0),
+        "all on its one line"
+    );
+    assert_eq!(bench.field.reader_selection(), ((2, 90), (2, 90)));
+}
+
+mod many;
+
+/// `Runtime::focused_field` names the focus only while it is one of the
+/// runtime's text fields: not a button, and not a field that a layout took
+/// away, so a driver never reads a field that is gone.
+#[test]
+fn focused_field_follows_the_focus() {
+    let Some((mut harness, mut text)) = form("ab", true) else {
+        return;
+    };
+    let ok = UiId::panel("form").with("ok");
+    assert_eq!(harness.runtime().focused_field(), Some(&name()), "the field has focus");
+    harness.send(Message::Focus(ok.clone()));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.runtime().focused(), Some(&ok));
+    assert_eq!(harness.runtime().focused_field(), None, "a button is no field");
+    harness.send(Message::Focus(name()));
+    harness.lay_out(&mut text);
+    assert_eq!(harness.runtime().focused_field(), Some(&name()));
+    harness.send(Message::Remove);
+    harness.lay_out(&mut text);
+    assert_eq!(harness.runtime().focused_field(), None, "the field is gone");
 }

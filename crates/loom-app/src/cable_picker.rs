@@ -6,6 +6,11 @@ use crate::{App, Message};
 use loom_canvas::{CanvasEvent, PortRef};
 use loom_ui_core::UiId;
 
+/// The Iced scrolling area containing the cable picker rows.
+pub(crate) fn list_id() -> UiId {
+    UiId::panel("menu").with("cable").with("list")
+}
+
 impl App {
     /// Opens the port list for the one selected tile.
     pub(crate) fn open_cable_picker(&mut self) -> bool {
@@ -30,6 +35,9 @@ impl App {
     fn show_cable_picker(&mut self, module: u32, start: Option<PortRef>) {
         self.overlays.open(Overlay::Menu(ContextMenu::Cable { module, start }));
         self.overlays.set_menu_highlight(Some(0));
+        if let Some(item) = self.cable_menu_model(module, start, Some(0)).items.first() {
+            self.effect(loom_ui::Effects::scroll_into_view(item.id.clone()));
+        }
     }
 
     /// The same port rows for the pointer, keys and accessibility tree.
@@ -64,7 +72,7 @@ impl App {
                     };
                     items.push(MenuItem {
                         id: id.clone().with(tile.id).with(direction).with(index as u32),
-                        label: structure.named_port(port),
+                        label: format!("{} ({direction})", structure.named_port(port)),
                         description: Some(direction.to_string()),
                         message: Message::CablePort {
                             start,

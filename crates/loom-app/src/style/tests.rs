@@ -236,6 +236,59 @@ fn the_focus_ring_stands_out() {
         let ratio = contrast_ratio(ring.color, fill.to_core());
         assert!(ratio >= 3.0, "on {name}: {ratio:.2}:1");
     }
+    // The ring is drawn `offset` outside the element, so a strip of the
+    // panel's colour lies between it and a button's fill: its neighbours
+    // on both sides are the panel's colour, checked above, whatever the
+    // button's role (WCAG 2.2, SC 2.4.13 measures a focus indicator
+    // against what is next to it). Against the fills themselves it is
+    // 1.1:1 to 2.3:1 for the filled roles, which the gap makes harmless.
+    assert!(
+        ring.offset >= 1.0,
+        "a gap between the ring and a fill: {} px",
+        ring.offset
+    );
+}
+
+/// A scroll container's thumb stands out at 3:1 or more against the panel
+/// it runs over, since no track is drawn (WCAG 2.2, 1.4.11), and its
+/// tokens are the spec's: 6 px wide, 2 px in, round ends (ui-layer.md,
+/// section 5, rule 12).
+#[test]
+fn the_scrollbar_thumb_stands_out_against_the_panel() {
+    use loom_canvas::contrast_ratio;
+    use loom_canvas::iced_convert::ToCore as _;
+    let scroll = super::scroll();
+    assert_eq!((scroll.width, scroll.inset, scroll.radius), (6.0, 2.0, 3.0));
+    let app = crate::tests::app();
+    let theme = app.theme();
+    let panel = theme.extended_palette().background.base.color;
+    let ratio = contrast_ratio(scroll.thumb, panel.to_core());
+    assert!(ratio >= 3.0, "{ratio:.2}:1");
+}
+
+/// The ring's reach is the room a scroll container keeps around its
+/// content, so a focused part at its edge keeps its whole ring.
+#[test]
+fn a_scroll_container_keeps_room_for_the_ring() {
+    let ring = super::focus_ring();
+    assert_eq!(super::scroll().ring, ring.offset + ring.width);
+}
+
+/// A radio's note, in the panel style's quiet colour, reads at 4.5:1 or
+/// more against the panel (WCAG 2.2, 1.4.3), and a radio's mark at 3:1 or
+/// more (1.4.11; ui-layer.md, section 6, rule 9).
+#[test]
+fn a_radio_note_and_mark_read_against_the_panel() {
+    use loom_canvas::contrast_ratio;
+    use loom_canvas::iced_convert::ToCore as _;
+    let app = crate::tests::app();
+    let theme = app.theme();
+    let panel = theme.extended_palette().background.base.color.to_core();
+    let style = crate::iced_bridge::paint::panel_style(&theme);
+    let note = contrast_ratio(style.quiet, panel);
+    assert!(note >= 4.5, "the note: {note:.2}:1");
+    let mark = contrast_ratio(style.mark, panel);
+    assert!(mark >= 3.0, "the mark: {mark:.2}:1");
 }
 
 /// No app source writes a size or a colour inline: every `.size(...)`,
@@ -451,4 +504,44 @@ fn both_toolkits_read_the_same_role_tokens() {
             );
         }
     }
+}
+
+/// Help's links read at 4.5:1 or more against the dialog they sit on
+/// (WCAG 2.2, 1.4.3), always. Against the body text beside them, a link
+/// that reaches less than 3:1 cannot be told apart by colour alone, so it
+/// must be underlined (1.4.1, technique G183); at 3:1 or more the
+/// underline is optional. Today's link colour is 1.65:1 against the body
+/// text, which is why the link token underlines.
+#[test]
+fn help_links_read_and_stand_apart_from_the_text() {
+    use loom_canvas::contrast_ratio;
+    let theme = crate::tests::app().theme();
+    let dialog = super::dialog(&theme);
+    let link = super::link(&theme);
+    let on_dialog = contrast_ratio(link.colour, dialog.fill);
+    assert!(on_dialog >= 4.5, "on the dialog: {on_dialog:.2}:1");
+    let beside_text = contrast_ratio(link.colour, dialog.text);
+    assert!(
+        beside_text >= 3.0 || link.underline,
+        "{beside_text:.2}:1 against the body text, and no underline"
+    );
+    let quiet = contrast_ratio(loom_canvas::iced_convert::ToCore::to_core(super::QUIET), dialog.fill);
+    assert!(quiet >= 4.5, "quiet text on the dialog: {quiet:.2}:1");
+}
+
+/// The module browser's highlighted row keeps its text readable on its
+/// fill, and its outline stands out at 3:1 or more against the panel
+/// (1.4.3, 1.4.11).
+#[test]
+fn the_highlighted_row_reads_and_stands_out() {
+    use loom_canvas::contrast_ratio;
+    let theme = crate::tests::app().theme();
+    let panel = super::floating_panel(&theme);
+    let row = super::highlighted_row(&theme);
+    let text = contrast_ratio(panel.text, row.fill);
+    assert!(text >= 4.5, "text on the row: {text:.2}:1");
+    let quiet = contrast_ratio(loom_canvas::iced_convert::ToCore::to_core(super::QUIET), row.fill);
+    assert!(quiet >= 4.5, "quiet text on the row: {quiet:.2}:1");
+    let outline = contrast_ratio(row.border, panel.fill);
+    assert!(outline >= 3.0, "the outline: {outline:.2}:1");
 }

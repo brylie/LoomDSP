@@ -126,6 +126,9 @@ pub(crate) enum Event {
     LocateAfterLayout,
     /// A screen reader asked for an action.
     Action(ActionRequest),
+    /// What one of the runtime's text fields reports changed: its text,
+    /// caret, selection, or scroll (ui-layer.md, section 7, rule 7).
+    FieldChanged,
 }
 
 /// What the app keeps for the accessibility tree between events. It
@@ -611,11 +614,18 @@ impl crate::App {
         ids
     }
 
-    /// The UI ID the tree gave node `node`, for the harness
+    /// The UI ID the tree gave node `node`: for the runtime's text actions
+    /// on its fields (`App::access_target`), and for the harness
     /// (`ui_test/a11y.rs`).
-    #[cfg(any(test, feature = "test-ui"))]
     pub(crate) fn a11y_ui_id(&self, node: accesskit::NodeId) -> Option<loom_ui_core::UiId> {
         self.a11y.ids.id(node.0).cloned()
+    }
+
+    /// The node ID the tree gives the part `id`, for a test that acts on it
+    /// as a screen reader would.
+    #[cfg(test)]
+    pub(crate) fn a11y_node_of(&mut self, id: &loom_ui_core::UiId) -> accesskit::NodeId {
+        accesskit::NodeId(self.a11y.ids.number(id))
     }
 
     /// The tree as it is now, with the canvas placed by `view`.
@@ -688,6 +698,21 @@ impl crate::App {
             jump: self.jump_items(),
             overlay,
             overlay_focus,
+            ours_overlay: match (&self.overlays.question, &self.overlays.help, self.runtime_menu()) {
+                (Some(question), _, _) => Some((
+                    accesskit::Role::AlertDialog,
+                    question.model().title,
+                    crate::overlays::access::question_id(),
+                )),
+                // Help is over the menus (row 6), as F1 opens it from them.
+                (None, Some(help), _) => Some((
+                    accesskit::Role::Dialog,
+                    help.model.name.to_string(),
+                    crate::overlays::access::help_id(),
+                )),
+                (None, None, Some(menu)) => Some((accesskit::Role::Menu, menu.label, menu.id)),
+                (None, None, None) => None,
+            },
         }
     }
 
@@ -800,6 +825,35 @@ impl crate::App {
         // acts as its item says.
         if let Some(messages) = self.a11y_panel_action(request, at) {
             return messages;
+        }
+        // The runtime's question owns the input over everything (row 3b):
+        // a Click on an answer gives it, and Focus moves the runtime's
+        // focus there, as Tab would.
+        if let Some(id) = self
+            .a11y
+            .ids
+            .id(request.target_node.0)
+            .filter(|id| {
+                id.is_under(&crate::overlays::access::question_id())
+                    || id.is_under(&crate::overlays::access::help_id())
+                    || self.runtime_menu().is_some_and(|menu| id.is_under(&menu.id))
+            })
+            .cloned()
+        {
+            self.reader_event(ReaderEvent::Close);
+            return match request.action {
+                accesskit::Action::Click => self
+                    .question_click(&id)
+                    .or_else(|| self.help_click(&id))
+                    .or_else(|| self.menu_click(&id))
+                    .into_iter()
+                    .collect(),
+                accesskit::Action::Focus if self.our_stops().contains(&id) => {
+                    self.effect(loom_ui::Effects::focus(id));
+                    Vec::new()
+                }
+                _ => Vec::new(),
+            };
         }
         // An open panel owns input, as it does for the pointer: the
         // canvas behind it does not change.
@@ -1012,6 +1066,7 @@ impl crate::App {
                 self.a11y.flush_live = true;
                 self.a11y_rebuild();
             }
+            Event::FieldChanged => self.a11y_rebuild(),
             Event::LocateAfterLayout => {
                 if self.a11y.active {
                     self.a11y_read_places();

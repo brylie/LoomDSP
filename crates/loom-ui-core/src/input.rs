@@ -181,6 +181,10 @@ pub enum Key {
     Home,
     /// End.
     End,
+    /// Page Up: one page up.
+    PageUp,
+    /// Page Down: one page down.
+    PageDown,
     /// The menu key, which opens the menu of what has focus.
     ContextMenu,
     /// F10. With Shift, it opens a menu as the menu key does.

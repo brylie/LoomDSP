@@ -12,7 +12,7 @@
 //! next turn. A driver never calls `update`.
 
 use crate::app::WindowSpec;
-use crate::effect::{Choice, FileRequest, Image, Job, NoGpu, Question, Reply};
+use crate::effect::{Choice, ClipboardText, FileRequest, Image, Job, NoGpu, Question, Reply};
 use crate::waker::{Wake, Waker};
 use loom_ui_core::UiId;
 use std::path::PathBuf;
@@ -20,7 +20,7 @@ use std::sync::mpsc::Sender;
 
 /// One paste answer: the field that asked, the focus's move count when it
 /// asked, and the clipboard's text.
-pub(crate) type PasteAnswer = (UiId, u64, Option<String>);
+pub(crate) type PasteAnswer = (UiId, u64, ClipboardText);
 
 /// Where a driver answers a text field's paste: the clipboard's text goes
 /// back to the runtime, which puts it in that field on a later turn if the
@@ -45,9 +45,9 @@ impl Paste {
         }
     }
 
-    /// Answers with the clipboard's `text`, or `None` when it holds none,
-    /// and wakes the loop. A runtime that is gone takes nothing.
-    pub fn give(self, text: Option<String>) {
+    /// Answers with what the read found, and wakes the loop. A runtime
+    /// that is gone takes nothing.
+    pub fn give(self, text: ClipboardText) {
         if self.answers.send((self.field, self.moves, text)).is_ok() {
             (self.wake)();
         }
@@ -71,13 +71,13 @@ pub trait Driver<M> {
     fn clipboard_write(&mut self, text: String);
 
     /// Read the clipboard, and send the reply's message through `waker`.
-    fn clipboard_read(&mut self, reply: Reply<Option<String>, M>, waker: &Waker<M>);
+    fn clipboard_read(&mut self, reply: Reply<ClipboardText, M>, waker: &Waker<M>);
 
     /// Read the clipboard for a text field's paste, and answer `paste`,
     /// now or later. The default answers that the clipboard is empty, for
     /// a driver with no clipboard.
     fn clipboard_paste(&mut self, paste: Paste) {
-        paste.give(None);
+        paste.give(ClipboardText::Empty);
     }
 
     /// Show a file dialog, and send the reply's message through `waker`.

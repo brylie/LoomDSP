@@ -40,7 +40,7 @@ enum Msg {
     /// Reads the clipboard.
     Paste,
     /// The clipboard's text.
-    Pasted(Option<String>),
+    Pasted(crate::ClipboardText),
     /// Focuses the search field, selecting all of it.
     FocusSearch,
     /// Scrolls the search field into view.
@@ -516,7 +516,7 @@ fn answers_arrive_on_the_next_turn() {
             Msg::Ask,
             Msg::Answered(Some(1)),
             Msg::Paste,
-            Msg::Pasted(Some("osc".into()))
+            Msg::Pasted(crate::ClipboardText::Text("osc".into()))
         ]
     );
     assert_eq!(harness.driver().questions()[0].title, "Unsaved");
@@ -827,6 +827,15 @@ fn paint_counts_what_it_painted() {
         text: loom_ui_core::Color::WHITE,
         caret: loom_ui_core::Color::WHITE,
         selection: loom_ui_core::Color::BLACK,
+        ring: crate::focus::RingStyle {
+            color: loom_ui_core::Color::WHITE,
+            width: 2.0,
+            offset: 2.0,
+        },
+        quiet: loom_ui_core::Color::rgb(0.6, 0.6, 0.6),
+        mark: loom_ui_core::Color::rgb(0.9, 0.9, 0.9),
+        primary: loom_ui_core::Color::rgb(0.3, 0.6, 1.0),
+        track: loom_ui_core::Color::rgb(0.4, 0.4, 0.4),
     };
     let mut recorder = crate::paint::testing::Recorder::default();
     runtime.paint(Layer::Panels, &mut recorder, &style);
@@ -851,6 +860,15 @@ fn paint_before_lay_out_panics() {
         text: loom_ui_core::Color::WHITE,
         caret: loom_ui_core::Color::WHITE,
         selection: loom_ui_core::Color::BLACK,
+        ring: crate::focus::RingStyle {
+            color: loom_ui_core::Color::WHITE,
+            width: 2.0,
+            offset: 2.0,
+        },
+        quiet: loom_ui_core::Color::rgb(0.6, 0.6, 0.6),
+        mark: loom_ui_core::Color::rgb(0.9, 0.9, 0.9),
+        primary: loom_ui_core::Color::rgb(0.3, 0.6, 1.0),
+        track: loom_ui_core::Color::rgb(0.4, 0.4, 0.4),
     };
     runtime.paint(Layer::Panels, &mut crate::paint::testing::Recorder::default(), &style);
 }
@@ -1025,4 +1043,445 @@ fn an_app_with_no_tree_hears_no_screen_reader() {
     runtime.handle(event, Instant::now(), &mut driver);
     assert_eq!(runtime.counts().updates, 0);
     assert!(driver.accessibility().is_none());
+}
+
+/// What the combobox test app hears.
+#[derive(Debug, Clone, PartialEq)]
+enum ComboMsg {
+    /// The element that takes keys first took this key.
+    Panel(UiId, Key),
+    /// The search field changed.
+    Edited(String),
+    /// Focus this element.
+    Focus(UiId),
+    /// Show the panel in this layer, under the input layer or not.
+    Below(bool),
+    /// The canvas takes the keyboard, or lets it go.
+    Canvas(bool),
+    /// A click on this element.
+    Clicked(UiId),
+    /// From now on the app takes Escape first too, as a browser's closes it.
+    TakeEscape,
+}
+
+/// A browser as the combobox pattern has it: a column that takes Up, Down,
+/// Enter, Escape, and Tab first (Tab, which it may not take, is dropped),
+/// holding a search field and, beside the column, a button that is not
+/// inside it. The app answers Up, Down, and Enter, and lets Escape pass.
+#[derive(Default)]
+struct Combo {
+    heard: Vec<ComboMsg>,
+    search: String,
+    below: bool,
+    canvas: bool,
+    /// The app takes Escape too, as a browser's closes it.
+    takes_escape: bool,
+}
+
+impl App for Combo {
+    type Message = ComboMsg;
+
+    fn update(&mut self, message: ComboMsg, _cx: &Context<'_, ComboMsg>) -> Effects<ComboMsg> {
+        let effects = match &message {
+            ComboMsg::Edited(text) => {
+                self.search = text.clone();
+                Effects::none()
+            }
+            ComboMsg::Focus(id) => Effects::focus(id.clone()),
+            ComboMsg::Below(below) => {
+                self.below = *below;
+                Effects::none()
+            }
+            ComboMsg::Canvas(on) => {
+                self.canvas = *on;
+                Effects::none()
+            }
+            ComboMsg::TakeEscape => {
+                self.takes_escape = true;
+                Effects::none()
+            }
+            ComboMsg::Panel(..) | ComboMsg::Clicked(_) => Effects::none(),
+        };
+        self.heard.push(message);
+        effects
+    }
+
+    fn view(&self, view: &mut crate::view::View) {
+        use crate::access::{Access, Action, Role};
+        use crate::element::{Element, Length};
+        let search = self.search.clone();
+        view.panel_with(UiId::panel("browser"), Layer::Overlays, &search, |search| {
+            let style = crate::layout::tests::STYLE;
+            let field = Element::field(search.clone(), style)
+                .key("search")
+                .width(Length::Fixed(200.0))
+                .access(Access::new(Role::TextInput, "Search"));
+            let go = Element::text("Go", style)
+                .key("go")
+                .focusable()
+                .access(Access::new(Role::Button, "Go").action(Action::Click));
+            let combo = Element::column([field, go]).key("combo").takes_first([
+                Key::Up,
+                Key::Down,
+                Key::Enter,
+                Key::Escape,
+                Key::Tab,
+            ]);
+            let outside = Element::text("Close", style)
+                .key("close")
+                .focusable()
+                .access(Access::new(Role::Button, "Close").action(Action::Click));
+            Element::column([combo, outside])
+        });
+    }
+
+    fn window(&self) -> crate::app::WindowSpec {
+        crate::app::WindowSpec::default()
+    }
+
+    fn input(&self) -> crate::app::InputState {
+        crate::app::InputState {
+            layer: if self.below { Layer::Question } else { Layer::Overlays },
+            canvas_focused: self.canvas,
+            target_first: false,
+        }
+    }
+
+    fn clicked(&self, id: &UiId) -> Option<ComboMsg> {
+        Some(ComboMsg::Clicked(id.clone()))
+    }
+
+    fn panel_key(&self, id: &UiId, key: &KeyEvent) -> Option<ComboMsg> {
+        let KeyEvent::Pressed { key, .. } = key else {
+            return None;
+        };
+        let taken = matches!(key, Key::Up | Key::Down | Key::Enter) || (*key == Key::Escape && self.takes_escape);
+        taken.then(|| ComboMsg::Panel(id.clone(), *key))
+    }
+
+    fn field_event(&self, _id: &UiId, event: &crate::field::FieldEvent) -> Option<ComboMsg> {
+        match event {
+            crate::field::FieldEvent::Edited(text) => Some(ComboMsg::Edited(text.clone())),
+            _ => None,
+        }
+    }
+}
+
+/// A target that keeps every event it hears and sends nothing.
+#[derive(Default)]
+struct Keys {
+    events: Vec<Event>,
+}
+
+impl Target<ComboMsg> for Keys {
+    fn input(&mut self, event: &Event, _pointer: Option<Point>, _now: Instant, _out: &mut Vec<ComboMsg>) -> Routed {
+        self.events.push(event.clone());
+        Routed::Taken
+    }
+
+    fn focus(&mut self, _target: &FocusTarget, _select: Selection) {}
+
+    fn scroll_into_view(&mut self, _id: &UiId) {}
+
+    fn focused(&self) -> Option<UiId> {
+        None
+    }
+
+    fn needs_redraw(&mut self, _updates: usize) -> bool {
+        false
+    }
+}
+
+/// `key` pressed with no modifiers.
+fn press(key: Key) -> DriverEvent {
+    DriverEvent::Input {
+        event: Event::Key(KeyEvent::Pressed {
+            key,
+            modifiers: Modifiers::default(),
+            text: match key {
+                Key::Character(c) => Some(c.to_string()),
+                _ => None,
+            },
+            repeat: false,
+        }),
+        pointer: None,
+    }
+}
+
+/// The combobox app with the search field focused.
+fn combo() -> Harness<Combo, Keys> {
+    let mut harness = Harness::new(
+        Combo::default(),
+        Keys::default(),
+        WindowState::new(Size::new(800.0, 600.0)),
+        Instant::now(),
+    );
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    let search = UiId::panel("browser").with("combo").with("search");
+    harness.send(ComboMsg::Focus(search.clone()));
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    assert_eq!(harness.runtime().focused(), Some(&search));
+    harness
+}
+
+/// The keys the app heard that the element taking keys first took.
+fn taken(harness: &Harness<Combo, Keys>) -> Vec<Key> {
+    harness
+        .app()
+        .heard
+        .iter()
+        .filter_map(|message| match message {
+            ComboMsg::Panel(_, key) => Some(*key),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Section 6, rule 6, step 2b: Up, Down, and Enter over the focused
+/// search field go to the element around it that takes them first, named
+/// by its UI ID, and neither the field nor the target hears them; a key it
+/// does not name, a letter, goes to the field as before.
+#[test]
+fn an_element_takes_its_keys_before_the_focused_field() {
+    let mut harness = combo();
+    for key in [Key::Up, Key::Down, Key::Enter] {
+        harness.step(press(key));
+    }
+    assert_eq!(taken(&harness), [Key::Up, Key::Down, Key::Enter]);
+    let owner = harness.app().heard.iter().find_map(|message| match message {
+        ComboMsg::Panel(id, _) => Some(id.clone()),
+        _ => None,
+    });
+    assert_eq!(owner, Some(UiId::panel("browser").with("combo")));
+    assert!(
+        harness.runtime().target().events.is_empty(),
+        "the target heard none of them"
+    );
+    harness.step(press(Key::Character('s')));
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.app().search, "s", "a letter is the field's");
+}
+
+/// A key the element names but the app lets pass goes on as if nothing took
+/// it first: Escape, which the field does not take, reaches the target.
+/// Tab is never taken first, though the element named it.
+#[test]
+fn a_key_the_app_passes_goes_on() {
+    let mut harness = combo();
+    harness.step(press(Key::Escape));
+    assert!(taken(&harness).is_empty());
+    assert!(
+        harness
+            .runtime()
+            .target()
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::Key(KeyEvent::Pressed { key: Key::Escape, .. }))),
+        "Escape went on to the target"
+    );
+    harness.step(press(Key::Tab));
+    assert!(taken(&harness).is_empty(), "Tab is not taken first");
+}
+
+/// Only the focus's own ancestors are asked: with the focus on a button
+/// beside the element, its keys are not taken first. Nor are they while a
+/// layer above takes input.
+#[test]
+fn only_around_the_focus_and_in_the_input_layer() {
+    let mut harness = combo();
+    harness.send(ComboMsg::Focus(UiId::panel("browser").with("close")));
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    harness.step(press(Key::Down));
+    assert!(taken(&harness).is_empty(), "the button is not inside it");
+
+    let mut harness = combo();
+    harness.send(ComboMsg::Below(true));
+    harness.step(press(Key::Down));
+    assert!(taken(&harness).is_empty(), "a layer above takes input");
+}
+
+/// What the opener test app hears.
+#[derive(Debug, Clone, PartialEq)]
+enum OpenMsg {
+    /// Open the dialog and focus its Close button as the latest input says.
+    Open,
+    /// Open it the same way, then, in the same update, focus its Help
+    /// button with a plain focus effect.
+    OpenThenHelp,
+}
+
+/// An app that shows, once opened, a dialog with a Close button in the
+/// Overlays layer, and focuses it with `Effects::focus_as_input` in the
+/// same turn that opens it.
+#[derive(Default)]
+struct Opener {
+    open: bool,
+}
+
+impl App for Opener {
+    type Message = OpenMsg;
+
+    fn update(&mut self, message: OpenMsg, _cx: &Context<'_, OpenMsg>) -> Effects<OpenMsg> {
+        self.open = true;
+        let quiet = Effects::focus_as_input(UiId::panel("dialog").with("close"));
+        match message {
+            OpenMsg::Open => quiet,
+            OpenMsg::OpenThenHelp => quiet.and(Effects::focus(UiId::panel("dialog").with("help"))),
+        }
+    }
+
+    fn view(&self, view: &mut crate::view::View) {
+        use crate::access::{Access, Action, Role};
+        use crate::element::Element;
+        if self.open {
+            view.panel_with(UiId::panel("dialog"), Layer::Overlays, &(), |_| {
+                let button = |key: &'static str, label: &'static str| {
+                    Element::text(label, crate::layout::tests::STYLE)
+                        .key(key)
+                        .focusable()
+                        .access(Access::new(Role::Button, label).action(Action::Click))
+                };
+                Element::column([button("close", "Close"), button("help", "Help")])
+            });
+        }
+    }
+
+    fn window(&self) -> crate::app::WindowSpec {
+        crate::app::WindowSpec::default()
+    }
+
+    fn input(&self) -> crate::app::InputState {
+        crate::app::InputState {
+            layer: if self.open { Layer::Overlays } else { Layer::Canvas },
+            canvas_focused: false,
+            target_first: false,
+        }
+    }
+}
+
+/// A target that takes everything and sends nothing.
+#[derive(Default)]
+struct Silent;
+
+impl Target<OpenMsg> for Silent {
+    fn input(&mut self, _event: &Event, _pointer: Option<Point>, _now: Instant, _out: &mut Vec<OpenMsg>) -> Routed {
+        Routed::Taken
+    }
+
+    fn focus(&mut self, _target: &FocusTarget, _select: Selection) {}
+
+    fn scroll_into_view(&mut self, _id: &UiId) {}
+
+    fn focused(&self) -> Option<UiId> {
+        None
+    }
+
+    fn needs_redraw(&mut self, _updates: usize) -> bool {
+        false
+    }
+}
+
+/// Opens the dialog right after `before`, and says whether the focus on
+/// its Close button shows a ring.
+fn opened_after(before: DriverEvent) -> bool {
+    let mut harness = Harness::new(
+        Opener::default(),
+        Silent,
+        WindowState::new(Size::new(400.0, 300.0)),
+        Instant::now(),
+    );
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    harness.step(before);
+    harness.send(OpenMsg::Open);
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    assert_eq!(
+        harness.runtime().focused(),
+        Some(&UiId::panel("dialog").with("close")),
+        "the focus moved in"
+    );
+    harness.runtime().focus_ring().is_some()
+}
+
+/// Section 6, rule 3: a focus effect that follows the latest input shows
+/// the ring after a key press, as a browser's `:focus-visible` does when a
+/// script moves the focus, and none after a pointer press, also when the
+/// element is laid out only after the turn that asked for it.
+#[test]
+fn a_focus_as_input_rings_after_a_key_and_not_after_a_press() {
+    use loom_ui_core::{PointerButton, PointerEvent};
+    assert!(opened_after(press(Key::F10)), "opened from the keyboard");
+    let pointer = DriverEvent::Input {
+        event: Event::Pointer(PointerEvent::Pressed(PointerButton::Left)),
+        pointer: Some(Point::new(300.0, 250.0)),
+    };
+    assert!(!opened_after(pointer), "opened by the pointer");
+}
+
+/// The quiet mark of a focus effect that follows a pointer press belongs
+/// to its element alone: a plain focus effect on another element, before
+/// the layout that takes either, shows its ring.
+#[test]
+fn a_quiet_focus_never_quiets_another() {
+    use loom_ui_core::{PointerButton, PointerEvent};
+    let mut harness = Harness::new(
+        Opener::default(),
+        Silent,
+        WindowState::new(Size::new(400.0, 300.0)),
+        Instant::now(),
+    );
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    harness.step(DriverEvent::Input {
+        event: Event::Pointer(PointerEvent::Pressed(PointerButton::Left)),
+        pointer: Some(Point::new(300.0, 250.0)),
+    });
+    harness.send(OpenMsg::OpenThenHelp);
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    let help = UiId::panel("dialog").with("help");
+    assert_eq!(harness.runtime().focused(), Some(&help));
+    assert_eq!(
+        harness.runtime().focus_ring().map(|(id, _)| id),
+        Some(help),
+        "the plain focus rings"
+    );
+}
+
+/// While the canvas has the keyboard, no element takes a key first: the
+/// canvas's keys are its own (section 6, rule 1).
+#[test]
+fn nothing_takes_a_key_first_while_the_canvas_has_the_keyboard() {
+    let mut harness = combo();
+    harness.send(ComboMsg::Canvas(true));
+    harness.step(press(Key::Down));
+    assert!(taken(&harness).is_empty());
+}
+
+/// Escape with a Space held on a button inside the element cancels the
+/// button's click, as everywhere (section 3, rule 4), before the element
+/// that takes Escape first can: releasing Space then clicks nothing.
+#[test]
+fn escape_cancels_a_held_space_before_it_is_taken_first() {
+    let mut harness = combo();
+    harness.send(ComboMsg::TakeEscape);
+    let go = UiId::panel("browser").with("combo").with("go");
+    harness.send(ComboMsg::Focus(go.clone()));
+    harness.lay_out(&mut crate::layout::tests::Mono::default());
+    assert_eq!(harness.runtime().focused(), Some(&go));
+    harness.step(press(Key::Space));
+    harness.step(press(Key::Escape));
+    harness.step(DriverEvent::Input {
+        event: Event::Key(KeyEvent::Released { key: Key::Space }),
+        pointer: None,
+    });
+    harness.step(DriverEvent::Woken);
+    let clicks = harness
+        .app()
+        .heard
+        .iter()
+        .filter(|m| matches!(m, ComboMsg::Clicked(_)))
+        .count();
+    assert_eq!(clicks, 0, "the held Space clicked nothing");
+    assert!(
+        taken(&harness).is_empty(),
+        "the Escape cancelled it, and went to no element first"
+    );
 }

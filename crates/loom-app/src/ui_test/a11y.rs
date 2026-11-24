@@ -147,6 +147,11 @@ impl A11yTree {
         A11yNode { tree: self, id: node }
     }
 
+    /// True when some node, shown or not, is for `id` or a part inside it.
+    pub fn has_part_under(&self, id: &UiId) -> bool {
+        self.ids.values().any(|of| of.is_under(id))
+    }
+
     /// The accessible name of every shown node, in tree order, for a test
     /// that checks what a screen reader can reach.
     pub fn names(&self) -> Vec<String> {

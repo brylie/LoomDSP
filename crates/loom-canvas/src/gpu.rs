@@ -8,7 +8,9 @@ use crate::theme::Palette;
 use crate::tile_text::{self, TextKind};
 use crate::trace::{Segment, TraceGeometry};
 use bytemuck::{Pod, Zeroable};
-use loom_ui::paint::{InstanceBuffer, PaintList, PaintRenderer, SHAPE_ATTRIBUTES, Shape, Target, packed};
+use loom_ui::paint::{
+    INSTANCE_ATTRIBUTES, InstanceBuffer, PaintList, PaintRenderer, SHAPE_ATTRIBUTES, Shape, Target, packed,
+};
 use loom_ui_core::{Color, Point, Rect, Size};
 
 /// Corner radius of tiles, in world units.
@@ -16,7 +18,7 @@ const TILE_RADIUS: f32 = 5.0;
 /// Cable width, in world units.
 pub(crate) const CABLE_WIDTH: f32 = 2.4;
 /// Thinnest a cable is drawn, in physical pixels.
-const CABLE_MIN_PX: f32 = 1.2;
+pub(crate) const CABLE_MIN_PX: f32 = 1.2;
 
 /// A circle or square port marker centred on a point.
 fn marker(centre: Point, radius: f32, shape: PortShape, fill: Color, border: Color, border_width: f32) -> Shape {
@@ -588,10 +590,16 @@ impl CanvasRenderer {
             })
         };
 
+        // A shape's instance has five vec4s, the last its shadow's blur;
+        // the canvas's own instances have four.
         let instance_layout = |stride: usize| wgpu::VertexBufferLayout {
             array_stride: stride as u64,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &SHAPE_ATTRIBUTES,
+            attributes: if stride == std::mem::size_of::<Shape>() {
+                &SHAPE_ATTRIBUTES
+            } else {
+                &INSTANCE_ATTRIBUTES
+            },
         };
 
         Self {

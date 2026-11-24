@@ -1496,7 +1496,7 @@ fn an_xy_pad_drags_relatively_on_both_axes() {
     assert!((moved - 0.1).abs() < 1e-3, "up raises y: {moved}");
 
     // Long enough after the last click not to be a double-click.
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     let coarse = position_of(&ui, id, "pad_x");
     ui.hold(keyboard::Modifiers::SHIFT);
     ui.drag(at, Point::new(at.x + 20.0, at.y), 4);
@@ -1523,7 +1523,7 @@ fn an_xy_pad_jumps_with_alt_and_resets_both() {
     assert!((x - 0.25).abs() < 1e-3, "x follows the pointer: {x}");
     assert!((y - 0.75).abs() < 1e-3, "y follows the pointer: {y}");
 
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     let steps = ui.app().session.edits.history.len();
     ui.move_to(at);
     ui.press();
@@ -1720,14 +1720,14 @@ fn a_range_handle_drags_and_cannot_cross() {
     assert!(moved > 0.0, "low moved up: {moved}");
     assert_eq!(param_value(&ui, id, "span_high"), 1.0, "high stayed");
 
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     let at = handle(&mut ui, id, "span_low");
     ui.drag(at, Point::new(at.x + 1_000.0, at.y), 8);
     assert_eq!(param_value(&ui, id, "span_low"), 1.0, "low stops at high");
     assert_eq!(param_value(&ui, id, "span_high"), 1.0);
 
     // Apart again, and a press on the track outside the band.
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     let widget = widget_of(&ui, id, "span_low");
     let _ = ui.app_mut().send(Message::Canvas(CanvasEvent::SetControl {
         module: id.0,
@@ -1792,7 +1792,7 @@ fn a_range_band_moves_both_and_a_double_click_resets() {
     assert!(low < 0.0 && high < 1.0, "both moved: {low}, {high}");
     assert!((high - low - 1.0).abs() < 1e-3, "the width stays: {}", high - low);
 
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     let (a, b) = (handle(&mut ui, id, "span_low"), handle(&mut ui, id, "span_high"));
     ui.move_to(a);
     ui.press();
@@ -1807,7 +1807,7 @@ fn a_range_band_moves_both_and_a_double_click_resets() {
     );
     assert_eq!(param_value(&ui, id, "span_high"), high);
 
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     ui.move_to(b);
     ui.press();
     ui.release();
@@ -1816,7 +1816,7 @@ fn a_range_band_moves_both_and_a_double_click_resets() {
     assert_eq!(param_value(&ui, id, "span_high"), 1.0, "high resets");
     assert_eq!(param_value(&ui, id, "span_low"), low, "low stays");
 
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     let middle = on_span(&mut ui, id, 0.7);
     let steps = ui.app().session.edits.history.len();
     ui.move_to(middle);
@@ -1998,7 +1998,7 @@ fn a_press_ends_the_inside_of_a_range() {
     let none = keyboard::Modifiers::default();
     ui.tap(keyboard::Key::Named(Named::Enter), none);
     ui.tap(keyboard::Key::Named(Named::Space), none);
-    std::thread::sleep(std::time::Duration::from_millis(450));
+    ui.wait(std::time::Duration::from_millis(450));
     focus_control(&mut ui, id, "span_low");
     let before = position_of(&ui, id, "span_low");
     ui.tap(keyboard::Key::Named(Named::ArrowRight), none);
@@ -2767,7 +2767,7 @@ fn a_paste_reads_the_clipboard_the_test_set() {
     let log = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
     assert!(
         log.iter()
-            .any(|message| matches!(message, Message::Pasted { text: Some(text), .. } if text == "drums")),
+            .any(|message| matches!(message, Message::Pasted { text: loom_ui::ClipboardText::Text(text), .. } if text == "drums")),
         "{log:?}"
     );
 }
@@ -3110,7 +3110,7 @@ fn a_capture_after_a_shrink_draws_the_last_frame_again() {
     let background = theme.palette().background;
     let size = crate::WINDOW;
     let mut built = UserInterface::build(app.view(), size, Cache::default(), &mut offscreen.renderer);
-    let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(std::time::Instant::now()));
+    let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(ui.now()));
     let _ = built.update(
         &[redraw],
         iced::mouse::Cursor::Unavailable,
@@ -3235,4 +3235,105 @@ fn a_relative_example_name_copies_inside_its_folder() {
     assert_eq!(std::fs::read(&real).unwrap(), before, "the example is unchanged");
     drop(ui);
     assert!(!folder.exists(), "and the folder goes with its Ui");
+}
+
+/// Opens the probe menu with a right-click on the first cable's output,
+/// while the inspector's cutoff field on module 4 has the keys: a right
+/// press leaves a text field focused.
+fn menu_over_a_focused_value_field(ui: &mut Ui) {
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.redraw();
+    let field = ui.value_field(4, 0);
+    ui.move_to(field);
+    ui.press();
+    ui.release();
+    ui.redraw();
+    assert!(ui.text_field_focused(), "the field has the keys");
+    let (from, _) = ui.app().session.controller.graph().cables().next().expect("a cable");
+    let name = ui
+        .app()
+        .session
+        .controller
+        .graph()
+        .node(from.module)
+        .expect("its module")
+        .descriptor
+        .outputs[from.port]
+        .name;
+    let out = ui.output(from.module.0, name);
+    ui.move_to(out);
+    ui.step(&[iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+        iced::mouse::Button::Right,
+    ))]);
+    ui.step(&[iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+        iced::mouse::Button::Right,
+    ))]);
+    ui.redraw();
+    assert!(ui.app().overlays.probe_menu().is_some(), "the menu is open");
+}
+
+/// Typing and Enter in an inspector field the probe menu covers change
+/// nothing: before the guard, "777" and Enter set the filter's cutoff from
+/// 300 to 777 under the open menu (found 2026-11-20). A field's messages
+/// are heard only while its view owns the input (`Message::field_view`).
+#[test]
+fn a_field_under_the_probe_menu_changes_nothing() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    let mut ui = Ui::open("subtractive.ron");
+    let cutoff = |ui: &Ui| {
+        ui.app()
+            .session
+            .controller
+            .graph()
+            .node(loom_core::ModuleId(4))
+            .expect("the filter")
+            .params[0]
+    };
+    let before = cutoff(&ui);
+    let unsaved = ui.app().unsaved();
+    menu_over_a_focused_value_field(&mut ui);
+    ui.typewrite("777");
+    ui.tap(Key::Named(Named::Enter), Modifiers::default());
+    ui.redraw();
+    assert_eq!(cutoff(&ui), before, "the patch is unchanged");
+    assert!(ui.app().session.value_draft.is_none(), "no draft under the menu");
+    assert_eq!(ui.app().unsaved(), unsaved, "nothing to save");
+}
+
+/// Typing in patch info's Authors field under the licence chooser, which a
+/// screen reader's Click on Choose opened with the field still focused,
+/// changes nothing (found 2026-11-20).
+#[test]
+fn a_field_under_the_licence_chooser_changes_nothing() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.focus(&crate::patch_info::authors_part());
+    ui.redraw();
+    let authors = |ui: &Ui| ui.app().session.document.info().authors.clone();
+    let before = authors(&ui);
+    let choose = crate::inspector::ids::part(&crate::inspector::ids::patch(), "choose_licence");
+    ui.a11y_action(&choose, accesskit::Action::Click);
+    ui.redraw();
+    assert!(ui.app().overlays.chooser.is_some(), "the chooser is open");
+    ui.typewrite("Zq");
+    ui.redraw();
+    assert_eq!(authors(&ui), before, "the authors are unchanged");
+}
+
+/// A field's messages still work in the view that owns the input: the
+/// same field, with nothing over the canvas, takes a value.
+#[test]
+fn a_field_in_the_view_that_owns_the_input_still_works() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.redraw();
+    ui.type_a_value(4, 0, "777");
+    let cutoff = ui
+        .app()
+        .session
+        .controller
+        .graph()
+        .node(loom_core::ModuleId(4))
+        .expect("the filter")
+        .params[0];
+    assert_eq!(cutoff, 777.0);
 }

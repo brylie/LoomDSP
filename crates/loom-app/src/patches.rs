@@ -11,6 +11,7 @@ use crate::style::{self, button};
 use crate::{DIM, files, recovery};
 use iced::widget::{checkbox, column, container, mouse_area, opaque, row, scrollable, space, text, text_input};
 use iced::{Length, Theme};
+use loom_canvas::iced_convert::ToIced as _;
 use loom_patch::Metadata;
 use loom_patch::metadata::{Filter, Licence, LicenceFilter, Prepared};
 use loom_ui::Effects;
@@ -33,8 +34,10 @@ pub(crate) fn text_fields() -> [UiId; 2] {
 const LIST: &str = "patch-browser-list";
 /// Height of one row. Fixed, so the list can scroll to a row.
 const ROW_HEIGHT: f32 = 46.0;
+/// Rows the list shows at once: one page, for Page Up and Page Down.
+const PAGE_ROWS: i32 = 10;
 /// Height of the list.
-const LIST_HEIGHT: f32 = 10.0 * ROW_HEIGHT;
+const LIST_HEIGHT: f32 = PAGE_ROWS as f32 * ROW_HEIGHT;
 /// Most rows sent to the UI at once. Each batch sorts the whole list again,
 /// so sending rows one by one costs more with every file in the folder.
 const BATCH_ROWS: usize = 32;
@@ -247,7 +250,7 @@ pub enum Message {
     Pick(usize),
     /// Enter: open the highlighted patch.
     Submit,
-    /// Up or Down.
+    /// Up or Down, by one row, or Page Up or Page Down, by a page.
     Step(i32),
     /// Escape, a click outside, or **Close**.
     Close,
@@ -736,14 +739,14 @@ impl PatchBrowser {
         let panel = container(panel)
             .padding(16)
             .width(720)
-            .style(container::rounded_box)
+            .style(crate::help::dialog_style)
             .id(crate::places::widget_id(&patches_id()));
         opaque(
             container(panel)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .center(Length::Fill)
-                .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
+                .style(|_| container::background(style::SCRIM.to_iced())),
         )
     }
 }
@@ -830,7 +833,7 @@ fn empty_line(rows: &[Row], shown: &[usize], folder: &Path) -> Option<String> {
 }
 
 /// The keys the open browser handles, whether or not a widget used them:
-/// Up, Down, and Escape (Your patches browser, Keys).
+/// Up, Down, Page Up, Page Down, and Escape (Your patches browser, Keys).
 pub(crate) fn key(
     event: iced::Event,
     _status: iced::event::Status,
@@ -843,6 +846,10 @@ pub(crate) fn key(
     let message = match key {
         Key::Named(Named::ArrowUp) => Message::Step(-1),
         Key::Named(Named::ArrowDown) => Message::Step(1),
+        // A page, as in the module browser (the WAI-ARIA list box
+        // pattern's optional keys).
+        Key::Named(Named::PageUp) => Message::Step(-PAGE_ROWS),
+        Key::Named(Named::PageDown) => Message::Step(PAGE_ROWS),
         Key::Named(Named::Escape) => Message::Close,
         _ => return None,
     };

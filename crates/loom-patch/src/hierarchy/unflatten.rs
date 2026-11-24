@@ -294,6 +294,26 @@ impl Hierarchy {
         })
     }
 
+    /// Whether the flat endpoints can be written together at a visible patch level.
+    pub fn can_save_assignment(&self, graph: &Graph, source: OutputRef, target: ModuleId, param: usize) -> bool {
+        let (Some(source_node), Some(target_node)) = (graph.node(source.module), graph.node(target)) else {
+            return false;
+        };
+        if source_node.output_name(source.port).is_none() || target_node.parameter_name(param).is_none() {
+            return false;
+        }
+        let assignment = loom_core::Assignment {
+            source,
+            target,
+            param,
+            depth: 0.0,
+            polarity: None,
+            enabled: true,
+        };
+        self.shown_assignment(graph, &assignment, &self.transient_ids())
+            .is_some()
+    }
+
     /// Resolves the file's visible endpoints through slots, ports, and mode outputs.
     fn shown_assignment(
         &self,

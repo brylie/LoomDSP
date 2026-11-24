@@ -156,3 +156,94 @@ fn a_round_clip_cuts_hits_square() {
     let layout = lay_out(root, 200.0, 100.0);
     assert_eq!(hit(&layout, 0.5, 0.5), "p/round/fill", "the corner, past its curve");
 }
+
+/// A link to the page `key`, named by `words`.
+fn link(words: &str, key: &str) -> crate::element::Inline {
+    use crate::access::{Access, Action, Role};
+    crate::element::Inline::new(words).link(key, Access::new(Role::Link, words).action(Action::Click))
+}
+
+/// A link inside a rich text is hit where its words are, and a point on
+/// the paragraph beside it hits the paragraph. The fake measure sets 8
+/// pixels a character, so "See " ends at 32 and "Saw" at 56.
+#[test]
+fn a_link_is_hit_where_its_words_are() {
+    use crate::element::Inline;
+    let notes = Element::rich(
+        [Inline::new("See "), link("Saw", "saw"), Inline::new(" too")],
+        crate::layout::tests::STYLE,
+    )
+    .key("notes");
+    let layout = lay_out(Element::column([notes]), 300.0, 100.0);
+    assert_eq!(hit(&layout, 40.0, 8.0), "p/notes/saw");
+    assert_eq!(hit(&layout, 10.0, 8.0), "p/notes");
+    assert_eq!(hit(&layout, 60.0, 8.0), "p/notes");
+}
+
+/// A measure that sets text as [`Mono`] does, but puts every range on two
+/// lines, as a wrap would: the first half at the end of the first line,
+/// the rest at the start of the second.
+struct Wrapping(Mono);
+
+impl loom_ui_core::TextMeasure for Wrapping {
+    fn measure(&mut self, text: &str, style: loom_ui_core::TextStyle, wrap_width: Option<f32>) -> Size {
+        self.0.measure(text, style, wrap_width)
+    }
+
+    fn span_rects(
+        &mut self,
+        _text: &str,
+        _spans: &[loom_ui_core::Span],
+        _style: loom_ui_core::TextStyle,
+        _wrap_width: Option<f32>,
+        _range: std::ops::Range<usize>,
+    ) -> Vec<loom_ui_core::Rect> {
+        use loom_ui_core::Rect;
+        vec![
+            Rect::new(Point::new(80.0, 0.0), Size::new(20.0, 16.0)),
+            Rect::new(Point::new(0.0, 16.0), Size::new(20.0, 16.0)),
+        ]
+    }
+}
+
+/// A link that wraps is hit on both of its lines and not between them,
+/// where the paragraph's other words are, and its bounds hold both.
+#[test]
+fn a_wrapped_link_is_hit_on_each_line_only() {
+    use crate::element::Inline;
+    let notes = Element::rich(
+        [Inline::new("before "), link("Saw", "saw")],
+        crate::layout::tests::STYLE,
+    )
+    .key("notes")
+    .width(Length::Fixed(100.0));
+    let mut layout = Layout::new(UiId::panel("p"));
+    layout.rebuild(Element::column([notes]));
+    layout.compute(Size::new(300.0, 100.0), &mut Wrapping(Mono::default()));
+    assert_eq!(hit(&layout, 90.0, 8.0), "p/notes/saw", "its first line");
+    assert_eq!(hit(&layout, 10.0, 24.0), "p/notes/saw", "its second line");
+    assert_eq!(hit(&layout, 10.0, 8.0), "p/notes", "the words before it");
+    let bounds = layout.bounds(&id("notes/saw")).expect("laid out");
+    assert_eq!(
+        bounds,
+        loom_ui_core::Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 32.0))
+    );
+    assert_eq!(layout.pieces(&id("notes/saw")).len(), 2);
+}
+
+/// A link in a text with no key is keyed under the element around it, and
+/// a clip around the text cuts its hits as it cuts the text.
+#[test]
+fn a_link_takes_its_scope_and_its_clip() {
+    use crate::element::Inline;
+    let notes = Element::rich(
+        [Inline::new("0123456789 "), link("Saw", "saw")],
+        crate::layout::tests::STYLE,
+    );
+    let clipped = Element::column([notes]).key("box").width(Length::Fixed(100.0)).clip();
+    let layout = lay_out(Element::column([clipped]), 300.0, 100.0);
+    // "0123456789 " is 88 pixels, so the link runs from 88 to 112 on one
+    // line (the fake's default rectangles do not wrap), past the clip.
+    assert_eq!(hit(&layout, 92.0, 8.0), "p/box/saw");
+    assert_eq!(hit(&layout, 104.0, 8.0), "nothing", "cut away by the clip");
+}

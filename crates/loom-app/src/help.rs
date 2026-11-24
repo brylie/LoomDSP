@@ -1,13 +1,10 @@
 //! Offline module help from the running registry and bundled notes.
 
-use crate::Element;
-use crate::style::{self, button};
-use iced::widget::{column, container, markdown, row, scrollable, space, text};
-use iced::{Length, Theme};
+use crate::style;
+use iced::Theme;
+use iced::widget::container;
 use loom_core::{ModuleDescriptor, Registry, RoleDescriptor, RolePort};
 use serde::Serialize;
-
-use crate::Message;
 
 include!(concat!(env!("OUT_DIR"), "/help_pages.rs"));
 
@@ -36,6 +33,14 @@ pub struct Model {
     pub params: Vec<Entry>,
     pub notes: String,
     pub example: Option<String>,
+    /// The notes before the example section, parsed: what the view shows
+    /// and the accessibility tree reads. Left out of the snapshot, which
+    /// has the notes as written.
+    #[serde(skip)]
+    pub(crate) lead: Vec<markdown::Block>,
+    /// The example section and what follows it, parsed.
+    #[serde(skip)]
+    pub(crate) tail: Vec<markdown::Block>,
 }
 
 impl Model {
@@ -49,18 +54,25 @@ impl Model {
     }
 }
 
-/// The open overlay and its parsed Markdown: the notes before the
-/// example, and the example section with what follows it.
+/// The open overlay: its model, with the notes parsed into blocks, which
+/// its panel draws and the accessibility tree reads (`help/panel.rs`).
 pub struct Help {
     pub model: Model,
-    lead: Vec<markdown::Item>,
-    tail: Vec<markdown::Item>,
 }
 
 /// Where the hand-written notes' example section starts. The overlay shows
 /// the reference sections between the notes and the example
 /// (help-pages.md, In the app).
 pub(crate) const EXAMPLE_HEADING: &str = "\n## Example";
+
+/// The notes before the example section, and the section with what follows
+/// it.
+fn split_example(notes: &str) -> (&str, &str) {
+    match notes.find(EXAMPLE_HEADING) {
+        Some(at) => notes.split_at(at),
+        None => (notes, ""),
+    }
+}
 
 impl Help {
     /// Builds the view from the actual registry descriptor.
@@ -120,6 +132,8 @@ impl Help {
                 .collect(),
             notes: notes.clone(),
             example,
+            lead: Vec::new(),
+            tail: Vec::new(),
         };
         Self::from_model(model)
     }
@@ -169,6 +183,8 @@ impl Help {
                 .collect(),
             notes,
             example: None,
+            lead: Vec::new(),
+            tail: Vec::new(),
         })
     }
 
@@ -192,102 +208,30 @@ impl Help {
             params: Vec::new(),
             notes,
             example: None,
+            lead: Vec::new(),
+            tail: Vec::new(),
         })
     }
 
-    /// Parses the notes, split before the example section.
-    fn from_model(model: Model) -> Self {
-        let (lead, tail) = match model.notes.find(EXAMPLE_HEADING) {
-            Some(at) => model.notes.split_at(at),
-            None => (model.notes.as_str(), ""),
-        };
-        Self {
-            lead: markdown::parse(lead).collect(),
-            tail: markdown::parse(tail).collect(),
-            model,
-        }
+    /// Parses the notes once, split before the example section.
+    fn from_model(mut model: Model) -> Self {
+        let (lead, tail) = split_example(&model.notes);
+        model.lead = markdown::parse(lead).blocks;
+        model.tail = markdown::parse(tail).blocks;
+        Self { model }
     }
+}
 
-    /// Draws the overlay from the same model exposed to snapshots: a fixed
-    /// title row, then one scrolling body in reading order (summary, notes,
-    /// Parameters, Inputs, Outputs, example), over a dimmed backdrop that
-    /// closes help when clicked.
-    pub fn view(&self, theme: Theme) -> Element<'_, Message> {
-        let m = &self.model;
-        let header = row![
-            text(m.name).size(style::TITLE),
-            space::horizontal(),
-            crate::inspector::ids::named(
-                &crate::overlays::access::help_id().with("close"),
-                button(text("Close").size(style::CONTROL)).on_press(Message::CloseHelp),
-            )
-        ]
-        .align_y(iced::Alignment::Center);
-        let mut content = column![].spacing(12).width(Length::Fill);
-        if !m.id.is_empty() {
-            content = content.push(text(m.summary()).size(style::SMALL).color(style::QUIET));
-            content = content.push(text(m.description).size(style::BODY));
-        }
-        content = content.push(markdown::view(&self.lead, style::markdown(&theme)).map(Message::HelpLink));
-        for (title, entries) in [
-            ("Parameters", &m.params),
-            ("Inputs", &m.inputs),
-            ("Outputs", &m.outputs),
-        ] {
-            if m.id.is_empty() {
-                break;
-            }
-            content = content.push(text(title).size(style::HEADING));
-            if entries.is_empty() {
-                content = content.push(text("None.").size(style::BODY).color(style::QUIET));
-            }
-            for entry in entries {
-                content = content.push(
-                    column![
-                        text(entry.label).size(style::CONTROL),
-                        text(entry.details.clone()).size(style::SMALL).color(style::QUIET),
-                        text(entry.description).size(style::BODY),
-                    ]
-                    .spacing(2),
-                );
-            }
-        }
-        if m.example.is_some() {
-            content = content.push(crate::inspector::ids::named(
-                &crate::overlays::access::help_id().with("example"),
-                button(text("Open example").size(style::CONTROL)).on_press(Message::HelpExample),
-            ));
-        }
-        content = content.push(markdown::view(&self.tail, style::markdown(&theme)).map(Message::HelpLink));
-        let panel = container(
-            column![
-                header,
-                // The scrollbar takes its own space, so text wraps before it
-                // instead of running under it.
-                scrollable(content)
-                    .id("module-help-content")
-                    .spacing(10)
-                    .height(Length::Fill)
-            ]
-            .spacing(12),
-        )
-        .padding(20)
-        .width(Length::Fill)
-        .max_width(720)
-        .height(Length::Fill)
-        .style(container::rounded_box);
-        // The panel takes its own clicks; the backdrop around it closes help.
-        // The panel is named by its UI ID, so the window says where it is.
-        let panel = crate::inspector::ids::named(&crate::overlays::access::help_id(), panel);
-        let backdrop = container(iced::widget::opaque(panel))
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .padding(30)
-            .style(|_: &Theme| container::Style {
-                background: Some(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.55).into()),
-                ..container::Style::default()
-            });
-        iced::widget::mouse_area(backdrop).on_press(Message::CloseHelp).into()
+/// The dialog's panel, from the style token (`style::dialog`), which
+/// `loom-ui`'s panels take too. Your patches uses it as well.
+pub(crate) fn dialog_style(theme: &Theme) -> container::Style {
+    use loom_canvas::iced_convert::ToIced as _;
+    let look = style::dialog(theme);
+    container::Style {
+        background: Some(look.fill.to_iced().into()),
+        text_color: Some(look.text.to_iced()),
+        border: iced::border::rounded(look.radius),
+        ..container::Style::default()
     }
 }
 
@@ -310,6 +254,9 @@ impl crate::App {
         controller.graph().node(id).map(|node| Help::new(node.descriptor))
     }
 }
+
+pub(crate) mod markdown;
+mod panel;
 
 #[cfg(test)]
 mod tests;

@@ -58,6 +58,8 @@
 
 pub mod access;
 mod app;
+#[cfg(feature = "clipboard")]
+pub mod clipboard;
 mod draw;
 mod driver;
 pub mod effect;
@@ -73,8 +75,10 @@ pub mod paint;
 mod pointer;
 mod routing;
 mod runtime;
+mod select;
 #[cfg(feature = "shell")]
 pub mod shell;
+mod slider;
 mod still;
 mod view;
 mod waker;
@@ -83,8 +87,8 @@ mod window;
 pub use app::{App, Context, Deadline, InputState, TabStep, WindowSpec};
 pub use draw::Panels;
 pub use driver::{Driver, Paste};
-pub use effect::{Effect, Effects};
-pub use element::{Align, Element, Length, Looks, Padding, StateLook};
+pub use effect::{ClipboardText, Effect, Effects};
+pub use element::{Align, Element, Inline, Length, Looks, Padding, Placement, ScrollStyle, ShadowStyle, StateLook};
 pub use event::{AccessEvent, DriverEvent, Ime, WindowEvent, WindowState};
 pub use field::FieldEvent;
 pub use focus::{AccessNodes, FocusStep, RingStyle};
@@ -94,6 +98,8 @@ pub use layout::Layout;
 pub use pointer::Heard;
 pub use routing::{NO_ELEMENTS, NoTarget, Routed, Target};
 pub use runtime::{Counts, Next, Runtime};
+pub use select::{Select, SelectStyle};
+pub use slider::{Drag, Fill, SlidePhase, Slider};
 pub use still::Still;
 pub use view::{Layer, View};
 pub use waker::{Wake, Waker};

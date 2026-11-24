@@ -123,6 +123,20 @@ impl iced::advanced::widget::Operation<FocusAnswer> for FindFocus {
     }
 }
 
+/// The task that answers `question`, given `field`, the runtime's text
+/// field that has focus, if one has: a focus question is then answered at
+/// once with that field, since Iced's own focus is not on it, so Tab from a
+/// field, the clipboard keys, and a script's typing see the field whichever
+/// toolkit draws it. Every other question, and a focus question with no
+/// runtime field focused, is asked of Iced. Shared by the bridge and the
+/// window.
+pub(crate) fn answer_task(question: WindowQuestion, field: Option<&UiId>) -> Task<Message> {
+    match (question, field) {
+        (WindowQuestion::Focus(reply), Some(field)) => Task::done(reply(Some(field.clone()))),
+        (question, _) => question_task(question),
+    }
+}
+
 /// The Iced task that asks a window question and hands its answer to the
 /// app on a later turn, in the order asked. Shared by the bridge and the
 /// `Ui` harness.
@@ -212,6 +226,9 @@ pub(crate) struct TestPanels {
     /// The element a message moves the focus to, by a focus effect after
     /// the app's own, as one of the app's panels would ask.
     pub(crate) focuses: fn(&Message) -> Option<UiId>,
+    /// The message for an event on one of their text fields, as a view's
+    /// own mapping gives it (`runtime_fields.rs`).
+    pub(crate) fields: fn(&UiId, &loom_ui::FieldEvent) -> Option<Message>,
 }
 
 #[cfg(any(test, feature = "test-ui"))]
@@ -235,6 +252,11 @@ impl Extra {
             .and_then(|panels| (panels.focuses)(message))
             .map_or_else(Effects::none, Effects::focus)
     }
+
+    /// The message for an event on a test panel's text field.
+    fn field_event(&self, id: &UiId, event: &loom_ui::FieldEvent) -> Option<Message> {
+        self.panels.as_ref().and_then(|panels| (panels.fields)(id, event))
+    }
 }
 
 #[cfg(not(any(test, feature = "test-ui")))]
@@ -250,6 +272,11 @@ impl Extra {
     /// No effects of its own outside tests.
     fn answer(&self, _message: &Message) -> Effects<Message> {
         Effects::none()
+    }
+
+    /// No fields of its own outside tests.
+    fn field_event(&self, _id: &UiId, _event: &loom_ui::FieldEvent) -> Option<Message> {
+        None
     }
 }
 
@@ -287,6 +314,9 @@ impl loom_ui::App for Hosted {
             .toolbar_click(id)
             .or_else(|| self.0.breadcrumb_click(id))
             .or_else(|| self.0.bar_click(id))
+            .or_else(|| self.0.question_click(id))
+            .or_else(|| self.0.help_click(id))
+            .or_else(|| self.0.menu_click(id))
             .or_else(|| self.2.clicked(id))
     }
 
@@ -314,6 +344,40 @@ impl loom_ui::App for Hosted {
             max_width: 480.0,
             gap: 0.0,
         }
+    }
+
+    /// An edit or an Enter on one of the runtime's text fields, as that
+    /// field's own message (`runtime_fields.rs`), or a test panel's.
+    fn field_event(&self, id: &UiId, event: &loom_ui::FieldEvent) -> Option<Message> {
+        self.0
+            .field_message(id, event)
+            .or_else(|| self.2.field_event(id, event))
+    }
+
+    /// The UI ID the node `node` names, from the tree's own table, so the
+    /// runtime carries out a screen reader's text actions on its fields.
+    fn access_target(&self, node: accesskit::NodeId) -> Option<UiId> {
+        self.0.a11y_ui_id(node)
+    }
+
+    /// What a field reports to a screen reader changed: the tree is built
+    /// again, only while a screen reader listens, so it costs nothing else.
+    fn access_changed(&self) -> Option<Message> {
+        self.0
+            .a11y
+            .is_active()
+            .then_some(Message::A11y(crate::a11y::Event::FieldChanged))
+    }
+
+    /// A key press under an open question, which the runtime keeps from
+    /// Iced: the question's keys and Panic (`question::key_of`).
+    fn question_key(&self, key: &loom_ui_core::KeyEvent) -> Option<Message> {
+        crate::question::key_of(key)
+    }
+
+    /// A press outside the probe menu or Recent closes it (row 3b).
+    fn pressed_outside(&self, root: &UiId) -> Option<Message> {
+        self.0.menu_pressed_outside(root)
     }
 
     /// The runtime's focus moved: the app keeps one copy of what has the
@@ -478,7 +542,7 @@ impl<D: BridgeDriver> Bridge<D> {
         &mut self,
         run: impl FnOnce(&mut Runtime<Hosted, IcedTarget>, Instant, &mut D) -> loom_ui::Next,
     ) -> Task<Bridged> {
-        let now = Instant::now();
+        let now = self.runtime.app().0.clock.now();
         let next = run(&mut self.runtime, now, &mut self.driver);
         let mut tasks = self.driver.take_tasks();
         // The window's work, one after another: focus and scroll first,
@@ -487,8 +551,9 @@ impl<D: BridgeDriver> Bridge<D> {
         // batch's tasks side by side, so a question batched beside a scroll
         // could read the window from before it.
         let mut window = Task::batch(self.runtime.target_mut().take_tasks());
+        let field = self.runtime.focused_field().cloned();
         for question in self.runtime.app().0.take_window_questions() {
-            window = window.chain(question_task(question).map(Bridged::App));
+            window = window.chain(answer_task(question, field.as_ref()).map(Bridged::App));
         }
         if self.runtime.app().0.take_focus_question() {
             window = window.chain(focus_query(Bridged::Focus));
@@ -856,4 +921,4 @@ pub(crate) use services::AppServices;
 pub(crate) type AppBridge = Bridge<headless::UiDriver>;
 #[cfg(test)]
 use services::choice;
-pub(crate) use window::{SharedClipboard, WindowLayers};
+pub(crate) use window::WindowLayers;

@@ -2120,11 +2120,8 @@ fn frame_nodes_are_hidden_below_a_panel() {
     for id in [tree::toolbar_id(), tree::tabs_id(), tree::toolbar_id().with("undo")] {
         assert!(node(&update, node_of(ui.app_mut(), &id)).is_hidden(), "{id}");
     }
-    assert!(!ui_act(
-        &mut ui,
-        &request(Action::Click, add, None),
-        std::time::Instant::now()
-    ));
+    let ui_now = ui.now();
+    assert!(!ui_act(&mut ui, &request(Action::Click, add, None), ui_now));
 }
 
 /// The audio watcher's reading is a live value: it asks for no build, and
@@ -2278,11 +2275,8 @@ fn the_tree_follows_the_pointer_under_every_panel() {
         }
         let knob_node = widget_node(ui.app_mut(), module, knob);
         let before = cutoff(&ui);
-        let sent = ui_act(
-            &mut ui,
-            &request(Action::Increment, knob_node, None),
-            std::time::Instant::now(),
-        );
+        let now = ui.now();
+        let sent = ui_act(&mut ui, &request(Action::Increment, knob_node, None), now);
         assert_eq!(sent, open, "{owner:?}: Increment on a tile's knob");
         assert_eq!(
             (cutoff(&ui) - before).abs() > 1e-6,
@@ -2299,11 +2293,8 @@ fn the_tree_follows_the_pointer_under_every_panel() {
             !open,
             "{owner:?}: the inspector"
         );
-        let clicked = ui_act(
-            &mut ui,
-            &request(Action::Click, shortcuts_node, None),
-            std::time::Instant::now(),
-        );
+        let now = ui.now();
+        let clicked = ui_act(&mut ui, &request(Action::Click, shortcuts_node, None), now);
         assert_eq!(clicked, open, "{owner:?}: a Click in the inspector");
         if open {
             // The overlay it opened is closed again, so the knob below is
@@ -2398,10 +2389,8 @@ fn every_inspector_part_is_named_and_placed() {
                 Kind::List => Role::List,
                 Kind::ListItem => Role::ListItem,
                 Kind::Dialog => Role::Dialog,
-                Kind::AlertDialog => Role::AlertDialog,
                 Kind::Menu => Role::Menu,
                 Kind::MenuItem => Role::MenuItem,
-                Kind::Link => Role::Link,
                 Kind::ListBox => Role::ListBox,
                 Kind::ListBoxOption => Role::ListBoxOption,
             };
@@ -2509,7 +2498,7 @@ fn an_inspector_slider_steps_as_its_own_arrow_key_and_groups() {
     let steps = ui.app().session.edits.history.len();
     let before = position(ui.app());
     let node_id = node_of(ui.app_mut(), &slider_id);
-    let at = std::time::Instant::now();
+    let at = ui.now();
     ui_act(&mut ui, &request(Action::Increment, node_id, None), at);
     ui_act(&mut ui, &request(Action::Increment, node_id, None), at);
     let step = crate::param::slider_step(&spec);
@@ -2625,11 +2614,8 @@ fn an_inspector_option_click_chooses_it() {
         .clone();
     let target = node_of(ui.app_mut(), &other.id);
     assert_eq!(node(&update, target).role(), Role::RadioButton);
-    ui_act(
-        &mut ui,
-        &request(Action::Click, target, None),
-        std::time::Instant::now(),
-    );
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::Click, target, None), ui_now);
     let (_, update, _) = inspector_of(&mut ui, &[module]);
     assert_eq!(node(&update, target).toggled(), Some(accesskit::Toggled::True));
 }
@@ -2905,7 +2891,7 @@ fn the_inspector_slider_steps_a_tenth_of_the_tile_knob_until_phase_3() {
     let spec = ui.app().control_target(module, knob, ControlPart::Main).unwrap().spec;
     let position =
         |app: &App| spec.normalize(app.session.controller.graph().node(ModuleId(module)).unwrap().params[index]);
-    let at = std::time::Instant::now();
+    let at = ui.now();
     let mut moved = Vec::new();
     for target in ["inspector", "tile"] {
         ui.send(Message::Inspector(crate::inspector::Message::Param {
@@ -3120,7 +3106,7 @@ fn a_matrix_source_step_skips_a_taken_pair_and_is_its_own_undo_step() {
     let steps = ui.app().session.edits.history.len();
     let source = crate::matrix::access::cell(id, crate::matrix::Column::Source);
     let target = node_of(ui.app_mut(), &source);
-    let at = std::time::Instant::now();
+    let at = ui.now();
     ui_act(&mut ui, &request(Action::Increment, target, None), at);
     let moved = ui
         .app()
@@ -3195,11 +3181,8 @@ fn a_matrix_step_with_nothing_allowed_does_nothing() {
     let source = crate::matrix::access::cell(id, crate::matrix::Column::Source);
     let _ = matrix_tree(&mut ui);
     let node_id = node_of(ui.app_mut(), &source);
-    ui_act(
-        &mut ui,
-        &request(Action::Decrement, node_id, None),
-        std::time::Instant::now(),
-    );
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::Decrement, node_id, None), ui_now);
     assert_eq!(ui.app().session.edits.history.len(), steps);
     assert_eq!(ui.app().alerts.status(), status, "nothing is said");
 }
@@ -3222,7 +3205,7 @@ fn a_matrix_depth_is_a_slider_in_percent_that_groups() {
     assert_eq!(found.numeric_value_step(), Some(1.0));
     let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
     let steps = ui.app().session.edits.history.len();
-    let at = std::time::Instant::now();
+    let at = ui.now();
     ui_act(
         &mut ui,
         &request(Action::SetValue, slider, Some(ActionData::NumericValue(40.0))),
@@ -3253,10 +3236,11 @@ fn the_matrix_filter_takes_text_and_focus() {
     let found = node(&update, node_id);
     assert_eq!(found.role(), Role::TextInput);
     assert!(found.supports_action(Action::Focus) && found.supports_action(Action::SetValue));
+    let ui_now = ui.now();
     ui_act(
         &mut ui,
         &request(Action::SetValue, node_id, Some(ActionData::Value("lfo".into()))),
-        std::time::Instant::now(),
+        ui_now,
     );
     assert_eq!(ui.app().session.matrix.filter, "lfo");
     let (_, update) = matrix_tree(&mut ui);
@@ -3436,7 +3420,8 @@ fn a_screen_reader_target_step_follows_a_renumbered_row_inside_a_sub_patch() {
         let cell = access::cell(id, Column::Target);
         let node = node_of(ui.app_mut(), &cell);
         let action = if forward { Action::Increment } else { Action::Decrement };
-        ui_act(&mut ui, &request(action, node, None), std::time::Instant::now());
+        let ui_now = ui.now();
+        ui_act(&mut ui, &request(action, node, None), ui_now);
         steps += 1;
         assert_ne!(
             ui.app().alerts.severity(),
@@ -3490,7 +3475,7 @@ fn a_matrix_depth_steps_onto_the_percent_grid() {
     let _ = matrix_tree(&mut ui);
     let slider = node_of(ui.app_mut(), &depth_id);
     let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
-    let at = std::time::Instant::now();
+    let at = ui.now();
     ui_act(&mut ui, &request(Action::Increment, slider, None), at);
     assert!((depth(ui.app()) - 0.31).abs() < 1e-6, "{}", depth(ui.app()));
     for _ in 0..19 {
@@ -3532,7 +3517,7 @@ fn an_inspector_depth_steps_onto_the_percent_grid() {
     );
     let slider = node_of(ui.app_mut(), &depth_id);
     let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
-    let at = std::time::Instant::now();
+    let at = ui.now();
     ui_act(&mut ui, &request(Action::Increment, slider, None), at);
     assert!((depth(ui.app()) - 0.31).abs() < 1e-6, "{}", depth(ui.app()));
     for _ in 0..19 {
@@ -3622,6 +3607,36 @@ fn every_small_overlay_part_is_named_and_placed() {
         let places = ui.places();
         let update = ui.app_mut().a11y_tree(&places);
         let frames = ui.app().a11y_frames();
+        // The probe menu and Recent are the runtime's (row 3b): their nodes
+        // come from their panels, placed by the runtime's layout.
+        if let Some((role, label, id)) = frames.ours_overlay.clone() {
+            assert!(frames.overlay.is_empty(), "{name}: reported once");
+            let root_node = node(&update, node_of(ui.app_mut(), &id));
+            assert!(!root_node.is_hidden(), "{name}: the overlay is not hidden");
+            assert!(root_node.is_modal(), "{name}: it owns the input");
+            assert_eq!(root_node.role(), role, "{name}");
+            assert!(!label.is_empty(), "{name}: it has a name");
+            let stops = ui.app().our_stops();
+            let items: Vec<_> = stops.iter().filter(|stop| stop.is_under(&id)).collect();
+            assert!(!items.is_empty(), "{name}: something acts");
+            for item in items {
+                let found = node(&update, node_of(ui.app_mut(), item));
+                assert!(!found.is_hidden(), "{name}: {item} is not hidden");
+                assert!(
+                    found.label().is_some_and(|text| !text.is_empty()),
+                    "{name}: {item} has a name"
+                );
+                let at = ui
+                    .runtime()
+                    .bounds(item)
+                    .unwrap_or_else(|| panic!("{name}: {item} is laid out"));
+                assert!(at.width > 0.0 && at.height > 0.0, "{item}");
+                assert!(found.bounds().is_some(), "{item} has bounds");
+            }
+            let panic = node(&update, node_of(ui.app_mut(), &tree::toolbar_id().with("panic")));
+            assert!(panic.is_hidden(), "{name}: what it covers stays hidden");
+            continue;
+        }
         assert_eq!(frames.overlay.len(), 1, "{name}: one overlay is reported");
         let root = &frames.overlay[0];
         let root_node = node(&update, node_of(ui.app_mut(), &root.id));
@@ -3647,7 +3662,7 @@ fn every_small_overlay_part_is_named_and_placed() {
                 "{name}: {} has a name",
                 item.id
             );
-            if item.click.is_none() || item.kind == Kind::Link {
+            if item.click.is_none() {
                 continue;
             }
             acting += 1;
@@ -3675,6 +3690,9 @@ fn a_menu_highlight_is_moved_by_keys_and_reported_as_focus() {
         .unwrap();
     let focus = |ui: &mut crate::ui_test::Ui| {
         let _ = ui.redraw();
+        // The probe menu is the runtime's (row 3b): its focus is in the
+        // runtime's nodes.
+        ui.read_runtime_nodes();
         let places = ui.places();
         let update = ui.app_mut().a11y_tree(&places);
         ui.app().a11y.ids.id(update.focus.0).cloned()
@@ -3729,29 +3747,94 @@ fn a_menu_item_is_picked_by_a_screen_reader() {
 #[test]
 fn the_question_reports_its_highlight_and_takes_a_screen_reader_answer() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    ui.app_mut().overlays.question = Some(crate::question::Question::discard(
-        "Patch".to_string(),
-        crate::question::AfterDiscard::New,
-    ));
+    // Opened as the app opens it, so it takes the focus to its safe
+    // answer (row 3b): New with a change not saved.
+    ui.app_mut().edit(|app| {
+        app.session.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+    });
+    ui.send(Message::File(crate::FileAction::New));
     let _ = ui.redraw();
-    let places = ui.places();
-    let update = ui.app_mut().a11y_tree(&places);
-    let model = ui.app().overlays.question.as_ref().unwrap().model();
+    let model = ui.app().overlays.question.as_ref().expect("New asks").model();
+    let tree = ui.a11y_tree();
     assert_eq!(
-        ui.app().a11y.ids.id(update.focus.0),
+        tree.focused().ui_id(),
         Some(&crate::overlays::access::answer_id(model.highlight)),
         "focus is on the highlighted answer"
     );
-    let root = node(&update, node_of(ui.app_mut(), &crate::overlays::access::question_id()));
+    let root = tree.node_by_id(&crate::overlays::access::question_id());
     assert_eq!(root.role(), Role::AlertDialog);
+    assert_eq!(root.name(), Some(model.title.as_str()));
     // The sentence is heard as a text's value, not as a description a
     // screen reader may never say.
     assert_eq!(root.description(), None);
-    let text = node_of(ui.app_mut(), &crate::overlays::access::question_id().with("text"));
-    assert_eq!(node(&update, text).value(), Some(model.text.as_str()));
+    let text = tree.node_by_id(&crate::overlays::access::question_id().with("text"));
+    assert_eq!(text.value(), Some(model.text.as_str()));
     let cancel = node_of(ui.app_mut(), &crate::overlays::access::answer_id("cancel"));
     ui.send(Message::A11y(Event::Action(request(Action::Click, cancel, None))));
     assert!(ui.app().overlays.question.is_none(), "Cancel answered it");
+}
+
+/// A question that opens over a focused Outline row takes the focus a
+/// screen reader hears: the row is covered, so the safe answer has it.
+#[test]
+fn the_question_has_focus_over_a_focused_outline_row() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Outline)));
+    let _ = ui.redraw();
+    assert!(
+        ui.app().a11y_frames().focused_item.is_some(),
+        "a row has the panel's focus"
+    );
+    ui.app_mut().edit(|app| {
+        app.session.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+    });
+    ui.send(Message::File(crate::FileAction::New));
+    let _ = ui.redraw();
+    let model = ui.app().overlays.question.as_ref().expect("New asks").model();
+    assert_eq!(
+        ui.a11y_tree().focused().ui_id(),
+        Some(&crate::overlays::access::answer_id(model.highlight)),
+        "focus is on the safe answer, not the covered row"
+    );
+}
+
+/// A runtime menu under help or a question is covered: it is not reported,
+/// and a screen reader's Click on one of its items does nothing.
+#[test]
+fn a_covered_runtime_menu_is_not_reported_and_refuses_a_click() {
+    for cover in ["help", "question"] {
+        let (_, mut ui) = with_each_small_overlay()
+            .into_iter()
+            .find(|(name, _)| *name == "probe menu")
+            .unwrap();
+        if cover == "help" {
+            ui.app_mut().overlays.help = Some(crate::help::Help::shortcuts());
+        } else {
+            ui.app_mut().edit(|app| {
+                app.session.controller.add_module("loom.osc.sine").unwrap();
+                app.commit();
+            });
+            ui.send(Message::File(crate::FileAction::New));
+            assert!(ui.app().overlays.question.is_some(), "New asks");
+        }
+        let _ = ui.redraw();
+        let tree = ui.a11y_tree();
+        let meter = crate::menus::probe_id().with("meter");
+        assert!(
+            !tree.has_part_under(&crate::menus::probe_id()),
+            "under {cover}, the probe menu is not in the tree"
+        );
+        let node = node_of(ui.app_mut(), &meter);
+        let modules = ui.app().session.controller.graph().nodes().count();
+        ui.send(Message::A11y(Event::Action(request(Action::Click, node, None))));
+        assert_eq!(
+            ui.app().session.controller.graph().nodes().count(),
+            modules,
+            "under {cover}, the click added no meter"
+        );
+    }
 }
 
 /// While help is open over a menu's level, only help is reported: an
@@ -3767,8 +3850,13 @@ fn only_the_overlay_that_owns_the_input_is_reported() {
     ui.app_mut().overlays.help = Some(crate::help::Help::shortcuts());
     let _ = ui.redraw();
     let frames = ui.app().a11y_frames();
-    assert_eq!(frames.overlay.len(), 1);
-    assert_eq!(frames.overlay[0].id, crate::overlays::access::help_id());
+    // Help is the runtime's (row 6): its nodes come from its panel, and the
+    // menu under it gives none.
+    assert!(frames.overlay.is_empty(), "no overlay of Iced's is reported");
+    assert_eq!(
+        frames.ours_overlay.map(|(_, _, id)| id),
+        Some(crate::overlays::access::help_id())
+    );
 }
 
 /// The menu key opens the selected tile's menu with the pointer anywhere,
@@ -4244,11 +4332,8 @@ fn a_click_on_a_browser_option_adds_its_module() {
     let before = ui.app().ui_snapshot().tiles.len();
     let _ = ui.places();
     let option = browser_option(&mut ui, 0);
-    ui_act(
-        &mut ui,
-        &request(Action::Click, option, None),
-        std::time::Instant::now(),
-    );
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::Click, option, None), ui_now);
     assert!(ui.app().overlays.browser().is_none(), "the browser closed");
     assert_eq!(ui.app().ui_snapshot().tiles.len(), before + 1);
 }
@@ -4276,11 +4361,8 @@ fn show_context_menu_on_a_library_row_opens_its_menu() {
     assert!(!node(&update, module).supports_action(Action::ShowContextMenu));
     let option = browser_option(&mut ui, row);
     assert!(node(&update, option).supports_action(Action::ShowContextMenu));
-    ui_act(
-        &mut ui,
-        &request(Action::ShowContextMenu, option, None),
-        std::time::Instant::now(),
-    );
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::ShowContextMenu, option, None), ui_now);
     let _ = ui.redraw();
     let places = ui.places();
     let update = ui.app_mut().a11y_tree(&places);
@@ -4291,7 +4373,8 @@ fn show_context_menu_on_a_library_row_opens_its_menu() {
     assert!(places.of(&crate::browser::insert_linked_id(&id)).is_some());
 
     let before = ui.app().ui_snapshot().tiles.len();
-    ui_act(&mut ui, &request(Action::Click, item, None), std::time::Instant::now());
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::Click, item, None), ui_now);
     assert_eq!(ui.app().ui_snapshot().tiles.len(), before + 1, "inserted");
     assert!(ui.app().overlays.browser().is_none());
 }
@@ -4311,11 +4394,8 @@ fn help_over_the_browser_hides_it() {
     let update = ui.app_mut().a11y_tree(&places);
     assert!(update.nodes.iter().all(|(id, _)| *id != option), "not reported");
     let tiles = ui.app().ui_snapshot().tiles.len();
-    ui_act(
-        &mut ui,
-        &request(Action::Click, option, None),
-        std::time::Instant::now(),
-    );
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::Click, option, None), ui_now);
     assert_eq!(ui.app().ui_snapshot().tiles.len(), tiles, "inert");
 }
 
@@ -4614,11 +4694,8 @@ fn an_overlay_edit_is_one_undo_step() {
     let steps = ui.app().session.edits.history.len();
     let _ = ui.places();
     let option = browser_option(&mut ui, 0);
-    ui_act(
-        &mut ui,
-        &request(Action::Click, option, None),
-        std::time::Instant::now(),
-    );
+    let ui_now = ui.now();
+    ui_act(&mut ui, &request(Action::Click, option, None), ui_now);
     assert_eq!(ui.app().ui_snapshot().tiles.len(), before + 1);
     assert_eq!(ui.app().session.edits.history.len(), steps + 1, "one step");
     let _ = ui.app_mut().send(Message::Undo);

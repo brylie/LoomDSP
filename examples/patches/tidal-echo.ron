@@ -1,0 +1,72 @@
+// This patch plays on its own. Clock triggers a short envelope every half
+// note. In the Tidal Echo tile, Cutoff sets the centre of the LFO sweep.
+// Time starts at about an eighth note at 108 BPM (278 ms). If you change
+// the tempo, set Time by ear. Feedback sets how long the repeats last.
+//
+// Open the Tidal Echo tile to follow the loop. The band-pass signal goes
+// into Mixer In 1. The mixer sends a copy to Delay Line, which returns to
+// In 2. Each trip repeats the sound at a lower level. The Feedback control
+// tops out below unity. LoomDSP inserts one sample of delay on the dashed
+// return cable to schedule the loop. Use loom check to locate it in text.
+//
+// To build a reusable effect like this, assign an LFO to the filter's
+// Cutoff, then group the filter, mixer, and delay with Cmd+G or Ctrl+G.
+// The outside assignment makes Cutoff a surface control. Open the group,
+// then use Expose in the inspector to bring Time and the return level out.
+Patch(
+    version: 1,
+    metadata: Metadata(
+        name: "Tidal Echo",
+        description: "A resonant echo you can play from a three-control sub-patch.",
+        tags: ["delay", "feedback", "sub-patch"],
+        license: "CC0-1.0",
+    ),
+    subpatches: {
+        "tidal-echo": SubPatch(
+            metadata: Metadata(
+                name: "Tidal Echo",
+                description: "A band-pass filter feeding a recirculating delay.",
+                license: "CC0-1.0",
+            ),
+            modules: [
+                PatchModule(id: 7, kind: "loom.filter.svf@1", params: {"cutoff": 1000.0, "resonance": 0.52}, position: Some((144.0, -84.0))),
+                PatchModule(id: 8, kind: "loom.mix.mixer@1", params: {"level1": 0.68, "level2": 0.39}, position: Some((408.0, -84.0))),
+                PatchModule(id: 9, kind: "loom.time.delay@1", params: {"time": 0.278}, position: Some((204.0, 144.0))),
+                PatchModule(id: 10, kind: "loom.struct.input@1", label: Some("In"), position: Some((-36.0, -84.0))),
+                PatchModule(id: 11, kind: "loom.struct.output@1", label: Some("Out"), position: Some((696.0, -84.0))),
+            ],
+            cables: [
+                PatchCable(from: (10, "out"), to: (7, "in")),
+                PatchCable(from: (7, "bandpass"), to: (8, "in1")),
+                PatchCable(from: (9, "out"), to: (8, "in2")),
+                PatchCable(from: (8, "out"), to: (9, "in")),
+                PatchCable(from: (8, "out"), to: (11, "in")),
+            ],
+            exposed: [
+                Exposed(name: "Cutoff", module: 7, param: "cutoff"),
+                Exposed(name: "Time", module: 9, param: "time"),
+                Exposed(name: "Feedback", module: 8, param: "level2", range: Some((0.0, 0.8))),
+            ],
+        ),
+    },
+    modules: [
+        PatchModule(id: 1, kind: "loom.clock.transport@1", params: {"tempo": 108.0}, position: Some((-420.0, 276.0))),
+        PatchModule(id: 2, kind: "loom.clock.clock@1", params: {"rate": 9.0}, position: Some((-408.0, -288.0))),
+        PatchModule(id: 3, kind: "loom.env.envelope@1", params: {"attack": 0.006, "curve": 0.4, "decay": 0.12, "mode": 1.0}, position: Some((-144.0, -288.0))),
+        PatchModule(id: 4, kind: "loom.mod.lfo@1", params: {"rate": 0.22}, position: Some((216.0, -312.0))),
+        PatchModule(id: 5, kind: "loom.osc.pulse@1", params: {"octave": -2.0, "tune": 3.0, "width": 0.34}, position: Some((-408.0, -72.0))),
+        PatchModule(id: 6, kind: "loom.level.amp@1", params: {"gain": 0.3}, position: Some((-144.0, -36.0))),
+        PatchModule(id: 10, kind: "loom.io.audio-out@1", position: Some((468.0, 240.0))),
+        PatchModule(id: 11, kind: "loom.struct.subpatch@1", subpatch: Some("tidal-echo"), params: {"Cutoff": 1000.0, "Feedback": 0.39, "Time": 0.278}, position: Some((144.0, -84.0))),
+    ],
+    cables: [
+        PatchCable(from: (2, "trigger"), to: (3, "gate")),
+        PatchCable(from: (5, "out"), to: (6, "in")),
+        PatchCable(from: (3, "out"), to: (6, "level")),
+        PatchCable(from: (6, "out"), to: (11, "In")),
+        PatchCable(from: (11, "Out"), to: (10, "in")),
+    ],
+    modulation: [
+        PatchModulation(source: (4, "out"), target: (11, "Cutoff"), depth: 0.25),
+    ],
+)

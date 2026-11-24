@@ -67,6 +67,9 @@ impl App for Example {
             Message::Field(FieldEvent::Edited(text)) => self.name = text,
             Message::Field(FieldEvent::Committed(text)) => self.committed = Some(text),
             Message::Field(FieldEvent::Left) => {}
+            // A real app shows a status message, which a screen reader
+            // announces (ui-layer.md, section 8, rule 2).
+            Message::Field(FieldEvent::PasteRefused) => println!("Couldn't read the clipboard"),
         }
         Effects::none()
     }

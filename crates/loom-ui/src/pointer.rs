@@ -19,13 +19,30 @@
 //! the next turn, whichever path found it. Hover and pressed run no update
 //! (section 3, rule 4).
 //!
+//! A scroll container's bar and the wheel are the pointer's too (section 5,
+//! rule 12). The wheel scrolls the innermost container under the pointer,
+//! and what it cannot take passes out, then on to whatever is next. It
+//! never moves a slider, with or without a modifier (rule 16). A press on
+//! the thumb drags it until the release, wherever the pointer goes; a press
+//! above or below it moves one page toward the press.
+//!
+//! A left press on a slider drags it until the release, wherever the
+//! pointer goes, as a bar's thumb does; the drag reaches the app through
+//! [`App::slid`] ([`crate::slider`]).
+//!
 //! [`Routed::Later`]: crate::Routed::Later
 
 use crate::app::{App, InputState};
 use crate::draw::Panels;
 use crate::hit::Hit;
 use crate::view::Layer;
-use loom_ui_core::{Event, Point, PointerButton, PointerEvent, UiId};
+use crate::window::ThumbDrag;
+use loom_ui_core::{Event, Modifiers, Point, PointerButton, PointerEvent, ScrollDelta, UiId};
+use std::time::Instant;
+
+/// How many lines of body text one step of a wheel scrolls (section 5,
+/// rule 12).
+const WHEEL_LINES: f32 = 3.0;
 
 /// The pointer's widget state among the runtime's elements.
 #[derive(Debug, Default)]
@@ -47,6 +64,19 @@ pub(crate) struct Pointer {
     /// Where the pointer last moved, in the window, to check the hover
     /// again after a layout moves what was under it.
     pub(crate) at: Option<Point>,
+    /// The press on a scroll container's bar that is held, until the
+    /// release: the thumb it drags, if it went down on the thumb.
+    pub(crate) thumb: Option<ThumbDrag>,
+    /// The modifier keys held, as last reported: Shift during a slider's
+    /// drag makes it finer.
+    pub(crate) modifiers: Modifiers,
+    /// The sliders' drag, group of keys, and last press (section 5, rule
+    /// 16).
+    pub(crate) slide: crate::slider::Sliding,
+    /// The moment of the latest turn, for a double-click on a slider. The
+    /// runtime sets it at the start of each turn, since it never reads the
+    /// clock.
+    pub(crate) now: Option<Instant>,
 }
 
 impl Pointer {
@@ -66,6 +96,7 @@ impl Pointer {
     /// keyboard's and no focus moved. Returns true when the hover changed.
     pub(crate) fn clear(&mut self) -> bool {
         self.pressed = None;
+        self.thumb = None;
         self.at = None;
         self.set_hover(None)
     }
@@ -119,14 +150,34 @@ impl<A: App> Panels<'_, A> {
     /// True when one of the runtime's layers above the target takes a
     /// pointer at `point`: a driver whose toolkit routes before the turn
     /// asks this first, and keeps the event from the toolkit when it is
-    /// true (a move reaches it as the pointer leaving).
+    /// true (a move reaches it as the pointer leaving). A held press on a
+    /// scroll container's bar keeps every pointer event until its release,
+    /// and a select's open list every press (section 5, rule 18).
     pub fn over_target(&self, event: &Event, point: Point) -> bool {
         let input = self.app.input().layer;
-        self.keeps_hint(event, point)
+        self.pointer.thumb.is_some()
+            || (self.window.select.is_some() && matches!(event, Event::Pointer(PointerEvent::Pressed(_))))
+            || self.keeps_hint(event, point)
+            || !self.pressed_outside(input, event, point).is_empty()
             || self
                 .window
                 .hit_in(point, |layer| Side::of(layer) == Side::Above && layer >= input)
                 .is_some()
+    }
+
+    /// The panels a press at `point` is outside of, when `event` is a press
+    /// of any button and the input layer, above the target, has panels that
+    /// close on one (section 5, rule 14): each such panel, if the press is
+    /// inside none of them. Empty otherwise, and for a press inside one.
+    fn pressed_outside(&self, input: Layer, event: &Event, point: Point) -> Vec<UiId> {
+        if !matches!(event, Event::Pointer(PointerEvent::Pressed(_))) || Side::of(input) != Side::Above {
+            return Vec::new();
+        }
+        let roots = self.window.closing_roots(input);
+        if roots.iter().any(|(_, at)| at.contains(point)) {
+            return Vec::new();
+        }
+        roots.into_iter().map(|(root, _)| root).collect()
     }
 
     /// True for a move onto the hover text showing, or between it and its
@@ -163,6 +214,7 @@ impl<A: App> Panels<'_, A> {
         let mut heard = self.offer(input, event, point, Side::Below);
         heard.redraw |= self.shown_pressed() != pressed;
         self.report_focus();
+        self.nudge_for_select();
         heard
     }
 
@@ -208,12 +260,97 @@ impl<A: App> Panels<'_, A> {
         over.then(|| pressed.clone())
     }
 
-    /// True when the element with UI ID `id` is a button or a switch,
-    /// which a pointer press does not focus.
-    fn takes_no_press_focus(&self, id: &UiId) -> bool {
+    /// True when the element with UI ID `id` is a menu item.
+    fn is_menu_item(&self, id: &UiId) -> bool {
         self.window
             .access_of(id)
-            .is_some_and(|access| matches!(access.role(), crate::access::Role::Button | crate::access::Role::Switch))
+            .is_some_and(|access| access.role() == crate::access::Role::MenuItem)
+    }
+
+    /// True when the element with UI ID `id` is a button, a switch, a
+    /// check box, a link, or a menu item, which a pointer press does not
+    /// focus: each acts, and none takes input the keys would then go to
+    /// (section 6, rule 3; section 5, rule 17).
+    fn takes_no_press_focus(&self, id: &UiId) -> bool {
+        self.window.access_of(id).is_some_and(|access| {
+            matches!(
+                access.role(),
+                crate::access::Role::Button
+                    | crate::access::Role::Switch
+                    | crate::access::Role::CheckBox
+                    | crate::access::Role::Link
+                    | crate::access::Role::MenuItem
+            )
+        })
+    }
+
+    /// Offers a pointer event to the runtime's layers above the target, as
+    /// the runtime's own routing does first, for a driver that delivers an
+    /// event itself outside a turn, such as a script's: a press outside a
+    /// closing menu is taken and told, and one on a dialog's scrim is held.
+    pub fn pointer_above_target(&mut self, event: &Event, point: Point) -> Heard {
+        let input = self.app.input();
+        let heard = self.pointer_above(input, event, point);
+        self.report_focus();
+        self.nudge_for_select();
+        heard
+    }
+
+    /// Sends the app's message for each of `reports` from a slider, for
+    /// the next turn ([`App::slid`]).
+    pub(crate) fn report_slid(&self, reports: impl IntoIterator<Item = crate::slider::Slid>) {
+        for (id, position, phase) in reports {
+            if let Some(message) = self.app.slid(&id, position, phase) {
+                self.waker.send(message);
+            }
+        }
+    }
+
+    /// Opens the list of the select `id` for a left press on it, on its
+    /// chosen option, unless it has no options. Returns true when it was a
+    /// select that took the press, which is no click. A press on an open
+    /// select never comes here: it is outside the list, which closes.
+    fn press_select(&mut self, id: &UiId) -> bool {
+        let Some((select, _, _)) = self.window.select_of(id) else {
+            return false;
+        };
+        if select.options.is_empty() {
+            return false;
+        }
+        let at = select.chosen.unwrap_or(0);
+        self.open_select(id, select, at);
+        true
+    }
+
+    /// Wakes the loop for a turn when a select's list changed outside one,
+    /// so the view is built again with it.
+    fn nudge_for_select(&self) {
+        if self.window.select_changed {
+            self.waker.nudge();
+        }
+    }
+
+    /// Starts a drag, or a reset, on the slider `id` for a left press at
+    /// `point`, unless it is turned off. Returns true when it was a slider
+    /// that took the press.
+    fn press_slider(&mut self, id: &UiId, point: Point) -> bool {
+        let Some((slider, bounds)) = self.window.slider_of(id) else {
+            return false;
+        };
+        if self
+            .window
+            .access_of(id)
+            .is_some_and(crate::access::Access::is_disabled)
+        {
+            return false;
+        }
+        let shift = self.pointer.modifiers.shift;
+        let reports = self
+            .pointer
+            .slide
+            .press(id, slider, bounds, point, shift, self.pointer.now);
+        self.report_slid(reports);
+        true
     }
 
     /// Offers a pointer event to the runtime's layers above the target.
@@ -235,6 +372,82 @@ impl<A: App> Panels<'_, A> {
         if matches!(pointer, PointerEvent::Moved | PointerEvent::Pressed(_)) {
             self.pointer.at = Some(point);
         }
+        let keep = |layer: Layer| Side::of(layer) == side && layer >= input.layer;
+        // A held press on a bar has the pointer until it is let go, at the
+        // first step that hears it, wherever the pointer is.
+        if let Some(drag) = self.pointer.thumb.clone() {
+            return match pointer {
+                PointerEvent::Moved => Heard {
+                    taken: true,
+                    redraw: self.window.drag_thumb(&drag, point),
+                },
+                PointerEvent::Released(PointerButton::Left) => {
+                    self.pointer.thumb = None;
+                    Heard {
+                        taken: true,
+                        redraw: false,
+                    }
+                }
+                _ => Heard {
+                    taken: true,
+                    redraw: false,
+                },
+            };
+        }
+        // A held drag on a slider has the pointer until it is let go, too.
+        if self.pointer.slide.drags() {
+            match pointer {
+                PointerEvent::Moved => {
+                    let shift = self.pointer.modifiers.shift;
+                    let report = self.pointer.slide.moved(point, shift);
+                    self.report_slid(report);
+                }
+                PointerEvent::Released(PointerButton::Left) => {
+                    let report = self.pointer.slide.released();
+                    self.report_slid(report);
+                    self.pointer.pressed = None;
+                }
+                _ => {}
+            }
+            return Heard {
+                taken: true,
+                redraw: false,
+            };
+        }
+        if let PointerEvent::Scrolled(delta) = pointer
+            && let Some(heard) = self.wheel(*delta, point, keep)
+        {
+            return heard;
+        }
+        // Section 5, rule 18: a press anywhere outside a select's open list,
+        // the select itself included, closes the list with no choice, and
+        // is taken, as a press outside a menu is: before any scroll bar
+        // takes it, though a press on the list's own bar is inside it.
+        if side == Side::Above
+            && matches!(pointer, PointerEvent::Pressed(_))
+            && self.window.select.is_some()
+            && !self
+                .window
+                .bounds(&crate::select::list_id())
+                .is_some_and(|list| list.contains(point))
+        {
+            self.pointer.space = None;
+            self.close_select();
+            return Heard {
+                taken: true,
+                redraw: true,
+            };
+        }
+        if let PointerEvent::Pressed(PointerButton::Left) = pointer
+            && let Some(drag) = self.window.press_bar(point, keep)
+        {
+            self.pointer.space = None;
+            self.pointer.thumb = Some(drag);
+            return Heard {
+                taken: true,
+                redraw: true,
+            };
+        }
         if side == Side::Above && self.keeps_hint(event, point) {
             // Movement on the hint's source itself still counts as pointer input.
             let on_source = self
@@ -248,13 +461,29 @@ impl<A: App> Panels<'_, A> {
                 redraw: on_source && self.note_hover_motion(),
             };
         }
-        let hit = self
-            .window
-            .hit_in(point, |layer| Side::of(layer) == side && layer >= input.layer)
-            .map(|(layer, hit)| match hit {
-                Hit::Element(id) => (layer, Some(id.clone())),
-                Hit::Blocked => (layer, None),
-            });
+        // Section 5, rule 14: a press outside a panel of the input layer
+        // that closes on one is taken, and told to the app.
+        let outside = if side == Side::Above {
+            self.pressed_outside(input.layer, event, point)
+        } else {
+            Vec::new()
+        };
+        if !outside.is_empty() {
+            self.pointer.space = None;
+            for root in &outside {
+                if let Some(message) = self.app.pressed_outside(root) {
+                    self.waker.send(message);
+                }
+            }
+            return Heard {
+                taken: true,
+                redraw: false,
+            };
+        }
+        let hit = self.window.hit_in(point, keep).map(|(layer, hit)| match hit {
+            Hit::Element(id) => (layer, Some(id.clone())),
+            Hit::Blocked => (layer, None),
+        });
         let Some((layer, id)) = hit else {
             if side == Side::Above {
                 return Heard::default();
@@ -276,28 +505,79 @@ impl<A: App> Panels<'_, A> {
         let at = id.map(|id| (layer, id));
         let mut redraw = false;
         match pointer {
-            PointerEvent::Moved => redraw = self.hover(at),
+            PointerEvent::Moved => {
+                redraw = self.hover(at.clone());
+                // The pointer over an option of an open list highlights it.
+                if let Some(index) = at.as_ref().and_then(|(_, id)| crate::select::option_index(id)) {
+                    self.highlight_option(index);
+                }
+                // Section 6, rule 8: the pointer moving over a menu item
+                // focuses it, with no ring, as native menus move their
+                // highlight; the keys then go on from there.
+                if let Some((_, id)) = &at
+                    && self.is_menu_item(id)
+                    && self.focus.id() != Some(id)
+                {
+                    self.focus.wanted = None;
+                    self.focus.set(Some(id.clone()));
+                    self.focus.ring = false;
+                    self.focus.release_owed = true;
+                    redraw = true;
+                }
+            }
             PointerEvent::Pressed(button) => {
                 self.pointer.space = None;
                 redraw = self.hover(at.clone());
                 let before = self.focus.id().cloned();
                 self.focus_in(point, |layer| Side::of(layer) == side && layer >= input.layer);
                 redraw |= self.focus.id() != before.as_ref();
+                // A press on a slider drags it or resets it, and is no click.
                 if *button == PointerButton::Left {
-                    self.pointer.pressed = at;
+                    let slider = at.as_ref().is_some_and(|(_, id)| {
+                        let id = id.clone();
+                        self.press_slider(&id, point) || self.press_select(&id)
+                    });
+                    if !slider {
+                        self.pointer.pressed = at;
+                    }
                 }
             }
             PointerEvent::Released(PointerButton::Left) => {
                 if let Some(pressed) = self.pointer.pressed.take()
                     && Some(&pressed) == at.as_ref()
-                    && let Some(message) = self.app.clicked(&pressed.1)
                 {
-                    self.waker.send(message);
+                    // A press and release on an option chooses it.
+                    if let Some(index) = crate::select::option_index(&pressed.1) {
+                        self.highlight_option(index);
+                        self.choose_highlighted();
+                    } else if let Some(message) = self.app.clicked(&pressed.1) {
+                        self.waker.send(message);
+                    }
                 }
             }
             _ => {}
         }
         Heard { taken: true, redraw }
+    }
+
+    /// A wheel or a touch pad's scroll at `point`, in the layers `keep`
+    /// allows: the containers under it take what they can. Taken only when
+    /// one moved, so a wheel no container can use goes on. `None` with no
+    /// container under the point: the event is then offered as any other
+    /// is. Over a slider it scrolls too, since the wheel never moves one
+    /// (section 5, rule 16).
+    fn wheel(&mut self, delta: ScrollDelta, point: Point, keep: impl Fn(Layer) -> bool + Copy) -> Option<Heard> {
+        // Positive is a scroll up, which moves the content down: a smaller
+        // offset.
+        let by = |line: f32| match delta {
+            ScrollDelta::Lines { y, .. } => -y * WHEEL_LINES * line,
+            ScrollDelta::Pixels { y, .. } => -y,
+        };
+        let moved = self.window.scroll_wheel(point, by, keep)?;
+        Some(Heard {
+            taken: moved,
+            redraw: moved,
+        })
     }
 
     /// Moves the hover to `at`. Returns true when it changed.
@@ -335,6 +615,16 @@ impl<A: App> Panels<'_, A> {
     /// reader's Focus still reach it. A field, or a press on no stop,
     /// moves the focus as before.
     fn focus_in(&mut self, point: Point, keep: impl Fn(Layer) -> bool) {
+        // A press in a select's open list leaves the focus on the select
+        // (section 5, rule 18).
+        if self.window.select.is_some()
+            && self
+                .window
+                .bounds(&crate::select::list_id())
+                .is_some_and(|list| list.contains(point))
+        {
+            return;
+        }
         let to = self.window.focus_at_in(point, keep).flatten().cloned();
         if to.as_ref().is_some_and(|id| self.takes_no_press_focus(id)) {
             return;

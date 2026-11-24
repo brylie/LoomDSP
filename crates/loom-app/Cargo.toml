@@ -34,7 +34,7 @@ default = ["complex-scripts"]
 complex-scripts = ["loom-ui/complex-scripts"]
 # The headless `Ui` harness, for the tests in `tests/`. It changes no behaviour.
 # It needs loom-ui's test driver access to the app (`Runtime::app_mut`).
-test-ui = ["loom-ui/test-driver"]
+test-ui = ["loom-ui/test-driver", "loom-ui/testing"]
 
 [dependencies]
 loom-core.workspace = true
@@ -59,6 +59,8 @@ iced = { workspace = true, features = ["smol", "markdown"] }
 clap.workspace = true
 rfd.workspace = true
 ron.workspace = true
+# Parses help's notes once, for the view and the accessibility tree.
+pulldown-cmark.workspace = true
 etcetera.workspace = true
 jiff.workspace = true
 # Runs widget operations on the live window, for the control channel.
@@ -83,6 +85,8 @@ loom-analysis.workspace = true
 loom-patch = { workspace = true, features = ["test-follows"] }
 # `test-ui`: lets the tests in `tests/` import `Ui`.
 loom-app = { path = ".", features = ["test-ui"] }
+# `testing`: the recording painter, so a test reads what the runtime paints.
+loom-ui = { workspace = true, features = ["shell", "testing"] }
 
 [lints]
 workspace = true

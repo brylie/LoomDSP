@@ -749,6 +749,7 @@ pub struct CableView {
 
 /// The four cable stroke weights in the visual system.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CableWidth {
     /// One voice, one side.
     #[default]
@@ -1019,6 +1020,11 @@ impl Scene {
     /// What is under a world point. Ports win over tiles, because they sit
     /// on the tile edges. Tiles drawn later win over earlier ones.
     pub fn hit(&self, point: Point, port_radius: f32) -> Hit {
+        self.hit_at_scale(point, port_radius, 1.0)
+    }
+
+    /// Hit-tests at the current number of physical pixels per world unit.
+    pub(crate) fn hit_at_scale(&self, point: Point, port_radius: f32, px_per_world: f32) -> Hit {
         // Badges sit beside their own port. They win over that tile's ports,
         // so a click on one never starts a cable. A tile moved on top of a
         // badge keeps its ports: those win over the badge (#249).
@@ -1104,16 +1110,17 @@ impl Scene {
         }
         // Cables last, with a tighter tolerance than ports: they are thin,
         // and empty canvas near a cable should still start a selection box.
-        if let Some(index) = self.cable_at(point, port_radius * 0.5) {
+        if let Some(index) = self.cable_at(point, port_radius * 0.5, px_per_world) {
             return Hit::Cable(index);
         }
         Hit::Nothing
     }
 
     /// The topmost cable within `tolerance` of a world point.
-    fn cable_at(&self, point: Point, tolerance: f32) -> Option<usize> {
+    fn cable_at(&self, point: Point, tolerance: f32, px_per_world: f32) -> Option<usize> {
         self.cables.iter().enumerate().rev().find_map(|(index, cable)| {
-            let tolerance = tolerance.max(crate::gpu::CABLE_WIDTH * cable.width.scale() * 0.5);
+            let width = crate::gpu::CABLE_WIDTH.max(crate::gpu::CABLE_MIN_PX / px_per_world);
+            let tolerance = tolerance.max(width * cable.width.scale() * 0.5);
             let t2 = tolerance * tolerance;
             let from = self.port_position(PortRef {
                 module: cable.from.0,

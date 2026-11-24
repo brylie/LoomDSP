@@ -124,7 +124,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         // Set only on the screenshot path, which never replaces the patch.
         still: _,
         // Set and taken within one `update`.
-        history_key: _,
+        pending_shortcut: _,
         // The window's, so it stays, but the tiles' node IDs are dropped.
         // `a11y/tests.rs` covers both.
         a11y: _,
@@ -132,6 +132,9 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         effects: _,
         // Filled and taken within one `update` (`App::post`).
         posted: _,
+        // The window's, so it stays: a test's stepped clock keeps its
+        // time across New and Open (`clock.rs`).
+        clock: _,
         // Filled and taken within one turn, by the bridge.
         window_questions: _,
         // The control channel's: a command that sent `new` is still

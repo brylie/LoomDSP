@@ -272,7 +272,7 @@ fn toolbar(panel: &Panel) -> Element {
                 .filter(|button| button.group == which)
                 .map(button),
         )
-        .spacing(6.0)
+        .spacing(style::BUTTON_SPACING)
         .align_y(Align::Center)
     };
     let row = Element::row([

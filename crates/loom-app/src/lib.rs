@@ -23,6 +23,7 @@ mod canvas_events;
 mod chrome;
 mod clip;
 mod clipboard;
+mod clock;
 mod control;
 mod controls;
 mod devices;
@@ -75,11 +76,13 @@ mod qa_tests;
 mod question;
 mod recent;
 mod recovery;
+mod runtime_fields;
 mod scene;
 mod screenshot;
 mod script_vars;
 mod session;
 mod settings;
+mod shortcut;
 mod slots;
 mod snapshot;
 mod spectrum;
@@ -276,13 +279,11 @@ pub fn run() -> Result<(), loom_ui::shell::Error> {
     }
     let mut app = App::new(args.clone());
     app.remember_opened_at_start(&args);
-    // The window and its services share the clipboard once it opens.
-    let clipboard = iced_bridge::SharedClipboard::default();
     let result = loom_ui::shell::run(
         iced_bridge::Hosted(app, None, iced_bridge::Extra::default()),
         iced_bridge::IcedTarget::default(),
-        iced_bridge::WindowLayers::new(clipboard.clone()),
-        iced_bridge::AppServices::new(clipboard),
+        iced_bridge::WindowLayers::new(),
+        iced_bridge::AppServices,
         loom_ui::shell::Options {
             size: loom_ui_core::Size::new(WINDOW.width, WINDOW.height),
             // The window is open: the watchers start on the first turn.
@@ -484,11 +485,12 @@ enum Message {
     Key(iced::keyboard::Event),
     /// Take back the last step (`docs/design/undo.md`).
     Undo,
-    /// An undo or redo shortcut, after checking whether a text field has
-    /// focus. While one has, the shortcut does nothing: the field is
-    /// being edited, and undo would change the patch behind it.
-    HistoryKey {
-        redo: bool,
+    /// A shortcut that acts on the patch (undo, redo, or one on the
+    /// selection), after checking whether a text field has focus. While
+    /// one has, the shortcut does nothing: the field is being edited, and
+    /// the shortcut would change the patch behind it (`shortcut.rs`).
+    Shortcut {
+        shortcut: shortcut::Shortcut,
         typing: bool,
     },
     /// Replay the step undo took back.
@@ -501,6 +503,10 @@ enum Message {
     /// after a press: a press elsewhere ends a draft whose field never had
     /// focus, which a change alone would miss.
     FocusMoved(Option<loom_ui_core::UiId>),
+    /// A runtime text field's paste could not read the clipboard: said in
+    /// the status line, never shown as an empty clipboard (ui-layer.md,
+    /// section 8, rule 2).
+    FieldPasteRefused,
     /// Tab was pressed. It closes a text field on the main view.
     TextFieldTab {
         backwards: bool,
@@ -510,6 +516,24 @@ enum Message {
     /// Escape (ui-layer.md, section 6, rule 7). Posted for a turn of its
     /// own, after every other message the same key sent.
     ToolbarFocus(Option<loom_ui_core::UiId>),
+    /// Tab or Shift+Tab on an item of the probe menu or Recent: the menu
+    /// closes, and the focus moves on from what opened it (the WAI-ARIA
+    /// menu pattern; row 3b).
+    MenuTab {
+        back: bool,
+    },
+    /// Tab or Shift+Tab inside help: the focus moves to help's next stop,
+    /// or the one before, wrapping at both ends (the WAI-ARIA modal dialog
+    /// pattern; row 6). One message whether the key came from the keyboard
+    /// or a script.
+    HelpTab {
+        back: bool,
+    },
+    /// One step of the runtime's focus, after a menu closed and gave back
+    /// the focus it opened over (row 3b).
+    FocusStep {
+        back: bool,
+    },
     /// Tab between a view's fields, from the part the window says has
     /// focus (`window_question.rs`).
     TabFrom {
@@ -558,7 +582,7 @@ enum Message {
     /// arrives after another patch opened is dropped.
     Pasted {
         world: Point,
-        text: Option<String>,
+        text: loom_ui::ClipboardText,
         generation: u64,
     },
     /// The accessibility tree for screen readers (`a11y.rs`).
@@ -622,7 +646,117 @@ impl Message {
                 | Self::StartWatching
                 | Self::RetryCommit(_)
                 | Self::WindowRescaled
+                // Only says a refused paste in the status line.
+                | Self::FieldPasteRefused
         )
+    }
+
+    /// The view whose text field sent this message, for a message only a
+    /// focused text field sends (its typing, or Enter in it): the main
+    /// view's inspector and patch info (`InputOwner::Canvas`), Preferences,
+    /// Your patches, the module browser, or the licence chooser. `None` for
+    /// every other message.
+    ///
+    /// A text field keeps its focus when an overlay opens over it without a
+    /// left press (a right-click that opens the probe menu, a screen
+    /// reader's Click on Choose), and typing then reached it: Enter even
+    /// committed a value into the patch under the probe menu (found
+    /// 2026-11-20). [`App::apply_at`] drops such a message unless its view
+    /// owns the input, so a covered field changes nothing. Row 3 of the
+    /// plan for leaving Iced moves the focus into the overlay, and keeps
+    /// this as the second guard.
+    ///
+    /// Each view's own messages are matched in full, so a field message
+    /// added there must choose a side.
+    fn field_view(&self) -> Option<input_owner::InputOwner> {
+        use input_owner::InputOwner;
+        let from = |field: bool, view: InputOwner| field.then_some(view);
+        match self {
+            Self::Inspector(message) => {
+                use inspector::Message as M;
+                let field = match message {
+                    M::ValueText { .. }
+                    | M::ValueSubmit { .. }
+                    | M::UnknownLabelDraft { .. }
+                    | M::UnknownLabelApply { .. }
+                    | M::SubPatchNameDraft { .. }
+                    | M::SubPatchNameApply { .. } => true,
+                    M::Param { .. }
+                    | M::ParamValue { .. }
+                    | M::ValueDraftClear
+                    | M::Choice { .. }
+                    | M::Range { .. }
+                    | M::SelectModule(_)
+                    | M::DropRow(_)
+                    | M::Expose { .. }
+                    | M::Unexpose { .. }
+                    | M::Scrolled => false,
+                };
+                from(field, InputOwner::Canvas)
+            }
+            Self::PatchInfo(message) => {
+                use patch_info::Message as M;
+                let field = match message {
+                    M::Authors(_) | M::PartAuthors(..) | M::TagDraft(_) | M::TagSubmit => true,
+                    M::RemoveTag(_) | M::ChooseLicence => false,
+                };
+                from(field, InputOwner::Canvas)
+            }
+            Self::Preferences(message) => {
+                use settings::Message as M;
+                let field = match message {
+                    M::Author(_) | M::SaveAuthor => true,
+                    M::ClockSource(_)
+                    | M::SendClock(..)
+                    | M::Open
+                    | M::Close
+                    | M::Refresh
+                    | M::Safety(_)
+                    | M::Activity(_)
+                    | M::Map(_)
+                    | M::Audio(_)
+                    | M::Input(_)
+                    | M::Midi(..)
+                    | M::PanicLearn
+                    | M::PanicClear
+                    | M::ChooseLicence => false,
+                };
+                from(field, InputOwner::Preferences)
+            }
+            Self::Patches(message) => {
+                use patches::Message as M;
+                let field = match message {
+                    M::Search(_) | M::Author(_) | M::Tag(_) | M::Submit => true,
+                    M::Found { .. } | M::Licence(..) | M::Hover(_) | M::Pick(_) | M::Step(_) | M::Close => false,
+                };
+                from(field, InputOwner::Patches)
+            }
+            Self::Browser(message) => {
+                use browser::Message as M;
+                let field = match message {
+                    M::Query(_) | M::Submit => true,
+                    M::Hover(_)
+                    | M::Pick(_)
+                    | M::Menu { .. }
+                    | M::InsertLinked(_)
+                    | M::Library(_)
+                    | M::Scrolled(_)
+                    | M::Key(_)
+                    | M::Close => false,
+                };
+                from(field, InputOwner::Browser)
+            }
+            Self::Licence(message) => {
+                use licence_chooser::Message as M;
+                let field = match message {
+                    M::OtherText(_) | M::Use => true,
+                    M::Answer(_) | M::Commercial(_) | M::Clear | M::Cancel => false,
+                };
+                from(field, InputOwner::Chooser)
+            }
+            // No other message comes from a view's text field.
+            _ => None,
+        }
     }
 
     /// True for what still runs while a question is open: the question
@@ -650,6 +784,8 @@ impl Message {
             | Self::StartWatching
             | Self::RetryCommit(_)
             | Self::WindowRescaled
+            // It only says a refused paste in the status line.
+            | Self::FieldPasteRefused
             | Self::ControlFrame(_)
             | Self::Located { .. }
             | Self::Captured { .. }
@@ -717,13 +853,16 @@ impl Message {
             | Self::Inspector(_)
             | Self::Modulation(_)
             | Self::Undo
-            | Self::HistoryKey { .. }
+            | Self::Shortcut { .. }
             | Self::Redo
             | Self::TextFocusCheck
             | Self::TextFieldTab { .. }
             | Self::TabFrom { .. }
             | Self::EnterFields { .. }
             | Self::ToolbarFocus(_)
+            | Self::MenuTab { .. }
+            | Self::HelpTab { .. }
+            | Self::FocusStep { .. }
             | Self::SliderReleased
             | Self::Matrix(_)
             | Self::MatrixKey(_)
@@ -735,8 +874,12 @@ impl Message {
             | Self::Licence(_)
             | Self::OpenRecent
             | Self::Recent(_)
-            | Self::DismissError(_)
-            | Self::Pasted { .. } => false,
+            | Self::DismissError(_) => false,
+            // A refused read says so even under a question, since a read
+            // that began before the question opened can end during it, and
+            // a refusal must never pass silently; it changes no patch. A read
+            // with text waits out the question, as other edits do.
+            Self::Pasted { text, .. } => *text == loom_ui::ClipboardText::Refused,
         }
     }
 }
@@ -831,9 +974,9 @@ struct App {
     /// How the canvas starts, for a still image of the window
     /// (`--screenshot-window`). `None` in the app.
     still: Option<loom_canvas::Still>,
-    /// An undo (`false`) or redo (`true`) shortcut waiting for the check
-    /// that no text field has focus.
-    history_key: Option<bool>,
+    /// A shortcut on the patch waiting for the check that no text field
+    /// has focus (`shortcut.rs`).
+    pending_shortcut: Option<shortcut::Shortcut>,
     /// The accessibility tree's node IDs and whether a screen reader
     /// listens. It belongs to the window, so it stays when the patch changes.
     a11y: a11y::Access,
@@ -844,6 +987,9 @@ struct App {
     /// (`App::post`). Returned at the end of `update` as one next-turn
     /// effect (`Effects::next_turn`).
     posted: Vec<Message>,
+    /// Where the app reads the time: the system clock, or the test
+    /// harness's stepped clock (`clock.rs`, #868).
+    clock: clock::Clock,
     /// What only the window's widgets can answer, for the bridge to ask
     /// after the turn (`window_question.rs`). Interior, so a call that only
     /// reads the app can ask.
@@ -1498,6 +1644,16 @@ impl App {
         if !matches!(message, Message::FocusMoved(_)) {
             debug_assert_eq!(self.focus.as_ref(), cx.focused(), "the app's copy of focus drifted");
         }
+        // A shortcut waits for Iced's answer to which part has focus; the
+        // runtime's own fields say so through the context (section 6, rule
+        // 6, step 6).
+        let message = match message {
+            Message::Shortcut { shortcut, typing } => Message::Shortcut {
+                shortcut,
+                typing: typing || cx.field_has_focus(),
+            },
+            other => other,
+        };
         // What reads the runtime's layout (where a part is for `locate`, the
         // nodes for the tree) waits for the draw that lays out a view a
         // live value just rebuilt, so it never reads a layout half made.
@@ -1565,7 +1721,14 @@ impl App {
         if matches!(message, Message::ControlFrame(_)) {
             self.control_frame_asked = false;
         }
+        let asked = self.overlays.question.is_some();
         self.apply_at(message, now);
+        // A question that opened takes the focus to its safe answer, with a
+        // ring (ui-layer.md, section 6, rule 4; plan 3.2, row 3b).
+        if !asked && let Some(question) = &self.overlays.question {
+            let answer = question.highlighted_id();
+            self.effect(loom_ui::Effects::focus(answer));
+        }
         self.sync_part_authors();
         // The timers, the watchers, and the frames a command waits for
         // follow what this update changed.
@@ -1595,7 +1758,7 @@ impl App {
     /// Applies one message. Its effects collect in `self.effects`, and the
     /// window questions it asks in `self.window_questions`.
     fn apply(&mut self, message: Message) {
-        self.apply_at(message, Instant::now());
+        self.apply_at(message, self.clock.now());
     }
 
     /// Applies one message at the time given by the runtime.
@@ -1624,6 +1787,10 @@ impl App {
         };
         loom_canvas::stats::request_frame(cause);
         if self.overlays.question.is_some() && !message.allowed_during_question() {
+            return;
+        }
+        // A covered text field changes nothing (`Message::field_view`).
+        if message.field_view().is_some_and(|view| view != self.overlays.owner()) {
             return;
         }
         // What this message means for a screen reader's tree.
@@ -1705,6 +1872,22 @@ impl App {
                 self.tab_between_fields(from.as_ref(), backwards);
             }
             Message::EnterFields { backwards } => self.enter_fields(backwards),
+            Message::MenuTab { back } => {
+                if let Some(menu) = self.runtime_menu() {
+                    self.close_menu(menu.kind);
+                    // After the frame that shows the menu closed: by then
+                    // the runtime has given back the focus the menu opened
+                    // over, and told the app (`FocusMoved`), so the step
+                    // goes on from there.
+                    self.effect(loom_ui::Effects::after_draw(Message::FocusStep { back }));
+                }
+            }
+            Message::FocusStep { back } => self.effect(loom_ui::Effects::focus_step(back)),
+            Message::HelpTab { back } => {
+                if let Some(next) = self.help_next_stop(self.focus.as_ref(), back) {
+                    self.effect(loom_ui::Effects::focus(next));
+                }
+            }
             Message::ToolbarFocus(stop) => self.toolbar_focus(stop),
             Message::Canvas(CanvasEvent::Paste { world }) => {
                 let generation = self.generation;
@@ -1730,6 +1913,9 @@ impl App {
             Message::Matrix(event) => self.matrix_message(event),
             Message::MatrixKey(key) => self.matrix_key_message(key),
             Message::ControlFrame(now) => self.control_frame(now),
+            Message::FieldPasteRefused => {
+                self.alerts.warn(crate::clipboard::COULD_NOT_READ.to_string());
+            }
             Message::TextFieldTab { backwards } => {
                 self.text_field_tab(self.focus.clone().as_ref(), backwards);
             }
@@ -1762,7 +1948,7 @@ impl App {
                 self.ask_recovery();
             }
             message if self.clipboard_key(&message).is_some() => {
-                self.clipboard_command(&message);
+                self.pending_shortcut = self.clipboard_key(&message).and_then(shortcut::Shortcut::clipboard);
             }
             message => {
                 self.handle(message);
@@ -1776,15 +1962,13 @@ impl App {
         if ask_focus {
             self.focus_question.set(true);
         }
-        // An undo or redo shortcut asks the window whether a text field has
-        // focus first, so Cmd+Z right after a click into a field undoes the
-        // typing, not the patch (window_question.rs).
-        if let Some(redo) = self.history_key.take() {
-            self.ask_window(window_question::WindowQuestion::focus(move |part| {
-                Message::HistoryKey {
-                    redo,
-                    typing: part.is_some(),
-                }
+        // A shortcut on the patch asks the window whether a text field has
+        // focus first, so Cmd+Z or Cmd+D right after a click into a field
+        // leaves the patch alone (window_question.rs, shortcut.rs).
+        if let Some(shortcut) = self.pending_shortcut.take() {
+            self.ask_window(window_question::WindowQuestion::focus(move |part| Message::Shortcut {
+                shortcut,
+                typing: part.is_some(),
             }));
         }
         // A screen reader's tree follows what this message changed.
@@ -1821,6 +2005,10 @@ impl App {
                     self.effect(loom_ui::Effects::unfocus());
                 }
             }
+            // Then the focus goes to Close, with a ring only when help was
+            // opened from the keyboard (help-pages.md; section 6, rule 4).
+            // After the unfocus, which would drop it.
+            self.effect(loom_ui::Effects::focus_as_input(help::Help::first_stop()));
         } else if was_help_open && self.overlays.help.is_none() {
             let owner = self.input_owner();
             let field = self
@@ -1835,6 +2023,12 @@ impl App {
                 .or_else(|| (owner == input_owner::InputOwner::Browser).then(browser::search_id));
             if let Some(field) = field {
                 self.effect(loom_ui::Effects::focus(field));
+            } else if self
+                .focus
+                .as_ref()
+                .is_some_and(|part| part.is_under(&overlays::access::help_id()))
+            {
+                self.effect(loom_ui::Effects::unfocus());
             }
         } else if !was_open && self.overlays.browser().is_some() {
             self.effect(loom_ui::Effects::focus(browser::search_id()));
@@ -2019,10 +2213,14 @@ impl App {
             | Message::StartWatching
             | Message::RetryCommit(_)
             | Message::ControlFrame(_)
+            | Message::FieldPasteRefused
             | Message::TextFieldTab { .. }
             | Message::TabFrom { .. }
             | Message::EnterFields { .. }
             | Message::ToolbarFocus(_)
+            | Message::MenuTab { .. }
+            | Message::HelpTab { .. }
+            | Message::FocusStep { .. }
             | Message::FocusMoved(_)
             | Message::Inspector(_)
             | Message::Located { .. }
@@ -2112,11 +2310,13 @@ impl App {
                     .copied();
                 if let Some(descriptor) = descriptor {
                     self.overlays.help = Some(help::Help::new(descriptor));
+                    self.help_to_top();
                 } else if let Some(role) = link
                     .strip_suffix(".md")
                     .and_then(|id| self.session.controller.registry().role(id))
                 {
                     self.overlays.help = Some(help::Help::role(role, self.session.controller.registry()));
+                    self.help_to_top();
                 } else {
                     self.alerts.warn(format!("Linked document is not bundled: {link}"));
                 }
@@ -2129,13 +2329,9 @@ impl App {
             Message::JumpChoice(index) => self.choose_jump(index),
             Message::DismissJump => self.session.outline.close_jump(),
             Message::PatchInfo(message) => self.patch_info_message(message),
-            Message::HistoryKey { redo, typing } => {
+            Message::Shortcut { shortcut, typing } => {
                 if !typing {
-                    if redo {
-                        self.redo();
-                    } else {
-                        self.undo();
-                    }
+                    self.run_shortcut(shortcut);
                 }
             }
             Message::Licence(message) => self.licence_message(message),
@@ -2314,12 +2510,15 @@ impl App {
                 // Ctrl+Z or Cmd+Z undoes; adding Shift redoes. Ctrl+Y also
                 // redoes, except on macOS.
                 match key.as_ref() {
-                    // Undo and redo wait for a focus check: a text field
-                    // being edited keeps them (undo.md, Gestures).
+                    // Undo, redo, and the shortcuts on the selection wait for
+                    // a focus check: a text field being edited keeps them
+                    // (undo.md, Gestures; shortcut.rs).
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") && modifiers.shift() => {
-                        self.history_key = Some(true)
+                        self.pending_shortcut = Some(shortcut::Shortcut::Redo)
                     }
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") => self.history_key = Some(false),
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") => {
+                        self.pending_shortcut = Some(shortcut::Shortcut::Undo)
+                    }
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("n") => {
                         self.file_action(FileAction::New)
                     }
@@ -2333,16 +2532,20 @@ impl App {
                         self.file_action(FileAction::Save);
                     }
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("y") && !cfg!(target_os = "macos") => {
-                        self.history_key = Some(true)
+                        self.pending_shortcut = Some(shortcut::Shortcut::Redo)
                     }
                     iced::keyboard::Key::Character(",") => self.toggle_preferences(),
                     // Ctrl+G makes a sub-patch; with Shift it dissolves one.
                     iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("g") && modifiers.shift() => {
-                        self.dissolve_subpatch()
+                        self.pending_shortcut = Some(shortcut::Shortcut::DissolveSubpatch)
                     }
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("g") => self.make_subpatch(),
+                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("g") => {
+                        self.pending_shortcut = Some(shortcut::Shortcut::MakeSubpatch)
+                    }
                     // Ctrl+Enter or Cmd+Enter opens the selected sub-patch.
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => self.open_selected(),
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
+                        self.pending_shortcut = Some(shortcut::Shortcut::OpenSelected)
+                    }
                     _ => {}
                 }
             }

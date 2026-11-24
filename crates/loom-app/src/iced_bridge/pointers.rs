@@ -193,6 +193,7 @@ pub(crate) fn hand_scripted(
             redraw |= match delivery {
                 Delivery::Unused => panels.pointer_below(&event, Point::new(at.x, at.y)),
                 Delivery::Captured => panels.pointer_taken(&event),
+                Delivery::Above => panels.pointer_above_target(&event, Point::new(at.x, at.y)),
             }
             .redraw;
         }
@@ -225,6 +226,12 @@ pub(crate) fn ours(event: &iced::Event) -> Option<Event> {
         iced::Event::Mouse(mouse::Event::CursorMoved { .. }) => PointerEvent::Moved,
         iced::Event::Mouse(mouse::Event::ButtonPressed(pressed)) => PointerEvent::Pressed(button(pressed)?),
         iced::Event::Mouse(mouse::Event::ButtonReleased(released)) => PointerEvent::Released(button(released)?),
+        // The wheel too, so a scroll container of the runtime's above Iced
+        // scrolls in the harness as the window's own events scroll it.
+        iced::Event::Mouse(mouse::Event::WheelScrolled { delta }) => {
+            use loom_canvas::iced_convert::ToCore as _;
+            PointerEvent::Scrolled(delta.to_core())
+        }
         _ => return None,
     };
     Some(Event::Pointer(pointer))

@@ -9,8 +9,6 @@
 use crate::Element;
 use iced::Theme;
 use iced::widget::button as iced_button;
-use iced::widget::markdown as iced_markdown;
-use loom_canvas::iced_convert::ToIced as _;
 
 /// Table cells, row details, and captions in the inspector and matrix.
 pub const SMALL: f32 = 11.0;
@@ -55,6 +53,13 @@ pub const fn top_height(inside: bool) -> f32 {
 /// as Iced's buttons had.
 pub const BUTTON_PADDING: loom_ui::Padding = loom_ui::Padding::symmetric(5.0, 10.0);
 
+/// The space between buttons side by side: within a toolbar group, and
+/// between the breadcrumb's entries and their separators. At least the
+/// focus ring's reach (its offset and its width) plus a margin, so a ring
+/// never covers a neighbour's fill or its text (ui-layer.md, section 6,
+/// rule 3; `no_focus_ring_reaches_a_neighbour`).
+pub const BUTTON_SPACING: f32 = 6.0;
+
 /// The width of a rule between parts of the window.
 pub const RULE: f32 = 1.0;
 
@@ -69,11 +74,59 @@ pub const BODY_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
     weight: loom_ui_core::Weight::Regular,
 };
 
+/// [`SMALL`] text, for `loom-ui` elements: details and IDs.
+pub const SMALL_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
+    size: SMALL,
+    line_height: LINE_HEIGHT,
+    weight: loom_ui_core::Weight::Regular,
+};
+
+/// Help's widest box, in logical pixels, as Iced drew it.
+pub const HELP_WIDTH: f32 = 720.0;
+
 /// [`CONTROL`] text, for `loom-ui` elements.
 pub const CONTROL_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
     size: CONTROL,
     line_height: LINE_HEIGHT,
     weight: loom_ui_core::Weight::Regular,
+};
+
+/// [`TITLE`] text, for `loom-ui` elements: a dialog's title.
+pub const TITLE_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
+    size: TITLE,
+    line_height: LINE_HEIGHT,
+    weight: loom_ui_core::Weight::Regular,
+};
+
+/// The wash over the window behind a dialog (visual-system.md, Overlays):
+/// black at 40%, as Iced's question had.
+pub const SCRIM: loom_ui_core::Color = loom_ui_core::Color::rgba(0.0, 0.0, 0.0, 0.4);
+
+/// The corner radius of a dialog's box, as Iced's box had
+/// (visual-system.md, Overlays).
+pub const OVERLAY_RADIUS: f32 = 2.0;
+
+/// The width of the question's box, in logical pixels.
+pub const QUESTION_WIDTH: f32 = 460.0;
+
+/// The corner radius of a menu's box (visual-system.md, Overlays,
+/// `MENU_PANEL`).
+pub const MENU_RADIUS: f32 = 6.0;
+
+/// The width of a menu's border (visual-system.md, Overlays,
+/// `MENU_PANEL`).
+pub const MENU_BORDER: f32 = 1.0;
+
+/// The corner radius of a menu item (visual-system.md, Overlays,
+/// `MENU_ITEM`).
+pub const MENU_ITEM_RADIUS: f32 = 3.0;
+
+/// The shadow under a menu (visual-system.md, Overlays): black at 35%,
+/// 4 logical pixels down, with a 12 pixel blur, as Iced's menu had.
+pub const MENU_SHADOW: loom_ui::ShadowStyle = loom_ui::ShadowStyle {
+    colour: loom_ui_core::Color::rgba(0.0, 0.0, 0.0, 0.35),
+    offset: loom_ui_core::Vector { x: 0.0, y: 4.0 },
+    blur: 12.0,
 };
 
 /// [`HEADING`] text, for `loom-ui` elements: the patch name in the
@@ -94,6 +147,7 @@ pub const CONTROL_EDGE: iced::Color = QUIET;
 /// A checkbox that keeps its outline and check mark readable on cards and panels.
 pub fn check_box(theme: &Theme, status: iced::widget::checkbox::Status) -> iced::widget::checkbox::Style {
     use iced::widget::checkbox::{Status, primary};
+    use loom_canvas::iced_convert::ToIced as _;
     let mut style = primary(theme, status);
     match status {
         Status::Active { is_checked: true } | Status::Hovered { is_checked: true } => {
@@ -382,18 +436,43 @@ pub fn cell(focused: bool) -> impl Fn(&Theme, iced_button::Status) -> iced_butto
 /// on a tile and in a panel, 2 logical pixels wide and 2 outside the part.
 /// It stands out at 3:1 or more against every panel background
 /// (WCAG 2.2, 1.4.11 and 2.4.13), which a test checks.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "drawn once the first view moves to loom-ui (leaving-iced plan, step 3.2)"
-    )
-)]
 pub fn focus_ring() -> loom_ui::RingStyle {
     loom_ui::RingStyle {
         color: loom_canvas::Palette::default().focus,
         width: 2.0,
         offset: 2.0,
+    }
+}
+
+/// The width of a scroll container's thumb (ui-layer.md, section 5,
+/// rule 12).
+pub const SCROLLBAR_WIDTH: f32 = 6.0;
+
+/// The room between a scroll container's thumb and its edges.
+pub const SCROLLBAR_INSET: f32 = 2.0;
+
+/// The radius of a scroll container's thumb: half its width, so its ends
+/// are round.
+pub const SCROLLBAR_RADIUS: f32 = 3.0;
+
+/// The colour of a scroll container's thumb: the quiet text colour, which
+/// stands out at 3:1 or more against the panel it runs over, as no track is
+/// drawn (WCAG 2.2, 1.4.11). A test checks it.
+pub const SCROLLBAR_THUMB: iced::Color = QUIET;
+
+/// How a scroll container of the app's own UI layer looks and moves: the
+/// scrollbar tokens, the focus ring's reach kept as room around the
+/// content, and one line of body text for its keys and the wheel.
+pub fn scroll() -> loom_ui::ScrollStyle {
+    use loom_canvas::iced_convert::ToCore as _;
+    let ring = focus_ring();
+    loom_ui::ScrollStyle {
+        width: SCROLLBAR_WIDTH,
+        inset: SCROLLBAR_INSET,
+        radius: SCROLLBAR_RADIUS,
+        thumb: SCROLLBAR_THUMB.to_core(),
+        ring: ring.offset + ring.width,
+        line: BODY_TEXT.size * BODY_TEXT.line_height,
     }
 }
 
@@ -466,17 +545,110 @@ pub fn quiet_pick_list(theme: &Theme, status: iced::widget::pick_list::Status) -
     }
 }
 
-/// Markdown in the help overlay, on the same scale as the rest of the app.
-pub fn markdown(theme: &Theme) -> iced_markdown::Settings {
-    let mut settings = iced_markdown::Settings::with_text_size(BODY, theme);
-    settings.h1_size = TITLE.into();
-    settings.h2_size = HEADING.into();
-    settings.h3_size = HEADING.into();
-    settings.h4_size = CONTROL.into();
-    settings.h5_size = CONTROL.into();
-    settings.h6_size = CONTROL.into();
-    settings.code_size = SMALL.into();
-    settings
+/// How a dialog over the canvas looks: help and Your patches. Today's
+/// look, the palette's weak background with a corner of 2, now a token so
+/// `loom-ui`'s panels take it (plan 3.2, rows 5b and 6).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DialogLook {
+    /// The panel's fill.
+    pub fill: loom_ui_core::Color,
+    /// Its text.
+    pub text: loom_ui_core::Color,
+    /// The radius of its corners.
+    pub radius: f32,
+}
+
+/// The dialog look in `theme`.
+pub fn dialog(theme: &Theme) -> DialogLook {
+    use loom_canvas::iced_convert::ToCore as _;
+    let palette = theme.extended_palette();
+    DialogLook {
+        fill: palette.background.weak.color.to_core(),
+        text: palette.background.weak.text.to_core(),
+        radius: 2.0,
+    }
+}
+
+/// Help's backdrop: darker than the question's and Your patches'
+/// ([`SCRIM`]), as today, since help covers the whole canvas to be read.
+pub const HELP_SCRIM: loom_ui_core::Color = loom_ui_core::Color::rgba(0.0, 0.0, 0.0, 0.55);
+
+/// How a link in help's text looks: the theme's primary colour, as help
+/// shows links today, and an underline, since the colour alone is too
+/// close to the body text to tell a link apart (WCAG 2.2, 1.4.1).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinkLook {
+    /// The colour of its words and its line.
+    pub colour: loom_ui_core::Color,
+    /// It is underlined. Required while the colour is under 3:1 against
+    /// the body text (WCAG 2.2, 1.4.1, technique G183), which a test checks.
+    pub underline: bool,
+}
+
+/// The link look in `theme`.
+pub fn link(theme: &Theme) -> LinkLook {
+    use loom_canvas::iced_convert::ToCore as _;
+    LinkLook {
+        colour: theme.extended_palette().primary.base.color.to_core(),
+        underline: true,
+    }
+}
+
+/// How the module browser's floating panel looks: the palette's base
+/// background, a 1 px outline in its strong colour, and a corner of 6, as
+/// today.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FloatingLook {
+    /// The panel's fill.
+    pub fill: loom_ui_core::Color,
+    /// Its text.
+    pub text: loom_ui_core::Color,
+    /// Its outline's colour.
+    pub border: loom_ui_core::Color,
+    /// Its outline's width.
+    pub border_width: f32,
+    /// The radius of its corners.
+    pub radius: f32,
+}
+
+/// The floating panel look in `theme`.
+pub fn floating_panel(theme: &Theme) -> FloatingLook {
+    use loom_canvas::iced_convert::ToCore as _;
+    let palette = theme.extended_palette();
+    FloatingLook {
+        fill: palette.background.base.color.to_core(),
+        text: palette.background.base.text.to_core(),
+        border: palette.background.strong.color.to_core(),
+        border_width: 1.0,
+        radius: 6.0,
+    }
+}
+
+/// How a browser's highlighted row looks: a lifted grey with a 1 px
+/// outline in the primary colour and a corner of 4, as today, so its
+/// quieter text stays readable on it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RowLook {
+    /// The row's fill.
+    pub fill: loom_ui_core::Color,
+    /// Its outline's colour.
+    pub border: loom_ui_core::Color,
+    /// Its outline's width.
+    pub border_width: f32,
+    /// The radius of its corners.
+    pub radius: f32,
+}
+
+/// The highlighted row look in `theme`.
+pub fn highlighted_row(theme: &Theme) -> RowLook {
+    use loom_canvas::iced_convert::ToCore as _;
+    let palette = theme.extended_palette();
+    RowLook {
+        fill: palette.background.weak.color.to_core(),
+        border: palette.primary.base.color.to_core(),
+        border_width: 1.0,
+        radius: 4.0,
+    }
 }
 
 #[cfg(test)]
