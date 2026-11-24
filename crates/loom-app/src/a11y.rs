@@ -711,8 +711,22 @@ impl crate::App {
                     crate::overlays::access::help_id(),
                 )),
                 (None, None, Some(menu)) => Some((accesskit::Role::Menu, menu.label, menu.id)),
+                // The module browser is the runtime's (row 5): a dialog named
+                // "Add module", modal, around its panels' nodes.
+                (None, None, None) if !self.browser_stops().is_empty() => Some((
+                    accesskit::Role::Dialog,
+                    "Add module".to_string(),
+                    crate::browser::browser_id(),
+                )),
+                // Your patches too (row 5b).
+                (None, None, None) if !self.patches_stops().is_empty() => Some((
+                    accesskit::Role::Dialog,
+                    "Your patches".to_string(),
+                    crate::patches::patches_id(),
+                )),
                 (None, None, None) => None,
             },
+            ours_menu: self.browser_menu_group(),
         }
     }
 
@@ -837,6 +851,8 @@ impl crate::App {
                 id.is_under(&crate::overlays::access::question_id())
                     || id.is_under(&crate::overlays::access::help_id())
                     || self.runtime_menu().is_some_and(|menu| id.is_under(&menu.id))
+                    || (!self.browser_stops().is_empty() && id.is_under(&crate::browser::browser_id()))
+                    || (!self.patches_stops().is_empty() && id.is_under(&crate::patches::patches_id()))
             })
             .cloned()
         {
@@ -846,6 +862,8 @@ impl crate::App {
                     .question_click(&id)
                     .or_else(|| self.help_click(&id))
                     .or_else(|| self.menu_click(&id))
+                    .or_else(|| self.browser_click(&id))
+                    .or_else(|| self.patches_click(&id))
                     .into_iter()
                     .collect(),
                 accesskit::Action::Focus if self.our_stops().contains(&id) => {

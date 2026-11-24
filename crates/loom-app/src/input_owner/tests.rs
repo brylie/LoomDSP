@@ -1,6 +1,7 @@
 //! Tests for the input owner and the one input route.
 
 use super::*;
+use crate::patches;
 use crate::ui_test::Ui;
 use iced::keyboard::Modifiers;
 use loom_canvas::stats::{FrameCause, requests_this_thread};
@@ -371,7 +372,12 @@ fn clipboard_keys_do_nothing_behind_an_overlay() {
             let modules = ui.app().session.controller.graph().nodes().count();
             let _ = ui.unfocus_all();
             ui.redraw();
-            assert!(!ui.text_field_focused(), "{owner:?}: a field would take the key");
+            // The module browser's search field is its dialog's only stop
+            // and keeps the focus (module-browser.md, Focus and Tab), so
+            // there the key meets the field, which must not pass it on.
+            if owner != InputOwner::Browser {
+                assert!(!ui.text_field_focused(), "{owner:?}: a field would take the key");
+            }
             ui.set_clipboard(Some("before".to_string()));
             let after = tap_command(&mut ui, c);
             if after != modules || ui.clipboard() != Some("before") {

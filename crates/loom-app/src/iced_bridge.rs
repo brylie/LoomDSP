@@ -317,7 +317,37 @@ impl loom_ui::App for Hosted {
             .or_else(|| self.0.question_click(id))
             .or_else(|| self.0.help_click(id))
             .or_else(|| self.0.menu_click(id))
+            .or_else(|| self.0.browser_click(id))
+            .or_else(|| self.0.patches_click(id))
             .or_else(|| self.2.clicked(id))
+    }
+
+    /// The pointer came onto one of the runtime's elements that reports its
+    /// hover: a browser's row, which it highlights.
+    fn hovered(&self, id: &UiId) -> Option<Message> {
+        self.0.browser_hovered(id).or_else(|| self.0.patches_hovered(id))
+    }
+
+    /// A right press or a screen reader's ShowContextMenu on an element with
+    /// a context menu: a browser's library row (ui-layer.md, section 5,
+    /// rule 19).
+    fn context_menu(&self, id: &UiId, by_key: bool) -> Option<Message> {
+        self.0.browser_context_menu(id, by_key)
+    }
+
+    /// A root placed under an element that stopped showing: a browser
+    /// row's menu, whose row scrolled out of view, closes (section 5,
+    /// rule 13).
+    fn anchor_hidden(&self, root: &UiId) -> Option<Message> {
+        self.0.browser_anchor_hidden(root)
+    }
+
+    /// A key an element takes before the focused one inside it (section 6,
+    /// rule 6, step 2b): the browser's list keys over its search field.
+    fn panel_key(&self, id: &UiId, key: &loom_ui_core::KeyEvent) -> Option<Message> {
+        self.0
+            .browser_panel_key(id, key)
+            .or_else(|| self.0.patches_panel_key(id, key))
     }
 
     /// Where Tab goes from one of the runtime's stops: the toolbar and the
@@ -377,7 +407,9 @@ impl loom_ui::App for Hosted {
 
     /// A press outside the probe menu or Recent closes it (row 3b).
     fn pressed_outside(&self, root: &UiId) -> Option<Message> {
-        self.0.menu_pressed_outside(root)
+        self.0
+            .menu_pressed_outside(root)
+            .or_else(|| self.0.browser_pressed_outside(root))
     }
 
     /// The runtime's focus moved: the app keeps one copy of what has the
@@ -579,6 +611,12 @@ impl<D: BridgeDriver> Bridge<D> {
     /// for that turn.
     pub(crate) fn input(&mut self, event: loom_ui_core::Event, pointer: Option<loom_ui_core::Point>) -> Task<Bridged> {
         self.turn(DriverEvent::Input { event, pointer })
+    }
+
+    /// A screen reader's event, as the adapter gives the window one: a turn
+    /// of the runtime's, which carries out its own actions first.
+    pub(crate) fn accessibility(&mut self, event: loom_ui::AccessEvent) -> Task<Bridged> {
+        self.turn(DriverEvent::Accessibility(event))
     }
 
     /// The runtime, to read: its focus, hover, and panels.

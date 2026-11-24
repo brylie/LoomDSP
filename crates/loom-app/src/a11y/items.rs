@@ -183,13 +183,6 @@ pub(crate) enum SetText {
     /// The matrix's filter. It filters as it is typed in and has no Enter
     /// of its own, so the text is the one message.
     MatrixFilter,
-    /// The module browser's search field. It searches as it is typed in,
-    /// and Enter would pick a row, so the text is the one message.
-    BrowserQuery,
-    /// Your patches' search field, which filters as it is typed in.
-    PatchesSearch,
-    /// Your patches' Author field, which filters as it is typed in.
-    PatchesAuthor,
     /// Preferences' **Your name** field. It saves on Enter or on close, so
     /// a screen reader's whole new text is typed and then saved, as Enter
     /// would.
@@ -260,9 +253,6 @@ impl SetText {
                 Message::PatchInfo(crate::patch_info::Message::TagSubmit),
             ],
             Self::MatrixFilter => vec![Message::Matrix(crate::matrix::Event::Filter(text))],
-            Self::BrowserQuery => vec![Message::Browser(crate::browser::Message::Query(text))],
-            Self::PatchesSearch => vec![Message::Patches(crate::patches::Message::Search(text))],
-            Self::PatchesAuthor => vec![Message::Patches(crate::patches::Message::Author(text))],
             Self::PreferencesAuthor => vec![
                 Message::Preferences(crate::settings::Message::Author(text)),
                 Message::Preferences(crate::settings::Message::SaveAuthor),

@@ -1,8 +1,5 @@
 //! Offline module help from the running registry and bundled notes.
 
-use crate::style;
-use iced::Theme;
-use iced::widget::container;
 use loom_core::{ModuleDescriptor, Registry, RoleDescriptor, RolePort};
 use serde::Serialize;
 
@@ -219,19 +216,6 @@ impl Help {
         model.lead = markdown::parse(lead).blocks;
         model.tail = markdown::parse(tail).blocks;
         Self { model }
-    }
-}
-
-/// The dialog's panel, from the style token (`style::dialog`), which
-/// `loom-ui`'s panels take too. Your patches uses it as well.
-pub(crate) fn dialog_style(theme: &Theme) -> container::Style {
-    use loom_canvas::iced_convert::ToIced as _;
-    let look = style::dialog(theme);
-    container::Style {
-        background: Some(look.fill.to_iced().into()),
-        text_color: Some(look.text.to_iced()),
-        border: iced::border::rounded(look.radius),
-        ..container::Style::default()
     }
 }
 

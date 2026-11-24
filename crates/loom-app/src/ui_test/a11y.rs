@@ -12,8 +12,6 @@
 //! inside them, are left out, as a screen reader leaves them out.
 
 use super::Ui;
-use crate::Message;
-use crate::a11y::Event;
 use accesskit::{Action, ActionData, ActionRequest, Node, NodeId, Role, TreeId, TreeUpdate};
 use loom_ui_core::UiId;
 use std::collections::HashMap;
@@ -237,6 +235,17 @@ impl<'a> A11yNode<'a> {
         self.raw().supports_action(action)
     }
 
+    /// True when it is the chosen one of its set: a highlighted row.
+    pub fn is_selected(&self) -> bool {
+        self.raw().is_selected() == Some(true)
+    }
+
+    /// The UI ID of the node the keys act on while this one keeps the
+    /// focus: a search field's highlighted row (section 7, rule 27).
+    pub fn active_descendant(&self) -> Option<&'a UiId> {
+        self.raw().active_descendant().and_then(|node| self.tree.ids.get(&node))
+    }
+
     /// True when it has keyboard focus.
     pub fn is_focused(&self) -> bool {
         self.id == self.tree.focus
@@ -389,7 +398,11 @@ impl Ui {
             target_node: node.id,
             data,
         };
-        let _ = self.deliver(Message::A11y(Event::Action(request)));
+        // As the adapter's request reaches the window: the runtime's turn
+        // first, which carries out what is its own (a field's text, a
+        // select, a slider, a context menu), and hands the rest to the app
+        // as `Message::A11y`.
+        let _ = self.accessibility(loom_ui::AccessEvent::Action(request));
         // The window draws its next frame after the turn, as after any
         // other; the canvas acts on some requests there, such as opening
         // the module browser.

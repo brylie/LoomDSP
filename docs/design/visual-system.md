@@ -199,6 +199,9 @@ Kept problems survive opening another patch, except as the table says.
 | `OVERLAY_PANEL` | A dialog's box: fill, border, and radius | Matched to the box Iced draws today, measured when the token is built, so the gate shows no change |
 | `MENU_PANEL` | A menu's box over the canvas: the base fill, a 1 px quiet border, radius 6 | As today's probe menu |
 | `MENU_SHADOW` | The shadow under a menu | Black at 35% opacity, offset 4 px down, blur 12 px, as today |
+| `BROWSER_FIELD` | A browser's search or Author field: the weak fill and radius 4 (`FIELD_RADIUS`) | As Iced's text input drew it (row 5) |
+| `SWATCH` | The 8 px family swatch beside a module browser row's name, radius 2 (`SWATCH_RADIUS`) | As today (row 5) |
+| `TAG` | A Your patches tag: a 1 px outline (`TAG_BORDER`) and radius 4 (`TAG_RADIUS`); filled and outlined while it filters, quiet text otherwise | As the tab look Iced drew (row 5b) |
 | `MENU_ITEM` | A menu item's looks: a 1 px quiet border and radius 3 always; a weak fill while hovered, pressed, or highlighted, however the highlight got there; the focus ring on top when the keys moved it | As today's menu items, without Iced's 2 px primary border on the highlight (Brylie's decision, 2026-11-20): the focus ring marks keyboard focus instead |
 
 *Why:* the dialogs and menus were drawn with Iced's own box and its palette, which are not ours. Tokens keep the look the same while it moves, and give later menus and popovers one source.

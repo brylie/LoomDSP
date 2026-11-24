@@ -3114,8 +3114,15 @@ fn tab_moves_between_the_fields_of_one_view() {
     ui.focus(&search);
     ui.tap(tab.clone(), Modifiers::default());
     assert_eq!(ui.focused_field(), Some(author));
+    // Tab goes on to the licence filters, which the keyboard reaches now
+    // (patch-metadata.md, Keys; row 5b), not back to the search field.
     ui.tap(tab, Modifiers::default());
-    assert_eq!(ui.focused_field(), Some(search), "wrapped inside the browser");
+    assert_eq!(
+        ui.runtime().focused(),
+        Some(&crate::patches::licence_id("lets-me-change")),
+        "on to the licence filters"
+    );
+    let _ = search;
 }
 
 /// Tab goes forward and Shift-Tab back, wrapping at both ends. It takes three

@@ -727,7 +727,13 @@ impl Message {
                 use patches::Message as M;
                 let field = match message {
                     M::Search(_) | M::Author(_) | M::Tag(_) | M::Submit => true,
-                    M::Found { .. } | M::Licence(..) | M::Hover(_) | M::Pick(_) | M::Step(_) | M::Close => false,
+                    M::Found { .. }
+                    | M::Licence(..)
+                    | M::Hover(_)
+                    | M::Pick(_)
+                    | M::Step(_)
+                    | M::Close
+                    | M::FocusTag(_) => false,
                 };
                 from(field, InputOwner::Patches)
             }
@@ -740,7 +746,7 @@ impl Message {
                     | M::Menu { .. }
                     | M::InsertLinked(_)
                     | M::Library(_)
-                    | M::Scrolled(_)
+                    | M::CloseMenu
                     | M::Key(_)
                     | M::Close => false,
                 };

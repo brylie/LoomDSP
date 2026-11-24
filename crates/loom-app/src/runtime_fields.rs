@@ -22,8 +22,13 @@ impl App {
             return Some(Message::FieldPasteRefused);
         }
         // One arm per field, added with its view: `id == &view::field_id()`
-        // then `view::field_message(event)`. None yet.
-        let _ = id;
+        // then `view::field_message(event)`.
+        if *id == crate::browser::search_id() {
+            return crate::browser::field_message(event);
+        }
+        if crate::patches::text_fields().contains(id) {
+            return crate::patches::field_message(id, event);
+        }
         None
     }
 }

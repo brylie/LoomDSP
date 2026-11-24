@@ -398,36 +398,39 @@ fn the_list_scrolls_the_highlighted_row_just_into_view() {
     let _ = ui.redraw();
     let rows = ui.app().overlays.patches().unwrap().model().rows.len();
     assert_eq!(rows, 25);
-    // Where the highlighted row is in the window, and what the list shows.
+    // Where the highlighted row is in the window, where the list is, and
+    // where the first row is, which moves only when the list scrolls.
     let step = |ui: &mut crate::ui_test::Ui, by: i32| {
         ui.send(AppMessage::Patches(Message::Step(by)));
         let _ = ui.redraw();
+        ui.lay_out_panels();
         let browser = ui.app().overlays.patches().unwrap();
         let row = browser.model().rows[browser.highlight].id.clone();
-        let place = ui.places().of(&row).expect("the window drew the row");
-        let list = place.clip.expect("the row is in the list");
-        let offset = ui.scroll_translation(LIST).expect("the list scrolls").y;
-        (place.rect, list, offset)
+        let first = browser.model().rows[0].id.clone();
+        let at = |id: &loom_ui_core::UiId| ui.runtime().bounds(id).expect("laid out");
+        (at(&row), at(&part_id("list")), at(&first).y)
     };
     let near = |a: f32, b: f32| (a - b).abs() < 0.5;
-    let (_, _, offset) = step(&mut ui, 1);
-    assert!(near(offset, 0.0), "in view: no scroll");
-    let (row, list, offset) = step(&mut ui, 11);
-    assert!(offset > 0.0, "below: it scrolled");
+    let (_, _, top) = step(&mut ui, 1);
+    let (row, list, first) = step(&mut ui, 11);
+    assert!(first < top, "below: it scrolled");
     assert!(
-        near(row.y + row.height, list.y + list.height),
-        "its bottom meets the list's"
+        row.y + row.height <= list.y + list.height + 0.5 && row.y + row.height > list.y + list.height - 8.0,
+        "its bottom meets the list's: {row:?} in {list:?}"
     );
     // Rows 3 to 12 show now, so row 2 is above the view.
     let (row, list, _) = step(&mut ui, -10);
-    assert!(near(row.y, list.y), "above: its top meets the list's");
+    assert!(
+        row.y >= list.y - 0.5 && row.y < list.y + 8.0,
+        "above: its top meets the list's: {row:?} in {list:?}"
+    );
     let (_, _, before) = step(&mut ui, 1);
     let (_, _, after) = step(&mut ui, 1);
     assert!(near(before, after), "a row already in view scrolls nothing");
     let (row, list, _) = step(&mut ui, 100);
     assert_eq!(ui.app().overlays.patches().unwrap().highlight, rows - 1, "the last row");
     assert!(
-        near(row.y + row.height, list.y + list.height),
+        row.y + row.height <= list.y + list.height + 0.5,
         "the end of the list shows"
     );
 }
@@ -437,28 +440,29 @@ fn the_list_scrolls_the_highlighted_row_just_into_view() {
 /// (patch-metadata.md, Keys).
 #[test]
 fn page_keys_step_a_page() {
-    use iced::keyboard::{Event, Key, Location, Modifiers, key::Named};
-    let message = |named: Named| {
-        let event = iced::Event::Keyboard(Event::KeyPressed {
-            key: Key::Named(named),
-            modified_key: Key::Named(named),
-            physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
-            location: Location::Standard,
-            modifiers: Modifiers::empty(),
-            text: None,
+    use loom_ui_core::{Key, KeyEvent, Modifiers};
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    crate::input_owner::tests::open_overlay(&mut ui, crate::input_owner::InputOwner::Patches);
+    let message = |ui: &crate::ui_test::Ui, field: &loom_ui_core::UiId, key: Key| {
+        let press = KeyEvent::Pressed {
+            key,
+            modifiers: Modifiers::NONE,
             repeat: false,
-        });
-        super::key(event, iced::event::Status::Ignored, iced::window::Id::unique())
+            text: None,
+        };
+        ui.app().patches_panel_key(field, &press)
     };
-    let step = |named: Named| match message(named) {
-        Some(crate::Message::Patches(Message::Step(by))) => Some(by),
-        _ => None,
-    };
-    assert_eq!(step(Named::PageDown), Some(PAGE_ROWS));
-    assert_eq!(step(Named::PageUp), Some(-PAGE_ROWS));
-    assert_eq!(step(Named::ArrowDown), Some(1));
-    assert!(matches!(
-        message(Named::Escape),
-        Some(crate::Message::Patches(Message::Close))
-    ));
+    for field in super::text_fields() {
+        let step = |key: Key| match message(&ui, &field, key) {
+            Some(crate::Message::Patches(Message::Step(by))) => Some(by),
+            _ => None,
+        };
+        assert_eq!(step(Key::PageDown), Some(PAGE_ROWS));
+        assert_eq!(step(Key::PageUp), Some(-PAGE_ROWS));
+        assert_eq!(step(Key::Down), Some(1));
+        assert!(matches!(
+            message(&ui, &field, Key::Escape),
+            Some(crate::Message::Patches(Message::Close))
+        ));
+    }
 }

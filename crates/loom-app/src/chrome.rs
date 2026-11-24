@@ -28,6 +28,10 @@ impl App {
         self.toolbar_panel(view);
         self.breadcrumb_panel(view);
         self.bar_panel(view);
+        // Help comes after the browser, so it is over it: F1 opens help
+        // from the browser (help-pages.md).
+        self.browser_panel(view);
+        self.patches_panel(view);
         self.help_panel(view);
         self.question_panel(view);
         self.menu_panel(view);
@@ -56,6 +60,9 @@ impl App {
     pub(crate) fn our_stops(&self) -> Vec<UiId> {
         let mut stops = self.question_stops();
         stops.extend(self.help_stops());
+        stops.extend(self.browser_stops());
+        stops.extend(self.patches_stops());
+        stops.extend(self.patches_tags());
         stops.extend(self.menu_stops());
         stops.extend(self.toolbar_stops());
         stops.extend(self.breadcrumb_stops());
@@ -90,6 +97,18 @@ impl App {
             return self
                 .help_next_stop(Some(from), back)
                 .map_or(TabStep::Leave, TabStep::To);
+        }
+        // The browser's search field is its dialog's only stop, so Tab and
+        // Shift+Tab stay on it (module-browser.md, Focus and Tab; the
+        // WAI-ARIA modal dialog pattern).
+        if self.browser_stops().contains(from) {
+            return TabStep::To(from.clone());
+        }
+        // Tab loops inside Your patches, the tags as one stop
+        // (patch-metadata.md, Keys; the WAI-ARIA modal dialog and toolbar
+        // patterns).
+        if let Some(to) = self.patches_next_stop(from, back) {
+            return TabStep::To(to);
         }
         // Tab on a menu item closes the menu and moves on from what opened
         // it (the WAI-ARIA menu pattern; section 6, rule 8).

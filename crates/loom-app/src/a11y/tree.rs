@@ -422,7 +422,7 @@ pub(crate) fn tree(
     };
     // The runtime's own panels: the toolbar, the breadcrumb inside a
     // sub-patch, and the bar, each in its named group.
-    let groups = frame.ours(ours);
+    let groups = frame.ours(ours, frames);
     let mut children = groups.toolbar;
     children.extend(groups.breadcrumb);
     children.push(frame.tabs(snapshot.matrix.tab));
@@ -766,6 +766,10 @@ pub(crate) struct Frames {
     /// alert dialog for the question and a menu for the probe menu or
     /// Recent.
     pub ours_overlay: Option<(Role, String, UiId)>,
+    /// A menu the runtime draws inside that overlay, as a panel of its
+    /// own: its name and UI ID, around its items. A library row's menu in
+    /// the module browser (row 5).
+    pub ours_menu: Option<(String, UiId)>,
 }
 
 /// The UI ID a fixed text names. The texts are this app's own constants,
@@ -1068,7 +1072,11 @@ impl Frame<'_> {
     /// breadcrumb's entries in one named "Patch levels", and the stats
     /// bar's items in one named "Status bar". Below a panel that owns the
     /// input they are hidden, as the window's other parts are.
-    fn ours(&mut self, ours: &loom_ui::AccessNodes) -> Ours {
+    fn ours(&mut self, ours: &loom_ui::AccessNodes, frames: &Frames) -> Ours {
+        // Only the overlay that owns the input and what is inside it: help
+        // over the module browser leaves the browser covered (rule 24).
+        let owner = frames.ours_overlay.as_ref().map(|(_, _, id)| id);
+        let owns = |root: &UiId| owner.is_none_or(|owner| root == owner || root.is_under(owner));
         let tops: Vec<NodeId> = ours
             .roots
             .iter()
@@ -1080,7 +1088,7 @@ impl Frame<'_> {
         let overlay_roots: Vec<&UiId> = ours
             .roots
             .iter()
-            .filter(|(_, layer, _)| *layer >= loom_ui::Layer::Overlays)
+            .filter(|(root, layer, _)| *layer >= loom_ui::Layer::Overlays && owns(root))
             .map(|(root, _, _)| root)
             .collect();
         let in_overlay = |table: &IdTable, node: NodeId| {
@@ -1095,12 +1103,20 @@ impl Frame<'_> {
             }
             self.nodes.push((*id, node));
         }
-        let overlay: Vec<NodeId> = ours
+        let mut overlay: Vec<NodeId> = ours
             .roots
             .iter()
-            .filter(|(_, layer, _)| *layer >= loom_ui::Layer::Overlays)
+            .filter(|(root, layer, _)| *layer >= loom_ui::Layer::Overlays && owns(root))
             .flat_map(|(_, _, tops)| tops.iter().copied())
             .collect();
+        // A menu drawn as a panel of its own is named around its items.
+        if let Some((label, menu)) = &frames.ours_menu {
+            let (items, rest): (Vec<NodeId>, Vec<NodeId>) = overlay
+                .iter()
+                .partition(|top| self.table.id(top.0).is_some_and(|id| id.is_under(menu)));
+            overlay = rest;
+            overlay.extend(self.group(items, Role::Menu, label, menu));
+        }
         let under = |panel: &UiId| -> Vec<NodeId> {
             tops.iter()
                 .copied()

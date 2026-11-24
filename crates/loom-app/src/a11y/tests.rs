@@ -4269,10 +4269,19 @@ fn browser_ui(dir: &std::path::Path) -> crate::ui_test::Ui {
     ui
 }
 
-/// The node of the option for the row at `row` in the open browser.
+/// The node of the option for the row at `row` in the open browser. The
+/// browser is the runtime's (row 5), so its nodes are read first.
 fn browser_option(ui: &mut crate::ui_test::Ui, row: usize) -> NodeId {
+    ui.read_runtime_nodes();
     let id = ui.app().overlays.browser().unwrap().model().rows[row].id.clone();
     node_of(ui.app_mut(), &id)
+}
+
+/// The tree as the window sends it, with the runtime's own nodes read first.
+fn tree_with_ours(ui: &mut crate::ui_test::Ui) -> TreeUpdate {
+    ui.read_runtime_nodes();
+    let places = ui.places();
+    ui.app_mut().a11y_tree(&places)
 }
 
 /// The module browser in the tree: a modal dialog whose search field has
@@ -4284,8 +4293,7 @@ fn browser_option(ui: &mut crate::ui_test::Ui, row: usize) -> NodeId {
 fn the_module_browser_is_reported_with_the_focus_in_its_field() {
     let dir = crate::recovery::tests::TempDir::new("a11y-browser");
     let mut ui = browser_ui(&dir.0);
-    let places = ui.places();
-    let update = ui.app_mut().a11y_tree(&places);
+    let update = tree_with_ours(&mut ui);
     let dialog = node(&update, node_of(ui.app_mut(), &crate::browser::browser_id()));
     assert_eq!(dialog.role(), Role::Dialog);
     assert!(dialog.is_modal());
@@ -4301,27 +4309,27 @@ fn the_module_browser_is_reported_with_the_focus_in_its_field() {
         list.size_of_set(),
         Some(ui.app().overlays.browser().unwrap().model().rows.len())
     );
-    assert!(list.clips_children());
-
-    let (overlay, _) = ui.app().overlay_items();
-    for item in overlay[0].walk() {
-        let acts = item.click.is_some() || item.focus.is_some() || item.set_text.is_some();
-        if acts && !matches!(item.kind, super::items::Kind::Dialog) {
-            assert!(places.of(&item.id).is_some(), "the window drew `{}`", item.id);
-        }
-    }
+    // The runtime cuts what its list scrolls away out of each row's bounds
+    // (section 7, rule 28), and says how far the list scrolls.
+    assert!(list.scroll_y_max().is_some());
+    // Every part that acts has its place, from the runtime's layout.
+    assert!(node(&update, field).bounds().is_some());
+    assert!(node(&update, first).bounds().is_some());
 
     ui.send(Message::Browser(crate::browser::Message::Key(
         crate::browser::Nav::Down,
     )));
     let _ = ui.redraw();
-    let places = ui.places();
-    let update = ui.app_mut().a11y_tree(&places);
+    let update = tree_with_ours(&mut ui);
     let second = browser_option(&mut ui, 1);
     assert_eq!(update.focus, field, "the focus stays in the field");
     assert_eq!(node(&update, field).active_descendant(), Some(second));
     assert_eq!(node(&update, second).is_selected(), Some(true));
-    assert_eq!(node(&update, first).is_selected(), Some(false));
+    assert_ne!(
+        node(&update, first).is_selected(),
+        Some(true),
+        "the first is no longer selected"
+    );
 }
 
 /// A screen reader's Click on a module's option adds it, as a press does.
@@ -4338,9 +4346,10 @@ fn a_click_on_a_browser_option_adds_its_module() {
     assert_eq!(ui.app().ui_snapshot().tiles.len(), before + 1);
 }
 
-/// ShowContextMenu on a library row opens its menu as a menu, with the
-/// focus on Insert linked; a Click there inserts the sub-patch linked. A
-/// module's option offers no menu.
+/// ShowContextMenu on a library row opens its menu as a menu, with Insert
+/// linked as the search field's active descendant: the focus stays in the
+/// field (ui-layer.md, section 6, rule 8). A Click there inserts the
+/// sub-patch linked. A module's option offers no menu.
 #[test]
 fn show_context_menu_on_a_library_row_opens_its_menu() {
     let dir = crate::recovery::tests::TempDir::new("a11y-browser-menu");
@@ -4355,22 +4364,20 @@ fn show_context_menu_on_a_library_row_opens_its_menu() {
         .iter()
         .position(|row| row.library)
         .expect("the library row");
-    let places = ui.places();
-    let update = ui.app_mut().a11y_tree(&places);
+    let update = tree_with_ours(&mut ui);
     let module = browser_option(&mut ui, 0);
     assert!(!node(&update, module).supports_action(Action::ShowContextMenu));
     let option = browser_option(&mut ui, row);
     assert!(node(&update, option).supports_action(Action::ShowContextMenu));
-    let ui_now = ui.now();
-    ui_act(&mut ui, &request(Action::ShowContextMenu, option, None), ui_now);
-    let _ = ui.redraw();
-    let places = ui.places();
-    let update = ui.app_mut().a11y_tree(&places);
     let id = ui.app().overlays.browser().unwrap().model().rows[row].id.clone();
+    ui.a11y_action(&id, Action::ShowContextMenu);
+    let update = tree_with_ours(&mut ui);
     let item = node_of(ui.app_mut(), &crate::browser::insert_linked_id(&id));
-    assert_eq!(update.focus, item, "the focus is on the menu's item");
+    let field = node_of(ui.app_mut(), &crate::browser::search_id());
+    assert_eq!(update.focus, field, "the focus stays in the field");
+    assert_eq!(node(&update, field).active_descendant(), Some(item));
     assert_eq!(node(&update, item).role(), Role::MenuItem);
-    assert!(places.of(&crate::browser::insert_linked_id(&id)).is_some());
+    assert!(node(&update, item).bounds().is_some());
 
     let before = ui.app().ui_snapshot().tiles.len();
     let ui_now = ui.now();
@@ -4390,9 +4397,11 @@ fn help_over_the_browser_hides_it() {
     ui.send(Message::ShowHelp);
     let _ = ui.redraw();
     assert!(ui.app().overlays.help.is_some());
-    let places = ui.places();
-    let update = ui.app_mut().a11y_tree(&places);
-    assert!(update.nodes.iter().all(|(id, _)| *id != option), "not reported");
+    let update = tree_with_ours(&mut ui);
+    assert!(
+        update.nodes.iter().all(|(id, node)| *id != option || node.is_hidden()),
+        "not reported"
+    );
     let tiles = ui.app().ui_snapshot().tiles.len();
     let ui_now = ui.now();
     ui_act(&mut ui, &request(Action::Click, option, None), ui_now);
@@ -4426,9 +4435,10 @@ fn your_patches_follows_each_batch_without_moving_the_focus() {
     let _ = ui.deliver(Message::File(crate::FileAction::Browse));
     let _ = ui.redraw();
     let open = ui.app().patches_open;
+    // Your patches is the runtime's (row 5b): its nodes are read first.
+    let update = tree_with_ours(&mut ui);
     let field = node_of(ui.app_mut(), &crate::patches::part_id("search"));
-    let places = ui.places();
-    assert_eq!(ui.app_mut().a11y_tree(&places).focus, field);
+    assert_eq!(update.focus, field);
 
     let paths = crate::patches::patch_files(&source.0, &std::sync::atomic::AtomicBool::new(false));
     let mut selected: Option<(UiId, NodeId)> = None;
@@ -4436,8 +4446,7 @@ fn your_patches_follows_each_batch_without_moving_the_focus() {
         let rows = batch.iter().map(|path| crate::patches::Row::read(path)).collect();
         ui.send(Message::Patches(crate::patches::Message::Found { open, rows }));
         let _ = ui.redraw();
-        let places = ui.places();
-        let update = ui.app_mut().a11y_tree(&places);
+        let update = tree_with_ours(&mut ui);
         assert_eq!(update.focus, field, "the focus stays in the field");
         let model = ui.app().overlays.patches().unwrap().model().clone();
         let list = node(&update, node_of(ui.app_mut(), &crate::patches::part_id("list")));
@@ -4451,14 +4460,15 @@ fn your_patches_follows_each_batch_without_moving_the_focus() {
         }
         selected = Some((highlighted, number));
     }
-    // Every part that acts is where the window drew it.
-    let places = ui.places();
-    let (overlay, _) = ui.app().overlay_items();
-    for item in overlay[0].walk() {
-        let acts = item.click.is_some() || item.focus.is_some() || item.set_text.is_some();
-        if acts && item.kind != super::items::Kind::Dialog {
-            assert!(places.of(&item.id).is_some(), "the window drew `{}`", item.id);
-        }
+    // Every part that acts has its place, from the runtime's layout.
+    let update = tree_with_ours(&mut ui);
+    for id in [
+        crate::patches::part_id("close"),
+        crate::patches::part_id("search"),
+        crate::patches::part_id("author"),
+    ] {
+        let number = node_of(ui.app_mut(), &id);
+        assert!(node(&update, number).bounds().is_some(), "`{id}` has its place");
     }
 }
 

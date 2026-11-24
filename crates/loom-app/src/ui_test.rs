@@ -561,6 +561,14 @@ impl Ui {
         if draw { self.redraw() } else { self.bridge.take_log() }
     }
 
+    /// A screen reader's event, as the adapter gives the window one: the
+    /// runtime's turn first, then what comes of it, as for a message.
+    pub(crate) fn accessibility(&mut self, event: loom_ui::AccessEvent) -> Vec<Message> {
+        let task = self.bridge.accessibility(event);
+        self.settle(vec![task]);
+        self.bridge.take_log()
+    }
+
     /// Takes focus from every field, as the bridge does for a focus effect
     /// to no element, with no message.
     pub(crate) fn unfocus_all(&mut self) -> Vec<Message> {
@@ -668,6 +676,15 @@ impl Ui {
     /// widget takes itself sends none: the app hears of it on the next turn
     /// that asks.
     pub(crate) fn focus(&mut self, part: &loom_ui_core::UiId) {
+        // One of the runtime's fields takes the focus as a press on it
+        // gives it, in the runtime's own focus.
+        self.lay_out_panels();
+        if let Some(at) = self.runtime().bounds(part) {
+            let centre = loom_ui_core::Point::new(at.x + at.width / 2.0, at.y + at.height / 2.0);
+            let _ = self.bridge.runtime_mut().focus_at(centre);
+            self.redraw();
+            return;
+        }
         let mut operation =
             iced::advanced::widget::operation::focusable::focus::<()>(crate::places::field_widget_id(part));
         self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut operation));
@@ -676,11 +693,15 @@ impl Ui {
 
     /// True when a text field has keyboard focus, read from the widgets.
     pub(crate) fn text_field_focused(&mut self) -> bool {
-        self.read_focus().any
+        self.runtime().focused_field().is_some() || self.read_focus().any
     }
 
-    /// The part whose text field has focus, read from the widgets.
+    /// The part whose text field has focus: one of the runtime's fields,
+    /// or else one of Iced's, read from the widgets.
     pub(crate) fn focused_field(&mut self) -> Option<loom_ui_core::UiId> {
+        if let Some(field) = self.runtime().focused_field() {
+            return Some(field.clone());
+        }
         self.read_focus().part()
     }
 
@@ -717,8 +738,13 @@ impl Ui {
         self.field(&part)
     }
 
-    /// Where the text field of `part` is in the window, to click on it.
+    /// Where the text field of `part` is in the window, to click on it: one
+    /// of the runtime's, from its layout, or else one of Iced's.
     pub(crate) fn field(&mut self, part: &loom_ui_core::UiId) -> Point {
+        self.lay_out_panels();
+        if let Some(at) = self.runtime().bounds(part) {
+            return Point::new(at.x + at.width / 2.0, at.y + at.height / 2.0);
+        }
         self.field_by_id(crate::places::field_widget_id(part))
     }
 
