@@ -110,7 +110,7 @@ pub enum Pointer {
 }
 
 /// What the layers ask of the window. `None` keeps what it was.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Report {
     /// The pointer.
     pub cursor: Option<Pointer>,
@@ -122,6 +122,13 @@ pub struct Report {
     /// the messages already queued. The shell runs those, then asks
     /// [`Layers::alone`] for it.
     pub alone: bool,
+    /// Input the layers hold for the runtime, in order: a control
+    /// channel's scripted keys. The shell gives each one to the runtime as
+    /// [`DriverEvent::Input`], one turn each, as it gives a real key, so a
+    /// scripted key goes where a real one would: the runtime's Tab, its
+    /// panel keys and fields, then the target (ui-layer.md, section 6,
+    /// rule 6).
+    pub input: Vec<loom_ui_core::Event>,
 }
 
 /// What the shell remembers of the input method between reports: what
@@ -337,6 +344,7 @@ where
         ime: ImeMemory::default(),
         shown: false,
         pacing: Pacing::default(),
+        scripted: std::collections::VecDeque::new(),
         error: None,
     };
     event_loop
@@ -400,6 +408,8 @@ struct Handler<A: App, T, L, S> {
     shown: bool,
     /// The redraw rule.
     pacing: Pacing,
+    /// Input the layers reported for the runtime, not yet given to it.
+    scripted: std::collections::VecDeque<loom_ui_core::Event>,
     /// What stopped the loop, if anything failed.
     error: Option<Error>,
 }
@@ -521,8 +531,18 @@ where
     /// alone, runs it and asks them again, in a loop, so the stack stays
     /// flat however many come.
     fn after(&mut self, event_loop: &ActiveEventLoop) {
-        while self.report(event_loop) {
-            self.alone();
+        loop {
+            while self.report(event_loop) {
+                self.alone();
+            }
+            // Then the layers' input, one turn each, as the window's own
+            // would come, with what each turn reports applied after it.
+            let quit = self.driver.exit || self.live.as_ref().is_none_or(|live| live.runtime.exited());
+            let Some(event) = self.scripted.pop_front().filter(|_| !quit) else {
+                break;
+            };
+            let pointer = self.held.pointer;
+            self.run(|runtime, driver| runtime.handle(DriverEvent::Input { event, pointer }, Instant::now(), driver));
         }
     }
 
@@ -587,6 +607,7 @@ where
         if self.pacing.layers(report.redraw) {
             live.window.request_redraw();
         }
+        self.scripted.extend(report.input);
         if self.driver.exit || live.runtime.exited() {
             event_loop.exit();
             return false;

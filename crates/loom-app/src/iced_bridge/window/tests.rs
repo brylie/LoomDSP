@@ -221,3 +221,65 @@ fn iceds_widgets_use_the_shells_clipboard() {
     assert_eq!(clipboard.read(Kind::Primary), None);
     assert_eq!(clipboard.read(Kind::Standard), Some("osc".to_owned()));
 }
+
+/// A scripted key goes to the window as a real one: each report hands the
+/// shell one key, as the runtime's input, and keeps Iced's copy for the
+/// next report, as `window_event` keeps a real key's; one key a report, so
+/// each has a turn of its own. With none left, the report hands none.
+#[test]
+fn a_scripted_key_is_handed_to_the_shell_one_a_report() {
+    use iced::keyboard::{Event as Keyboard, Key, Location, Modifiers, key::Named};
+    let mut runtime = runtime();
+    let mut layers = WindowLayers::new();
+    let down = |pressed: bool| {
+        let key = Key::Named(Named::ArrowDown);
+        iced::Event::Keyboard(if pressed {
+            Keyboard::KeyPressed {
+                key: key.clone(),
+                modified_key: key.clone(),
+                physical_key: iced::keyboard::key::Physical::Unidentified(
+                    iced::keyboard::key::NativeCode::Unidentified,
+                ),
+                location: Location::Standard,
+                modifiers: Modifiers::empty(),
+                text: None,
+                repeat: false,
+            }
+        } else {
+            Keyboard::KeyReleased {
+                key: key.clone(),
+                modified_key: key,
+                physical_key: iced::keyboard::key::Physical::Unidentified(
+                    iced::keyboard::key::NativeCode::Unidentified,
+                ),
+                location: Location::Standard,
+                modifiers: Modifiers::empty(),
+            }
+        })
+    };
+    runtime.app().0.pointer.script_key(down(true));
+    runtime.app().0.pointer.script_key(down(false));
+    let first = report(&mut layers, &mut runtime);
+    assert!(
+        matches!(
+            first.input.as_slice(),
+            [loom_ui_core::Event::Key(loom_ui_core::KeyEvent::Pressed {
+                key: loom_ui_core::Key::Down,
+                ..
+            })]
+        ),
+        "{:?}",
+        first.input
+    );
+    assert_eq!(layers.events.len(), 1, "Iced keeps its copy");
+    let second = report(&mut layers, &mut runtime);
+    assert!(
+        matches!(
+            second.input.as_slice(),
+            [loom_ui_core::Event::Key(loom_ui_core::KeyEvent::Released { .. })]
+        ),
+        "{:?}",
+        second.input
+    );
+    assert!(report(&mut layers, &mut runtime).input.is_empty());
+}

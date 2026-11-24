@@ -452,7 +452,13 @@ impl Ui {
             let task = self.bridge.update(Bridged::Presented);
             self.settle(vec![task]);
         }
-        self.bridge.take_log()
+        let mut log = self.bridge.take_log();
+        // A scripted key goes as a real one, each in a step of its own, as
+        // the window's bridge gives them (`Report::input`).
+        while let Some(key) = self.app().pointer.take_scripted_key() {
+            log.extend(self.step(&[key]));
+        }
+        log
     }
 
     /// Every text the runtime paints in `layer` now, with the box it is
