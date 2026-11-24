@@ -9,7 +9,7 @@
 //! and the licence chooser.
 
 use crate::App;
-use crate::a11y::items::Item;
+use crate::a11y::items::{Item, Kind};
 use crate::input_owner::InputOwner;
 use loom_ui_core::UiId;
 
@@ -40,8 +40,23 @@ impl App {
             InputOwner::Question => (Vec::new(), None),
             // Help is the runtime's (row 6): its nodes come from its panel.
             InputOwner::Help => (Vec::new(), None),
-            // The menus are the runtime's (rows 3b and 3d).
-            InputOwner::TileMenu | InputOwner::ProbeMenu | InputOwner::RecentList => (Vec::new(), None),
+            // The menus are the runtime's (rows 3b and 3d), except the cable
+            // menu, which Iced still draws (#856): its items come from here.
+            InputOwner::TileMenu | InputOwner::ProbeMenu | InputOwner::RecentList => {
+                match self
+                    .menu_model()
+                    .filter(|menu| menu.kind == crate::menus::MenuKind::Cable)
+                {
+                    Some(menu) => {
+                        let focus = menu
+                            .highlight
+                            .and_then(|at| menu.items.get(at))
+                            .map_or_else(|| menu.id.clone(), |item| item.id.clone());
+                        (vec![menu_item(&menu)], Some(focus))
+                    }
+                    None => (Vec::new(), None),
+                }
+            }
             InputOwner::Browser => match self.overlays.browser() {
                 Some(open) => {
                     let (item, focus) = crate::browser::access::items(open.model());
@@ -66,5 +81,25 @@ impl App {
             InputOwner::Chooser => (Vec::new(), None),
             InputOwner::Canvas => (Vec::new(), None),
         }
+    }
+}
+
+/// The cable menu and its items, which Iced still draws (#856). The
+/// highlighted item is reported as focus, not as a state of its own.
+fn menu_item(menu: &crate::menus::MenuModel) -> Item {
+    let items = menu
+        .items
+        .iter()
+        .map(|item| Item {
+            label: Some(item.label.clone()),
+            description: item.description.clone(),
+            click: Some(item.message.clone()),
+            ..Item::new(item.id.clone(), Kind::MenuItem)
+        })
+        .collect();
+    Item {
+        label: Some(menu.label.clone()),
+        children: items,
+        ..Item::new(menu.id.clone(), Kind::Menu)
     }
 }

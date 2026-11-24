@@ -740,9 +740,38 @@ pub struct CableView {
     pub colour_from: Color,
     /// Colour at the destination end.
     pub colour_to: Color,
+    /// The drawing weight for the signal leaving the source.
+    pub width: CableWidth,
     /// True if the engine runs this cable through a one-sample delay to
     /// break a feedback loop. Drawn dashed.
     pub delayed: bool,
+}
+
+/// The four cable stroke weights in the visual system.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CableWidth {
+    /// One voice, one side.
+    #[default]
+    Mono,
+    /// One voice, two sides.
+    Stereo,
+    /// Several voices, one side each.
+    Bundle,
+    /// Several voices, two sides each.
+    StereoBundle,
+}
+
+impl CableWidth {
+    /// The width relative to one mono voice, in world and distant screen units.
+    pub(crate) const fn scale(self) -> f32 {
+        match self {
+            Self::Mono => 1.0,
+            Self::Stereo => 1.5,
+            Self::Bundle => 2.0,
+            Self::StereoBundle => 2.5,
+        }
+    }
 }
 
 /// One modulation assignment, as the canvas draws its line
@@ -991,6 +1020,11 @@ impl Scene {
     /// What is under a world point. Ports win over tiles, because they sit
     /// on the tile edges. Tiles drawn later win over earlier ones.
     pub fn hit(&self, point: Point, port_radius: f32) -> Hit {
+        self.hit_at_scale(point, port_radius, 1.0)
+    }
+
+    /// Hit-tests at the current number of physical pixels per world unit.
+    pub(crate) fn hit_at_scale(&self, point: Point, port_radius: f32, px_per_world: f32) -> Hit {
         // Badges sit beside their own port. They win over that tile's ports,
         // so a click on one never starts a cable. A tile moved on top of a
         // badge keeps its ports: those win over the badge (#249).
@@ -1076,16 +1110,18 @@ impl Scene {
         }
         // Cables last, with a tighter tolerance than ports: they are thin,
         // and empty canvas near a cable should still start a selection box.
-        if let Some(index) = self.cable_at(point, port_radius * 0.5) {
+        if let Some(index) = self.cable_at(point, port_radius * 0.5, px_per_world) {
             return Hit::Cable(index);
         }
         Hit::Nothing
     }
 
     /// The topmost cable within `tolerance` of a world point.
-    fn cable_at(&self, point: Point, tolerance: f32) -> Option<usize> {
-        let t2 = tolerance * tolerance;
+    fn cable_at(&self, point: Point, tolerance: f32, px_per_world: f32) -> Option<usize> {
         self.cables.iter().enumerate().rev().find_map(|(index, cable)| {
+            let width = crate::gpu::CABLE_WIDTH.max(crate::gpu::CABLE_MIN_PX / px_per_world);
+            let tolerance = tolerance.max(width * cable.width.scale() * 0.5);
+            let t2 = tolerance * tolerance;
             let from = self.port_position(PortRef {
                 module: cable.from.0,
                 output: true,

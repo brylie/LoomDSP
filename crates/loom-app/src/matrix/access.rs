@@ -94,12 +94,18 @@ impl App {
     pub(crate) fn matrix_items(&self) -> Vec<Item> {
         let graph = self.session.controller.graph();
         let state = &self.session.matrix;
-        let model = state.model(graph, &self.session.hierarchy, &self.session.selection, self.right_tab);
+        let model = state.model(
+            graph,
+            &self.session.hierarchy,
+            &self.session.level,
+            &self.session.selection,
+            self.right_tab,
+        );
         // Each pick list once per build, not once per row and direction:
         // each pick carries a name made for it.
         let picks = Picks {
-            sources: sources(graph, &self.session.hierarchy),
-            targets: targets(graph, &self.session.hierarchy),
+            sources: sources(graph, &self.session.hierarchy, &self.session.level),
+            targets: targets(graph, &self.session.hierarchy, &self.session.level),
         };
         let mut parts = vec![
             Item {
@@ -201,6 +207,7 @@ impl App {
         cells.push(Item {
             label: Some("Target".to_string()),
             value: Some(r.target.clone()),
+            description: r.target_detail.clone(),
             step: (
                 self.matrix_target_step(id, true, &picks.targets),
                 self.matrix_target_step(id, false, &picks.targets),
@@ -231,6 +238,7 @@ impl App {
         let down = ((percent - 1.0) / 100.0).max(-1.0);
         cells.push(Item {
             label: Some("Depth".to_string()),
+            description: r.range.clone(),
             number: Some(Number {
                 value: f64::from(percent),
                 min: -100.0,
@@ -263,7 +271,8 @@ impl App {
     /// surface between) or that would repeat another assignment's pair is
     /// skipped, so a step never edits nothing and never warns. `None` when
     /// no such source is left that way.
-    /// `options` is [`sources`] for the graph now.
+    /// `options` is [`sources`] for the graph now. A row's own surface source
+    /// keeps its position in that order even when Add cannot offer it.
     pub(crate) fn matrix_source_step(
         &self,
         id: AssignmentId,
@@ -272,17 +281,19 @@ impl App {
     ) -> Option<Message> {
         let graph = self.session.controller.graph();
         let a = graph.assignment(id)?;
-        let mut at = options.iter().position(|s| s.output == a.source);
-        while let Some(next) = next_at(at, options.len(), forward) {
-            let pick = &options[next];
-            if self.allows_assignment(pick.output, a.target, a.param)
-                && !taken(graph, id, pick.output, a.target, a.param)
-            {
-                return Some(Message::Matrix(Event::Source(id, pick.clone())));
-            }
-            at = Some(next);
-        }
-        None
+        let (before, after) = match options.binary_search_by_key(&a.source, |pick| pick.output) {
+            Ok(at) => (&options[..at], &options[at + 1..]),
+            Err(at) => options.split_at(at),
+        };
+        let allowed = |pick: &&SourcePick| {
+            self.allows_assignment(pick.output, a.target, a.param) && !taken(graph, id, pick.output, a.target, a.param)
+        };
+        let pick = if forward {
+            after.iter().find(allowed)
+        } else {
+            before.iter().rev().find(allowed)
+        }?;
+        Some(Message::Matrix(Event::Source(id, pick.clone())))
     }
 
     /// The message for one step of assignment `id`'s target, forward or

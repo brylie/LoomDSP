@@ -16,9 +16,9 @@ use loom_ui_core::{Color, Point, Rect, Size};
 /// Corner radius of tiles, in world units.
 const TILE_RADIUS: f32 = 5.0;
 /// Cable width, in world units.
-const CABLE_WIDTH: f32 = 2.4;
+pub(crate) const CABLE_WIDTH: f32 = 2.4;
 /// Thinnest a cable is drawn, in physical pixels.
-const CABLE_MIN_PX: f32 = 1.2;
+pub(crate) const CABLE_MIN_PX: f32 = 1.2;
 
 /// A circle or square port marker centred on a point.
 fn marker(centre: Point, radius: f32, shape: PortShape, fill: Color, border: Color, border_width: f32) -> Shape {
@@ -92,6 +92,14 @@ impl Cable {
         }
     }
 
+    /// An installed cable uses the same stroke in the scene and when focused.
+    pub(crate) fn installed(from: Point, to: Point, cable: &crate::CableView) -> Self {
+        let mut line = Self::new(from, to, cable.colour_from, cable.colour_to, cable.delayed);
+        line.params[0] *= cable.width.scale();
+        line.params[2] *= cable.width.scale();
+        line
+    }
+
     /// Draws the cable at a third of the usual width: a modulation line.
     pub fn thin(mut self) -> Self {
         self.params[0] = CABLE_WIDTH / 3.0;
@@ -159,12 +167,10 @@ impl Geometry {
             ) else {
                 continue;
             };
-            cables.push(Cable::new(
+            cables.push(Cable::installed(
                 from.output_position(cable.from.1),
                 to.input_position(cable.to.1),
-                cable.colour_from,
-                cable.colour_to,
-                cable.delayed,
+                cable,
             ));
         }
 

@@ -162,6 +162,29 @@ pub const HEADING_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
 /// secondary text colour is 4.27:1 on the panels, under the 4.5:1 that
 /// WCAG asks for, so the app uses this instead (a test checks it).
 pub const QUIET: iced::Color = iced::Color::from_rgb(0.66, 0.69, 0.75);
+/// An unchecked switch's edge, and a choice's border on hover.
+pub const CONTROL_EDGE: iced::Color = QUIET;
+
+/// A checkbox that keeps its outline and check mark readable on cards and panels.
+pub fn check_box(theme: &Theme, status: iced::widget::checkbox::Status) -> iced::widget::checkbox::Style {
+    use iced::widget::checkbox::{Status, primary};
+    use loom_canvas::iced_convert::ToIced as _;
+    let mut style = primary(theme, status);
+    match status {
+        Status::Active { is_checked: true } | Status::Hovered { is_checked: true } => {
+            let palette = loom_canvas::Palette::default();
+            style.background = palette.control_value.to_iced().into();
+            style.icon_color = palette.background.to_iced();
+            style.border.color = palette.control_value.to_iced();
+        }
+        Status::Active { is_checked: false } | Status::Hovered { is_checked: false } => {
+            style.border.color = CONTROL_EDGE;
+            style.border.width = 1.0;
+        }
+        Status::Disabled { .. } => {}
+    }
+    style
+}
 /// Status bar text for a warning, with the word `Warning:` beside it.
 pub const WARNING_TEXT: iced::Color = iced::Color::from_rgb8(0xF5, 0xA6, 0x23);
 /// Status bar text for an error, with the word `Error:` beside it.
@@ -354,6 +377,56 @@ pub fn outlined(
     }
 }
 
+/// The cable menu's surface, which Iced still draws, with an opaque fill and a visible
+/// edge where it crosses a tile or empty canvas.
+pub fn canvas_menu(theme: &Theme) -> iced::widget::container::Style {
+    let palette = theme.extended_palette();
+    iced::widget::container::Style {
+        background: Some(palette.background.base.color.into()),
+        border: iced::Border {
+            color: QUIET,
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        shadow: iced::Shadow {
+            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+            offset: iced::Vector::new(0.0, 4.0),
+            blur_radius: 12.0,
+        },
+        ..iced::widget::container::Style::default()
+    }
+}
+
+/// A row of the cable menu, which Iced still draws. The edge marks the hit area and the accent marks
+/// the row under the pointer or keyboard focus.
+pub fn menu_item(focused: bool) -> impl Fn(&Theme, iced_button::Status) -> iced_button::Style {
+    move |theme, status| {
+        let palette = theme.extended_palette();
+        let active = matches!(status, iced_button::Status::Hovered | iced_button::Status::Pressed) || focused;
+        iced_button::Style {
+            background: Some(
+                if active {
+                    palette.background.weak.color
+                } else {
+                    palette.background.base.color
+                }
+                .into(),
+            ),
+            text_color: if status == iced_button::Status::Disabled {
+                QUIET
+            } else {
+                palette.background.base.text
+            },
+            border: iced::Border {
+                color: if active { palette.primary.base.color } else { QUIET },
+                width: if active { 2.0 } else { 1.0 },
+                radius: 3.0.into(),
+            },
+            ..iced_button::Style::default()
+        }
+    }
+}
+
 /// A value shown as plain text that can be clicked to edit it, such as a
 /// cell of the modulation matrix. A light fill on hover, and an outline
 /// while it has keyboard focus, so focus never depends on colour alone.
@@ -486,11 +559,7 @@ pub fn quiet_pick_list(theme: &Theme, status: iced::widget::pick_list::Status) -
             iced::Color::TRANSPARENT.into()
         },
         border: iced::Border {
-            color: if active {
-                palette.background.strong.color
-            } else {
-                iced::Color::TRANSPARENT
-            },
+            color: if active { CONTROL_EDGE } else { iced::Color::TRANSPARENT },
             width: 1.0,
             radius: 3.0.into(),
         },

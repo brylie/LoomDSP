@@ -78,6 +78,7 @@ impl App {
                 Some((_, at)) => (Placement::At(at), TILE_MENU_WIDTH),
                 None => return,
             },
+            MenuKind::Cable => return,
         };
         let missing: Vec<bool> = match menu.kind {
             MenuKind::Recent => self
@@ -124,7 +125,9 @@ impl App {
                 | crate::input_owner::InputOwner::RecentList
                 | crate::input_owner::InputOwner::TileMenu
         );
-        self.menu_model().filter(|_| owns)
+        // The cable menu shares the tile menu's owner, but is still Iced's
+        // (#856), so it is no runtime menu.
+        self.menu_model().filter(|menu| owns && menu.kind != MenuKind::Cable)
     }
 
     /// The message for a click on one of the runtime menu's items, from the

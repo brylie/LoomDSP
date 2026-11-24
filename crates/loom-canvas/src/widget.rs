@@ -82,6 +82,12 @@ impl<'a, Message> PatchCanvas<'a, Message> {
         self
     }
 
+    /// The window's physical pixels per logical pixel, for cable hit testing.
+    pub fn display_scale(mut self, scale: f32) -> Self {
+        self.model.display_scale = scale;
+        self
+    }
+
     /// Leaves each frame the widget builds in `slot`, for the host to draw.
     /// See [`CanvasSlot`].
     pub fn drawn(mut self, slot: &'a CanvasSlot) -> Self {

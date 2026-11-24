@@ -665,6 +665,7 @@ impl PatchBrowser {
             licences = licences.push(named(
                 &licence_id(licence.key),
                 checkbox(licence.on)
+                    .style(style::check_box)
                     .label(licence.label)
                     .size(style::SWITCH)
                     .text_size(style::CONTROL)

@@ -26,6 +26,7 @@ Before the browser, the toolbar had a drop-down of module IDs and an Add button.
 | Gesture | Where the browser opens | Where the module goes |
 |---|---|---|
 | `A` with the pointer over the canvas | At the pointer | At the pointer, snapped to the grid |
+| `A` while the canvas has the keys and the pointer is elsewhere | At the centre of the canvas | Nearest free grid position to the centre of the visible canvas |
 | Double-click on empty canvas | At the pointer | At the click, snapped to the grid |
 | "Add module" button in the toolbar | At the centre of the canvas | Nearest free grid position to the centre of the visible canvas |
 
@@ -84,7 +85,7 @@ A screen reader finds the browser as a dialog named "Add module": the search fie
 
 ### Adding
 
-- With A or a double-click, the tile’s top-left corner goes at the chosen point, snapped to the grid, even when it overlaps another tile.
+- When A or a double-click gives a pointer position, the tile’s top-left corner goes there, snapped to the grid, even when it overlaps another tile.
 - **Toolbar placement (Agreed).** The toolbar supplies no pointer position. Put the tile’s top-left corner on the nearest free grid point to the visible canvas centre where the whole tile fits. Leave one grid step between tiles so the port jacks stay clear. Measure straight-line distance, breaking ties by top then left. If the view is full or too small, use the nearest free grid point even if the tile extends outside the view. This applies to every kind of browser row.
 - The new module becomes the only selection.
 - Adding is one undo step ([undo.md](undo.md)). Undo removes the module.
@@ -93,7 +94,7 @@ A screen reader finds the browser as a dialog named "Add module": the search fie
 
 ## Rules
 
-1. **`A` opens the browser, with no modifier.** Ctrl+A or Cmd+A still selects all. Tab keeps moving focus between controls. *Why:* one key that always does the same thing is easier to learn than a key whose meaning depends on the selection, and `A` was free.
+1. **`A` opens the browser, with no modifier.** Ctrl+A or Cmd+A still selects all. Tab keeps its [canvas focus behaviour](panels.md#keyboard-without-a-mouse). *Why:* one key that always does the same thing is easier to learn than a key whose meaning depends on the selection, and `A` was free.
 1. **The search field takes keys while the browser is open.** Canvas shortcuts (Delete, Space for Run, F, Tab focus) do not fire while typing. *Why:* typing `f` in a query must not frame the patch, and Backspace must not delete the selected module.
 2. **A pointer-placed module goes where the user opened the browser,** not where auto-layout finds room. *Why:* the user opened it there because that is where they want to patch. A module that appears off screen breaks the flow.
 3. **The pointer position is taken when the browser opens,** not when Enter is pressed. *Why:* the pointer may drift onto the list while the user picks a row.
@@ -109,6 +110,7 @@ A screen reader finds the browser as a dialog named "Add module": the search fie
 - [ ] Given the query `FILTER`, every Filter module is listed (case does not matter). (test)
 - [ ] Given a query with no matches, the list is empty and Enter adds nothing. (test)
 - [ ] With the pointer over the canvas, pressing `A` opens the browser at the pointer with the search field focused. (manual)
+- [x] With the pointer outside the canvas, `A` opens the browser and Enter adds the chosen module (`keys_add_connect_edit_and_save_with_the_pointer_outside`).
 - [ ] Typing a query and pressing Enter adds the highlighted module with its top-left at the snapped pointer position, selects it, and closes the browser. (test for placement; manual for the gesture)
 - [ ] Double-click on empty canvas opens the browser there. Double-click on a control still resets the control. (manual)
 - [ ] The toolbar button opens the browser and adds at the nearest free position to the centre of the visible canvas. (test)

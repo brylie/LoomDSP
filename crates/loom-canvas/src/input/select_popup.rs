@@ -197,8 +197,7 @@ impl CanvasModel<'_> {
                         self.set_control(out, module, widget, (popup.scroll + row) as f32);
                     }
                 } else if left
-                    && self.scene.hit(state.camera.to_world(screen), state.hit_radius())
-                        == (Hit::Widget { module, widget })
+                    && self.hit(state, state.camera.to_world(screen)) == (Hit::Widget { module, widget })
                     && last_click.is_some_and(|(at, clicked, clicked_widget, _)| {
                         clicked == module && clicked_widget == widget && now - at < DOUBLE_CLICK
                     })

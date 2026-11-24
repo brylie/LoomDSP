@@ -16,6 +16,7 @@ impl App {
         let mut canvas = PatchCanvas::new(&self.session.scene, &self.session.selection, Message::Canvas)
             .drawn(&self.canvas_drawn)
             .clock(&self.clock)
+            .display_scale(self.window_scale)
             .values(&self.session.values)
             .window_drag_line(self.session.gestures.assign_drag().is_some())
             .traces(&self.session.traces)
@@ -94,6 +95,43 @@ impl App {
         }
         // The menus (tile, probe, Recent) are the runtime's, in its Overlays
         // layer over everything Iced draws (rows 3b and 3d, `menus/panel.rs`).
+        // The cable menu is still Iced's.
+        if self.overlays.cable_menu().is_some()
+            && let Some(menu) = self.menu_model()
+        {
+            let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
+                .on_press(Message::CloseTileMenu)
+                .on_right_press(Message::CloseTileMenu);
+            let mut items = column![].spacing(2);
+            if menu.items.is_empty() {
+                items = items.push(iced::widget::text("No ports to connect").size(style::CONTROL));
+            }
+            for (index, item) in menu.items.into_iter().enumerate() {
+                items = items.push(crate::inspector::ids::named(
+                    &item.id,
+                    button(iced::widget::text(item.label).size(style::CONTROL))
+                        .on_press(item.message)
+                        .width(Length::Fill)
+                        .style(style::menu_item(menu.highlight == Some(index))),
+                ));
+            }
+            let panel = column![
+                iced::widget::text(menu.label).size(style::HEADING),
+                iced::widget::scrollable(items).id(crate::places::widget_id(&crate::cable_picker::list_id()))
+            ]
+            .spacing(6);
+            let panel = crate::inspector::ids::named(
+                &menu.id,
+                container(panel)
+                    .padding(8)
+                    .width(270)
+                    .max_height(350)
+                    .style(style::canvas_menu),
+            );
+            layers = layers
+                .push(outside)
+                .push(iced::widget::center(iced::widget::opaque(panel)));
+        }
         if let Some(window) = self.preferences_view() {
             layers = layers.push(window);
         }
@@ -165,6 +203,7 @@ impl App {
                 self.session.matrix.model(
                     self.session.controller.graph(),
                     &self.session.hierarchy,
+                    &self.session.level,
                     &self.session.selection,
                     self.right_tab,
                 ),

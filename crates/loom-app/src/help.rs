@@ -191,7 +191,12 @@ impl Help {
     /// The keyboard shortcuts page: every canvas gesture and shortcut,
     /// opened from the inspector or with F1 when nothing is selected.
     pub fn shortcuts() -> Self {
-        let notes: String = crate::HELP.lines().map(|line| format!("- {}\n", line.trim())).collect();
+        let notes: String = loom_canvas::shortcuts::EDITOR_SHORTCUTS
+            .iter()
+            .map(|shortcut| shortcut.help)
+            .chain(crate::HELP.lines())
+            .map(|line| format!("- {}\n", line.trim()))
+            .collect();
         Self::from_model(Model {
             id: "",
             name: "Keyboard shortcuts",

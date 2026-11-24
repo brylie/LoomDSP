@@ -21,7 +21,7 @@ impl CanvasModel<'_> {
         };
         if let Some(world) = still.pointer {
             state.cursor = Some(world);
-            state.hover = Some(self.scene.hit(world, state.hit_radius()));
+            state.hover = Some(self.hit(&state, world));
         }
         state.interaction = match still.drag {
             Some(StillDrag::Wire { from, pulled }) => Interaction::Wiring { from, pulled },
@@ -326,6 +326,18 @@ impl CanvasModel<'_> {
                 );
                 out.take();
             }
+            Event::Key(KeyEvent::Pressed {
+                key,
+                modifiers,
+                repeat: false,
+                ..
+            }) if *key == crate::shortcuts::ADD.key
+                && modifiers.none()
+                && let Some(at) = screen.filter(|_| over) =>
+            {
+                self.open_browser(BrowserPlacement::Pointer(state.camera.to_world(at)), at, bounds, out);
+                out.take();
+            }
             // The menu key, or Shift+F10, opens the tile menu, as a
             // right-click on the tile does (ui-layer.md, section 6, rule 8).
             // It acts on the focused control's tile or the selected tile,
@@ -382,17 +394,6 @@ impl CanvasModel<'_> {
                         self.emit(out, CanvasEvent::Select(all));
                         out.take();
                     }
-                    Key::Character('a') if modifiers.none() => {
-                        if let Some(screen) = screen {
-                            self.open_browser(
-                                BrowserPlacement::Pointer(state.camera.to_world(screen)),
-                                screen,
-                                bounds,
-                                out,
-                            );
-                        }
-                        out.take();
-                    }
                     _ => {}
                 }
             }
@@ -416,7 +417,7 @@ impl CanvasModel<'_> {
                 // The view moved under the pointer: hover text hides, and
                 // shows again only after the pointer rests anew.
                 state.hover_text.restart(now);
-                state.hover = Some(self.scene.hit(state.camera.to_world(screen), state.hit_radius()));
+                state.hover = Some(self.hit(state, state.camera.to_world(screen)));
                 // Each wheel event is one step of a zoom or a trackpad pan,
                 // and nothing marks its end, so each one reports the view.
                 self.emit(out, CanvasEvent::Camera(state.camera));
@@ -468,7 +469,7 @@ impl CanvasModel<'_> {
                 let Some(screen) = screen else { return };
                 let world = state.camera.to_world(screen);
                 state.cursor = Some(world);
-                let hover = over.then(|| self.scene.hit(world, state.hit_radius()));
+                let hover = over.then(|| self.hit(state, world));
                 let mut redraw = false;
                 match &mut state.interaction {
                     Interaction::Panning { last, click, .. } => {
@@ -665,7 +666,7 @@ impl CanvasModel<'_> {
                     }
                     Interaction::Wiring { from, pulled } => {
                         let mut handled = false;
-                        match world.filter(|_| over).map(|w| self.scene.hit(w, state.hit_radius())) {
+                        match world.filter(|_| over).map(|w| self.hit(state, w)) {
                             Some(Hit::Port(to)) => {
                                 let pair = if from.output { (from, to) } else { (to, from) };
                                 if pair.0.output && !pair.1.output {
@@ -821,7 +822,7 @@ impl CanvasModel<'_> {
             return;
         }
         let shift = state.modifiers.shift;
-        let hit = self.scene.hit(world, state.hit_radius());
+        let hit = self.hit(state, world);
         // A press ends the keyboard's inside of a composite widget and any
         // grab (panel-widgets.md, rule 4).
         state.focus.pressed();
@@ -1191,7 +1192,7 @@ impl CanvasModel<'_> {
         bounds: Rect,
         out: &mut Reaction,
     ) {
-        let (output, anchor) = match self.scene.hit(world, state.hit_radius()) {
+        let (output, anchor) = match self.hit(state, world) {
             Hit::Port(port) if port.output => match self.scene.port_position(port) {
                 Some(position) => (port, position),
                 None => return,

@@ -341,6 +341,7 @@ fn hits_cables_where_they_are_drawn() {
         to: (2, 0),
         colour_from: Color::WHITE,
         colour_to: Color::WHITE,
+        width: crate::CableWidth::Mono,
         delayed: false,
     };
     let scene = Scene::new(vec![module(1, 0.0, 0.0), module(2, 400.0, 200.0)], vec![cable]);
@@ -353,6 +354,28 @@ fn hits_cables_where_they_are_drawn() {
         scene.hit(middle + Vector::new(0.0, 40.0), PORT_HIT_RADIUS),
         Hit::Nothing
     );
+}
+
+/// At a distant zoom the stroke's physical-pixel minimum still takes the pointer.
+#[test]
+fn distant_cable_hit_testing_includes_the_minimum_pixel_stroke() {
+    let scene = Scene::new(
+        vec![module(1, 0.0, 0.0), module(2, 400.0, 0.0)],
+        vec![CableView {
+            from: (1, 0),
+            to: (2, 0),
+            colour_from: Color::WHITE,
+            colour_to: Color::WHITE,
+            width: crate::CableWidth::StereoBundle,
+            delayed: false,
+        }],
+    );
+    let from = scene.module(1).unwrap().output_position(0);
+    let to = scene.module(2).unwrap().input_position(0);
+    let point = Point::new((from.x + to.x) / 2.0, (from.y + to.y) / 2.0 + 20.0);
+    let radius = TILE_WIDTH * 0.25;
+    assert_eq!(scene.hit_at_scale(point, radius, 0.05), Hit::Cable(0));
+    assert_eq!(scene.hit_at_scale(point, radius, 0.1), Hit::Nothing);
 }
 
 #[test]

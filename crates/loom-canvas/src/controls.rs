@@ -285,7 +285,7 @@ impl ControlGeometry {
                             2.5,
                             KNOB_START,
                             KNOB_SWEEP,
-                            palette.control_track,
+                            palette.control_edge,
                         ));
                         // At least a short cap, so a knob at its minimum
                         // still reads as live (visual-system.md, Knobs).
@@ -325,7 +325,7 @@ impl ControlGeometry {
                     WidgetViewKind::Fader { vertical, .. } => {
                         let t = position.clamp(0.0, 1.0);
                         let track = fader_track(rect, *vertical);
-                        shapes.push(Shape::new(track, 1.5, palette.control_track, Color::TRANSPARENT, 0.0));
+                        shapes.push(Shape::new(track, 1.5, palette.control_edge, Color::TRANSPARENT, 0.0));
                         if !dimmed {
                             let filled = fader_span(track, *vertical, 0.0, t.max(KNOB_START_CAP));
                             shapes.push(Shape::new(filled, 1.5, palette.control_value, Color::TRANSPARENT, 0.0));
@@ -364,7 +364,7 @@ impl ControlGeometry {
                             position.clamp(0.0, 1.0),
                             second.map_or(0.0, |s| s.position.clamp(0.0, 1.0)),
                         );
-                        shapes.push(Shape::new(area, 3.0, palette.control_body, palette.control_track, 1.0));
+                        shapes.push(Shape::new(area, 3.0, palette.control_body, palette.control_edge, 1.0));
                         let marks = [
                             (ControlPart::Main, modulation),
                             (
@@ -418,7 +418,7 @@ impl ControlGeometry {
                         let low = position.clamp(0.0, 1.0);
                         let high = second.map_or(0.0, |s| s.position.clamp(0.0, 1.0));
                         let track = range_track(rect, vertical);
-                        shapes.push(Shape::new(track, 1.5, palette.control_track, Color::TRANSPARENT, 0.0));
+                        shapes.push(Shape::new(track, 1.5, palette.control_edge, Color::TRANSPARENT, 0.0));
                         shapes.push(Shape::new(
                             fader_span(track, vertical, low.min(high), low.max(high)),
                             1.5,
@@ -485,12 +485,13 @@ impl ControlGeometry {
                         } else {
                             palette.control_track
                         };
-                        shapes.push(Shape::new(track, 5.5, fill, Color::TRANSPARENT, 0.0));
+                        let edge = if on { fill } else { palette.control_edge };
+                        shapes.push(Shape::new(track, 5.5, fill, edge, 1.0));
                         let x = if on { track.x + track.width - 5.5 } else { track.x + 5.5 };
                         shapes.push(circle(
                             Point::new(x, track.y + 5.5),
                             4.0,
-                            palette.text,
+                            if on { palette.background } else { palette.text },
                             Color::TRANSPARENT,
                             0.0,
                         ));
@@ -504,7 +505,7 @@ impl ControlGeometry {
                             } else {
                                 palette.tile
                             };
-                            shapes.push(circle(centre, 3.5, fill, palette.control_track, 1.2));
+                            shapes.push(circle(centre, 3.5, fill, palette.control_edge, 1.2));
                         }
                     }
                     WidgetViewKind::Segmented { options, .. } => {
@@ -519,7 +520,7 @@ impl ControlGeometry {
                                 segment_rect(rect, i, options.len()),
                                 3.0,
                                 fill,
-                                palette.control_track,
+                                palette.control_edge,
                                 1.0,
                             ));
                         }
@@ -529,7 +530,7 @@ impl ControlGeometry {
                             number_box(rect),
                             4.0,
                             palette.control_body,
-                            palette.control_track,
+                            palette.control_edge,
                             1.0,
                         ));
                     }
@@ -549,7 +550,7 @@ impl ControlGeometry {
                             box_rect,
                             4.0,
                             palette.control_body,
-                            palette.control_track,
+                            palette.control_edge,
                             1.0,
                         ));
                         let arrow_x = box_rect.x + box_rect.width - 9.0;
@@ -578,7 +579,8 @@ impl ControlGeometry {
                         } else {
                             palette.control_track
                         };
-                        shapes.push(Shape::new(button_body(rect), 6.0, fill, Color::TRANSPARENT, 0.0));
+                        let edge = if on { fill } else { palette.control_edge };
+                        shapes.push(Shape::new(button_body(rect), 6.0, fill, edge, 1.0));
                     }
                     WidgetViewKind::Scope => {
                         // The frame and its centre line. The trace has its

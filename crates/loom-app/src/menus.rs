@@ -18,6 +18,8 @@ use loom_ui_core::UiId;
 pub(crate) enum MenuKind {
     /// The menu on a tile, by its module.
     Tile(u32),
+    /// The keyboard cable picker.
+    Cable,
     /// The menu on an output or a cable.
     Probe,
     /// The Recent list.
@@ -130,6 +132,9 @@ impl App {
     /// The open menu, if one is open.
     pub(crate) fn menu_model(&self) -> Option<MenuModel> {
         let highlight = self.overlays.menu_highlight();
+        if let Some((module, start)) = self.overlays.cable_menu() {
+            return Some(self.cable_menu_model(module, start, highlight));
+        }
         if let Some((module, _)) = self.overlays.tile_menu() {
             let id = tile_id(module);
             let title = self
@@ -203,7 +208,7 @@ impl App {
     /// A key a menu uses ([`is_menu_key`]) while a menu is open. It stops
     /// here, so it reaches neither the canvas nor a window behind the menu.
     pub(crate) fn menu_key(&mut self, event: &keyboard::Event) {
-        let keyboard::Event::KeyPressed { key, .. } = event else {
+        let keyboard::Event::KeyPressed { key, repeat, .. } = event else {
             return;
         };
         let Some(menu) = self.menu_model() else {
@@ -213,16 +218,29 @@ impl App {
             Key::Named(Named::Escape) => {
                 self.close_menu(menu.kind);
             }
-            // Enter and Space on an item are the runtime's activation
-            // (section 3, rule 4), which reaches the app as `App::clicked`.
-            // Here Enter only stops at the menu, with no item focused.
+            // The cable menu is still Iced's (#856): Enter sends its
+            // highlighted item's message, as its own update on the next turn,
+            // as a click on the item would (ui-layer.md, section 2, rule 5).
+            Key::Named(Named::Enter) if menu.kind == MenuKind::Cable => {
+                if !repeat && let Some(item) = menu.highlight.and_then(|at| menu.items.get(at)) {
+                    self.post(item.message.clone());
+                }
+            }
+            // In the runtime's menus, Enter and Space on an item are the
+            // runtime's activation (section 3, rule 4), which reaches the app
+            // as `App::clicked`. Here Enter only stops at the menu, with no
+            // item focused.
             Key::Named(Named::Enter) => {}
             _ => {
                 if let Some(at) = step(menu.highlight, menu.items.len(), key) {
                     self.overlays.set_menu_highlight(Some(at));
-                    // The highlight is the runtime's focus, with a ring, as
-                    // the keys put it there (rows 3b and 3d).
-                    self.effect(loom_ui::Effects::focus(menu.items[at].id.clone()));
+                    if menu.kind == MenuKind::Cable {
+                        self.effect(loom_ui::Effects::scroll_into_view(menu.items[at].id.clone()));
+                    } else {
+                        // In a runtime menu the highlight is the focus, with a
+                        // ring, as the keys put it there (rows 3b and 3d).
+                        self.effect(loom_ui::Effects::focus(menu.items[at].id.clone()));
+                    }
                 }
             }
         }
@@ -231,7 +249,7 @@ impl App {
     /// Closes the open menu of kind `kind`.
     pub(crate) fn close_menu(&mut self, kind: MenuKind) {
         match kind {
-            MenuKind::Tile(_) => self.overlays.close_tile_menu(),
+            MenuKind::Tile(_) | MenuKind::Cable => self.overlays.close_tile_menu(),
             MenuKind::Probe => self.overlays.close_probe_menu(),
             MenuKind::Recent => self.overlays.close_recent_list(),
         }

@@ -475,6 +475,7 @@ fn part_credits_follow_nested_definitions_and_author_edits() {
         iced::keyboard::Modifiers::empty(),
     );
     ui.typewrite("Yara");
+    assert!(ui.app().overlays.browser().is_none());
     assert!(ui.app().unsaved());
     let Inspector::SubPatch(subpatch) = ui.app().inspector_model() else {
         panic!("selected sub-patch")

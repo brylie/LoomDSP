@@ -326,8 +326,10 @@ fn audio_watcher_events_update_the_stats_model() {
 /// Cmd/Ctrl+0 zoom reset and the ones that were there before it.
 #[test]
 fn help_text_lists_every_canvas_shortcut() {
+    let help = crate::help::Help::shortcuts().model.notes;
     for shortcut in [
-        "A or a double-click",
+        "A opens the module browser",
+        "C opens the cable picker",
         "Cmd/Ctrl+A",
         "Delete or Backspace",
         "Tab and Shift-Tab",
@@ -344,7 +346,7 @@ fn help_text_lists_every_canvas_shortcut() {
         "Cmd/Ctrl+Z",
         "Cmd/Ctrl+Shift+Z",
     ] {
-        assert!(HELP.contains(shortcut), "help text lacks {shortcut:?}");
+        assert!(help.contains(shortcut), "help text lacks {shortcut:?}");
     }
 }
 

@@ -139,6 +139,8 @@ pub struct CanvasModel<'a> {
     centre_request: (u64, Option<Point>),
     pub(crate) still: Option<Still>,
     window_drag_line: bool,
+    /// Physical pixels per window logical pixel.
+    pub(crate) display_scale: f32,
 }
 
 /// How a still image of the canvas starts: its camera, the control with
@@ -345,7 +347,14 @@ impl<'a> CanvasModel<'a> {
             centre_request: (0, None),
             still: None,
             window_drag_line: false,
+            display_scale: 1.0,
         }
+    }
+
+    /// What the pointer hits, with cables at their actual rendered width.
+    fn hit(&self, state: &CanvasInput, world: Point) -> Hit {
+        self.scene
+            .hit_at_scale(world, state.hit_radius(), state.camera.zoom * self.display_scale)
     }
 
     /// Starts the canvas with this camera and focus instead of framing the
