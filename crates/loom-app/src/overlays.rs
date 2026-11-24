@@ -44,6 +44,9 @@ pub(crate) struct Overlays {
     menu_highlight: Option<usize>,
     /// The licence chooser, while it is open.
     pub chooser: Option<licence_chooser::Chooser>,
+    /// The text field Iced held when the chooser opened, given back when it
+    /// closes over the main view.
+    pub chooser_focus: Option<loom_ui_core::UiId>,
     /// Open module help.
     pub help: Option<help::Help>,
     /// The text field whose focus help temporarily took.

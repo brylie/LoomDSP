@@ -4582,41 +4582,42 @@ fn every_view_sends_nothing_when_nothing_changed() {
     }
 }
 
-/// The licence chooser over Preferences is reported alone: Preferences is
-/// hidden, and its parts do nothing. After Use, Preferences is reported
-/// again with the new default, and has the focus.
+/// The licence chooser over Preferences is reported alone, as a dialog
+/// named by its title with no description: Preferences is not reported,
+/// and its parts do nothing. The focus is on the first question. After
+/// Use, Preferences is reported again with the new default, and has the
+/// focus (patch-metadata.md, Keys).
 #[test]
 fn the_chooser_over_preferences_hides_it_until_it_closes() {
-    use crate::licence_chooser::access::licence_id;
+    use crate::licence_chooser::panel::{button_id, licence_id, question_id};
     use crate::settings::access::preferences_id;
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     let _ = ui.app_mut().send(Message::Preferences(crate::settings::Message::Open));
     let _ = ui.redraw();
     let frames = ui.app().a11y_frames();
     assert_eq!(frames.overlay[0].id, preferences_id());
-    let places = ui.places();
-    let _ = ui.app_mut().a11y_tree(&places);
-    let choose = node_of(ui.app_mut(), &preferences_id().with("licence").with("choose"));
-    ui.send(Message::A11y(Event::Action(request(Action::Click, choose, None))));
-    let _ = ui.redraw();
+    ui.a11y_action(&preferences_id().with("licence").with("choose"), Action::Click);
 
     let frames = ui.app().a11y_frames();
-    assert_eq!(frames.overlay.len(), 1);
-    assert_eq!(frames.overlay[0].id, licence_id(), "only the chooser");
-    let places = ui.places();
-    let update = ui.app_mut().a11y_tree(&places);
-    assert_eq!(ui.app().a11y.ids.id(update.focus.0), Some(&licence_id()));
+    assert!(frames.overlay.is_empty(), "Iced reports nothing over it");
+    let tree = ui.a11y_tree();
+    let dialog = tree.node_by_id(&licence_id());
+    assert_eq!(dialog.role(), accesskit::Role::Dialog);
+    assert_eq!(dialog.name(), Some("Default licence for new patches"));
+    assert_eq!(dialog.description(), None, "nothing stands before the first question");
+    assert!(!tree.has_part_under(&preferences_id()), "only the chooser");
+    assert_eq!(
+        tree.focused().ui_id(),
+        Some(&question_id("changes").with("yes")),
+        "the first question has the focus"
+    );
     let activity = node_of(ui.app_mut(), &preferences_id().with("activity"));
     let before = ui.app().rig.store.saved().show_activity;
     ui.send(Message::A11y(Event::Action(request(Action::Click, activity, None))));
     assert_eq!(ui.app().rig.store.saved().show_activity, before, "Preferences is inert");
 
-    for part in [licence_id().with("changes").with("give-up"), licence_id().with("use")] {
-        let places = ui.places();
-        let _ = ui.app_mut().a11y_tree(&places);
-        let target = node_of(ui.app_mut(), &part);
-        ui.send(Message::A11y(Event::Action(request(Action::Click, target, None))));
-        let _ = ui.redraw();
+    for part in [question_id("changes").with("give-up"), button_id("use")] {
+        ui.a11y_action(&part, Action::Click);
     }
     assert!(ui.app().overlays.chooser.is_none(), "Use closed it");
     assert!(ui.app().rig.store.saved().licence.is_some(), "the default is set");
@@ -4624,6 +4625,9 @@ fn the_chooser_over_preferences_hides_it_until_it_closes() {
     assert_eq!(frames.overlay[0].id, preferences_id(), "Preferences is back");
     let places = ui.places();
     let update = ui.app_mut().a11y_tree(&places);
+    // True while Iced draws Preferences (the 2026-11-12 stopgap). Once
+    // Preferences is the runtime's (plan 3.2, the Preferences row), rule 4
+    // gives the focus back to `preferences/licence/choose`: flip this then.
     assert_eq!(
         ui.app().a11y.ids.id(update.focus.0),
         Some(&preferences_id()),
@@ -4639,7 +4643,7 @@ fn the_chooser_over_preferences_hides_it_until_it_closes() {
 /// adds one.
 #[test]
 fn a_licence_from_the_chooser_adds_no_undo_step() {
-    use crate::licence_chooser::access::licence_id;
+    use crate::licence_chooser::panel::{button_id, question_id};
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     let before = ui.app().session.document.info().license.clone();
     let steps = ui.app().session.edits.history.len();
@@ -4648,14 +4652,11 @@ fn a_licence_from_the_chooser_adds_no_undo_step() {
         .send(Message::PatchInfo(crate::patch_info::Message::ChooseLicence));
     let _ = ui.redraw();
     for part in [
-        licence_id().with("changes").with("no"),
-        licence_id().with("commercial").with("yes"),
-        licence_id().with("use"),
+        question_id("changes").with("no"),
+        question_id("commercial").with("yes"),
+        button_id("use"),
     ] {
-        let places = ui.places();
-        let _ = ui.app_mut().a11y_tree(&places);
-        let target = node_of(ui.app_mut(), &part);
-        ui.send(Message::A11y(Event::Action(request(Action::Click, target, None))));
+        ui.a11y_action(&part, Action::Click);
     }
     assert_ne!(ui.app().session.document.info().license, before, "the licence is set");
     assert!(ui.app().session.document.info_unsaved());

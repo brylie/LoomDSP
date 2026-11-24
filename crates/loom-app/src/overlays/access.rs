@@ -62,13 +62,8 @@ impl App {
                 ),
                 None => (Vec::new(), None),
             },
-            InputOwner::Chooser => match &self.overlays.chooser {
-                Some(open) => (
-                    vec![crate::licence_chooser::access::items(&open.model())],
-                    Some(crate::licence_chooser::access::licence_id()),
-                ),
-                None => (Vec::new(), None),
-            },
+            // The licence chooser is the runtime's (row 3c).
+            InputOwner::Chooser => (Vec::new(), None),
             InputOwner::Canvas => (Vec::new(), None),
         }
     }

@@ -184,6 +184,9 @@ Kept problems survive opening another patch, except as the table says.
 | `OVERLAY_PANEL` | A dialog's box: fill, border, and radius | Matched to the box Iced draws today, measured when the token is built, so the gate shows no change |
 | `MENU_PANEL` | A menu's box over the canvas: the base fill, a 1 px quiet border, radius 6 | As today's probe menu |
 | `MENU_SHADOW` | The shadow under a menu | Black at 35% opacity, offset 4 px down, blur 12 px, as today |
+| `CHOOSER_WIDTH`, `CHOOSER_HEIGHT` | The licence chooser's box: 560 wide, at most 720 high, shorter when the window is; its body scrolls between the title and the buttons | As Iced drew it |
+| `RADIO_SPACING` | The room between the radios of a group | 10 px, more than two focus rings, so no ring touches a neighbour's (ui-layer.md, section 6, rule 9) |
+| `field` (`FieldLook`, `FIELD_PADDING`) | A text field `loom-ui` draws: the base fill, a 1 px border in the strong background colour, radius 2, 5 px inside | As Iced's text field, first used by the licence chooser's Other field (plan 3.2, row 3c) |
 | `MENU_ITEM` | A menu item's looks: a 1 px quiet border and radius 3 always; a weak fill while hovered, pressed, or highlighted, however the highlight got there; the focus ring on top when the keys moved it | As today's menu items, without Iced's 2 px primary border on the highlight (Brylie's decision, 2026-11-20): the focus ring marks keyboard focus instead |
 
 *Why:* the dialogs and menus were drawn with Iced's own box and its palette, which are not ours. Tokens keep the look the same while it moves, and give later menus and popovers one source.

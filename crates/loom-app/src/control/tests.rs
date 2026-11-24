@@ -1606,7 +1606,9 @@ fn routed_names(messages: Vec<Message>) -> Vec<String> {
                 "FocusMoved",
                 // A script's Tab inside help, which moves the focus as the
                 // runtime's own Tab does with no message of its own.
-                "HelpTab",
+                "OverlayTab",
+                // And an arrow on one of the licence chooser's answers.
+                "ChooserArrow",
                 "TypeFocus",
                 "Telemetry",
             ]
@@ -2623,14 +2625,22 @@ fn locate_takes_an_overlay_ui_id() {
         .app_mut()
         .send(Message::Preferences(crate::settings::Message::ChooseLicence));
     let _ = ui.redraw();
+    // The chooser is the runtime's (row 3c): Cancel is found in its own
+    // layout, as the live window's update finds it (`Found::find_ours`).
+    ui.lay_out_panels();
     let found = Found {
         canvas: None,
         text: None,
         places: ui.places(),
-        ours: None,
+        ours: ui.runtime().bounds(&crate::licence_chooser::panel::button_id("cancel")),
     };
     let cancel = locate(ui.app(), "licence/cancel", &found).unwrap();
-    let label = ui.text("Cancel").expect("the chooser shows Cancel");
+    let label = ui
+        .painted_texts(loom_ui::Layer::Overlays)
+        .into_iter()
+        .find(|(text, _)| text == "Cancel")
+        .map(|(_, rect)| rect)
+        .expect("the chooser shows Cancel");
     assert!(cancel.contains(label.center()));
 }
 

@@ -28,6 +28,8 @@ impl App {
         self.toolbar_panel(view);
         self.breadcrumb_panel(view);
         self.bar_panel(view);
+        // The chooser first, so help, which F1 opens over it, draws over it.
+        self.chooser_panel(view);
         self.help_panel(view);
         self.question_panel(view);
         self.menu_panel(view);
@@ -56,6 +58,7 @@ impl App {
     pub(crate) fn our_stops(&self) -> Vec<UiId> {
         let mut stops = self.question_stops();
         stops.extend(self.help_stops());
+        stops.extend(self.chooser_stops());
         stops.extend(self.menu_stops());
         stops.extend(self.toolbar_stops());
         stops.extend(self.breadcrumb_stops());
@@ -90,6 +93,11 @@ impl App {
             return self
                 .help_next_stop(Some(from), back)
                 .map_or(TabStep::Leave, TabStep::To);
+        }
+        // Tab stays inside the licence chooser, wrapping at both ends (the
+        // WAI-ARIA modal dialog pattern; patch-metadata.md, Keys).
+        if let Some(to) = self.chooser_tab(from, next, back) {
+            return TabStep::To(to);
         }
         // Tab on a menu item closes the menu and moves on from what opened
         // it (the WAI-ARIA menu pattern; section 6, rule 8).

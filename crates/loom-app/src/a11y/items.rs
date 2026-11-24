@@ -194,9 +194,6 @@ pub(crate) enum SetText {
     /// a screen reader's whole new text is typed and then saved, as Enter
     /// would.
     PreferencesAuthor,
-    /// The licence chooser's **Other** field. Enter in it would use the
-    /// licence, so the text is the one message.
-    LicenceOther,
 }
 
 impl SetText {
@@ -267,7 +264,6 @@ impl SetText {
                 Message::Preferences(crate::settings::Message::Author(text)),
                 Message::Preferences(crate::settings::Message::SaveAuthor),
             ],
-            Self::LicenceOther => vec![Message::Licence(crate::licence_chooser::Message::OtherText(text))],
         }
     }
 }

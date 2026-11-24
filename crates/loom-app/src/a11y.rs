@@ -710,8 +710,17 @@ impl crate::App {
                     help.model.name.to_string(),
                     crate::overlays::access::help_id(),
                 )),
-                (None, None, Some(menu)) => Some((accesskit::Role::Menu, menu.label, menu.id)),
-                (None, None, None) => None,
+                // The licence chooser, a dialog named by its title with no
+                // description (row 3c), under help and over nothing else.
+                (None, None, menu) => match (&self.overlays.chooser, menu) {
+                    (Some(chooser), _) => Some((
+                        accesskit::Role::Dialog,
+                        chooser.model().title.to_string(),
+                        crate::licence_chooser::panel::licence_id(),
+                    )),
+                    (None, Some(menu)) => Some((accesskit::Role::Menu, menu.label, menu.id)),
+                    (None, None) => None,
+                },
             },
             ours_overlay_items: if self.overlays.question.is_some() {
                 None
@@ -841,6 +850,7 @@ impl crate::App {
             .filter(|id| {
                 id.is_under(&crate::overlays::access::question_id())
                     || id.is_under(&crate::overlays::access::help_id())
+                    || id.is_under(&crate::licence_chooser::panel::licence_id())
                     || self.runtime_menu().is_some_and(|menu| id.is_under(&menu.id))
             })
             .cloned()
@@ -850,6 +860,7 @@ impl crate::App {
                 accesskit::Action::Click => self
                     .question_click(&id)
                     .or_else(|| self.help_click(&id))
+                    .or_else(|| self.chooser_click(&id))
                     .or_else(|| self.menu_click(&id))
                     .into_iter()
                     .collect(),

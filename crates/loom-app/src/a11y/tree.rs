@@ -1080,23 +1080,50 @@ impl Frame<'_> {
             .iter()
             .flat_map(|(_, _, tops)| tops.iter().copied())
             .collect();
-        // The runtime's overlays (the question, row 3b) own the input
-        // while they are open: they are reported and act, while what they
-        // cover is hidden (section 7, rule 27).
-        let overlay_roots: Vec<&UiId> = ours
+        // The runtime's top overlay (the question, help, the licence
+        // chooser, a menu) owns the input while it is open: it is reported
+        // and acts, while what it covers is hidden (section 7, rule 27).
+        // An overlay under it, such as the chooser under help, is drawn
+        // but not reported at all, as a covered menu is not (rule 24): its
+        // nodes would otherwise sit inside the top one's dialog. The top is
+        // the last root drawn in the highest layer, with the roots under
+        // its key, such as help's backdrop.
+        let within = |id: &UiId, root: &UiId| id == root || id.is_under(root);
+        let top = ours
             .roots
             .iter()
             .filter(|(_, layer, _)| *layer >= loom_ui::Layer::Overlays)
+            .max_by_key(|(_, layer, _)| *layer)
+            .map(|(root, layer, _)| (root, *layer));
+        let top = ours
+            .roots
+            .iter()
+            .rev()
+            .find(|(_, layer, _)| top.is_some_and(|(_, top)| *layer == top))
+            .map(|(root, _, _)| root);
+        let overlay_roots: Vec<&UiId> = ours
+            .roots
+            .iter()
+            .filter(|(root, layer, _)| *layer >= loom_ui::Layer::Overlays && top.is_some_and(|top| within(root, top)))
             .map(|(root, _, _)| root)
             .collect();
-        let in_overlay = |table: &IdTable, node: NodeId| {
+        let covered_roots: Vec<&UiId> = ours
+            .roots
+            .iter()
+            .filter(|(root, layer, _)| *layer >= loom_ui::Layer::Overlays && !overlay_roots.contains(&root))
+            .map(|(root, _, _)| root)
+            .collect();
+        let in_roots = |table: &IdTable, node: NodeId, roots: &[&UiId]| {
             table
                 .id(node.0)
-                .is_some_and(|id| overlay_roots.iter().any(|root| id == *root || id.is_under(root)))
+                .is_some_and(|id| roots.iter().any(|root| within(id, root)))
         };
         for (id, node) in &ours.nodes {
+            if in_roots(self.table, *id, &covered_roots) {
+                continue;
+            }
             let mut node = node.clone();
-            if self.covered && !in_overlay(self.table, *id) {
+            if self.covered && !in_roots(self.table, *id, &overlay_roots) {
                 node.set_hidden();
             }
             self.nodes.push((*id, node));
@@ -1104,7 +1131,7 @@ impl Frame<'_> {
         let overlay: Vec<NodeId> = ours
             .roots
             .iter()
-            .filter(|(_, layer, _)| *layer >= loom_ui::Layer::Overlays)
+            .filter(|(root, _, _)| overlay_roots.contains(&root))
             .flat_map(|(_, _, tops)| tops.iter().copied())
             .collect();
         let under = |panel: &UiId| -> Vec<NodeId> {

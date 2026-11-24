@@ -109,6 +109,27 @@ pub const OVERLAY_RADIUS: f32 = 2.0;
 /// The width of the question's box, in logical pixels.
 pub const QUESTION_WIDTH: f32 = 460.0;
 
+/// The width of the licence chooser's box, in logical pixels, as Iced
+/// drew it.
+pub const CHOOSER_WIDTH: f32 = 560.0;
+
+/// The licence chooser's tallest box, in logical pixels, as Iced drew it.
+/// A shorter window shrinks it, and its body scrolls.
+pub const CHOOSER_HEIGHT: f32 = 720.0;
+
+/// The room between the radios of a group: more than two focus rings
+/// ([`focus_ring`], 4 each side), so no ring touches a neighbour's
+/// (ui-layer.md, section 6, rule 9).
+pub const RADIO_SPACING: f32 = 10.0;
+
+/// How far a part that belongs to a radio sits in from the radio's mark,
+/// so it lines up with the radio's label: the mark's width, 14, and the
+/// gap after it, 6 (`loom-ui`'s `Element::radio`).
+pub const RADIO_INDENT: f32 = 20.0;
+
+/// The room inside a text field around its text, as Iced's field had.
+pub const FIELD_PADDING: f32 = 5.0;
+
 /// The corner radius of a menu's box (visual-system.md, Overlays,
 /// `MENU_PANEL`).
 pub const MENU_RADIUS: f32 = 6.0;
@@ -496,6 +517,30 @@ pub fn dialog(theme: &Theme) -> DialogLook {
     DialogLook {
         fill: palette.background.weak.color.to_core(),
         text: palette.background.weak.text.to_core(),
+        radius: 2.0,
+    }
+}
+
+/// How a text field `loom-ui` draws looks: a box in the window's base
+/// colour with a border in its strong colour and a corner of 2, as Iced's
+/// field looked (visual-system.md).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FieldLook {
+    /// The box's fill.
+    pub fill: loom_ui_core::Color,
+    /// Its border, [`RULE`] wide.
+    pub border: loom_ui_core::Color,
+    /// The radius of its corners.
+    pub radius: f32,
+}
+
+/// The text field look in `theme`.
+pub fn field(theme: &Theme) -> FieldLook {
+    use loom_canvas::iced_convert::ToCore as _;
+    let palette = theme.extended_palette();
+    FieldLook {
+        fill: palette.background.base.color.to_core(),
+        border: palette.background.strong.color.to_core(),
         radius: 2.0,
     }
 }

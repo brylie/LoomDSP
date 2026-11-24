@@ -641,9 +641,12 @@ impl Widget<Message, iced::Theme, crate::Renderer> for Injector<'_> {
                     }
                     continue;
                 }
-                // Tab from a script inside help moves among help's stops, as
-                // the runtime's Tab does (row 6); Iced never hears it.
-                if self.app.overlays.help.is_some()
+                // Tab from a script inside help or the licence chooser moves
+                // among its stops, as the runtime's Tab does (rows 6 and 3c);
+                // Iced never hears it. Only until scripted keys take the
+                // runtime's path (lane C's 1b).
+                if (self.app.overlays.help.is_some()
+                    || self.app.input_owner() == crate::input_owner::InputOwner::Chooser)
                     && self.app.overlays.question.is_none()
                     && let Event::Keyboard(keyboard::Event::KeyPressed {
                         key: keyboard::Key::Named(keyboard::key::Named::Tab),
@@ -651,10 +654,35 @@ impl Widget<Message, iced::Theme, crate::Renderer> for Injector<'_> {
                         ..
                     }) = &injected
                 {
-                    shell.publish(Message::HelpTab {
+                    shell.publish(Message::OverlayTab {
                         back: modifiers.shift(),
                     });
                     continue;
+                }
+                // An arrow from a script on an answer of the licence chooser
+                // chooses as the runtime's radio keys do (row 3c). Only until
+                // scripted keys take the runtime's path (lane C's 1b).
+                if let Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(named),
+                    modifiers,
+                    ..
+                }) = &injected
+                    && modifiers.is_empty()
+                    && self.app.overlays.question.is_none()
+                    && self.app.overlays.help.is_none()
+                {
+                    use keyboard::key::Named;
+                    let back = match named {
+                        Named::ArrowUp | Named::ArrowLeft => Some(true),
+                        Named::ArrowDown | Named::ArrowRight => Some(false),
+                        _ => None,
+                    };
+                    if let Some(back) = back
+                        && self.app.chooser_arrow(back).is_some()
+                    {
+                        shell.publish(Message::ChooserArrow { back });
+                        continue;
+                    }
                 }
                 // While one of the runtime's overlays owns the input, a
                 // pointer event is the runtime's layers' above Iced, as a

@@ -158,7 +158,10 @@ impl App {
     /// True while one of the runtime's overlays owns the input: the
     /// question, help, the probe menu, or Recent.
     pub(crate) fn runtime_overlay_open(&self) -> bool {
-        self.overlays.question.is_some() || self.overlays.help.is_some() || self.runtime_menu().is_some()
+        self.overlays.question.is_some()
+            || self.overlays.help.is_some()
+            || self.overlays.chooser.is_some()
+            || self.runtime_menu().is_some()
     }
 
     /// The runtime menu's items as focus stops, in order.

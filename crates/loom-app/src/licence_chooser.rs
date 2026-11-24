@@ -7,11 +7,7 @@
 //! advice. It never picks a licence by itself (rule 7): nothing is stored
 //! until the user presses **Use this licence**.
 
-use crate::Element;
-use crate::style::{self, button};
-use crate::{App, DIM};
-use iced::Length;
-use iced::widget::{column, container, opaque, radio, row, rule, scrollable, space, text, text_input};
+use crate::App;
 use loom_patch::metadata::{self, Changes, Choice, Licence};
 use serde::Serialize;
 
@@ -301,156 +297,51 @@ pub(crate) const DISCLAIMER: &str = "LoomDSP explains each licence in plain word
 /// The line shown while a question is still open.
 pub(crate) const UNANSWERED: &str = "Answer the questions to pick a licence.";
 
-/// The part of the **Other** field, `licence/other-text`. Its text field's
-/// widget ID comes from it (`places::field_widget_id`), so a screen
-/// reader's Focus reaches it and the window's focus reads back.
-pub(crate) fn other_part() -> loom_ui_core::UiId {
-    access::licence_id().with("other-text")
-}
-
-/// The chooser, as a panel over the window, drawn from its model. Each part
-/// that acts is named by its UI ID, so the window says where it drew it.
-pub(crate) fn view(model: Model) -> Element<'static, crate::Message> {
-    use access::licence_id;
-    let named =
-        |element: Element<'static, crate::Message>, id: loom_ui_core::UiId| -> Element<'static, crate::Message> {
-            container(element).id(crate::places::widget_id(&id)).into()
-        };
-    let msg = crate::Message::Licence;
-    let note = |line: &'static str| container(text(line).size(style::BODY).color(DIM)).padding([0, 24]);
-    let mut answers = column![].spacing(4);
-    let other_answer = model.other.then_some(Answer::Other);
-    for pick in &model.changes {
-        let Message::Answer(answer) = pick.message else {
-            continue;
-        };
-        let chosen = pick.chosen.then_some(answer);
-        answers = answers.push(named(
-            radio(pick.label, answer, chosen, move |a| msg(Message::Answer(a)))
-                .size(style::SWITCH)
-                .text_size(style::CONTROL)
-                .into(),
-            licence_id().with("changes").with(pick.key),
-        ));
-        answers = answers.push(note(pick.note));
+/// The message for `event` on the **Other** field: an edit types its
+/// text, which chooses **Other**, and Enter is **Use this licence**, which
+/// does nothing while the answers give no licence (patch-metadata.md,
+/// Keys).
+pub(crate) fn field_message(event: &loom_ui::FieldEvent) -> Option<crate::Message> {
+    use loom_ui::FieldEvent;
+    match event {
+        FieldEvent::Edited(text) => Some(crate::Message::Licence(Message::OtherText(text.clone()))),
+        FieldEvent::Committed(_) => Some(crate::Message::Licence(Message::Use)),
+        _ => None,
     }
-    let changes = column![
-        text("Allow others to change it and share the result?").size(style::HEADING),
-        named(answers.into(), licence_id().with("changes")),
-    ]
-    .spacing(4);
-    let mut questions = column![changes].spacing(12);
-    if let Some(picks) = &model.commercial {
-        let mut answers = column![].spacing(4);
-        for pick in picks {
-            let Message::Commercial(value) = pick.message else {
-                continue;
-            };
-            let chosen = pick.chosen.then_some(value);
-            let choice = radio(pick.label, value, chosen, move |c| msg(Message::Commercial(c)))
-                .size(style::SWITCH)
-                .text_size(style::CONTROL);
-            answers = answers
-                .push(named(choice.into(), licence_id().with("commercial").with(pick.key)))
-                .push(note(pick.note));
-        }
-        questions = questions.push(
-            column![
-                text("Allow commercial use?").size(style::HEADING),
-                named(answers.into(), licence_id().with("commercial")),
-            ]
-            .spacing(4),
-        );
-    }
-    let other = column![
-        named(
-            radio(
-                "Other: any SPDX licence expression",
-                Answer::Other,
-                other_answer,
-                move |a| { msg(Message::Answer(a)) }
-            )
-            .size(style::SWITCH)
-            .text_size(style::CONTROL)
-            .into(),
-            licence_id().with("other"),
-        ),
-        container(named(
-            text_input("For example MIT, or CC-BY-4.0 OR MIT", &model.other_text)
-                .id(crate::places::field_widget_id(&other_part()))
-                .on_input(move |t| msg(Message::OtherText(t)))
-                .on_submit(msg(Message::Use))
-                .size(style::CONTROL)
-                .into(),
-            licence_id().with("other-text"),
-        ))
-        .padding([0, 24]),
-    ]
-    .spacing(4);
-
-    let mut result = column![].spacing(2);
-    match model.given {
-        Given::Licence { short, summary, url } => {
-            result = result.push(text(short).size(style::HEADING));
-            result = result.push(text(summary).size(style::BODY));
-            if let Some(url) = url {
-                result = result.push(text(url).size(style::SMALL).color(DIM));
-            }
-        }
-        Given::Error(error) => result = result.push(text(error).size(style::BODY)),
-        Given::Unlisted => {}
-        Given::Open => result = result.push(text(UNANSWERED).size(style::BODY).color(DIM)),
-    }
-    result = result.push(text(DISCLAIMER).size(style::SMALL).color(DIM));
-
-    let panel = column![
-        text(model.title).size(style::TITLE),
-        scrollable(
-            column![questions, rule::horizontal(1), other, rule::horizontal(1), result]
-                .spacing(12)
-                .padding([0, 12])
-        ),
-        row![
-            named(
-                button(text(model.clear).size(style::CONTROL))
-                    .on_press(msg(Message::Clear))
-                    .into(),
-                licence_id().with("clear"),
-            ),
-            space::horizontal(),
-            named(
-                button(text("Cancel").size(style::CONTROL))
-                    .on_press(msg(Message::Cancel))
-                    .into(),
-                licence_id().with("cancel"),
-            ),
-            named(
-                button(text("Use this licence").size(style::CONTROL))
-                    .style(style::primary)
-                    .on_press_maybe(model.ready.then_some(msg(Message::Use)))
-                    .into(),
-                licence_id().with("use"),
-            ),
-        ]
-        .spacing(8),
-    ]
-    .spacing(12);
-    let panel = container(panel)
-        .padding(16)
-        .width(560)
-        .max_height(720)
-        .style(container::rounded_box)
-        .id(crate::places::widget_id(&licence_id()));
-    opaque(
-        container(panel)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center(Length::Fill)
-            .style(|_| container::background(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.4))),
-    )
 }
 
 impl App {
+    /// Moves the focus into the chooser as it opens (ui-layer.md, section
+    /// 6, rule 4): a text field Iced held lets go first, so typing cannot
+    /// reach a field under it, and is kept to give back on close; then the
+    /// first question takes the focus, with a ring only when the chooser
+    /// was opened from the keyboard. After the unfocus, which would drop it.
+    pub(crate) fn chooser_opened(&mut self) {
+        let Some(chooser) = &self.overlays.chooser else {
+            return;
+        };
+        let first = chooser.first_stop();
+        self.overlays.chooser_focus = self.focus.clone();
+        if self.overlays.chooser_focus.is_some() {
+            self.effect(loom_ui::Effects::unfocus());
+        }
+        self.effect(loom_ui::Effects::focus_as_input(first));
+    }
+
+    /// Gives the focus back as the chooser closes. Over the main view, the
+    /// field it opened over takes it again; over Preferences, which Iced
+    /// still draws, the focus stays with Preferences' root, as decided
+    /// 2026-11-12 (patch-metadata.md, Keys). The runtime's own focus, if it
+    /// had one, comes back by itself (section 6, rule 4).
+    pub(crate) fn chooser_closed(&mut self) {
+        let field = self.overlays.chooser_focus.take();
+        if self.input_owner() == crate::input_owner::InputOwner::Canvas
+            && let Some(field) = field
+        {
+            self.effect(loom_ui::Effects::focus(field));
+        }
+    }
+
     /// Handles a chooser message, storing the licence it gives.
     pub(crate) fn licence_message(&mut self, message: Message) {
         let Some(chooser) = self.overlays.chooser.as_mut() else {
@@ -475,7 +366,7 @@ impl App {
     }
 }
 
-pub(crate) mod access;
+pub(crate) mod panel;
 
 #[cfg(test)]
 mod tests;

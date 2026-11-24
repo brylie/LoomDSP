@@ -22,8 +22,10 @@ impl App {
             return Some(Message::FieldPasteRefused);
         }
         // One arm per field, added with its view: `id == &view::field_id()`
-        // then `view::field_message(event)`. None yet.
-        let _ = id;
+        // then `view::field_message(event)`.
+        if *id == crate::licence_chooser::panel::other_text_id() {
+            return crate::licence_chooser::field_message(event);
+        }
         None
     }
 }

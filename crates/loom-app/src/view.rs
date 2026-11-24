@@ -100,10 +100,8 @@ impl App {
         if let Some(open) = self.overlays.patches() {
             layers = layers.push(open.view().map(Message::Patches));
         }
-        // Over the Preferences window, which also opens it.
-        if let Some(chooser) = &self.overlays.chooser {
-            layers = layers.push(crate::licence_chooser::view(chooser.model()));
-        }
+        // The licence chooser is the runtime's, in its Overlays layer, over
+        // Preferences, which also opens it (row 3c).
         // Help is the runtime's, in its Overlays layer, over the dialogs
         // Iced draws, because F1 opens it from them (help-pages.md; row 6).
         // The question is the runtime's, in its Question layer, over
