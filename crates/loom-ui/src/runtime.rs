@@ -596,6 +596,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if self.target_seen.is_none() || self.focus.id().is_none() {
             return false;
         }
+        self.drop_caret_reveal_if_focus_leaves(None);
         self.focus.wanted = None;
         self.focus.set(None);
         self.focus.ring = false;
@@ -652,6 +653,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
         self.release_target();
         let changed = self.focus.id() != Some(&id);
+        self.drop_caret_reveal_if_focus_leaves(Some(&id));
         self.focus.wanted = None;
         self.focus.set(Some(id));
         self.focus.ring = ring;
@@ -667,10 +669,27 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.pending.extend(later);
     }
 
+    /// Drops a pending caret reveal only when its field had keyboard focus
+    /// and that focus moves elsewhere. A screen reader can request a reveal
+    /// for a field that never had focus, which remains pending for layout.
+    fn drop_caret_reveal_if_focus_leaves(&mut self, to: Option<&UiId>) {
+        if let Some(from) = self.focus.id()
+            && Some(from) != to
+            && self
+                .panels
+                .caret_reveal
+                .as_ref()
+                .is_some_and(|(requested, _)| requested == from)
+        {
+            self.panels.caret_reveal = None;
+        }
+    }
+
     /// Moves the runtime's focus to `to`, from the keyboard or an effect,
     /// so a ring shows, and brings it into view (section 5, rule 12).
     /// Returns true when it changed.
     fn focus_to(&mut self, to: Option<UiId>) -> bool {
+        self.drop_caret_reveal_if_focus_leaves(to.as_ref());
         self.focus.wanted = None;
         if to.is_some() {
             self.panels.reveal.clone_from(&to);

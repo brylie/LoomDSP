@@ -284,6 +284,34 @@ fn a_long_text_wraps_into_one_run_per_line() {
     assert_eq!(bench.field.scroll(), 0.0, "a text area never scrolls sideways");
 }
 
+/// A field switching from one line to many at the same width begins
+/// wrapping immediately, and switching back stops wrapping.
+#[test]
+fn changing_line_count_reapplies_the_editor_width() {
+    let Some(mut bench) = area_in("alpha beta gamma delta epsilon zeta eta theta", 80.0) else {
+        return;
+    };
+    bench.field.take(
+        "alpha beta gamma delta epsilon zeta eta theta",
+        STYLE,
+        Lines::One,
+        80.0,
+        &mut bench.fonts,
+        &mut bench.layouts,
+    );
+    assert_eq!(bench.field.runs().len(), 1, "a single-line field does not wrap");
+
+    bench.field.take(
+        "alpha beta gamma delta epsilon zeta eta theta",
+        STYLE,
+        Lines::Many,
+        80.0,
+        &mut bench.fonts,
+        &mut bench.layouts,
+    );
+    assert!(bench.field.runs().len() > 1, "the text area wraps at the same width");
+}
+
 /// A run never crosses a hard break, and the selection's ends are named by
 /// the run they are on: the caret at the end is on the last run.
 #[test]
@@ -366,10 +394,16 @@ impl App for Notes {
             Layer::Panels,
             &model,
             |(text, scrolled): &(String, bool)| {
-                let area = Element::column([Element::text_area(text.clone(), STYLE)
-                    .key("area")
-                    .width(Length::Fixed(160.0))
-                    .access(Access::new(Role::TextInput, "Authors, one per line"))]);
+                let area = Element::column([
+                    Element::text_area(text.clone(), STYLE)
+                        .key("area")
+                        .width(Length::Fixed(160.0))
+                        .access(Access::new(Role::TextInput, "Authors, one per line")),
+                    Element::text("Next", STYLE)
+                        .key("next")
+                        .focusable()
+                        .access(Access::new(Role::Button, "Next").action(crate::access::Action::Click)),
+                ]);
                 if !*scrolled {
                     return area;
                 }
@@ -553,6 +587,33 @@ fn assert_caret_shows(harness: &Harness<Notes, Keys>) {
     assert!(
         caret.y >= pane.y && caret.y + caret.height <= pane.y + pane.height,
         "the caret at {caret:?} is outside the container at {pane:?}"
+    );
+}
+
+/// Tab after an edit, before layout, keeps the newly focused stop visible
+/// instead of following the text area's stale caret request.
+#[test]
+fn tab_after_edit_drops_the_old_caret_reveal() {
+    let Some((mut harness, mut text)) = notes_in("a", true) else {
+        return;
+    };
+    for _ in 0..6 {
+        harness.step(key_in(Key::Enter, Modifiers::NONE, None));
+        harness.step(key_in(Key::Character('b'), Modifiers::NONE, Some("b")));
+    }
+    harness.step(key_in(Key::Tab, Modifiers::NONE, None));
+    let next = UiId::panel("notes").with("pane").with("next");
+    assert_eq!(harness.runtime().focused(), Some(&next));
+    let scrolled = scrolled_by(&mut harness, &mut text);
+    assert!(scrolled > 0.0, "the focused stop has been scrolled into view");
+    let pane = harness
+        .runtime()
+        .bounds(&UiId::panel("notes").with("pane"))
+        .expect("pane");
+    let stop = harness.runtime().bounds(&next).expect("next stop");
+    assert!(
+        stop.y >= pane.y && stop.y + stop.height <= pane.y + pane.height,
+        "{stop:?} outside {pane:?}"
     );
 }
 
