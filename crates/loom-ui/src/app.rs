@@ -142,8 +142,10 @@ pub trait App {
     /// ID `id` (ui-layer.md, section 5, rule 18): from its open list, by a
     /// key, a press, or a screen reader, or a screen reader's Increment or
     /// Decrement, which steps one option. Only a choice that differs from
-    /// the chosen option is reported. It arrives on the next turn. It reads
-    /// state and changes none.
+    /// the chosen option is reported, except while the select has a step's
+    /// start ([`Select::steps_from`](crate::Select::steps_from)): then a
+    /// choice of the chosen option is reported too, as going back to it. It
+    /// arrives on the next turn. It reads state and changes none.
     fn chose(&self, id: &UiId, index: usize) -> Option<Self::Message> {
         let _ = (id, index);
         None

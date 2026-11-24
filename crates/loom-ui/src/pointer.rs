@@ -323,7 +323,7 @@ impl<A: App> Panels<'_, A> {
         if select.options.is_empty() {
             return false;
         }
-        let at = select.chosen.unwrap_or(0);
+        let at = select.start().unwrap_or(0);
         self.open_select(id, select, at);
         true
     }

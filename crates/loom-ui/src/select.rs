@@ -65,6 +65,7 @@ pub struct Select {
     pub(crate) name: String,
     pub(crate) options: Vec<String>,
     pub(crate) chosen: Option<usize>,
+    pub(crate) from: Option<usize>,
     pub(crate) style: SelectStyle,
 }
 
@@ -78,8 +79,27 @@ impl Select {
             name: name.into(),
             options,
             chosen,
+            from: None,
             style,
         }
+    }
+
+    /// Starts its steps at `from` in place of the chosen option, when it is
+    /// one of the options (ui-layer.md, section 5, rule 18, the step's
+    /// start): the list opens with it highlighted, and a screen reader's
+    /// Increment and Decrement step from it. The select still shows the
+    /// chosen option. Preferences gives a device that failed to open, so a
+    /// step never lands on it again.
+    #[must_use]
+    pub fn steps_from(mut self, from: Option<usize>) -> Self {
+        self.from = from.filter(|index| *index < self.options.len());
+        self
+    }
+
+    /// Where its steps start, and where its list opens: the step's start
+    /// when the app gave one, otherwise the chosen option.
+    pub(crate) fn start(&self) -> Option<usize> {
+        self.from.or(self.chosen)
     }
 
     /// The chosen option's label, or nothing.
@@ -474,10 +494,13 @@ impl<A: crate::App> crate::Panels<'_, A> {
         }
     }
 
-    /// Chooses the option at `index` of the select `id`, telling the app
-    /// on the next turn when it differs from the chosen one.
-    pub(crate) fn choose_option(&self, id: &UiId, chosen: Option<usize>, index: usize) {
-        if chosen != Some(index)
+    /// Chooses the option at `index` of `select`, whose UI ID is `id`,
+    /// telling the app on the next turn when it differs from the chosen
+    /// one, or always while a step's start is set: then a choice of the
+    /// chosen option means going back to it, as to the device that plays
+    /// after another failed (section 5, rule 18, the step's start).
+    pub(crate) fn choose_option(&self, id: &UiId, select: &Select, index: usize) {
+        if (select.chosen != Some(index) || select.from.is_some())
             && let Some(message) = self.app.chose(id, index)
         {
             self.waker.send(message);
@@ -487,7 +510,7 @@ impl<A: crate::App> crate::Panels<'_, A> {
     /// Chooses the open list's highlighted option and closes the list.
     pub(crate) fn choose_highlighted(&mut self) {
         if let Some(open) = self.window.select.clone() {
-            self.choose_option(&open.id, open.select.chosen, open.highlight);
+            self.choose_option(&open.id, &open.select, open.highlight);
             self.close_select();
         }
     }

@@ -1114,11 +1114,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     return (false, false);
                 };
                 let at = match action {
-                    Closed::OpenOnChosen => select.chosen.unwrap_or(0),
+                    Closed::OpenOnChosen => select.start().unwrap_or(0),
                     Closed::OpenOnFirst => 0,
                     Closed::OpenOnLast => count - 1,
                     Closed::Type => {
-                        let from = select.chosen.unwrap_or(count - 1);
+                        let from = select.start().unwrap_or(count - 1);
                         self.typed
                             .find(&id, text.unwrap_or_default(), now, &select.options, from)
                             .unwrap_or(from.min(count - 1))
@@ -1198,17 +1198,23 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 // while the select has the focus.
                 self.release_target();
                 self.focus_to(Some(target.clone()));
-                let at = select.chosen.unwrap_or(0);
+                let at = select.start().unwrap_or(0);
                 self.panels().open_select(&target, select, at);
             }
             KitAction::Collapse => self.panels().close_select(),
+            // A step goes on from the step's start, or the chosen option,
+            // and a step that cannot move, at an end, chooses nothing.
             KitAction::Increment => {
-                let to = select.chosen.map_or(0, |at| (at + 1).min(last));
-                self.panels().choose_option(&target, select.chosen, to);
+                let to = select.start().map_or(0, |at| (at + 1).min(last));
+                if select.start() != Some(to) {
+                    self.panels().choose_option(&target, &select, to);
+                }
             }
             _ => {
-                let to = select.chosen.map_or(0, |at| at.saturating_sub(1));
-                self.panels().choose_option(&target, select.chosen, to);
+                let to = select.start().map_or(0, |at| at.saturating_sub(1));
+                if select.start() != Some(to) {
+                    self.panels().choose_option(&target, &select, to);
+                }
             }
         }
         Some(true)
@@ -1249,9 +1255,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 .anchor
                 .is_some_and(|anchor| anchor != (bounds, self.window.size.height));
         if let Some(kept) = self.panels.select.as_mut()
-            && (kept.select.chosen != select.chosen || moved)
+            && (kept.select.chosen != select.chosen || kept.select.from != select.from || moved)
         {
             kept.select.chosen = select.chosen;
+            kept.select.from = select.from;
             self.panels.select_changed = true;
             self.panels.select_reported = true;
         }

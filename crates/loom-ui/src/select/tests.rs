@@ -239,3 +239,16 @@ fn the_list_goes_under_or_above_and_scrolls() {
     let (at, _) = placed(5, near_bottom);
     assert_eq!(at, Placement::At(Point::new(10.0, 30.0)), "above, 120 tall");
 }
+
+/// The step's start is where steps begin, when it is an option; past the
+/// end it is none, and the chosen option is the start again.
+#[test]
+fn the_steps_start_is_kept_only_inside_the_options() {
+    let style = SELECT;
+    let select = Select::new("Rate", rates(), Some(1), style).steps_from(Some(3));
+    assert_eq!(select.start(), Some(3));
+    assert_eq!(select.label(), "48 kHz", "it still shows the chosen one");
+    let past = Select::new("Rate", rates(), Some(1), style).steps_from(Some(9));
+    assert_eq!(past.start(), Some(1));
+    assert_eq!(Select::new("Rate", rates(), None, style).start(), None);
+}

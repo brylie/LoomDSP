@@ -61,6 +61,21 @@ fn panel(version: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
     list_panel(Element::column([stop("before"), room, select, after]))
 }
 
+/// The panel of [`panel`] with its select stepping from 88.2 kHz, as
+/// Preferences' device list does from a device that failed to open;
+/// version 1xx steps from the first option, and 2xx has no step's start,
+/// as once the app has dropped its mark of a failure.
+fn stepping(version: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
+    let chosen = Some((version % 100) as usize);
+    let from = match version / 100 {
+        0 => Some(2),
+        1 => Some(0),
+        _ => None,
+    };
+    let select = Select::new("Sample rate", options(0), chosen, SELECT).steps_from(from);
+    list_panel(Element::column([stop("before"), Element::select(select).key("rate")]))
+}
+
 /// The panel of [`panel`], and an overlay of the app's with a container
 /// 30 px tall at (300, 165), clear of the open list, whose ten rows scroll:
 /// its bar is the 10 px at its right, from x 390.
@@ -624,4 +639,78 @@ fn a_list_closed_by_a_layout_raises_the_tree_notice() {
     assert_eq!(harness.runtime().select_highlight(), None, "the layout closed it");
     step(&mut harness, DriverEvent::Woken);
     assert_eq!(harness.app().notices, before + 1, "told in the next turn");
+}
+
+/// A select with a step's start opens on it, not on the chosen option, and
+/// a screen reader's Increment steps on from it; the select still says the
+/// chosen option (section 5, rule 18, the step's start).
+#[test]
+fn a_step_goes_on_from_the_steps_start() {
+    let mut harness = at(stepping, 1);
+    tab_in(&mut harness);
+    step(&mut harness, key(Key::Down));
+    assert_eq!(highlight(&harness), Some(2), "on the step's start");
+    step(&mut harness, key(Key::Escape));
+    assert!(chosen(&harness).is_empty());
+    harness.send(Message::Describe);
+    let nodes = harness.app().nodes.clone().expect("the nodes");
+    let (select, node) = nodes
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Sample rate"))
+        .cloned()
+        .expect("the select");
+    assert_eq!(node.value(), Some("48 kHz"), "the chosen option");
+    step(
+        &mut harness,
+        DriverEvent::Accessibility(AccessEvent::Action(ActionRequest {
+            action: accesskit::Action::Increment,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: select,
+            data: None,
+        })),
+    );
+    assert_eq!(chosen(&harness), [3], "one on from the step's start");
+}
+
+/// A step from a step's start that lands on the chosen option, the device
+/// that plays, is reported, so the app hears the user went back to it and
+/// drops its mark of the failure; the next step then goes on past it.
+#[test]
+fn a_step_onto_the_chosen_option_is_reported_while_a_start_is_set() {
+    let mut harness = at(stepping, 101);
+    harness.send(Message::Describe);
+    let nodes = harness.app().nodes.clone().expect("the nodes");
+    let (select, _) = nodes
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Sample rate"))
+        .cloned()
+        .expect("the select");
+    let increment = || {
+        DriverEvent::Accessibility(AccessEvent::Action(ActionRequest {
+            action: accesskit::Action::Increment,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: select,
+            data: None,
+        }))
+    };
+    step(&mut harness, increment());
+    assert_eq!(chosen(&harness), [1], "back to the chosen option, reported");
+    harness.send(Message::Show(201));
+    step(&mut harness, increment());
+    assert_eq!(chosen(&harness), [1, 2], "on past it once the mark is gone");
+}
+
+/// By keyboard too: the list opens on the step's start, Down reaches the
+/// chosen option, and Enter on it is reported.
+#[test]
+fn enter_on_the_chosen_option_is_reported_while_a_start_is_set() {
+    let mut harness = at(stepping, 101);
+    tab_in(&mut harness);
+    step(&mut harness, key(Key::Down));
+    assert_eq!(highlight(&harness), Some(0), "on the step's start");
+    step(&mut harness, key(Key::Down));
+    step(&mut harness, key(Key::Enter));
+    assert_eq!(chosen(&harness), [1]);
 }
