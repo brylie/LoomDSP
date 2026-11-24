@@ -484,13 +484,12 @@ impl FieldState {
         fonts: &mut FontContext,
         layouts: &mut LayoutContext<()>,
     ) {
-        if lines != self.lines {
+        let lines_changed = lines != self.lines;
+        if lines_changed {
             self.lines = lines;
             // A single-line field lays its text out on one line; a
             // multi-line field wraps it to its width.
-            if lines == Lines::One {
-                self.editor.set_width(None);
-            }
+            self.editor.set_width((lines == Lines::Many).then_some(width));
         }
         if style != self.style {
             self.style = style;
@@ -505,7 +504,7 @@ impl FieldState {
             self.editor.set_text(text);
             self.forget_steps();
         }
-        if lines == Lines::Many && width != self.width {
+        if lines == Lines::Many && !lines_changed && width != self.width {
             self.editor.set_width(Some(width));
         }
         self.width = width;
