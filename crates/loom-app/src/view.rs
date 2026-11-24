@@ -129,12 +129,9 @@ impl App {
                 .push(outside)
                 .push(iced::widget::center(iced::widget::opaque(panel)));
         }
-        if let Some(window) = self.preferences_view() {
-            layers = layers.push(window);
-        }
-        // Your patches is the runtime's (row 5b, `patches/panel.rs`). So is
-        // the licence chooser (row 3c), in its Overlays layer over
-        // Preferences, which opens it.
+        // Preferences (row 8), Your patches (row 5b), and the licence
+        // chooser (row 3c) are the runtime's, in its Overlays layer; the
+        // chooser is over Preferences, which opens it.
         // Help is the runtime's, in its Overlays layer, over the dialogs
         // Iced draws, because F1 opens it from them (help-pages.md; row 6).
         // The question is the runtime's, in its Question layer, over

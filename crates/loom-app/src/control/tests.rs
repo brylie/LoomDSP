@@ -2613,15 +2613,18 @@ fn locate_takes_an_overlay_ui_id() {
     let _ = ui.app_mut().send(Message::Browser(crate::browser::Message::Close));
     let _ = ui.app_mut().send(Message::Preferences(crate::settings::Message::Open));
     let _ = ui.redraw();
-    let found = Found {
-        canvas: None,
-        text: None,
-        places: ui.places(),
-        ours: None,
-    };
-    let close = locate(ui.app(), "preferences/close", &found).unwrap();
-    let label = ui.text("Close").expect("Preferences shows Close");
-    assert!(close.contains(label.center()), "the button holds its label");
+    // Preferences is the runtime's (plan 3.2, row 8): its part is where the
+    // runtime laid it out.
+    let reply = run_ui(&mut ui, r#"{"cmd": "locate", "target": "preferences/close"}"#).expect("found");
+    let close = ui
+        .runtime()
+        .bounds(&crate::settings::panel::close_id())
+        .expect("laid out");
+    let at = loom_ui_core::Point::new(
+        reply["x"].as_f64().expect("an x") as f32,
+        reply["y"].as_f64().expect("a y") as f32,
+    );
+    assert!(close.contains(at), "{reply:?} in {close:?}");
     let _ = ui
         .app_mut()
         .send(Message::Preferences(crate::settings::Message::ChooseLicence));
@@ -3244,4 +3247,22 @@ fn a_capture_uses_the_live_runtime_focus_ring() {
     let focused = std::fs::read(&path).unwrap();
     std::fs::remove_file(path).unwrap();
     assert_ne!(plain, focused, "focus changes the painted control");
+}
+
+/// A script's Tab in Preferences takes the runtime's path, as a real key
+/// does: it moves the focus from Close to the next stop (preferences.md,
+/// Keys and focus; control-channel.md).
+#[test]
+fn a_scripted_tab_moves_the_focus_in_preferences() {
+    let mut ui = typing_ui();
+    ui.tap(
+        iced::keyboard::Key::Character(",".into()),
+        iced::keyboard::Modifiers::COMMAND,
+    );
+    ui.redraw();
+    let close = crate::settings::panel::close_id();
+    assert_eq!(ui.runtime().focused(), Some(&close));
+    let stops = ui.app().preferences_stops();
+    run_ui(&mut ui, r#"{"cmd": "key", "key": "tab"}"#).unwrap();
+    assert_eq!(ui.runtime().focused(), stops.get(1), "Tab went to the next stop");
 }

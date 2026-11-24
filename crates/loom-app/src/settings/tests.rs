@@ -1154,10 +1154,10 @@ fn the_panic_section_learns_and_cancels() {
     let fake = Rc::new(Fake::new(&[fake::device("Fake A")], &["Pad"]));
     let mut app = start(args(&dir), &fake);
     app.preferences(Message::Open);
-    assert!(app.preferences_view().is_some());
+    assert!(app.preferences_model().is_some());
     assert_eq!(app.panic_line(), "None");
     app.preferences(Message::PanicLearn);
-    assert!(app.preferences_view().is_some());
+    assert!(app.preferences_model().is_some());
     let _ = app.send(crate::Message::Midi);
     assert_eq!(app.panic_line(), "Waiting for MIDI...", "no MIDI came yet");
     app.preferences(Message::PanicLearn);
@@ -1176,7 +1176,7 @@ fn the_panic_section_learns_and_cancels() {
     );
     let _ = app.send(crate::Message::Midi);
     assert_eq!(app.panic_line(), "Channel 10, note 36");
-    assert!(app.preferences_view().is_some());
+    assert!(app.preferences_model().is_some());
 
     // Closing the window cancels a learn, so a later note on is not
     // saved as the trigger where the player cannot see it.

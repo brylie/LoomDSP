@@ -295,8 +295,10 @@ fn the_window_shows_patch_info_the_chooser_and_the_browser() {
 
     ui.send(AppMessage::Preferences(crate::settings::Message::Open));
     ui.redraw();
-    assert!(ui.text("New patches").is_some());
-    assert!(ui.text("No default").is_some());
+    // Preferences is the runtime's, its New patches section below the
+    // body's fold, so its model says what it shows.
+    let model = ui.app().preferences_model().expect("Preferences is open");
+    assert_eq!(model.licence, "No default");
     ui.send(AppMessage::Preferences(crate::settings::Message::Author(
         "  Sam  ".into(),
     )));

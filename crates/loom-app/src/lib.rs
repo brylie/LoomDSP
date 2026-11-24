@@ -1834,6 +1834,7 @@ impl App {
         let was_open = self.overlays.browser().is_some();
         let was_help_open = self.overlays.help.is_some();
         let was_chooser_open = self.overlays.chooser.is_some();
+        let was_preferences_open = self.overlays.preferences().is_some();
         let before_help = self.input_owner();
         match message {
             Message::Browser(message) => self.browser_message(message),
@@ -2011,7 +2012,10 @@ impl App {
         } else if !was_help_open && self.overlays.help.is_some() {
             if matches!(
                 before_help,
-                input_owner::InputOwner::Browser | input_owner::InputOwner::Patches | input_owner::InputOwner::Chooser
+                input_owner::InputOwner::Browser
+                    | input_owner::InputOwner::Patches
+                    | input_owner::InputOwner::Chooser
+                    | input_owner::InputOwner::Preferences
             ) {
                 self.overlays.help_focus = self.focus.clone();
                 if self.overlays.help_focus.is_some() {
@@ -2032,10 +2036,14 @@ impl App {
                     input_owner::InputOwner::Browser => *field == browser::search_id(),
                     input_owner::InputOwner::Patches => patches::text_fields().contains(field),
                     input_owner::InputOwner::Chooser => self.chooser_stops().contains(field),
+                    // Help over Preferences gives the focus back to the
+                    // part that had it, if it is still a stop there.
+                    input_owner::InputOwner::Preferences => self.preferences_stops().contains(field),
                     _ => false,
                 })
                 .or_else(|| (owner == input_owner::InputOwner::Browser).then(browser::search_id))
-                .or_else(|| self.overlays.chooser.as_ref().map(licence_chooser::Chooser::first_stop));
+                .or_else(|| self.overlays.chooser.as_ref().map(licence_chooser::Chooser::first_stop))
+                .or_else(|| (owner == input_owner::InputOwner::Preferences).then(settings::panel::close_id));
             if let Some(field) = field {
                 self.effect(loom_ui::Effects::focus(field));
             } else if self
@@ -2049,6 +2057,12 @@ impl App {
             self.chooser_opened();
         } else if was_chooser_open && self.overlays.chooser.is_none() {
             self.chooser_closed();
+        } else if !was_preferences_open && self.overlays.preferences().is_some() {
+            // Preferences opens with the focus on Close, with a ring only
+            // when it was opened from the keyboard (preferences.md, Keys and
+            // focus; section 6, rule 4). Closing it gives back what had the
+            // focus, as the runtime does when the input layer drops.
+            self.effect(loom_ui::Effects::focus_as_input(settings::panel::close_id()));
         } else if !was_open && self.overlays.browser().is_some() {
             self.effect(loom_ui::Effects::focus(browser::search_id()));
         }

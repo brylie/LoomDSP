@@ -673,6 +673,66 @@ impl crate::App {
         self.a11y.ours = nodes(&mut self.a11y.ids);
     }
 
+    /// The runtime's overlay that a screen reader is given, with its role,
+    /// its name, and its UI ID: the one that owns the input, by the one
+    /// answer the pointer reads too (`Overlays::owner`; section 7, rule
+    /// 27). The question is over everything, help over the dialogs it opens
+    /// from, and Preferences and the menus below them. `None` while the
+    /// owner is not the runtime's.
+    pub(crate) fn ours_overlay(&self) -> Option<(accesskit::Role, String, loom_ui_core::UiId)> {
+        use crate::input_owner::InputOwner;
+        match self.input_owner() {
+            InputOwner::Question => self.overlays.question.as_ref().map(|question| {
+                (
+                    accesskit::Role::AlertDialog,
+                    question.model().title,
+                    crate::overlays::access::question_id(),
+                )
+            }),
+            InputOwner::Help => self.overlays.help.as_ref().map(|help| {
+                (
+                    accesskit::Role::Dialog,
+                    help.model.name.to_string(),
+                    crate::overlays::access::help_id(),
+                )
+            }),
+            // The licence chooser, a dialog named by its title with no
+            // description (row 3c), over Preferences, which opens it.
+            InputOwner::Chooser => self.overlays.chooser.as_ref().map(|chooser| {
+                (
+                    accesskit::Role::Dialog,
+                    chooser.model().title.to_string(),
+                    crate::licence_chooser::panel::licence_id(),
+                )
+            }),
+            InputOwner::Preferences => Some((
+                accesskit::Role::Dialog,
+                "Preferences".to_string(),
+                crate::settings::preferences_id(),
+            )),
+            // The module browser (row 5) and Your patches (row 5b): dialogs
+            // around their panels' nodes.
+            InputOwner::Browser => (!self.browser_stops().is_empty()).then(|| {
+                (
+                    accesskit::Role::Dialog,
+                    "Add module".to_string(),
+                    crate::browser::browser_id(),
+                )
+            }),
+            InputOwner::Patches => (!self.patches_stops().is_empty()).then(|| {
+                (
+                    accesskit::Role::Dialog,
+                    "Your patches".to_string(),
+                    crate::patches::patches_id(),
+                )
+            }),
+            InputOwner::TileMenu | InputOwner::ProbeMenu | InputOwner::RecentList => self
+                .runtime_menu()
+                .map(|menu| (accesskit::Role::Menu, menu.label, menu.id)),
+            _ => None,
+        }
+    }
+
     /// What the tree reports of the parts around the canvas: the bar, the
     /// open panel's parts, and what has keyboard focus. The inspector's and
     /// the matrix's parts come from the same models their views draw.
@@ -698,43 +758,7 @@ impl crate::App {
             jump: self.jump_items(),
             overlay,
             overlay_focus,
-            ours_overlay: match (&self.overlays.question, &self.overlays.help, self.runtime_menu()) {
-                (Some(question), _, _) => Some((
-                    accesskit::Role::AlertDialog,
-                    question.model().title,
-                    crate::overlays::access::question_id(),
-                )),
-                // Help is over the menus (row 6), as F1 opens it from them.
-                (None, Some(help), _) => Some((
-                    accesskit::Role::Dialog,
-                    help.model.name.to_string(),
-                    crate::overlays::access::help_id(),
-                )),
-                // The licence chooser, a dialog named by its title with no
-                // description (row 3c), under help and over nothing else.
-                (None, None, _) if self.overlays.chooser.is_some() => self.overlays.chooser.as_ref().map(|chooser| {
-                    (
-                        accesskit::Role::Dialog,
-                        chooser.model().title.to_string(),
-                        crate::licence_chooser::panel::licence_id(),
-                    )
-                }),
-                (None, None, Some(menu)) => Some((accesskit::Role::Menu, menu.label, menu.id)),
-                // The module browser is the runtime's (row 5): a dialog named
-                // "Add module", modal, around its panels' nodes.
-                (None, None, None) if !self.browser_stops().is_empty() => Some((
-                    accesskit::Role::Dialog,
-                    "Add module".to_string(),
-                    crate::browser::browser_id(),
-                )),
-                // Your patches too (row 5b).
-                (None, None, None) if !self.patches_stops().is_empty() => Some((
-                    accesskit::Role::Dialog,
-                    "Your patches".to_string(),
-                    crate::patches::patches_id(),
-                )),
-                (None, None, None) => None,
-            },
+            ours_overlay: self.ours_overlay(),
             ours_overlay_items: if self.overlays.question.is_some() {
                 None
             } else {
@@ -865,6 +889,7 @@ impl crate::App {
                 id.is_under(&crate::overlays::access::question_id())
                     || id.is_under(&crate::overlays::access::help_id())
                     || id.is_under(&crate::licence_chooser::panel::licence_id())
+                    || id.is_under(&crate::settings::preferences_id())
                     || self.runtime_menu().is_some_and(|menu| id.is_under(&menu.id))
                     || (!self.browser_stops().is_empty() && id.is_under(&crate::browser::browser_id()))
                     || (!self.patches_stops().is_empty() && id.is_under(&crate::patches::patches_id()))
@@ -877,6 +902,7 @@ impl crate::App {
                     .question_click(&id)
                     .or_else(|| self.help_click(&id))
                     .or_else(|| self.chooser_click(&id))
+                    .or_else(|| self.preferences_click(&id))
                     .or_else(|| self.menu_click(&id))
                     .or_else(|| self.browser_click(&id))
                     .or_else(|| self.patches_click(&id))

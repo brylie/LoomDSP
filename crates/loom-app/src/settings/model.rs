@@ -82,20 +82,15 @@ pub(crate) struct Picks {
 }
 
 impl Picks {
+    /// The text of the chosen option.
+    #[cfg(test)]
+    pub(crate) fn chosen_text(&self) -> Option<&str> {
+        self.chosen.and_then(|at| self.options.get(at)).map(String::as_str)
+    }
+
     /// The message that picks option `at`.
     pub(crate) fn pick(&self, at: usize) -> Option<Message> {
         self.messages.get(at).cloned()
-    }
-
-    /// Where a step starts: the option that failed, or else the chosen
-    /// one.
-    pub(crate) fn step_from(&self) -> Option<usize> {
-        self.failed.or(self.chosen)
-    }
-
-    /// The text of the chosen option.
-    pub(crate) fn chosen_text(&self) -> Option<&str> {
-        self.chosen.and_then(|at| self.options.get(at)).map(String::as_str)
     }
 }
 
@@ -430,7 +425,7 @@ impl App {
                 let mut taken = crate::a11y::items::UniqueIds::default();
                 for name in names {
                     let on = self.rig.midi.ports.iter().any(|port| port.name() == name);
-                    let id = taken.take(super::access::preferences_id().with("midi").with(name.as_str()));
+                    let id = taken.take(super::panel::part_id("midi").with(name.as_str()));
                     parts.push(Part::Midi {
                         name: name.clone(),
                         on,

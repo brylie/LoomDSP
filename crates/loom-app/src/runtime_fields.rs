@@ -32,6 +32,15 @@ impl App {
         if crate::patches::text_fields().contains(id) {
             return crate::patches::field_message(id, event);
         }
+        // Preferences' **Your name**: each edit is the text as typed, and
+        // Enter saves it (preferences.md, Keys and focus).
+        if *id == crate::settings::author_part() {
+            return match event {
+                FieldEvent::Edited(text) => Some(Message::Preferences(crate::settings::Message::Author(text.clone()))),
+                FieldEvent::Committed(_) => Some(Message::Preferences(crate::settings::Message::SaveAuthor)),
+                _ => None,
+            };
+        }
         None
     }
 }

@@ -2388,7 +2388,6 @@ fn every_inspector_part_is_named_and_placed() {
                 Kind::Field => Role::TextInput,
                 Kind::List => Role::List,
                 Kind::ListItem => Role::ListItem,
-                Kind::Dialog => Role::Dialog,
                 Kind::Menu => Role::Menu,
                 Kind::MenuItem => Role::MenuItem,
                 Kind::ListBox => Role::ListBox,
@@ -4608,21 +4607,31 @@ fn every_view_sends_nothing_when_nothing_changed() {
 /// The licence chooser over Preferences is reported alone, as a dialog
 /// named by its title with no description: Preferences is not reported,
 /// and its parts do nothing. The focus is on the first question. After
-/// Use, Preferences is reported again with the new default, and has the
-/// focus (patch-metadata.md, Keys).
+/// Use, Preferences is reported again with the new default, and the focus
+/// is back on Choose, which opened the chooser, though the Click never
+/// moved the focus there (patch-metadata.md, Keys; the WAI-ARIA modal
+/// dialog pattern).
 #[test]
 fn the_chooser_over_preferences_hides_it_until_it_closes() {
     use crate::licence_chooser::panel::{button_id, licence_id, question_id};
-    use crate::settings::access::preferences_id;
+    use crate::settings::panel::part_id;
+    use crate::settings::preferences_id;
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     let _ = ui.app_mut().send(Message::Preferences(crate::settings::Message::Open));
     let _ = ui.redraw();
-    let frames = ui.app().a11y_frames();
-    assert_eq!(frames.overlay[0].id, preferences_id());
-    ui.a11y_action(&preferences_id().with("licence").with("choose"), Action::Click);
+    let tree = ui.a11y_tree();
+    assert_eq!(tree.node_by_id(&preferences_id()).role(), accesskit::Role::Dialog);
+    // Taken while Preferences is shown, for a screen reader that acts on
+    // what it last read.
+    let activity = node_of(ui.app_mut(), &part_id("activity"));
+    let choose = part_id("licence").with("choose");
+    // A screen reader's Click need not move the focus first: it stays on
+    // Close, and the chooser still gives it back to Choose, which opened it.
+    let close = crate::settings::panel::close_id();
+    ui.a11y_action(&close, Action::Focus);
+    assert_eq!(ui.runtime().focused(), Some(&close));
+    ui.a11y_action(&choose, Action::Click);
 
-    let frames = ui.app().a11y_frames();
-    assert!(frames.overlay.is_empty(), "Iced reports nothing over it");
     let tree = ui.a11y_tree();
     let dialog = tree.node_by_id(&licence_id());
     assert_eq!(dialog.role(), accesskit::Role::Dialog);
@@ -4634,7 +4643,6 @@ fn the_chooser_over_preferences_hides_it_until_it_closes() {
         Some(&question_id("changes").with("yes")),
         "the first question has the focus"
     );
-    let activity = node_of(ui.app_mut(), &preferences_id().with("activity"));
     let before = ui.app().rig.store.saved().show_activity;
     ui.send(Message::A11y(Event::Action(request(Action::Click, activity, None))));
     assert_eq!(ui.app().rig.store.saved().show_activity, before, "Preferences is inert");
@@ -4644,20 +4652,14 @@ fn the_chooser_over_preferences_hides_it_until_it_closes() {
     }
     assert!(ui.app().overlays.chooser.is_none(), "Use closed it");
     assert!(ui.app().rig.store.saved().licence.is_some(), "the default is set");
-    let frames = ui.app().a11y_frames();
-    assert_eq!(frames.overlay[0].id, preferences_id(), "Preferences is back");
-    let places = ui.places();
-    let update = ui.app_mut().a11y_tree(&places);
-    // True while Iced draws Preferences (the 2026-11-12 stopgap). Once
-    // Preferences is the runtime's (plan 3.2, the Preferences row), rule 4
-    // gives the focus back to `preferences/licence/choose`: flip this then.
+    let tree = ui.a11y_tree();
     assert_eq!(
-        ui.app().a11y.ids.id(update.focus.0),
-        Some(&preferences_id()),
-        "focus is on the window, since Choose is a button and takes none"
+        tree.node_by_id(&preferences_id()).role(),
+        accesskit::Role::Dialog,
+        "Preferences is back"
     );
-    let licence = node(&update, node_of(ui.app_mut(), &preferences_id().with("licence")));
-    assert_ne!(licence.value(), Some("No default"));
+    assert_eq!(tree.focused().ui_id(), Some(&choose), "the focus is back on Choose");
+    assert_ne!(tree.node_by_id(&part_id("licence")).value(), Some("No default"));
 }
 
 /// The chooser opened from the patch's details sets the patch's licence
@@ -4745,10 +4747,7 @@ fn one_change_in_preferences_sends_only_what_changed() {
     ui.read_runtime_nodes();
     let (_, changes) = ui.app_mut().a11y_changes(&places);
     let changes = changes.expect("the check box changed");
-    let activity = node_of(
-        ui.app_mut(),
-        &crate::settings::access::preferences_id().with("activity"),
-    );
+    let activity = node_of(ui.app_mut(), &crate::settings::panel::part_id("activity"));
     let status = node_of(ui.app_mut(), &crate::stats_bar::stats_id().with("status"));
     let mut sent = sent_ids(&changes);
     sent.sort_by_key(|id| id.0);

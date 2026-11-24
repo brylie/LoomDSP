@@ -317,6 +317,7 @@ impl loom_ui::App for Hosted {
             .or_else(|| self.0.question_click(id))
             .or_else(|| self.0.help_click(id))
             .or_else(|| self.0.chooser_click(id))
+            .or_else(|| self.0.preferences_click(id))
             .or_else(|| self.0.menu_click(id))
             .or_else(|| self.0.browser_click(id))
             .or_else(|| self.0.patches_click(id))
@@ -349,6 +350,12 @@ impl loom_ui::App for Hosted {
         self.0
             .browser_panel_key(id, key)
             .or_else(|| self.0.patches_panel_key(id, key))
+    }
+
+    /// What a choice in one of the runtime's selects means: Preferences'
+    /// lists, the first view to use one (plan 3.2, row 8).
+    fn chose(&self, id: &UiId, index: usize) -> Option<Message> {
+        self.0.preferences_chose(id, index)
     }
 
     /// Where Tab goes from one of the runtime's stops: the toolbar and the

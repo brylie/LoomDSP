@@ -45,11 +45,8 @@ pub(crate) enum Kind {
     List,
     /// One row of a list, holding that row's parts.
     ListItem,
-    /// A window over the rest that owns the input: help, Your patches,
-    /// Preferences. Its label is its title.
-    Dialog,
-    /// A menu over the rest that owns the input: the tile menu, the probe
-    /// menu, the Recent list.
+    /// A menu over the rest that owns the input: the cable menu, which
+    /// Iced still draws (#856).
     Menu,
     /// One item of a menu. Click picks it.
     MenuItem,
@@ -183,10 +180,6 @@ pub(crate) enum SetText {
     /// The matrix's filter. It filters as it is typed in and has no Enter
     /// of its own, so the text is the one message.
     MatrixFilter,
-    /// Preferences' **Your name** field. It saves on Enter or on close, so
-    /// a screen reader's whole new text is typed and then saved, as Enter
-    /// would.
-    PreferencesAuthor,
 }
 
 impl SetText {
@@ -250,10 +243,6 @@ impl SetText {
                 Message::PatchInfo(crate::patch_info::Message::TagSubmit),
             ],
             Self::MatrixFilter => vec![Message::Matrix(crate::matrix::Event::Filter(text))],
-            Self::PreferencesAuthor => vec![
-                Message::Preferences(crate::settings::Message::Author(text)),
-                Message::Preferences(crate::settings::Message::SaveAuthor),
-            ],
         }
     }
 }

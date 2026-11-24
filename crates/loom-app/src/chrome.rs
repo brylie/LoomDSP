@@ -28,10 +28,12 @@ impl App {
         self.toolbar_panel(view);
         self.breadcrumb_panel(view);
         self.bar_panel(view);
-        // The browsers, then the chooser, then help, which F1 opens over
-        // any of them (help-pages.md), so help draws over them.
+        // The browsers, then Preferences, then the chooser over it, then
+        // help, which F1 opens over any of them (help-pages.md), so help
+        // draws over them.
         self.browser_panel(view);
         self.patches_panel(view);
+        self.preferences_panel(view);
         self.chooser_panel(view);
         self.help_panel(view);
         self.question_panel(view);
@@ -65,6 +67,7 @@ impl App {
         stops.extend(self.browser_stops());
         stops.extend(self.patches_stops());
         stops.extend(self.patches_tags());
+        stops.extend(self.preferences_stops());
         stops.extend(self.menu_stops());
         stops.extend(self.toolbar_stops());
         stops.extend(self.breadcrumb_stops());
@@ -116,6 +119,13 @@ impl App {
         // WAI-ARIA modal dialog pattern; patch-metadata.md, Keys).
         if let Some(to) = self.chooser_tab(from, next, back) {
             return TabStep::To(to);
+        }
+        // Tab stays inside Preferences, wrapping at both ends (the WAI-ARIA
+        // modal dialog pattern; preferences.md, Keys and focus).
+        if from.is_under(&crate::settings::preferences_id()) {
+            return self
+                .preferences_next_stop(from, back)
+                .map_or(TabStep::Leave, TabStep::To);
         }
         // Tab on a menu item closes the menu and moves on from what opened
         // it (the WAI-ARIA menu pattern; section 6, rule 8).

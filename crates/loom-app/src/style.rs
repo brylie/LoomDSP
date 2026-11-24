@@ -693,5 +693,33 @@ pub fn highlighted_row(theme: &Theme) -> RowLook {
     }
 }
 
+/// How a select of the runtime's looks, and its open list (ui-layer.md,
+/// section 5, rule 18): the box in the palette's base background with a
+/// 1 px outline in its strong colour, as Iced's pick list was; the list in
+/// the floating panel's look with the menu's shadow, and the highlighted
+/// option in the highlighted row's fill. The mark is the text colour, so it
+/// keeps 3:1 against the box (WCAG 2.2, SC 1.4.11).
+pub fn select(theme: &Theme) -> loom_ui::SelectStyle {
+    use loom_canvas::iced_convert::ToCore as _;
+    let palette = theme.extended_palette();
+    let floating = floating_panel(theme);
+    loom_ui::SelectStyle {
+        text: CONTROL_TEXT,
+        colour: palette.background.base.text.to_core(),
+        background: palette.background.base.color.to_core(),
+        border: palette.background.strong.color.to_core(),
+        border_width: 1.0,
+        radius: 2.0,
+        padding_x: 8.0,
+        padding_y: 4.0,
+        mark: palette.background.base.text.to_core(),
+        list_background: floating.fill,
+        list_border: floating.border,
+        highlight: highlighted_row(theme).fill,
+        shadow: Some(MENU_SHADOW),
+        scroll: scroll(),
+    }
+}
+
 #[cfg(test)]
 mod tests;

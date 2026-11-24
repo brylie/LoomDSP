@@ -2848,16 +2848,13 @@ fn measure_and_wgpu_lay_out_alike() {
     );
     assert_eq!(measured, drawn, "with module 4 selected");
 
-    // Preferences is still Iced's, so its parts are walked; the browsers
-    // are the runtime's, laid out by its own text measure (row 5).
-    ui.send(Message::Preferences(crate::settings::Message::Open));
+    // Every dialog is the runtime's (rows 5, 5b, 3c, 8), laid out by its
+    // own text measure, so the second layout is the matrix, which Iced
+    // still draws.
+    ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
     let _ = ui.redraw();
     let (measured, drawn) = ui.places_on_both().expect("the adapter is still there");
-    assert!(
-        measured.of(&crate::settings::access::preferences_id()).is_some(),
-        "Preferences is open"
-    );
-    assert_eq!(measured, drawn, "with Preferences open");
+    assert_eq!(measured, drawn, "with the matrix open");
 }
 
 /// A capture draws the toolbar's buttons in their role's looks

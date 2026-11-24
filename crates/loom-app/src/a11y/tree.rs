@@ -933,15 +933,14 @@ impl Frame<'_> {
             Kind::Field => Role::TextInput,
             Kind::List => Role::List,
             Kind::ListItem => Role::ListItem,
-            Kind::Dialog => Role::Dialog,
             Kind::Menu => Role::Menu,
             Kind::MenuItem => Role::MenuItem,
             Kind::ListBox => Role::ListBox,
             Kind::ListBoxOption => Role::ListBoxOption,
         });
-        // A dialog or a menu owns the input while it is open, as the pointer
-        // finds: nothing outside it can be reached (section 7, rule 27).
-        if matches!(item.kind, Kind::Dialog | Kind::Menu) {
+        // A menu owns the input while it is open, as the pointer finds:
+        // nothing outside it can be reached (section 7, rule 27).
+        if item.kind == Kind::Menu {
             node.set_modal();
         }
         // A list says how many rows it has, and each row its place, so a
@@ -1015,8 +1014,8 @@ impl Frame<'_> {
             node.set_children(children);
         }
         let id = self.add(&item.id, node);
-        // Preferences and list boxes scroll, so their bounds clip descendants.
-        if item.kind == Kind::ListBox || item.id == crate::settings::access::preferences_id() {
+        // List boxes scroll, so their bounds clip descendants.
+        if item.kind == Kind::ListBox {
             self.clip_to_shown(id, &item.id);
         }
         // A covered field is hidden, so it cannot be focused, even while

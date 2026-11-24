@@ -63,15 +63,9 @@ impl App {
             // Your patches is the runtime's (row 5b): its nodes come from
             // its panels.
             InputOwner::Patches => (Vec::new(), None),
-            // No part of these has the keys until a field does, so the
-            // dialog itself has the focus, as help does.
-            InputOwner::Preferences => match self.preferences_model() {
-                Some(model) => (
-                    vec![crate::settings::access::items(&model)],
-                    Some(crate::settings::access::preferences_id()),
-                ),
-                None => (Vec::new(), None),
-            },
+            // Preferences is the runtime's (row 8): its nodes come from its
+            // panel, and its focus is the runtime's.
+            InputOwner::Preferences => (Vec::new(), None),
             // The licence chooser is the runtime's (row 3c).
             InputOwner::Chooser => (Vec::new(), None),
             InputOwner::Canvas => (Vec::new(), None),

@@ -312,31 +312,41 @@ pub(crate) fn field_message(event: &loom_ui::FieldEvent) -> Option<crate::Messag
 
 impl App {
     /// Moves the focus into the chooser as it opens (ui-layer.md, section
-    /// 6, rule 4): a text field Iced held lets go first, so typing cannot
-    /// reach a field under it, and is kept to give back on close; then the
-    /// first question takes the focus, with a ring only when the chooser
-    /// was opened from the keyboard. After the unfocus, which would drop it.
+    /// 6, rule 4): what had the focus lets go first, so typing cannot reach
+    /// a field under it; then the first question takes the focus, with a
+    /// ring only when the chooser was opened from the keyboard. After the
+    /// unfocus, which would drop it. On close the focus goes back to what
+    /// opened it: Preferences' **Choose**, whatever had the focus, as the
+    /// WAI-ARIA modal dialog pattern returns it to the opener (a screen
+    /// reader's Click may not move the focus first); from the inspector, the
+    /// field Iced held.
     pub(crate) fn chooser_opened(&mut self) {
         let Some(chooser) = &self.overlays.chooser else {
             return;
         };
         let first = chooser.first_stop();
-        self.overlays.chooser_focus = self.focus.clone();
-        if self.overlays.chooser_focus.is_some() {
+        let from_preferences = chooser.target() == Target::Default && self.overlays.preferences().is_some();
+        let had_focus = self.focus.is_some();
+        self.overlays.chooser_focus = if from_preferences {
+            Some(crate::settings::panel::part_id("licence").with("choose"))
+        } else {
+            self.focus.clone()
+        };
+        if had_focus {
             self.effect(loom_ui::Effects::unfocus());
         }
         self.effect(loom_ui::Effects::focus_as_input(first));
     }
 
-    /// Gives the focus back as the chooser closes. Over the main view, the
-    /// field it opened over takes it again; over Preferences, which Iced
-    /// still draws, the focus stays with Preferences' root, as decided
-    /// 2026-11-12 (patch-metadata.md, Keys). The runtime's own focus, if it
-    /// had one, comes back by itself (section 6, rule 4).
+    /// Gives the focus back as the chooser closes: to the part it opened
+    /// over, the main view's field or Preferences' Choose (section 6,
+    /// rule 4; patch-metadata.md, Keys).
     pub(crate) fn chooser_closed(&mut self) {
         let field = self.overlays.chooser_focus.take();
-        if self.input_owner() == crate::input_owner::InputOwner::Canvas
-            && let Some(field) = field
+        if matches!(
+            self.input_owner(),
+            crate::input_owner::InputOwner::Canvas | crate::input_owner::InputOwner::Preferences
+        ) && let Some(field) = field
         {
             self.effect(loom_ui::Effects::focus(field));
         }

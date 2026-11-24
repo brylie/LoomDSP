@@ -7,14 +7,13 @@ use crate::preferences::{AudioPrefs, BufferChoice, DeviceChoice, InputChoice, Ra
 use loom_core::OutputSafety;
 use loom_host_desktop::Outputs;
 
-pub(crate) mod access;
 mod model;
+pub(crate) mod panel;
 mod rig;
-mod view;
 
 pub(crate) use model::{Model, Part, Picks};
+pub(crate) use panel::{author_part, preferences_id};
 pub use rig::{Rig, RigLibrary, open_output, open_store};
-pub(crate) use view::author_part;
 
 /// A message for the Preferences window.
 #[derive(Debug, Clone, PartialEq)]
@@ -163,7 +162,13 @@ impl App {
             Message::SendClock(name, on) => self.choose_clock_output(name, on),
             Message::Midi(name, on) => self.set_midi_input(&name, on),
             Message::PanicLearn => self.learn_panic(),
-            Message::PanicClear => self.set_panic_pref(None),
+            Message::PanicClear => {
+                self.set_panic_pref(None);
+                // Clear turns itself off, so the focus goes to Learn, the
+                // stop before it, not back to Close at the top
+                // (preferences.md, Keys and focus).
+                self.effect(loom_ui::Effects::focus(panel::learn_id()));
+            }
         }
     }
 

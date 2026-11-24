@@ -88,7 +88,7 @@ With a screen reader, the chooser is a dialog named by its title. Each question 
 - **Enter** in the Other field is Use when Use is on, as above. On a button, Enter is that button's. In a question it does nothing.
 - **Escape** closes the chooser, as Cancel does, from anywhere in it, the Other field included. The exception is while an input method is composing in the field: that Escape is the composition's. *Departure from before row 3c:* the field took the first Escape, and a second one closed the chooser.
 - **The questions and what they give scroll** in the runtime's scroll container (UI layer, section 5, rule 12), between the title and the buttons, which stay in view. Focus moving to a part reveals it, and the wheel scrolls.
-- **Closing it** gives the focus back by UI layer, section 6, rule 4. Over Preferences, which Iced still draws, focus goes to Preferences' root, as decided 2026-11-12.
+- **Closing it** gives the focus back by UI layer, section 6, rule 4: to the field it opened from, or over Preferences to **Choose**, whatever had the focus when it opened, since a screen reader's Click may not move the focus first (the WAI-ARIA modal dialog pattern returns it to the opener).
 
 The dialog is named by its title and has no description, since nothing stands between the title and the first question.
 
