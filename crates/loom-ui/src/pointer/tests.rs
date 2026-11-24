@@ -52,6 +52,8 @@ struct Layers {
     runs: bool,
     /// The bar's second button reports its hover and has a context menu.
     reports: bool,
+    /// A second menu over the first, placed at (100, 50).
+    stacked: bool,
     heard: Vec<Message>,
 }
 
@@ -83,6 +85,13 @@ impl App for Layers {
         if self.overlay {
             view.panel_with(UiId::panel("menu"), Layer::Overlays, &(), |_| {
                 Element::row([menu_item("item", 20.0)]).closes_on_press_outside()
+            });
+        }
+        if self.stacked {
+            view.panel_with(UiId::panel("sub"), Layer::Overlays, &(), |_| {
+                Element::row([menu_item("subitem", 20.0)])
+                    .placed(crate::element::Placement::At(Point::new(100.0, 50.0)))
+                    .closes_on_press_outside()
             });
         }
     }
@@ -213,6 +222,7 @@ fn harness(overlay: bool, answer: Routed) -> Harness<Layers, Fake> {
         canvas: false,
         runs: false,
         reports: false,
+        stacked: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -893,6 +903,7 @@ fn the_app_decides_tab_at_the_end_of_a_run() {
         canvas: false,
         runs: true,
         reports: false,
+        stacked: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -1464,6 +1475,7 @@ fn reporting() -> Harness<Layers, Fake> {
         canvas: false,
         runs: false,
         reports: true,
+        stacked: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -1570,4 +1582,49 @@ fn show_context_menu_under_a_raised_layer_opens_nothing() {
         },
     )));
     assert!(reports(&harness).is_empty());
+}
+
+/// Section 5, rule 14: with two closing roots open, one over the other, a
+/// press inside the lower one closes only the upper one, a press inside the
+/// upper one closes neither, and a press outside both closes both.
+#[test]
+fn a_press_inside_the_lower_of_two_menus_closes_only_the_upper() {
+    let app = Layers {
+        overlay: true,
+        input: Layer::Overlays,
+        canvas: false,
+        runs: false,
+        reports: false,
+        stacked: true,
+        heard: Vec::new(),
+    };
+    let target = Fake {
+        answer: Routed::Passed,
+        taken_from: 350.0,
+        heard: Vec::new(),
+        focus: None,
+    };
+    let mut harness = Harness::new(app, target, WindowState::new(Size::new(400.0, 200.0)), Instant::now());
+    harness.lay_out(&mut Mono::default());
+    let told = |harness: &Harness<Layers, Fake>| -> Vec<UiId> {
+        harness
+            .app()
+            .heard
+            .iter()
+            .filter_map(|heard| match heard {
+                Message::Outside(root) => Some(root.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    harness.step(at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    assert_eq!(told(&harness), [UiId::panel("sub")], "inside the lower menu");
+    harness.step(at(105.0, 55.0, PointerEvent::Pressed(PointerButton::Left)));
+    assert_eq!(told(&harness).len(), 1, "inside the upper menu: neither");
+    harness.step(at(300.0, 150.0, PointerEvent::Pressed(PointerButton::Left)));
+    assert_eq!(
+        told(&harness)[1..],
+        [UiId::panel("menu"), UiId::panel("sub")],
+        "outside both: both, lower first"
+    );
 }

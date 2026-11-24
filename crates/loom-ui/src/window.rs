@@ -54,6 +54,10 @@ pub(crate) struct Window {
     drawn: Vec<UiId>,
     /// The hover text showing, laid out after the panels.
     hint: Option<crate::hint::Shown>,
+    /// The roots placed under an element that does not show, as the last
+    /// settled layout found them, so each is told to the app once
+    /// ([`crate::App::anchor_hidden`]).
+    pub(crate) anchors_hidden: Vec<UiId>,
     /// The window's size at the last [`Window::lay_out`].
     laid_out_at: Option<Size>,
     /// Panic on a slot mistake. On in a debug build; a test turns it off to
@@ -206,6 +210,7 @@ impl Default for Window {
             order: Vec::new(),
             drawn: Vec::new(),
             hint: None,
+            anchors_hidden: Vec::new(),
             laid_out_at: None,
             panic_on_mistake: cfg!(debug_assertions),
             stops: Vec::new(),
@@ -595,9 +600,14 @@ impl Window {
         if record.layout.placement().is_some() && !self.drawn.contains(key) {
             return None;
         }
-        // A panel's own key gives its place: its slot, or the window.
+        // A panel's own key gives its place: its slot, the window, or, for
+        // a placed root, its root element's box, which is all of it that
+        // shows (section 5, rule 13).
         let bounds = if id.keys().len() == record.layout.panel().keys().len() {
-            Rect::new(Point::ORIGIN, record.slot.unwrap_or_else(|| record.layout.size()))
+            match record.layout.records().first() {
+                Some(root) if record.layout.placement().is_some() => root.bounds,
+                _ => Rect::new(Point::ORIGIN, record.slot.unwrap_or_else(|| record.layout.size())),
+            }
         } else {
             record.layout.bounds(id)?
         };
@@ -794,6 +804,58 @@ impl Window {
     /// ([`crate::Element::context_menu`]).
     pub(crate) fn has_context_menu(&self, id: &UiId) -> bool {
         self.record_of(id).is_some_and(|record| record.context_menu)
+    }
+
+    /// Whether something of the element with UI ID `id` shows: it is laid
+    /// out, and not all cut away by the clips around it, in its panel and
+    /// in the window (`order::shows_through`).
+    pub(crate) fn shows(&self, id: &UiId) -> bool {
+        let Some(panel) = self.panel_of(id) else {
+            return false;
+        };
+        let record = &self.records[panel];
+        record
+            .layout
+            .records()
+            .iter()
+            .find(|element| element.id.as_ref() == Some(id))
+            .is_some_and(|element| order::shows_through(element.bounds, element.clip, record.origin, record.clip))
+    }
+
+    /// The roots placed under an element that does not show: gone,
+    /// scrolled out of view, or cut away (section 5, rule 13).
+    pub(crate) fn hidden_anchors(&self) -> Vec<UiId> {
+        // In the window's order, so the app hears them in the same order
+        // on every run.
+        self.order
+            .iter()
+            .filter_map(|root| Some((root, self.records.get(root)?)))
+            .filter_map(|(root, record)| match record.layout.placement() {
+                Some(crate::element::Placement::Under(anchor)) if !self.shows(anchor) => Some(root.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Whether `point` is inside a container whose keys come from the stop
+    /// `stop` ([`crate::Element::keys_from`]): a combobox's list, which
+    /// the field owns.
+    pub(crate) fn in_keys_of(&self, point: Point, stop: &UiId) -> bool {
+        self.drawn.iter().any(|key| {
+            self.records[key].layout.records().iter().any(|element| {
+                element.keys_from.as_ref() == Some(stop)
+                    && element
+                        .id
+                        .as_ref()
+                        .and_then(|id| self.bounds(id))
+                        .is_some_and(|at| at.contains(point))
+            })
+        })
+    }
+
+    /// Whether the element with UI ID `id` is a focus stop.
+    pub(crate) fn is_stop(&self, id: &UiId) -> bool {
+        self.record_of(id).is_some_and(|record| record.focusable)
     }
 
     /// The laid-out record of the element with UI ID `id`, in its panel.

@@ -169,17 +169,21 @@ impl<A: App> Panels<'_, A> {
 
     /// The panels a press at `point` is outside of, when `event` is a press
     /// of any button and the input layer, above the target, has panels that
-    /// close on one (section 5, rule 14): each such panel, if the press is
-    /// inside none of them. Empty otherwise, and for a press inside one.
+    /// close on one (section 5, rule 14): each such panel drawn over the
+    /// topmost one the press is inside, or every one when it is inside
+    /// none. A press on a browser closes the row menu over it and keeps the
+    /// browser; a press on the menu keeps both, even where the menu hangs
+    /// past the browser's edge. Empty otherwise.
     fn pressed_outside(&self, input: Layer, event: &Event, point: Point) -> Vec<UiId> {
         if !matches!(event, Event::Pointer(PointerEvent::Pressed(_))) || Side::of(input) != Side::Above {
             return Vec::new();
         }
         let roots = self.window.closing_roots(input);
-        if roots.iter().any(|(_, at)| at.contains(point)) {
-            return Vec::new();
-        }
-        roots.into_iter().map(|(root, _)| root).collect()
+        let over = roots
+            .iter()
+            .rposition(|(_, at)| at.contains(point))
+            .map_or(0, |at| at + 1);
+        roots.into_iter().skip(over).map(|(root, _)| root).collect()
     }
 
     /// True for a move onto the hover text showing, or between it and its
@@ -517,9 +521,13 @@ impl<A: App> Panels<'_, A> {
                 }
                 // Section 6, rule 8: the pointer moving over a menu item
                 // focuses it, with no ring, as native menus move their
-                // highlight; the keys then go on from there.
+                // highlight; the keys then go on from there. Only a menu
+                // item that is a focus stop: one whose menu leaves the
+                // focus in a field, as a browser's row menu does, keeps it
+                // there.
                 if let Some((_, id)) = &at
                     && self.is_menu_item(id)
+                    && self.window.is_stop(id)
                     && self.focus.id() != Some(id)
                 {
                     self.focus.wanted = None;
@@ -655,6 +663,16 @@ impl<A: App> Panels<'_, A> {
                 .window
                 .bounds(&crate::select::list_id())
                 .is_some_and(|list| list.contains(point))
+        {
+            return;
+        }
+        // A press in a list whose keys come from the focused field, as a
+        // combobox's list box does, leaves the focus in the field: the list
+        // is the field's, and its rows are no stops (section 6, rule 3).
+        if self
+            .focus
+            .id()
+            .is_some_and(|focused| self.window.in_keys_of(point, focused))
         {
             return;
         }

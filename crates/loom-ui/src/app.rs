@@ -114,6 +114,18 @@ pub trait App {
         None
     }
 
+    /// The message for the root panel `root`, placed under another element
+    /// ([`Placement::Under`](crate::Placement::Under)), whose element stopped
+    /// showing: scrolled out of view, cut away, or gone (ui-layer.md,
+    /// section 5, rule 13). Told once, on the next turn, after a settled
+    /// layout, and again only after the element shows and hides once more.
+    /// A menu under a list's row closes on it, as a select's list closes
+    /// when its select scrolls away. It reads state and changes none.
+    fn anchor_hidden(&self, root: &UiId) -> Option<Self::Message> {
+        let _ = root;
+        None
+    }
+
     /// The message for the slider with UI ID `id` moving to `position`,
     /// from 0 to 1 along its travel, in `phase` of its gesture (ui-layer.md,
     /// section 5, rule 16): a drag, a double-click's reset, a group of keys,

@@ -248,3 +248,23 @@ fn a_container_scrolls_from_the_stop_it_names() {
         "the container is no stop"
     );
 }
+
+/// Section 6, rule 3: a press on a row of the list whose keys come from a
+/// focused field leaves the focus in the field, as a combobox's list box
+/// does; the rows are no stops.
+#[test]
+fn a_press_in_the_fields_list_leaves_the_focus_in_the_field() {
+    use loom_ui_core::{Point, PointerButton, PointerEvent};
+    let mut harness = focused(searched, &id("search"));
+    let rows = harness.runtime().bounds(&id("rows")).expect("the list");
+    let inside = Point::new(rows.x + 10.0, rows.y + 10.0);
+    step(
+        &mut harness,
+        super::pointer(PointerEvent::Pressed(PointerButton::Left), inside),
+    );
+    step(
+        &mut harness,
+        super::pointer(PointerEvent::Released(PointerButton::Left), inside),
+    );
+    assert_eq!(harness.runtime().focused(), Some(&id("search")));
+}
