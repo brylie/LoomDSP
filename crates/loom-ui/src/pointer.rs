@@ -17,7 +17,9 @@
 //! and comes back, so that is still a click; a release anywhere else
 //! cancels it (Brylie's decision, 2026-11-17). A click's message runs on
 //! the next turn, whichever path found it. Hover and pressed run no update
-//! (section 3, rule 4).
+//! (section 3, rule 4), except that an element that asks hears the pointer
+//! coming onto it ([`App::hovered`]). A right press on an element with a
+//! context menu opens it ([`App::context_menu`], rule 19).
 //!
 //! A scroll container's bar and the wheel are the pointer's too (section 5,
 //! rule 12). The wheel scrolls the innermost container under the pointer,
@@ -506,7 +508,9 @@ impl<A: App> Panels<'_, A> {
         let mut redraw = false;
         match pointer {
             PointerEvent::Moved => {
+                let moves = self.pointer.hover_moves;
                 redraw = self.hover(at.clone());
+                self.report_hover(self.pointer.hover_moves != moves);
                 // The pointer over an option of an open list highlights it.
                 if let Some(index) = at.as_ref().and_then(|(_, id)| crate::select::option_index(id)) {
                     self.highlight_option(index);
@@ -527,7 +531,18 @@ impl<A: App> Panels<'_, A> {
             }
             PointerEvent::Pressed(button) => {
                 self.pointer.space = None;
+                let moves = self.pointer.hover_moves;
                 redraw = self.hover(at.clone());
+                self.report_hover(self.pointer.hover_moves != moves);
+                // A right press on an element with a context menu opens it
+                // (section 5, rule 19), after the press focused there.
+                if *button == PointerButton::Right
+                    && let Some((_, id)) = &at
+                    && self.window.has_context_menu(id)
+                    && let Some(message) = self.app.context_menu(id, false)
+                {
+                    self.waker.send(message);
+                }
                 let before = self.focus.id().cloned();
                 self.focus_in(point, |layer| Side::of(layer) == side && layer >= input.layer);
                 redraw |= self.focus.id() != before.as_ref();
@@ -578,6 +593,24 @@ impl<A: App> Panels<'_, A> {
             taken: moved,
             redraw: moved,
         })
+    }
+
+    /// Tells the app the pointer came onto the hovered element, when the
+    /// hover just `changed` and that element asked to hear it (section 3,
+    /// rule 4). Only the pointer's own move or press reports: a layout that
+    /// moves rows under a still pointer, as typing in a search field does,
+    /// moves the hover without telling the app, so the highlight stays
+    /// where the keys left it.
+    fn report_hover(&self, changed: bool) {
+        if !changed {
+            return;
+        }
+        if let Some((_, id)) = &self.pointer.hovered
+            && self.window.reports_hover(id)
+            && let Some(message) = self.app.hovered(id)
+        {
+            self.waker.send(message);
+        }
     }
 
     /// Moves the hover to `at`. Returns true when it changed.

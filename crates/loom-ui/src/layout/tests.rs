@@ -604,3 +604,47 @@ fn a_focus_stop_needs_an_access() {
         50.0,
     );
 }
+
+/// Section 5, rule 19: an element with a context menu offers
+/// ShowContextMenu on its node, whichever order its builder set the menu
+/// and the access in; with no key it keeps neither report.
+#[test]
+fn a_context_menu_offers_its_action_in_either_order() {
+    use crate::access::{Access, Action, Role};
+    let access = || Access::new(Role::Button, "Row").action(Action::Click);
+    let root = Element::column([
+        Element::text("first", STYLE)
+            .key("first")
+            .focusable()
+            .access(access())
+            .context_menu(),
+        Element::text("second", STYLE)
+            .key("second")
+            .context_menu()
+            .focusable()
+            .access(access()),
+        Element::text("plain", STYLE).context_menu().reports_hover(),
+    ]);
+    let layout = lay_out(root, 200.0, 100.0);
+    for key in ["first", "second"] {
+        let record = layout
+            .records()
+            .iter()
+            .find(|record| record.id.as_ref() == Some(&id(key)))
+            .expect("the row is laid out");
+        assert!(record.context_menu);
+        let node = record.access.as_ref().expect("it has access").node(true);
+        assert!(node.supports_action(accesskit::Action::ShowContextMenu), "{key}");
+    }
+    let plain = layout
+        .records()
+        .iter()
+        .find(|record| record.id.is_none() && record.context_menu);
+    assert!(plain.is_none(), "an element with no key keeps no context menu");
+    assert!(
+        !layout
+            .records()
+            .iter()
+            .any(|record| record.id.is_none() && record.reports_hover)
+    );
+}

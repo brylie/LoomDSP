@@ -204,6 +204,11 @@ pub(crate) struct Record {
     /// The keys it takes before the focused element inside it
     /// ([`Element::takes_first`]). Only an element with a UI ID has them.
     pub(crate) keys_first: Vec<Key>,
+    /// The app hears the pointer moving onto it ([`Element::reports_hover`]).
+    pub(crate) reports_hover: bool,
+    /// The app hears a right press or ShowContextMenu on it
+    /// ([`Element::context_menu`]).
+    pub(crate) context_menu: bool,
     /// For a slider: what it shows and how it moves (section 5, rule 16).
     pub(crate) slider: Option<crate::slider::Slider>,
     /// For a check box's box: whether it is on (section 5, rule 17).
@@ -904,6 +909,8 @@ impl Layout {
             keys_from,
             scrolls_from_keys,
             keys_first,
+            reports_hover,
+            context_menu,
             children,
             ..
         } = element;
@@ -983,6 +990,16 @@ impl Layout {
             self.problem(None, Problem::NoKey);
         }
         let hover = hover.filter(|_| kept.is_some());
+        let (reports_hover, context_menu) = (reports_hover && kept.is_some(), context_menu && kept.is_some());
+        // An element with a context menu offers it to a screen reader too
+        // (section 5, rule 19), whichever order its builder set them in.
+        let access = access.map(|access| {
+            if context_menu {
+                access.action(crate::access::Action::ShowContextMenu)
+            } else {
+                access
+            }
+        });
         // The hover text is the node's description unless it sets its own
         // (section 7, rule 23): one string for both. Text that only repeats
         // the node's name or value is not read a second time.
@@ -1032,6 +1049,8 @@ impl Layout {
             scrolls_from_keys: scrolls_from_keys && keys_from_kept,
             radio,
             keys_first,
+            reports_hover,
+            context_menu,
             slider,
             check,
             select,
@@ -1139,6 +1158,8 @@ impl Layout {
             scrolls_from_keys: false,
             radio: None,
             keys_first: Vec::new(),
+            reports_hover: false,
+            context_menu: false,
             slider: None,
             check: None,
             select: None,

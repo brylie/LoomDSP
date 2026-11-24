@@ -465,6 +465,11 @@ pub struct Element {
     /// For a scroll container, it is never a focus stop, even with no stop
     /// inside: a select's open list, whose select keeps the focus.
     pub(crate) passive: bool,
+    /// The app hears the pointer moving onto it ([`Element::reports_hover`]).
+    pub(crate) reports_hover: bool,
+    /// The app hears a right press on it, or a screen reader's
+    /// ShowContextMenu ([`Element::context_menu`]).
+    pub(crate) context_menu: bool,
     pub(crate) children: Vec<Element>,
     /// Where a root panel goes; `None` fills the window. Only a panel's
     /// root reads it.
@@ -498,6 +503,8 @@ impl Element {
             scrolls_from_keys: false,
             keys_first: Vec::new(),
             passive: false,
+            reports_hover: false,
+            context_menu: false,
             children,
             placement: None,
             closes_outside: false,
@@ -1020,6 +1027,27 @@ impl Element {
     #[must_use]
     pub fn takes_first(mut self, keys: impl IntoIterator<Item = Key>) -> Self {
         self.keys_first = keys.into_iter().filter(|key| *key != Key::Tab).collect();
+        self
+    }
+
+    /// Tells the app when the pointer moves onto it, through
+    /// [`App::hovered`](crate::App::hovered) on the next turn (ui-layer.md,
+    /// section 3, rule 4): for an element whose hover means something to
+    /// the app, such as a list's row, where it moves the highlight. Hover
+    /// stays widget state for every other element. It needs a key.
+    #[must_use]
+    pub fn reports_hover(mut self) -> Self {
+        self.reports_hover = true;
+        self
+    }
+
+    /// Gives it a context menu that the app opens (ui-layer.md, section 5,
+    /// rule 19): a right press on it, or a screen reader's ShowContextMenu
+    /// on its node, reaches [`App::context_menu`](crate::App::context_menu)
+    /// on the next turn. Its node offers ShowContextMenu. It needs a key.
+    #[must_use]
+    pub fn context_menu(mut self) -> Self {
+        self.context_menu = true;
         self
     }
 

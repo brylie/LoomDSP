@@ -32,6 +32,11 @@ enum Message {
     Outside(UiId),
     /// A key press under the question.
     QuestionKey,
+    /// The pointer came onto this element, which reports its hover.
+    Hovered(UiId),
+    /// This element's context menu, opened by a key or a screen reader
+    /// (`true`) or by a right press (`false`).
+    Menu(UiId, bool),
 }
 
 /// An app that shows a bar of two buttons in the panels layer, across the
@@ -45,6 +50,8 @@ struct Layers {
     /// The bar's two buttons are two runs, `a` and then `b`, with the
     /// target's own stops between them, and the order wraps.
     runs: bool,
+    /// The bar's second button reports its hover and has a context menu.
+    reports: bool,
     heard: Vec<Message>,
 }
 
@@ -68,8 +75,10 @@ impl App for Layers {
     }
 
     fn view(&self, view: &mut View) {
-        view.panel_with(UiId::panel("bar"), Layer::Panels, &(), |_| {
-            Element::row([button("a", 40.0), button("b", 40.0)]).width(Length::FILL)
+        view.panel_with(UiId::panel("bar"), Layer::Panels, &self.reports, |reports| {
+            let b = button("b", 40.0);
+            let b = if *reports { b.reports_hover().context_menu() } else { b };
+            Element::row([button("a", 40.0), b]).width(Length::FILL)
         });
         if self.overlay {
             view.panel_with(UiId::panel("menu"), Layer::Overlays, &(), |_| {
@@ -96,6 +105,23 @@ impl App for Layers {
 
     fn pressed_outside(&self, root: &UiId) -> Option<Message> {
         Some(Message::Outside(root.clone()))
+    }
+
+    fn hovered(&self, id: &UiId) -> Option<Message> {
+        Some(Message::Hovered(id.clone()))
+    }
+
+    fn context_menu(&self, id: &UiId, by_key: bool) -> Option<Message> {
+        Some(Message::Menu(id.clone(), by_key))
+    }
+
+    fn access_target(&self, node: accesskit::NodeId) -> Option<UiId> {
+        // Node 2 stands for the bar's second button, node 3 for its first.
+        match node.0 {
+            2 => Some(UiId::panel("bar").with("b")),
+            3 => Some(UiId::panel("bar").with("a")),
+            _ => None,
+        }
     }
 
     fn question_key(&self, _key: &loom_ui_core::KeyEvent) -> Option<Message> {
@@ -186,6 +212,7 @@ fn harness(overlay: bool, answer: Routed) -> Harness<Layers, Fake> {
         input: Layer::Canvas,
         canvas: false,
         runs: false,
+        reports: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -865,6 +892,7 @@ fn the_app_decides_tab_at_the_end_of_a_run() {
         input: Layer::Canvas,
         canvas: false,
         runs: true,
+        reports: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -1425,4 +1453,121 @@ fn a_paragraph_paints_its_links_once() {
         .expect("painted with its spans");
     assert_eq!(spans.len(), 4);
     assert!(spans[1].underline && spans[3].underline && !spans[0].underline);
+}
+
+/// The bar with its second button reporting hover and holding a context
+/// menu, and nothing over it.
+fn reporting() -> Harness<Layers, Fake> {
+    let app = Layers {
+        overlay: false,
+        input: Layer::Panels,
+        canvas: false,
+        runs: false,
+        reports: true,
+        heard: Vec::new(),
+    };
+    let target = Fake {
+        answer: Routed::Passed,
+        taken_from: 350.0,
+        heard: Vec::new(),
+        focus: None,
+    };
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let mut harness = Harness::new(app, target, window, Instant::now());
+    harness.lay_out(&mut Mono::default());
+    harness
+}
+
+/// What the app heard of hovers and context menus, in order.
+fn reports(harness: &Harness<Layers, Fake>) -> Vec<Message> {
+    harness
+        .app()
+        .heard
+        .iter()
+        .filter(|message| matches!(message, Message::Hovered(_) | Message::Menu(..)))
+        .cloned()
+        .collect()
+}
+
+/// Section 3, rule 4: an element that reports its hover tells the app once
+/// each time the pointer comes onto it, not for each move over it, and an
+/// element that does not ask tells it nothing.
+#[test]
+fn a_reporting_element_tells_the_app_its_hover_once_per_entry() {
+    let mut harness = reporting();
+    let b = UiId::panel("bar").with("b");
+    harness.step(at(60.0, 8.0, PointerEvent::Moved));
+    harness.step(at(62.0, 8.0, PointerEvent::Moved));
+    assert_eq!(reports(&harness), [Message::Hovered(b.clone())]);
+    harness.step(at(20.0, 8.0, PointerEvent::Moved));
+    assert_eq!(reports(&harness).len(), 1, "the first button does not ask to be heard");
+    harness.step(at(60.0, 8.0, PointerEvent::Moved));
+    assert_eq!(reports(&harness), [Message::Hovered(b.clone()), Message::Hovered(b)]);
+}
+
+/// Only the pointer's own move reports: a layout that leaves the hover on
+/// the same element tells the app nothing.
+#[test]
+fn a_layout_under_a_still_pointer_reports_no_hover() {
+    let mut harness = reporting();
+    harness.step(at(60.0, 8.0, PointerEvent::Moved));
+    harness.lay_out(&mut Mono::default());
+    harness.step(DriverEvent::RedrawRequested);
+    assert_eq!(reports(&harness).len(), 1);
+}
+
+/// Section 5, rule 19: a right press on an element with a context menu
+/// opens it, as not opened by a key; on one without, it opens nothing, and
+/// a left press never does.
+#[test]
+fn a_right_press_opens_the_context_menu() {
+    let mut harness = reporting();
+    let b = UiId::panel("bar").with("b");
+    harness.step(at(20.0, 8.0, PointerEvent::Pressed(PointerButton::Right)));
+    harness.step(at(60.0, 8.0, PointerEvent::Pressed(PointerButton::Left)));
+    harness.step(at(60.0, 8.0, PointerEvent::Released(PointerButton::Left)));
+    assert!(
+        !reports(&harness)
+            .iter()
+            .any(|message| matches!(message, Message::Menu(..)))
+    );
+    harness.step(at(60.0, 8.0, PointerEvent::Pressed(PointerButton::Right)));
+    assert_eq!(reports(&harness).last(), Some(&Message::Menu(b, false)));
+}
+
+/// Section 5, rule 19: a screen reader's ShowContextMenu on the node of an
+/// element with a context menu opens it as by a key; on any other node it
+/// goes on to the app's own handling, which here hears nothing.
+#[test]
+fn show_context_menu_opens_it_as_a_key_does() {
+    let mut harness = reporting();
+    let show = |node: u64| {
+        DriverEvent::Accessibility(crate::AccessEvent::Action(accesskit::ActionRequest {
+            action: accesskit::Action::ShowContextMenu,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: accesskit::NodeId(node),
+            data: None,
+        }))
+    };
+    harness.step(show(3));
+    assert!(reports(&harness).is_empty(), "the first button has no context menu");
+    harness.step(show(2));
+    assert_eq!(reports(&harness), [Message::Menu(UiId::panel("bar").with("b"), true)]);
+}
+
+/// Section 7, rule 24: under a layer that takes the input, an element with
+/// a context menu stays inert to a screen reader, as to the pointer.
+#[test]
+fn show_context_menu_under_a_raised_layer_opens_nothing() {
+    let mut harness = reporting();
+    harness.send(Message::Input(Layer::Overlays));
+    harness.step(DriverEvent::Accessibility(crate::AccessEvent::Action(
+        accesskit::ActionRequest {
+            action: accesskit::Action::ShowContextMenu,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: accesskit::NodeId(2),
+            data: None,
+        },
+    )));
+    assert!(reports(&harness).is_empty());
 }

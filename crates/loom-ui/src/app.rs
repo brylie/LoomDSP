@@ -91,6 +91,29 @@ pub trait App {
         None
     }
 
+    /// The message for the pointer moving onto the element with UI ID `id`,
+    /// one that asked for it with
+    /// [`Element::reports_hover`](crate::Element::reports_hover)
+    /// (ui-layer.md, section 3, rule 4). Heard once each time the pointer
+    /// comes onto it, not for each move over it. It arrives on the next
+    /// turn. It reads state and changes none.
+    fn hovered(&self, id: &UiId) -> Option<Self::Message> {
+        let _ = id;
+        None
+    }
+
+    /// The message for opening the context menu of the element with UI ID
+    /// `id`, one that has one
+    /// ([`Element::context_menu`](crate::Element::context_menu)): a right
+    /// press on it (`by_key` false), or a screen reader's ShowContextMenu on
+    /// its node (`by_key` true, so the menu opens on its first item, as one
+    /// opened from the keyboard does; section 5, rule 19). It arrives on the
+    /// next turn. It reads state and changes none.
+    fn context_menu(&self, id: &UiId, by_key: bool) -> Option<Self::Message> {
+        let _ = (id, by_key);
+        None
+    }
+
     /// The message for the slider with UI ID `id` moving to `position`,
     /// from 0 to 1 along its travel, in `phase` of its gesture (ui-layer.md,
     /// section 5, rule 16): a drag, a double-click's reset, a group of keys,

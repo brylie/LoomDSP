@@ -784,6 +784,28 @@ impl Window {
             .as_deref()
     }
 
+    /// Whether the element with UI ID `id` tells the app when the pointer
+    /// moves onto it ([`crate::Element::reports_hover`]).
+    pub(crate) fn reports_hover(&self, id: &UiId) -> bool {
+        self.record_of(id).is_some_and(|record| record.reports_hover)
+    }
+
+    /// Whether the element with UI ID `id` has a context menu the app opens
+    /// ([`crate::Element::context_menu`]).
+    pub(crate) fn has_context_menu(&self, id: &UiId) -> bool {
+        self.record_of(id).is_some_and(|record| record.context_menu)
+    }
+
+    /// The laid-out record of the element with UI ID `id`, in its panel.
+    fn record_of(&self, id: &UiId) -> Option<&crate::layout::Record> {
+        let panel = self.panel_of(id)?;
+        self.records[panel]
+            .layout
+            .records()
+            .iter()
+            .find(|element| element.id.as_ref() == Some(id))
+    }
+
     /// Shows `hint`, or none.
     pub(crate) fn set_hint(&mut self, hint: Option<crate::hint::Shown>) {
         self.hint = hint;
