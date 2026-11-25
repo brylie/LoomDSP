@@ -163,21 +163,38 @@ trait Native: Sized + Send + 'static {
     fn set_text(&mut self, text: String) -> Result<(), arboard::Error>;
 }
 
-/// The desktop's clipboard: `arboard` for every write and most reads, and
-/// on Linux our own read when `arboard` chose Wayland, so that read has a
-/// deadline. The choice is made once, when the handle opens.
-struct Desktop {
+impl Native for arboard::Clipboard {
+    fn open() -> Result<Self, arboard::Error> {
+        Self::new()
+    }
+
+    fn get_text(&mut self) -> ClipboardText {
+        answer(Self::get_text(self))
+    }
+
+    fn set_text(&mut self, text: String) -> Result<(), arboard::Error> {
+        // Linux: never waits (no `SetExtLinux::wait`), so a quit never
+        // pauses; the desktop's clipboard manager keeps the text, if it runs.
+        Self::set_text(self, text)
+    }
+}
+
+/// The desktop's clipboard: `arboard` (or a fake in a test) for every write
+/// and most reads, and on Linux our own read when `arboard` chose Wayland,
+/// so that read has a deadline. The choice is made once, when the handle
+/// opens.
+struct Desktop<A = arboard::Clipboard> {
     /// The handle every write goes through.
-    arboard: arboard::Clipboard,
+    arboard: A,
     /// Whether reads go through our Wayland read (`wayland.rs`).
     #[cfg(target_os = "linux")]
     wayland: bool,
 }
 
-impl Native for Desktop {
+impl<A: Native> Native for Desktop<A> {
     fn open() -> Result<Self, arboard::Error> {
         Ok(Self {
-            arboard: arboard::Clipboard::new()?,
+            arboard: A::open()?,
             #[cfg(target_os = "linux")]
             wayland: wayland::arboard_uses_wayland(),
         })
@@ -188,12 +205,10 @@ impl Native for Desktop {
         if self.wayland {
             return wayland::read_text(WAYLAND_READ_LIMIT);
         }
-        answer(self.arboard.get_text())
+        self.arboard.get_text()
     }
 
     fn set_text(&mut self, text: String) -> Result<(), arboard::Error> {
-        // Linux: never waits (no `SetExtLinux::wait`), so a quit never
-        // pauses; the desktop's clipboard manager keeps the text, if it runs.
         self.arboard.set_text(text)
     }
 }

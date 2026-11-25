@@ -2,8 +2,8 @@
 //! with no display.
 
 use super::{
-    BACKEND_READ_LIMIT, Backend, Clipboard, MAX_STUCK_READS, Native, READ_NOW_LIMIT, READS_BEFORE_RETRY, Reader,
-    System, WAYLAND_READ_LIMIT, answer, text_of,
+    BACKEND_READ_LIMIT, Backend, Clipboard, Desktop, MAX_STUCK_READS, Native, READ_NOW_LIMIT, READS_BEFORE_RETRY,
+    Reader, System, WAYLAND_READ_LIMIT, answer, text_of,
 };
 use crate::effect::ClipboardText;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -538,4 +538,40 @@ fn a_read_that_ends_in_time_leaves_nothing_stuck() {
         "every read reached the backend"
     );
     assert_eq!(opens.load(Ordering::SeqCst), 1, "through the one handle");
+}
+
+/// A native handle that always opens, and holds its text in memory.
+#[derive(Default)]
+struct Memory {
+    text: String,
+}
+
+impl Native for Memory {
+    fn open() -> Result<Self, arboard::Error> {
+        Ok(Self::default())
+    }
+
+    fn get_text(&mut self) -> ClipboardText {
+        ClipboardText::from_text(Some(self.text.clone()))
+    }
+
+    fn set_text(&mut self, text: String) -> Result<(), arboard::Error> {
+        self.text = text;
+        Ok(())
+    }
+}
+
+/// The desktop's clipboard writes through its `arboard` handle, and reads
+/// through it too when it does not read Wayland itself.
+#[test]
+fn the_desktop_clipboard_reads_and_writes_through_arboard() {
+    let mut desktop = Desktop::<Memory>::open().unwrap();
+    // On a Wayland desktop the read would be the real clipboard's.
+    #[cfg(target_os = "linux")]
+    {
+        desktop.wayland = false;
+    }
+    assert_eq!(desktop.get_text(), ClipboardText::Empty);
+    desktop.set_text("osc".to_owned()).unwrap();
+    assert_eq!(desktop.get_text(), ClipboardText::Text("osc".to_owned()));
 }

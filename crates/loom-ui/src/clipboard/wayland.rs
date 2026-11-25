@@ -7,6 +7,8 @@
 use super::MAX_TEXT;
 use super::pipe::read_within;
 use crate::effect::ClipboardText;
+use std::io::Read;
+use std::os::fd::AsFd;
 use std::time::Duration;
 use wl_clipboard_rs::paste::{ClipboardType, Error, MimeType, Seat, get_contents};
 use wl_clipboard_rs::utils::is_primary_selection_supported;
@@ -27,10 +29,23 @@ pub(super) fn arboard_uses_wayland() -> bool {
 /// text, is empty, as `arboard` answers it; anything else that goes wrong,
 /// a text past the cap too, is refused.
 pub(super) fn read_text(limit: Duration) -> ClipboardText {
-    match get_contents(ClipboardType::Regular, Seat::Unspecified, MimeType::Text) {
+    answer(
+        get_contents(ClipboardType::Regular, Seat::Unspecified, MimeType::Text),
+        limit,
+    )
+}
+
+/// What the compositor's answer gives: the pipe's text, read within
+/// `limit`, or what its error means. *Why apart:* a test gives it a pipe of
+/// its own and each error, with no compositor.
+fn answer<P: Read + AsFd>(contents: Result<(P, String), Error>, limit: Duration) -> ClipboardText {
+    match contents {
         // The pipe is dropped on return, which closes our end.
         Ok((mut pipe, _)) => super::text_of(read_within(&mut pipe, limit, MAX_TEXT).ok()),
         Err(Error::ClipboardEmpty | Error::NoMimeType) => ClipboardText::Empty,
         Err(_) => ClipboardText::Refused,
     }
 }
+
+#[cfg(test)]
+mod tests;
