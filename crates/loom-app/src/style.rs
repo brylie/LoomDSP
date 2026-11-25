@@ -496,6 +496,14 @@ pub fn tab(open: bool) -> impl Fn(&Theme, iced_button::Status) -> iced_button::S
 
 /// A card in a list, such as one modulation assignment. The selected card
 /// is outlined in the primary colour.
+/// The radius of a modulation card's corners, in the inspector and the
+/// matrix.
+pub const CARD_RADIUS: f32 = 5.0;
+
+/// The radius of an inspector row's corners while a dragged output over it
+/// lights it.
+pub const DROP_ROW_RADIUS: f32 = 4.0;
+
 pub fn card(selected: bool) -> impl Fn(&Theme) -> iced::widget::container::Style {
     move |theme| {
         let palette = theme.extended_palette();
@@ -508,7 +516,7 @@ pub fn card(selected: bool) -> impl Fn(&Theme) -> iced::widget::container::Style
                     palette.background.strong.color.scale_alpha(0.5)
                 },
                 width: if selected { 1.5 } else { 1.0 },
-                radius: 5.0.into(),
+                radius: CARD_RADIUS.into(),
             },
             ..iced::widget::container::Style::default()
         }

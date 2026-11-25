@@ -482,26 +482,74 @@ fn a_midi_range_draft_lives_only_in_the_pair_of_fields() {
     ui.tap(keyboard::Key::Named(keyboard::key::Named::Escape), none);
     assert!(!ui.app().session.learn.has_range_draft());
 
+    // Tab past either end leaves the pair, and leaving commits both
+    // (Brylie's decision, 2026-11-25): the focus moves on in the column,
+    // not to the canvas.
+    let range = |ui: &Ui| {
+        ui.app()
+            .session
+            .controller
+            .graph()
+            .midi_mapping_of(loom_core::ModuleId(module), index)
+            .map(|(_, mapping)| (mapping.options.low, mapping.options.high))
+            .unwrap()
+    };
     for (field, modifiers) in [(&high, none), (&low, keyboard::Modifiers::SHIFT)] {
         ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
+        ui.send(Message::Learn(Learn::MidiOptions {
+            module,
+            index,
+            options: loom_core::MidiMappingOptions::DEFAULT,
+        }));
         ui.focus(field);
         ui.send(draft());
         let messages = ui.tap(keyboard::Key::Named(keyboard::key::Named::Tab), modifiers);
-        assert_eq!(ui.focused_field(), None);
+        assert!(
+            ui.focused_field()
+                .is_none_or(|focused| focused != low && focused != high)
+        );
         assert!(!ui.app().session.learn.has_range_draft());
-        assert!(messages.iter().any(|message| matches!(message, Message::Canvas(_))));
+        assert_eq!(range(&ui), (0.2, 0.8), "leaving committed both");
+        assert!(!messages.iter().any(|message| matches!(message, Message::Canvas(_))));
     }
 
+    // A selection change leaves the pair too, and commits it.
+    ui.send(Message::Learn(Learn::MidiOptions {
+        module,
+        index,
+        options: loom_core::MidiMappingOptions::DEFAULT,
+    }));
     ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
     ui.focus(&low);
     ui.send(draft());
     ui.send(Message::Inspector(crate::inspector::Message::SelectModule(3)));
     ui.redraw();
     assert!(!ui.app().session.learn.has_range_draft());
+    assert_eq!(range(&ui), (0.2, 0.8), "a selection change committed it");
+
+    // A range that is not one, left: the last good range stays, and the
+    // status line says why.
+    ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
+    ui.focus(&high);
+    ui.send(Message::Learn(Learn::MidiRangeText {
+        module,
+        index,
+        low: "0.9".into(),
+        high: "0.1".into(),
+    }));
+    ui.tap(keyboard::Key::Named(keyboard::key::Named::Tab), none);
+    assert!(!ui.app().session.learn.has_range_draft());
+    assert_eq!(range(&ui), (0.2, 0.8), "the last good range stays");
+    assert!(
+        ui.app().alerts.status().contains("not changed"),
+        "{}",
+        ui.app().alerts.status()
+    );
 
     ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
     ui.focus(&high);
     ui.send(draft());
+    let before = range(&ui).0;
     let options = loom_core::MidiMappingOptions {
         low: 0.4,
         ..loom_core::MidiMappingOptions::DEFAULT
@@ -519,7 +567,9 @@ fn a_midi_range_draft_lives_only_in_the_pair_of_fields() {
             .1
             .options
             .low,
-        0.0
+        before,
+        "undo took the options back: {:?}",
+        range(&ui)
     );
 }
 
@@ -2493,43 +2543,63 @@ fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
     assert!(ui.app().session.selection.is_empty());
 }
 
-/// Tab closes a field with no change and moves the canvas's focus as usual.
+/// Tab from a value field commits its draft, as Enter does, and moves on
+/// to the next stop in the column, the row's slider, not the canvas; Shift+Tab
+/// commits and moves back. Text that is not a value keeps the last good one,
+/// and the status line says why (Brylie's decision, 2026-11-25;
+/// panel-widgets.md, Keys in a text field).
 #[test]
-fn tab_closes_an_inspector_field() {
+fn tab_from_a_value_field_commits_and_moves_on() {
     use keyboard::key::Named;
+    let tab = keyboard::Key::Named(Named::Tab);
     let mut ui = Ui::open("sine.ron");
-    let (id, _) = focus_cutoff_field(&mut ui);
-    let before = param_value(&ui, id, "cutoff");
-    ui.typewrite("5");
-    assert!(ui.app().session.value_draft.is_some());
-    let previous_focus = ui.app().focus.clone();
-    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
-    assert!(ui.app().session.value_draft.is_none());
-    assert_ne!(ui.app().focus, previous_focus, "the original field gave up focus");
-    assert_eq!(param_value(&ui, id, "cutoff"), before);
-}
-
-/// Tab in a value field also moves the canvas's focus, so a keyboard user
-/// keeps their place. Only a field in a view's list keeps Tab for itself.
-#[test]
-fn tab_from_a_value_field_moves_the_canvas() {
-    use keyboard::key::Named;
-    let mut ui = Ui::open("sine.ron");
-    let (id, _) = focus_cutoff_field(&mut ui);
-    assert_eq!(
-        ui.app().text_field_tabs(ui.app().focus.as_ref()),
-        [false; 2],
-        "a value field is in no list"
-    );
-    let messages = ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
+    let (id, index) = focus_cutoff_field(&mut ui);
+    let row = crate::inspector::ids::row(id.0, crate::inspector::ids::Kind::Param, "cutoff");
+    ui.typewrite("440");
+    let messages = ui.tap(tab.clone(), keyboard::Modifiers::default());
     assert!(
-        messages.iter().any(|m| matches!(m, Message::Canvas(_))),
-        "the canvas took Tab: {messages:?}"
+        !messages.iter().any(|m| matches!(m, Message::Canvas(_))),
+        "the canvas did not take Tab: {messages:?}"
     );
-    assert_ne!(
-        ui.app().session.selection.iter().copied().next(),
-        Some(id.0),
-        "focus moved on"
+    assert!(
+        (param_value(&ui, id, "cutoff") - 440.0).abs() < 0.5,
+        "committed: {} {messages:?} draft {:?}",
+        param_value(&ui, id, "cutoff"),
+        ui.app().session.value_draft.as_ref().map(|d| d.draft.text.clone())
+    );
+    assert!(ui.app().session.value_draft.is_none());
+    assert_eq!(
+        ui.runtime().focused(),
+        Some(&crate::inspector::ids::part(&row, "value")),
+        "on to the row's slider"
+    );
+
+    // Back the other way, from the field again.
+    let at = ui.value_field(id.0, index);
+    ui.move_to(at);
+    ui.press();
+    ui.release();
+    ui.typewrite("500");
+    ui.tap(tab.clone(), keyboard::Modifiers::SHIFT);
+    assert!(
+        (param_value(&ui, id, "cutoff") - 500.0).abs() < 0.5,
+        "Shift+Tab commits too"
+    );
+    assert_ne!(ui.app().focus, ui.app().value_field_part(id.0, index), "and moves back");
+
+    // Text that is not a value: the last good one stays.
+    let at = ui.value_field(id.0, index);
+    ui.move_to(at);
+    ui.press();
+    ui.release();
+    ui.typewrite("abc");
+    ui.tap(tab, keyboard::Modifiers::default());
+    assert!((param_value(&ui, id, "cutoff") - 500.0).abs() < 0.5, "unchanged");
+    assert!(ui.app().session.value_draft.is_none(), "the draft went");
+    assert!(
+        ui.app().alerts.status().contains("not changed"),
+        "{}",
+        ui.app().alerts.status()
     );
 }
 
@@ -2670,16 +2740,18 @@ fn a_button_only_row_keeps_existing_modulation_removable() {
     inspector_row(&mut ui, button.0, "On");
     let row = ids::row(button.0, ids::Kind::Param, "on");
     let remove = ids::part(&ids::assignment(&row, assignment.0), "remove");
-    let add = ids::part(&row, "add");
-    let places = ui.places();
-    let at = places
-        .of(&remove)
+    let add = ids::part(&row, "modulation/add");
+    // The module's rows are the runtime's (plan 3.2, row 4d.2).
+    ui.lay_out_panels();
+    let at = ui
+        .runtime()
+        .bounds(&remove)
         .expect("existing assignment's remove action stays visible");
-    assert!(places.of(&add).is_none(), "the row offers no add action");
+    assert!(ui.runtime().bounds(&add).is_none(), "the row offers no add action");
     let accessible = crate::inspector::access::items(&ui.app().inspector_model());
     assert!(crate::a11y::items::find(&accessible, &remove).is_some());
     assert!(crate::a11y::items::find(&accessible, &add).is_none());
-    ui.move_to(at.rect.center());
+    ui.move_to(at.center());
     ui.press();
     ui.release();
     assert!(ui.app().session.controller.graph().assignment(assignment).is_none());
@@ -2833,8 +2905,11 @@ fn gpu_required() -> bool {
 /// 2.3, item 2). Skips with no GPU adapter, unless one is required.
 #[test]
 fn measure_and_wgpu_lay_out_alike() {
-    let mut ui = Ui::open("subtractive.ron");
-    ui.send(Message::Inspector(crate::inspector::Message::SelectModule(4)));
+    // A sub-patch's inspector, Iced's until plan 3.2, row 4d.3: a module's
+    // rows are the runtime's.
+    let mut ui = Ui::open("nested-subtractive.ron");
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2])));
+    assert!(!ui.app().inspector_ours(), "a sub-patch's inspector is Iced's");
     let Some((measured, drawn)) = ui.places_on_both() else {
         assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
         return;

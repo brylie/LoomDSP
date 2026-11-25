@@ -685,6 +685,9 @@ impl Message {
                     | M::ValueDraftClear
                     | M::Choice { .. }
                     | M::Range { .. }
+                    | M::FullRange { .. }
+                    | M::Slid { .. }
+                    | M::DepthSlid { .. }
                     | M::SelectModule(_)
                     | M::DropRow(_)
                     | M::Expose { .. }
@@ -1960,9 +1963,13 @@ impl App {
                 self.handle(message);
             }
         }
-        // A range editor can disappear before the window's focus answer.
-        if self.session.learn.has_range_draft() && !cause.is_live() && self.midi_range_fields().is_none() {
-            self.session.learn.set_range_draft(None);
+        // A range editor can disappear before the window's focus answer:
+        // that is leaving the pair, which commits it (Brylie, 2026-11-25).
+        if !cause.is_live()
+            && self.midi_range_fields().is_none()
+            && let Some(param) = self.session.learn.range_draft_param()
+        {
+            self.leave_midi_range(param);
         }
         // The bridge asks the window where focus is after this turn.
         if ask_focus {

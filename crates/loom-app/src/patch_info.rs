@@ -243,6 +243,17 @@ impl App {
     /// A tag's remove button that takes the focus becomes the one the
     /// tags' Tab stop lands on next.
     pub(crate) fn authors_focus_moved(&mut self, focus: Option<&loom_ui_core::UiId>) {
+        // Leaving the Tags field by any means adds what is typed, as Enter
+        // does, as a value field's draft commits (Brylie's decision,
+        // 2026-11-25). Escape drops it before the focus leaves.
+        if self.focus.as_ref() == Some(&tags_part())
+            && focus != Some(&tags_part())
+            && !self.focus_went_into_an_overlay()
+        {
+            let draft = std::mem::take(&mut self.session.patch_info.tag_draft);
+            self.session.patch_info.tag_note = None;
+            self.add_tag(&draft);
+        }
         if focus != Some(&authors_part()) {
             self.session.patch_info.authors = self.session.document.info().authors.join("\n");
         }
@@ -350,6 +361,12 @@ impl App {
                 self.effect(loom_ui::Effects::focus_as_input(id));
             }
             Message::Leave => {
+                // Escape drops a value field's, the MIDI range's, or the
+                // Tags field's draft before the focus leaves, which would
+                // commit it.
+                self.session.value_draft = None;
+                self.session.learn.set_range_draft(None);
+                self.session.patch_info.tag_draft.clear();
                 self.effect(loom_ui::Effects::unfocus());
                 self.toolbar_focus(None);
             }

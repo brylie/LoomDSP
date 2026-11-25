@@ -495,3 +495,68 @@ fn space_gives_the_focused_answer() {
     ui.tap(Key::Named(Named::Space), Modifiers::empty());
     assert!(ui.app().quit, "Space gave Don't Save");
 }
+
+/// A draft being typed when the unsaved-changes question opens is not in
+/// the file its Save writes, as on main, where a draft reaches the patch
+/// only when it is committed: a tag in patch info's Tags field, and a value
+/// in an inspector value field. The question takes the focus without the
+/// field being left (ui-layer.md, section 6, rule 4), so nothing commits
+/// the draft on the way. Pinned for the navigator's question to Brylie
+/// (plan 3.2, row 4d.2); not a change.
+#[test]
+fn a_draft_is_not_in_the_file_the_questions_save_writes() {
+    let dir = TempDir::new("question-save-draft");
+    let path = dir.0.join("mine.ron");
+    fake::answer_save(Some(path.clone()));
+    let mut ui = changed();
+    ui.send(AppMessage::Canvas(loom_canvas::CanvasEvent::Select(Vec::new())));
+    let _ = ui.redraw();
+    ui.focus(&crate::patch_info::tags_part());
+    let _ = ui.typewrite("drafted");
+    assert_eq!(ui.app().session.patch_info.tag_draft, "drafted");
+    ui.send(AppMessage::File(FileAction::Close));
+    answer(&mut ui, Answer::Save);
+    fake::answer_save(None);
+    let saved = crate::patch_file::load(&path).expect("the file was written");
+    assert!(
+        saved.metadata.tags.is_empty(),
+        "the tag draft is not saved: {:?}",
+        saved.metadata.tags
+    );
+    assert!(ui.app().quit);
+
+    // A value field's draft, on a module.
+    let path = dir.0.join("value.ron");
+    fake::answer_save(Some(path.clone()));
+    let mut ui = changed();
+    let mut filter = loom_core::ModuleId(0);
+    ui.app_mut().edit(|app| {
+        filter = app.session.controller.add_module("loom.filter.svf").unwrap();
+        app.commit();
+    });
+    let module = filter.0;
+    ui.send(AppMessage::Canvas(loom_canvas::CanvasEvent::Select(vec![module])));
+    let _ = ui.redraw();
+    let index = {
+        let node = ui.app().session.controller.graph().node(filter).unwrap();
+        loom_core::ModuleNames::parameter_index(node, "cutoff").unwrap()
+    };
+    let before = ui.app().session.controller.graph().node(filter).unwrap().params[index];
+    let at = ui.value_field(module, index);
+    let _ = ui.move_to(at);
+    let _ = ui.press();
+    let _ = ui.release();
+    let _ = ui.typewrite("1234");
+    assert!(ui.app().session.value_draft.is_some());
+    ui.send(AppMessage::File(FileAction::Close));
+    answer(&mut ui, Answer::Save);
+    fake::answer_save(None);
+    let saved = crate::patch_file::load(&path).expect("the file was written");
+    let cutoff = saved
+        .modules
+        .iter()
+        .find(|saved| saved.id == module)
+        .and_then(|module| module.params.get("cutoff").copied())
+        .unwrap_or(before);
+    assert!((cutoff - before).abs() < 1e-3, "the value draft is not saved: {cutoff}");
+}

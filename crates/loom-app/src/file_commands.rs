@@ -450,6 +450,17 @@ impl App {
         self.meter = bench::FrameMeter::default();
         // A field can go with the old patch's views: ask the window again.
         self.focus_question.set(true);
+        // A part of the old patch's inspector, the runtime's since plan
+        // 3.2, row 4d, lets go of the focus too, as Iced's field did, so
+        // the runtime does not move it to the new inspector's first stop
+        // and the canvas holds the keys of the new patch.
+        if self
+            .focus
+            .as_ref()
+            .is_some_and(|focus| focus.is_under(&crate::inspector::panel::inspector_id()))
+        {
+            self.effect(loom_ui::Effects::unfocus());
+        }
         let skipped_drop = !std::mem::take(&mut self.drops).is_empty();
         self.alerts.clear(alerts::Cause::Commit);
         self.overlays.close_for_new_patch();

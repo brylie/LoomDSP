@@ -12,7 +12,10 @@ fn rows_and_their_parts_are_keyed_by_what_they_show() {
     assert!(own.is_under(&panel(4)));
 
     assert_eq!(part(&own, "value").to_string(), "inspector/4/param/cutoff/value");
-    assert_eq!(part(&own, "midi/low").to_string(), "inspector/4/param/cutoff/midi/low");
+    assert_eq!(
+        part(&own, "midi/settings/low").to_string(),
+        "inspector/4/param/cutoff/midi/settings/low"
+    );
     assert_eq!(part(&panel(4), "help").to_string(), "inspector/4/help");
     assert_eq!(
         assignment(&own, 12).to_string(),

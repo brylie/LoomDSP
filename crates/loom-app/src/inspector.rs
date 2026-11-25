@@ -68,6 +68,21 @@ pub(crate) enum Message {
     /// The inspector scrolled. It changes nothing; it is sent only while a
     /// screen reader listens, so the tree moves its nodes with the rows.
     Scrolled,
+    /// The runtime's slider for a parameter moved to a position from 0 to
+    /// 1, and `end` when its gesture ended, which closes the undo step as
+    /// a release does (ui-layer.md, section 5, rule 16).
+    Slid {
+        module: u32,
+        index: usize,
+        position: f32,
+        end: bool,
+    },
+    /// The runtime's depth slider on a modulation's card moved, from -1 to
+    /// 1, and `end` when its gesture ended.
+    DepthSlid { id: AssignmentId, depth: f32, end: bool },
+    /// **Full** was picked in a parameter's **Range** select: the
+    /// parameter's whole range (control-ranges.md; Brylie, 2026-11-25).
+    FullRange { module: u32, index: usize },
 }
 
 /// The widget ID of the inspector's scrolling area.
@@ -173,6 +188,10 @@ pub struct SlotRows {
     pub role_params: Vec<(String, u32, ParamRow)>,
     /// The part's other parameters, under a heading with the part's name.
     pub other_params: Vec<(String, u32, ParamRow)>,
+    /// The UI ID the part's rows are under: the slot's, then the part's
+    /// key (sub-patches.md, Slots; ui-layer.md, section 4).
+    #[serde(skip)]
+    pub rows_id: Option<UiId>,
 }
 
 /// A surface item's row on a sub-patch tile's inspector.
@@ -211,7 +230,7 @@ pub struct ExposureRow {
 
 impl ExposureRow {
     /// The action label shared by the inspector and its accessibility tree.
-    fn button_label(&self) -> String {
+    pub(crate) fn button_label(&self) -> String {
         let verb = if self.name.is_some() { "Unexpose" } else { "Expose" };
         format!("{verb} on {}", self.surface)
     }
@@ -551,8 +570,12 @@ impl App {
             if spec.is_transient() || (slot.is_none() && node.unknown.is_some()) {
                 return None;
             }
+            // A part's other rows are in its `others` group (the slot's
+            // model, `slot_rows`).
+            let other = slot.is_some_and(|slot| slot.role_param_of(spec.name).is_none());
             return Some(
                 slot.and_then(|_| self.slot_param_parent(tile, part))
+                    .map(|parent| if other { parent.with("others") } else { parent })
                     .map_or_else(own, |parent| parent.with(ids::Kind::Param.key()).with(spec.name)),
             );
         }
@@ -568,8 +591,15 @@ impl App {
             .min_by_key(|(_, exposed)| slot.is_some_and(|slot| slot.role.param(&exposed.name).is_none()))?;
         let kind = ids::Kind::Exposed;
         Some(match slot {
-            Some(_) => self
+            Some(slot) => self
                 .slot_param_parent(tile, part)
+                .map(|parent| {
+                    if slot.role.param(&exposed.name).is_none() {
+                        parent.with("others")
+                    } else {
+                        parent
+                    }
+                })
                 .map_or_else(own, |parent| parent.with(kind.key()).with(exposed.name.as_str())),
             None => ids::row(tile, kind, &exposed.name),
         })
@@ -647,6 +677,31 @@ impl App {
             Message::ValueText { module, index, text } => self.type_value_draft(module, index, text),
             Message::ValueDraftClear => self.clear_value_draft(),
             Message::Range { module, index, range } => self.set_range(module, index, range),
+            Message::FullRange { module, index } => self.set_full_range(module, index),
+            Message::Slid {
+                module,
+                index,
+                position,
+                end,
+            } => {
+                self.inspector_message(Message::Param {
+                    module,
+                    index,
+                    position,
+                });
+                if end {
+                    self.close_slider_gesture();
+                }
+            }
+            Message::DepthSlid { id, depth, end } => {
+                // On the percent grid, as the card says the depth and as
+                // Iced's slider stepped it, by drag and by key alike.
+                let depth = (depth * 100.0).round() / 100.0;
+                self.modulation_message(crate::modulation::Message::Depth { id, depth });
+                if end {
+                    self.close_slider_gesture();
+                }
+            }
             Message::Scrolled => {}
             Message::SelectModule(id) => {
                 if self.session.controller.graph().node(ModuleId(id)).is_some() {
@@ -899,11 +954,21 @@ impl App {
         };
         let names = modulation::Names::new(graph, hierarchy);
         let part = hierarchy.part_of_slot(ModuleId(id));
-        // A part with no key keeps the rows' own IDs.
-        let under = part.and_then(|part| self.slot_param_parent(id, part));
-        let keyed = |mut row: ParamRow, kind: ids::Kind, name: &str| {
+        // Every row is under the slot's part, by its kind and name; the
+        // part's other rows are in its `others` group, under their
+        // heading, as the panel nests them (ui-layer.md, section 4).
+        let under = part.map(|part| {
+            self.slot_param_parent(id, part)
+                .unwrap_or_else(|| ids::panel(id).with(part.0))
+        });
+        let keyed = |mut row: ParamRow, kind: ids::Kind, name: &str, other: bool| {
             if let Some(under) = &under {
-                row.ui = under.clone().with(kind.key()).with(name);
+                let group = if other {
+                    under.clone().with("others")
+                } else {
+                    under.clone()
+                };
+                row.ui = group.with(kind.key()).with(name);
             }
             row
         };
@@ -923,8 +988,9 @@ impl App {
                     let Some(row) = self.param_row(&names, part.0, index, &spec, exposure, !exposed) else {
                         continue;
                     };
-                    let row = keyed(row, ids::Kind::Param, spec.name);
-                    if state.role_param_of(spec.name).is_some() {
+                    let role = state.role_param_of(spec.name).is_some();
+                    let row = keyed(row, ids::Kind::Param, spec.name, !role);
+                    if role {
                         role_params.push((spec.label.to_string(), part.0, row));
                     } else {
                         other_params.push((spec.label.to_string(), part.0, row));
@@ -944,8 +1010,9 @@ impl App {
                     else {
                         continue;
                     };
-                    let row = keyed(row, ids::Kind::Exposed, &exposed.name);
-                    if state.role.param(&exposed.name).is_some() {
+                    let role = state.role.param(&exposed.name).is_some();
+                    let row = keyed(row, ids::Kind::Exposed, &exposed.name, !role);
+                    if role {
                         role_params.push((exposed.name.clone(), target.module.0, row));
                     } else {
                         other_params.push((exposed.name.clone(), target.module.0, row));
@@ -962,6 +1029,7 @@ impl App {
                 .then(|| loom_patch::hierarchy::no_part_text(state.role).to_string()),
             part: part_name,
             part_id: part.map(|p| p.0),
+            rows_id: under,
             choices: std::iter::once(crate::slots::SwapChoice {
                 label: crate::slots::NO_PART_CHOICE.to_string(),
                 to: crate::slots::SwapTarget::Empty,
@@ -1294,55 +1362,13 @@ pub fn view<'a>(
     let content: Element<'a, AppMessage> = match model {
         // Patch info, a selection of several, a port, and nothing are the
         // runtime's (`panel.rs`); the view never draws them here.
-        Inspector::Patch(_) | Inspector::Several(_) | Inspector::Empty | Inspector::Port(_) => text("").into(),
-        Inspector::Unknown(m) => {
-            let id = m.id;
-            let mut rows = column![
-                text(m.kind).size(style::HEADING),
-                text("This version of LoomDSP does not have this module. It makes no sound. Its settings are kept and saved.").size(style::BODY),
-                text("Label").size(style::BODY),
-                row![
-                    ids::named(
-                        &ids::part(&ids::panel(id), "label"),
-                        text_input("Label", &m.label)
-                            .id(ids::field(&ids::part(&ids::panel(id), "label")))
-                            .on_input(move |value| AppMessage::Inspector(Message::UnknownLabelDraft { module: id, value }))
-                            .on_submit(AppMessage::Inspector(Message::UnknownLabelApply { module: id }))
-                    ),
-                    ids::named(
-                        &ids::part(&ids::panel(id), "apply"),
-                        button("Apply").on_press(AppMessage::Inspector(Message::UnknownLabelApply { module: id }))
-                    ),
-                ].spacing(6),
-            ].spacing(6);
-            for (name, value) in m.params {
-                rows = rows.push(text(format!("{name}: {value}")).size(style::BODY));
-            }
-            for link in m.links {
-                let (key, label, message) = match link {
-                    UnknownLink::Assignment { id: link, text } => (
-                        ids::part(&ids::panel(id), "link/assignment").with(link),
-                        text,
-                        AppMessage::Modulation(crate::modulation::Message::Unassign(AssignmentId(link))),
-                    ),
-                    UnknownLink::Midi { index, text } => (
-                        ids::part(&ids::panel(id), "link/midi").with(index as u32),
-                        text,
-                        AppMessage::Learn(crate::learn::Message::Unmap { module: m.id, index }),
-                    ),
-                };
-                rows = rows.push(
-                    row![
-                        text(label).size(style::SMALL),
-                        space::horizontal(),
-                        ids::named(&ids::part(&key, "remove"), remove_button("Remove link", message))
-                    ]
-                    .align_y(iced::Alignment::Center),
-                );
-            }
-            rows.into()
-        }
-        Inspector::Module(m) => module_view(m, drop_row, dragging),
+        Inspector::Patch(_)
+        | Inspector::Several(_)
+        | Inspector::Empty
+        | Inspector::Port(_)
+        | Inspector::Module(_)
+        | Inspector::Unknown(_)
+        | Inspector::Slot(_) => text("").into(),
         Inspector::SubPatch(s) => {
             let id = s.id;
             // The name is edited in place, as a placeholder's label is, and
@@ -1393,57 +1419,6 @@ pub fn view<'a>(
             }
             rows.into()
         }
-        Inspector::Slot(s) => {
-            let id = s.id;
-            let mut rows = column![
-                text(s.name.clone()).size(style::HEADING),
-                text(format!("Slot for {}", s.role)).size(style::BODY).color(DIM),
-            ]
-            .spacing(6);
-            let current = s.choices.iter().find(|c| c.current).cloned();
-            let choices: Vec<crate::slots::SwapChoice> = s.choices.clone();
-            rows = rows.push(
-                row![
-                    text("Part").size(style::BODY),
-                    ids::named(
-                        &ids::part(&ids::panel(id), "part"),
-                        pick_list(choices, current, move |choice: crate::slots::SwapChoice| {
-                            AppMessage::SwapSlot {
-                                slot: id,
-                                to: choice.to,
-                            }
-                        })
-                        .text_size(style::CONTROL)
-                    ),
-                ]
-                .spacing(8)
-                .align_y(iced::Alignment::Center),
-            );
-            if let Some(note) = &s.note {
-                rows = rows.push(text(note.clone()).size(style::BODY).color(DIM));
-            }
-            for (label, module, p) in s.role_params {
-                rows = rows.push(param_row_view(module, label, p, None, drop_row, dragging));
-            }
-            if !s.other_params.is_empty() {
-                rows = rows.push(
-                    text(format!("{} only", s.part.clone().unwrap_or_default()))
-                        .size(style::BODY)
-                        .color(DIM),
-                );
-                for (label, module, p) in s.other_params {
-                    rows = rows.push(param_row_view(module, label, p, None, drop_row, dragging));
-                }
-            }
-            // An empty slot has no part to put in its place.
-            if s.part.is_some() {
-                rows = rows.push(ids::named(
-                    &ids::part(&ids::panel(id), "dissolve"),
-                    button(text("Dissolve slot").size(style::CONTROL)).on_press(AppMessage::DissolveSlot(id)),
-                ));
-            }
-            rows.into()
-        }
     };
     let content = match &panel {
         Some(panel) => container(content).id(crate::places::widget_id(panel)),
@@ -1460,63 +1435,6 @@ pub fn view<'a>(
         area
     };
     container(area).width(280).height(Length::Fill).into()
-}
-
-fn module_view<'a>(m: ModuleRows, drop_row: Option<(u32, usize)>, dragging: bool) -> Element<'a, AppMessage> {
-    let id = m.id;
-    let panel = ids::panel(id);
-    let mut items = column![
-        row![
-            text(m.name).size(style::HEADING),
-            space::horizontal(),
-            ids::named(
-                &ids::part(&panel, "help"),
-                button(text("Help").size(style::CONTROL)).on_press(AppMessage::ShowModuleHelp(id))
-            )
-        ]
-        .align_y(iced::Alignment::Center),
-        text(m.description).size(style::BODY),
-    ]
-    .spacing(6);
-    if m.resets_clip {
-        items = items.push(ids::named(
-            &ids::part(&panel, "reset_clip"),
-            button(text("Reset clip").size(style::CONTROL)).on_press(AppMessage::ResetClip(id)),
-        ));
-    }
-    if m.params.is_empty() {
-        items = items.push(text("No parameters.").size(style::BODY).color(DIM));
-    }
-    for p in m.params {
-        let label = p.label.to_string();
-        items = items.push(param_row_view(id, label, p, None, drop_row, dragging));
-    }
-    if !m.drives.is_empty() {
-        items = items.push(drives_view(m.drives, &panel));
-    }
-    // One line per port, its description in hover text.
-    let mut direction = "";
-    for port in m.ports {
-        if port.direction != direction {
-            direction = port.direction;
-            let heading = if direction == "Input" { "Inputs" } else { "Outputs" };
-            items = items.push(text(heading).size(style::SMALL).color(DIM));
-        }
-        let line = row![
-            text(port.label).size(style::SMALL),
-            space::horizontal(),
-            text(port.details).size(style::SMALL).color(DIM),
-        ];
-        items = items.push(tooltip(
-            line,
-            container(text(port.description).size(style::BODY))
-                .padding(6)
-                .max_width(260)
-                .style(container::rounded_box),
-            tooltip::Position::Top,
-        ));
-    }
-    items.into()
 }
 
 /// One parameter's row, as the module inspector and a sub-patch tile's
@@ -1551,13 +1469,13 @@ fn param_row_view<'a>(
             .style(if armed { style::primary } else { style::secondary })
             .on_press(AppMessage::Learn(crate::learn::Message::Arm((id, index))));
             // A mapping can be removed or changed in learn mode too.
-            let mut line = row![ids::named(&ids::part(&ui, "learn"), arm)]
+            let mut line = row![ids::named(&ids::part(&ui, "midi/line/learn"), arm)]
                 .spacing(4)
                 .align_y(iced::Alignment::Center);
             if p.mapping.is_some() {
                 line = line.push(options_button(id, index, &ui));
                 line = line.push(ids::named(
-                    &ids::part(&ui, "midi/remove"),
+                    &ids::part(&ui, "midi/line/remove"),
                     remove_button("Remove MIDI mapping", unmap),
                 ));
             }
@@ -1615,7 +1533,7 @@ fn param_row_view<'a>(
                         space::horizontal(),
                         options_button(id, index, &ui),
                         ids::named(
-                            &ids::part(&ui, "midi/remove"),
+                            &ids::part(&ui, "midi/line/remove"),
                             remove_button("Remove MIDI mapping", unmap)
                         ),
                     ]
@@ -1689,7 +1607,7 @@ fn expose_button<'a>(exposure: ExposureRow, ui: &UiId) -> Element<'a, AppMessage
 /// The small button beside a mapping's ×, which opens its options rows.
 fn options_button<'a>(module: u32, index: usize, row: &UiId) -> Element<'a, AppMessage> {
     ids::named(
-        &ids::part(row, "midi/options"),
+        &ids::part(row, "midi/line/options"),
         button(text("Options").size(style::SMALL))
             .style(style::plain)
             .padding(1)
@@ -1722,7 +1640,7 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow, ui: &UiId) 
             label("Mode"),
             space::horizontal(),
             ids::named(
-                &ids::part(ui, "midi/mode"),
+                &ids::part(ui, "midi/settings/mode"),
                 pick_list(modes, current, move |choice: Labelled<MidiMode>| AppMessage::Learn(
                     crate::learn::Message::MidiOptions {
                         module,
@@ -1755,7 +1673,7 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow, ui: &UiId) 
                 label("Encoding"),
                 space::horizontal(),
                 ids::named(
-                    &ids::part(ui, "midi/encoding"),
+                    &ids::part(ui, "midi/settings/encoding"),
                     pick_list(encodings, current, move |choice: Labelled<MidiEncoding>| {
                         AppMessage::Learn(crate::learn::Message::MidiOptions {
                             module,
@@ -1792,7 +1710,7 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow, ui: &UiId) 
                 })
         };
         let high_text = high.clone();
-        let low_field = field(&low, "midi/low").on_input(move |text| {
+        let low_field = field(&low, "midi/settings/low").on_input(move |text| {
             AppMessage::Learn(crate::learn::Message::MidiRangeText {
                 module,
                 index,
@@ -1801,7 +1719,7 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow, ui: &UiId) 
             })
         });
         let low_text = low.clone();
-        let high_field = field(&high, "midi/high").on_input(move |text| {
+        let high_field = field(&high, "midi/settings/high").on_input(move |text| {
             AppMessage::Learn(crate::learn::Message::MidiRangeText {
                 module,
                 index,
@@ -1813,9 +1731,9 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow, ui: &UiId) 
             row![
                 label("Range"),
                 space::horizontal(),
-                ids::named(&ids::part(ui, "midi/low"), low_field),
+                ids::named(&ids::part(ui, "midi/settings/low"), low_field),
                 label("to"),
-                ids::named(&ids::part(ui, "midi/high"), high_field)
+                ids::named(&ids::part(ui, "midi/settings/high"), high_field)
             ]
             .spacing(4)
             .align_y(iced::Alignment::Center),
@@ -1824,7 +1742,7 @@ fn mapping_rows<'a>(module: u32, index: usize, row_data: MappingRow, ui: &UiId) 
             rows = rows.push(label_owned(reason));
         }
         rows = rows.push(ids::named(
-            &ids::part(ui, "midi/invert"),
+            &ids::part(ui, "midi/settings/invert"),
             checkbox(options.invert)
                 .style(style::check_box)
                 .label("Invert")
@@ -2019,7 +1937,8 @@ fn value_control<'a>(
 
 /// Filtered choice names keep their UI identity when the count switches lists.
 fn choice_ui(root: &UiId, spec: &ParamSpec, index: usize, name: &str) -> UiId {
-    let root = root.clone().with("option");
+    let root = root.clone();
+    // A radio group's radios are its direct children (the 4d.2 renames).
     if spec.options.count_choices.is_some() {
         root.with(name)
     } else {
@@ -2163,7 +2082,7 @@ fn modulation_view<'a>(
         return rows.into();
     }
     rows = rows.push(ids::named(
-        &ids::part(row, "add"),
+        &ids::part(row, "modulation/add"),
         button(text(if adding.is_some() { "Cancel" } else { "+ Add modulation" }).size(style::SMALL))
             .padding([2, 8])
             .on_press(AppMessage::Modulation(crate::modulation::Message::AddModulation {
@@ -2176,7 +2095,7 @@ fn modulation_view<'a>(
         for s in sources {
             let source = s.source;
             // An output is its module and its port.
-            let ui = ids::part(row, "add/source")
+            let ui = ids::part(row, "modulation/source")
                 .with(source.module.0)
                 .with(source.port as u32);
             list = list.push(
@@ -2196,32 +2115,6 @@ fn modulation_view<'a>(
         rows = rows.push(container(list).padding([0, 8]));
     }
     rows.into()
-}
-
-/// **Drives**: one group per output. A line selects its target.
-fn drives_view<'a>(drives: Vec<DrivesGroup>, panel: &UiId) -> Element<'a, AppMessage> {
-    let mut list = column![text("Drives").size(style::CONTROL)].spacing(4);
-    for group in drives {
-        list = list.push(text(group.output).size(style::SMALL).color(DIM));
-        for line in group.lines {
-            let label = text(line.text).size(style::SMALL);
-            let id = ids::drives_line(panel, group.output, line.id);
-            list = list.push(
-                container(
-                    button(if line.enabled { label } else { label.color(DIM) })
-                        .width(Length::Fill)
-                        .padding([2, 8])
-                        .style(style::plain)
-                        .on_press(AppMessage::Inspector(Message::SelectModule(line.target))),
-                )
-                .id(crate::places::widget_id(&id))
-                .width(Length::Fill),
-            );
-        }
-    }
-    container(list)
-        .id(crate::places::widget_id(&ids::part(panel, "drives")))
-        .into()
 }
 
 /// The value of parameter `index` of `module`, or 0 when it is gone.

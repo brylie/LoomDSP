@@ -48,6 +48,10 @@ struct Panel {
     authors: String,
     /// The look of the column's text, fields, and buttons.
     looks: Looks,
+    /// The look of a module's rows.
+    rows: rows::Looks,
+    /// The row a dragged output is over, while one is dragged.
+    drop_row: Option<(u32, usize)>,
 }
 
 /// The colours the inspector is painted in, from the style tokens.
@@ -92,10 +96,33 @@ impl App {
             chip: style::dialog(&theme),
             field: style::field(&theme),
         };
+        let mut small_select = style::select(&theme);
+        small_select.text = style::SMALL_TEXT;
+        small_select.padding_y = 1.0;
+        small_select.padding_x = 4.0;
+        let mut quiet_select = small_select;
+        quiet_select.background = Color::TRANSPARENT;
+        quiet_select.border = Color::TRANSPARENT;
+        quiet_select.mark = style::QUIET.to_core();
+        let rows = rows::Looks {
+            text: looks.text,
+            quiet: looks.quiet,
+            field: looks.field,
+            select: style::select(&theme),
+            small_select,
+            quiet_select,
+            danger: palette.danger.strong.color.to_core(),
+            drop: palette.primary.weak.color.to_core(),
+            card_fill: palette.background.weak.color.scale_alpha(0.5).to_core(),
+            card_border: palette.background.strong.color.scale_alpha(0.5).to_core(),
+        };
+        let dragging = self.session.gestures.assign_drag().is_some() && !self.session.learn.is_on();
         let panel = Panel {
             model: self.inspector_model(),
             authors: self.session.patch_info.authors.clone(),
             looks,
+            rows,
+            drop_row: self.session.gestures.drop_row().filter(|_| dragging),
         };
         view.panel_with(inspector_id(), Layer::Panels, &panel, build);
     }
@@ -114,7 +141,7 @@ impl App {
             return Some(crate::Message::PatchInfo(crate::patch_info::Message::ChooseLicence));
         }
         let Inspector::Patch(rows) = self.inspector_model() else {
-            return None;
+            return self.inspector_rows_click(id);
         };
         rows.tags
             .iter()
@@ -133,10 +160,15 @@ impl App {
         let KeyEvent::Pressed { key, .. } = key else {
             return None;
         };
+        // Escape on any of the column's stops gives the keys back to the
+        // canvas, as from the toolbar.
+        if *key == Key::Escape && id.is_under(&inspector_id()) {
+            return Some(crate::Message::PatchInfo(Info::Leave));
+        }
         let Inspector::Patch(rows) = self.inspector_model() else {
             return None;
         };
-        let message = if *key == Key::Escape && id.is_under(&ids::patch()) {
+        let message = if *key == Key::Escape {
             Info::Leave
         } else if *id == tags_toolbar_id() {
             let last = rows.tags.len().checked_sub(1)?;
@@ -236,7 +268,13 @@ impl App {
 fn ours(model: &Inspector) -> bool {
     matches!(
         model,
-        Inspector::Patch(_) | Inspector::Several(_) | Inspector::Port(_) | Inspector::Empty
+        Inspector::Patch(_)
+            | Inspector::Several(_)
+            | Inspector::Port(_)
+            | Inspector::Empty
+            | Inspector::Module(_)
+            | Inspector::Unknown(_)
+            | Inspector::Slot(_)
     )
 }
 
@@ -266,6 +304,19 @@ fn build(panel: &Panel) -> Element {
             .spacing(6.0)
             .width(Length::FILL);
             return scroll(column, ids::panel(port.id).keys().last().cloned(), &port.name);
+        }
+        Inspector::Module(_) | Inspector::Unknown(_) | Inspector::Slot(_) => {
+            let shown = rows::Shown {
+                looks: panel.rows,
+                drop_row: panel.drop_row,
+            };
+            let (id, label, content) = match &panel.model {
+                Inspector::Module(m) => (m.id, m.name.clone(), rows::module(m, shown)),
+                Inspector::Unknown(m) => (m.id, m.kind.clone(), rows::unknown(m, panel.rows)),
+                Inspector::Slot(s) => (s.id, s.name.clone(), rows::slot(s, shown)),
+                _ => unreachable!("matched above"),
+            };
+            return scroll(content, ids::panel(id).keys().last().cloned(), &label);
         }
         // A module that went: nothing to show, and nothing to scroll.
         _ => return Element::column([]).width(Length::FILL).height(Length::FILL),
@@ -441,6 +492,9 @@ fn button(key: &'static str, label: &'static str, name: &'static str) -> Element
         .takes_first(ESCAPE)
         .access(Access::new(Role::Button, name).action(Action::Click))
 }
+
+mod routes;
+pub(crate) mod rows;
 
 #[cfg(test)]
 mod tests;

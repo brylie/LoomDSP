@@ -743,6 +743,31 @@ impl App {
     fn focus_inspector_region(&mut self) {
         // The runtime's column has real stops: the one last focused, or
         // its first field, or its first stop, as below.
+        if self.inspector_ours() && !matches!(self.inspector_model(), crate::inspector::Inspector::Patch(_)) {
+            // A module's rows: their item list says which parts are stops,
+            // as before, and the runtime focuses the one chosen.
+            let panel = crate::inspector::access::items(&self.inspector_model());
+            let stops = inspector_stops(&panel);
+            let saved = self.session.outline.last_inspector.as_ref();
+            let stop = saved
+                .and_then(|id| stops.iter().copied().find(|item| &item.id == id))
+                .or_else(|| stops.iter().copied().find(|item| item.focus.is_some()))
+                .or_else(|| stops.first().copied())
+                .map(|item| item.id.clone());
+            self.session.outline.inspector_action = None;
+            match stop {
+                Some(stop) => {
+                    self.session.outline.last_inspector = Some(stop.clone());
+                    self.effect(loom_ui::Effects::scroll_into_view(stop.clone()));
+                    self.effect(loom_ui::Effects::focus(stop));
+                }
+                None => {
+                    self.session.outline.inspector_action =
+                        Some(crate::a11y::tree::tab_id(crate::matrix::Tab::Inspector));
+                }
+            }
+            return;
+        }
         if self.inspector_ours() {
             let stops = self.inspector_stops();
             let saved = self.session.outline.last_inspector.as_ref();

@@ -479,7 +479,7 @@ fn param_row(module: u32, label: &str, p: &ParamRow, own: Option<&ExposureRow>) 
                 label: Some(format!("Learn {label} {detail}").trim_end().to_string()),
                 on: Some(*armed),
                 click: Some(AppMessage::Learn(crate::learn::Message::Arm((module, index)))),
-                ..Item::new(ids::part(ui, "learn"), Kind::Button)
+                ..Item::new(ids::part(ui, "midi/line/learn"), Kind::Button)
             });
             mapping(module, index, p, ui, &mut parts);
         }
@@ -639,16 +639,16 @@ fn mapping(module: u32, index: usize, p: &ParamRow, ui: &UiId, parts: &mut Vec<I
     if let Some(control) = &p.mapping
         && matches!(p.mode, ParamMode::Edit { .. })
     {
-        parts.push(Item::text(ids::part(ui, "midi"), format!("MIDI: {control}")));
+        parts.push(Item::text(ids::part(ui, "midi/line"), format!("MIDI: {control}")));
     }
     if p.mapping.is_some() {
         parts.push(Item::button(
-            ids::part(ui, "midi/options"),
+            ids::part(ui, "midi/line/options"),
             "MIDI mapping options",
             Some(AppMessage::Learn(Learn::MidiOptionsRows { module, index })),
         ));
         parts.push(Item::button(
-            ids::part(ui, "midi/remove"),
+            ids::part(ui, "midi/line/remove"),
             "Remove MIDI mapping",
             Some(AppMessage::Learn(Learn::Unmap { module, index })),
         ));
@@ -682,7 +682,7 @@ fn mapping_options(module: u32, index: usize, row: &MappingRow, ui: &UiId) -> Ve
         label: Some("MIDI mode".to_string()),
         value: Some(mode_name(options.mode).to_string()),
         step: (pick_mode(Some(at + 1)), pick_mode(at.checked_sub(1))),
-        ..Item::new(ids::part(ui, "midi/mode"), Kind::Choice)
+        ..Item::new(ids::part(ui, "midi/settings/mode"), Kind::Choice)
     }];
     if let Some(encoding) = encoding_of(options.mode) {
         let encodings = [
@@ -699,13 +699,13 @@ fn mapping_options(module: u32, index: usize, row: &MappingRow, ui: &UiId) -> Ve
             label: Some("Encoding".to_string()),
             value: Some(encoding_name(encoding).to_string()),
             step: (pick(Some(at + 1)), pick(at.checked_sub(1))),
-            ..Item::new(ids::part(ui, "midi/encoding"), Kind::Choice)
+            ..Item::new(ids::part(ui, "midi/settings/encoding"), Kind::Choice)
         });
     } else {
         parts.push(Item {
             description: row.range_error.clone(),
             ..field(
-                ids::part(ui, "midi/low"),
+                ids::part(ui, "midi/settings/low"),
                 "MIDI range low",
                 &row.low,
                 SetText::MidiLow {
@@ -718,7 +718,7 @@ fn mapping_options(module: u32, index: usize, row: &MappingRow, ui: &UiId) -> Ve
         parts.push(Item {
             description: row.range_error.clone(),
             ..field(
-                ids::part(ui, "midi/high"),
+                ids::part(ui, "midi/settings/high"),
                 "MIDI range high",
                 &row.high,
                 SetText::MidiHigh {
@@ -729,7 +729,7 @@ fn mapping_options(module: u32, index: usize, row: &MappingRow, ui: &UiId) -> Ve
             )
         });
         if let Some(reason) = &row.range_error {
-            parts.push(Item::text(ids::part(ui, "midi/range_error"), reason.clone()));
+            parts.push(Item::text(ids::part(ui, "midi/settings/range_error"), reason.clone()));
         }
         parts.push(Item {
             label: Some("Invert".to_string()),
@@ -738,11 +738,11 @@ fn mapping_options(module: u32, index: usize, row: &MappingRow, ui: &UiId) -> Ve
                 invert: !options.invert,
                 ..options
             })),
-            ..Item::new(ids::part(ui, "midi/invert"), Kind::Check)
+            ..Item::new(ids::part(ui, "midi/settings/invert"), Kind::Check)
         });
     }
     if let Some(note) = &row.range_note {
-        parts.push(Item::text(ids::part(ui, "midi/range_note"), note.clone()));
+        parts.push(Item::text(ids::part(ui, "midi/settings/range_note"), note.clone()));
     }
     parts
 }
@@ -825,7 +825,7 @@ fn modulation(
         return;
     }
     parts.push(Item::button(
-        ids::part(ui, "add"),
+        ids::part(ui, "modulation/add"),
         if adding.is_some() {
             "Cancel adding modulation"
         } else {
@@ -834,7 +834,7 @@ fn modulation(
         Some(AppMessage::Modulation(Modulation::AddModulation { module, index })),
     ));
     for source in adding.unwrap_or_default() {
-        let key = ids::part(ui, "add/source")
+        let key = ids::part(ui, "modulation/source")
             .with(source.source.module.0)
             .with(source.source.port as u32);
         parts.push(Item::button(

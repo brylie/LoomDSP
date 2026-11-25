@@ -42,6 +42,13 @@ impl App {
         if *id == crate::patch_info::authors_part() {
             return crate::patch_info::authors_message(event);
         }
+        // The inspector's rows: a typed value, a mapping's range, and an
+        // unknown module's label (plan 3.2, row 4d.2).
+        if id.is_under(&crate::inspector::panel::inspector_id())
+            && let Some(message) = self.inspector_field(id, event)
+        {
+            return Some(message);
+        }
         // Preferences' **Your name**: each edit is the text as typed, and
         // Enter saves it (preferences.md, Keys and focus).
         if *id == crate::settings::author_part() {

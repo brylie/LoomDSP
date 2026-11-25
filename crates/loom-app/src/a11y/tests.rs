@@ -1244,18 +1244,27 @@ fn only_changed_nodes_are_sent() {
 /// selection again changes nothing.
 #[test]
 fn a_message_that_changes_nothing_sends_nothing() {
-    let (mut app, module, _) = app_with_filter();
-    listen(&mut app);
-    let _ = app.send(Message::Canvas(CanvasEvent::Select(vec![module])));
-    app.a11y.locating = false;
-    let (_, changes) = app.a11y_changes(&Places::default());
-    assert!(changes.is_some(), "the inspector now shows the module");
+    let (app, module, _) = app_with_filter();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.app_mut().a11y_event(Event::Activated);
+    // What the window sends the screen reader, as it draws: the module's
+    // rows are the runtime's nodes (plan 3.2, row 4d.2).
+    let sent = |ui: &mut crate::ui_test::Ui| {
+        let _ = ui.redraw();
+        let _ = ui.redraw();
+        let _ = ui.take_sent_trees();
+        ui.take_sent_changes()
+            .into_iter()
+            .map(|update| update.nodes.len())
+            .sum::<usize>()
+    };
+    ui.send(Message::Canvas(CanvasEvent::Select(Vec::new())));
+    let _ = sent(&mut ui);
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![module])));
+    assert!(sent(&mut ui) > 0, "the inspector now shows the module");
 
-    let _ = app.send(Message::Canvas(CanvasEvent::Select(vec![module])));
-    assert!(app.a11y.locating, "the message asked for a rebuild");
-    app.a11y.locating = false;
-    let (_, changes) = app.a11y_changes(&Places::default());
-    assert!(changes.is_none());
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![module])));
+    assert_eq!(sent(&mut ui), 0, "the same selection again sends nothing");
 }
 
 /// One rebuild at a time: messages that arrive while one waits for the
@@ -2347,22 +2356,27 @@ fn the_tree_follows_the_pointer_under_every_panel() {
 fn inspector_of(ui: &mut crate::ui_test::Ui, select: &[u32]) -> (Places, TreeUpdate, Vec<super::items::Item>) {
     ui.send(Message::Canvas(CanvasEvent::Select(select.to_vec())));
     let _ = ui.redraw();
+    // The runtime's nodes, where it draws the column (plan 3.2, row 4d),
+    // then the window's places.
+    ui.read_runtime_nodes();
     let places = ui.places();
     let update = ui.app_mut().a11y_tree(&places);
-    let items = ui.app().a11y_frames().panel;
+    // What the column shows, from the model both toolkits draw from.
+    let items = crate::inspector::access::items(&ui.app().inspector_model());
     (places, update, items)
 }
 
 /// Every part the inspector reports has a role, every part but text has a
 /// name, and every part that acts is where the window drew it, inside the
-/// panel. Checked for a module and a sub-patch tile, so the items and the
-/// view cannot drift apart.
+/// panel. Checked for a sub-patch tile, Iced's until plan 3.2, row 4d.3;
+/// a module's rows are the runtime's, and `inspector/panel/rows/tests.rs`
+/// checks their nodes.
 #[test]
 fn every_inspector_part_is_named_and_placed() {
     use super::items::Kind;
     // Patch info, with nothing selected, is the runtime's (plan 3.2, row
     // 4d): `inspector/panel/tests.rs` checks its nodes.
-    let cases = [("subtractive.ron", vec![4]), ("nested-subtractive.ron", vec![2])];
+    let cases = [("nested-subtractive.ron", vec![2])];
     for (patch, select) in cases {
         let mut ui = crate::ui_test::Ui::open(patch);
         let (places, update, items) = inspector_of(&mut ui, &select);
@@ -2470,8 +2484,8 @@ fn an_inspector_slider_steps_as_its_own_arrow_key_and_groups() {
     );
     assert!(found.supports_action(Action::Increment) && found.supports_action(Action::SetValue));
     assert!(
-        !found.supports_action(Action::Focus),
-        "only text fields take focus (rule 22)"
+        found.supports_action(Action::Focus),
+        "the runtime's slider is a stop and offers Focus (rule 22, from row 4d)"
     );
 
     let index = ui
@@ -2498,13 +2512,22 @@ fn an_inspector_slider_steps_as_its_own_arrow_key_and_groups() {
     let before = position(ui.app());
     let node_id = node_of(ui.app_mut(), &slider_id);
     let at = ui.now();
-    ui_act(&mut ui, &request(Action::Increment, node_id, None), at);
-    ui_act(&mut ui, &request(Action::Increment, node_id, None), at);
-    let step = crate::param::slider_step(&spec);
+    // The runtime's slider carries out Increment, 1% of its travel, as an
+    // arrow key does and as the tile knob does (the decisions row of
+    // 2026-11-11, done in row 4d), and steps in quick turn are one group.
+    ui.app_mut().a11y_event(Event::Activated);
+    ui.a11y_action(&slider_id, Action::Increment);
+    ui.a11y_action(&slider_id, Action::Increment);
     assert!(
-        (position(ui.app()) - (before + 2.0 * step)).abs() < 1e-5,
-        "two of the slider's own steps"
+        (position(ui.app()) - (before + 0.02)).abs() < 1e-4,
+        "two steps of 1%: {} from {before}",
+        position(ui.app())
     );
+    // The group ends 500 ms after the last step, at a redraw past that.
+    // A turn of the runtime's past that, as its deadline's wake gives one.
+    ui.wait(std::time::Duration::from_millis(600));
+    ui.send(Message::Tick);
+    ui.send(Message::Tick);
     ui.app_mut().reader_event(crate::edits::ReaderEvent::Close);
     assert_eq!(ui.app().session.edits.history.len(), steps + 1, "one undo step");
 
@@ -2572,6 +2595,7 @@ fn an_inspector_field_takes_text_and_focus() {
         ui.app().value_field_part(module, index),
         "the app heard of it"
     );
+    ui.read_runtime_nodes();
     let places = ui.places();
     assert_eq!(ui.app_mut().a11y_tree(&places).focus, field);
 }
@@ -2682,118 +2706,17 @@ fn an_exposed_row_and_the_inner_row_differ_and_are_both_found() {
     let own = crate::inspector::ids::row(inner, crate::inspector::ids::Kind::Param, "cutoff");
     assert_ne!(own, exposed);
     assert!(super::items::find(&items, &own).is_some(), "the inner module's own row");
+    // A module's rows are the runtime's (plan 3.2, row 4d.2): its layout
+    // answers, as the control channel's update reads it.
+    ui.lay_out_panels();
     let found = crate::control::Found {
         canvas: places.canvas,
         text: None,
         places,
-        ours: None,
+        ours: ui.runtime().bounds(&own),
     };
     let at = crate::control::locate(ui.app(), &own.to_string(), &found).expect("found");
     assert!(at.width > 0.0);
-}
-
-/// A module whose inspector is taller than its panel, so it scrolls, and
-/// the harness with it selected and drawn.
-fn scrolling_inspector() -> (crate::ui_test::Ui, u32) {
-    let app = app_with_every_widget();
-    let modules: Vec<u32> = app.ui_snapshot().tiles.iter().map(|tile| tile.id).collect();
-    let mut ui = crate::ui_test::Ui::with_app(app);
-    for module in modules {
-        ui.send(Message::Canvas(CanvasEvent::Select(vec![module])));
-        let _ = ui.redraw();
-        let places = ui.places();
-        let panel = places.of(&crate::inspector::ids::panel(module));
-        if panel.is_some_and(|place| place.clip.is_some_and(|clip| place.rect.height > clip.height + 40.0)) {
-            return (ui, module);
-        }
-    }
-    panic!("no module's inspector is taller than its panel");
-}
-
-/// Scrolls the inspector down by a few lines, with the pointer over it.
-fn scroll_inspector(ui: &mut crate::ui_test::Ui, module: u32) -> Vec<Message> {
-    let panel = ui.places().of(&crate::inspector::ids::panel(module)).unwrap();
-    let over = panel.clip.unwrap().center();
-    let _ = ui.move_to(over);
-    ui.step(&[iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
-        delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -6.0 },
-    })])
-}
-
-/// With no screen reader, a scroll of the inspector sends no message, as
-/// before. With one, it sends one that changes nothing but asks for a
-/// rebuild, and the rows' nodes move with the rows (section 7, rule 7).
-#[test]
-fn a_scroll_moves_the_rows_and_is_a_message_only_while_listening() {
-    let (mut ui, module) = scrolling_inspector();
-    let before = ui.scroll_translation(crate::inspector::SCROLL_ID).unwrap();
-    let messages = scroll_inspector(&mut ui, module);
-    assert_ne!(
-        ui.scroll_translation(crate::inspector::SCROLL_ID).unwrap(),
-        before,
-        "it scrolled"
-    );
-    assert!(
-        !messages
-            .iter()
-            .any(|message| matches!(message, Message::Inspector(crate::inspector::Message::Scrolled))),
-        "no message with no screen reader"
-    );
-
-    ui.app_mut().a11y_event(Event::Activated);
-    let _ = ui.redraw();
-    let places = ui.places();
-    let row = super::items::find(&ui.app().a11y_frames().panel, &crate::inspector::ids::panel(module))
-        .and_then(|panel| {
-            panel
-                .children
-                .iter()
-                .find(|item| item.kind == super::items::Kind::Group)
-        })
-        .map(|item| item.id.clone())
-        .expect("a row");
-    let row_node = node_of(ui.app_mut(), &row);
-    let y = |update: &TreeUpdate| node(update, row_node).bounds().unwrap().y0;
-    let first = ui.app_mut().a11y_tree(&places);
-    ui.app_mut().a11y.locating = false;
-    let messages = scroll_inspector(&mut ui, module);
-    assert!(
-        messages
-            .iter()
-            .any(|message| matches!(message, Message::Inspector(crate::inspector::Message::Scrolled)))
-    );
-    // The harness runs the rebuild it asked for at once.
-    assert!(
-        messages
-            .iter()
-            .any(|message| matches!(message, Message::A11y(Event::Located(_)))),
-        "the scroll asked for a rebuild"
-    );
-    let places = ui.places();
-    let moved = ui.app_mut().a11y_tree(&places);
-    assert!(y(&moved) < y(&first), "the row's node moved up with the row");
-}
-
-/// A panel taller than the area that scrolls it says it is as tall as what
-/// shows, so a screen reader does not take rows out of view as visible.
-/// The rows keep their real bounds.
-#[test]
-fn a_scrolling_panel_is_as_tall_as_what_it_shows() {
-    let (mut ui, module) = scrolling_inspector();
-    ui.app_mut().a11y_event(Event::Activated);
-    let _ = ui.redraw();
-    let places = ui.places();
-    let panel = crate::inspector::ids::panel(module);
-    let place = places.of(&panel).unwrap();
-    let clip = place.clip.unwrap();
-    let update = ui.app_mut().a11y_tree(&places);
-    let bounds = node(&update, node_of(ui.app_mut(), &panel)).bounds().unwrap();
-    let scale = f64::from(ui.app().window_scale);
-    assert!(
-        (bounds.height() - f64::from(clip.height) * scale).abs() < 1.0,
-        "{bounds:?} {clip:?}"
-    );
-    assert!(bounds.height() < f64::from(place.rect.height) * scale - 1.0);
 }
 
 /// A field that has the keys is not reported as focused while a panel lies
@@ -2807,10 +2730,13 @@ fn a_covered_field_is_not_focused() {
     let row = crate::inspector::ids::row(module, crate::inspector::ids::Kind::Param, "cutoff");
     let field = node_of(ui.app_mut(), &crate::inspector::ids::part(&row, "field"));
     let _ = ui.deliver(Message::A11y(Event::Action(request(Action::Focus, field, None))));
+    ui.read_runtime_nodes();
     let places = ui.places();
     assert_eq!(ui.app_mut().a11y_tree(&places).focus, field, "focused while open");
 
     let _ = ui.app_mut().send(Message::ShowShortcuts);
+    let _ = ui.redraw();
+    ui.read_runtime_nodes();
     let update = ui.app_mut().a11y_tree(&places);
     assert!(node(&update, field).is_hidden());
     assert_ne!(update.focus, field, "not focused while covered");
@@ -2867,14 +2793,13 @@ fn a_drives_line_keeps_its_node_when_one_before_it_goes() {
     assert_eq!(ui.app_mut().a11y.ids.number(&kept), number);
 }
 
-/// One Increment on the inspector's Cutoff slider moves a tenth of one on
-/// the tile's Cutoff knob: 0.1% of travel against 1%. Each steps as its
-/// own arrow key does (section 7, rule 5). Brylie chose 1% for both, but
-/// the toolkit's slider shares one step between its arrow keys and a drag,
-/// so the slider keeps 0.1% until our own slider separates them in phase 3
-/// (plan, step 3.1).
+/// One Increment on the inspector's Cutoff slider moves as far as one on
+/// the tile's Cutoff knob: 1% of travel. Each steps as its own arrow key
+/// does (section 7, rule 5). Brylie chose 1% for both (2026-11-11); Iced's
+/// slider shared one step between its keys and a drag, so it kept 0.1%
+/// until our own slider separated them, in plan 3.2, row 4d.2.
 #[test]
-fn the_inspector_slider_steps_a_tenth_of_the_tile_knob_until_phase_3() {
+fn the_inspector_slider_steps_as_the_tile_knob() {
     let (app, module, knob) = app_with_filter();
     let mut ui = crate::ui_test::Ui::with_app(app);
     let _ = inspector_of(&mut ui, &[module]);
@@ -2907,11 +2832,19 @@ fn the_inspector_slider_steps_a_tenth_of_the_tile_knob_until_phase_3() {
             widget_node(ui.app_mut(), module, knob)
         };
         let before = position(ui.app());
-        ui_act(&mut ui, &request(Action::Increment, node_id, None), at);
+        if target == "inspector" {
+            // The runtime's slider carries out a screen reader's Increment.
+            let row = crate::inspector::ids::row(module, crate::inspector::ids::Kind::Param, "cutoff");
+            ui.app_mut().a11y_event(Event::Activated);
+            ui.a11y_action(&crate::inspector::ids::part(&row, "value"), Action::Increment);
+            let _ = node_id;
+        } else {
+            ui_act(&mut ui, &request(Action::Increment, node_id, None), at);
+        }
         ui.app_mut().reader_event(crate::edits::ReaderEvent::Close);
         moved.push(position(ui.app()) - before);
     }
-    assert!((moved[0] - 0.001).abs() < 1e-4, "the inspector slider: {moved:?}");
+    assert!((moved[0] - 0.01).abs() < 1e-4, "the inspector slider: {moved:?}");
     assert!((moved[1] - 0.01).abs() < 1e-4, "the tile knob: {moved:?}");
 }
 
@@ -3516,11 +3449,13 @@ fn an_inspector_depth_steps_onto_the_percent_grid() {
     );
     let slider = node_of(ui.app_mut(), &depth_id);
     let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
-    let at = ui.now();
-    ui_act(&mut ui, &request(Action::Increment, slider, None), at);
+    // The runtime's slider carries out Increment (plan 3.2, row 4d.2), and
+    // the app keeps the depth on the percent grid.
+    ui.app_mut().a11y_event(Event::Activated);
+    ui.a11y_action(&depth_id, Action::Increment);
     assert!((depth(ui.app()) - 0.31).abs() < 1e-6, "{}", depth(ui.app()));
     for _ in 0..19 {
-        ui_act(&mut ui, &request(Action::Increment, slider, None), at);
+        ui.a11y_action(&depth_id, Action::Increment);
     }
     assert!((depth(ui.app()) - 0.50).abs() < 1e-6, "no drift: {}", depth(ui.app()));
     let (_, update, _) = inspector_of(&mut ui, &[filter]);
@@ -4028,8 +3963,9 @@ fn focus_on_a_knob_takes_the_keys_from_the_matrix() {
 }
 
 /// With an inspector value field open, a screen reader's Focus on a knob
-/// closes the field as a press on the canvas does: its draft is dropped,
-/// not submitted, and the next arrow key steps the knob.
+/// closes the field as a press on the canvas does: focus leaving commits
+/// its draft (Brylie's decision, 2026-11-25), and the next arrow key steps
+/// the knob.
 #[test]
 fn focus_on_a_knob_closes_a_text_field_as_a_press_does() {
     let (app, module, knob) = app_with_filter();
@@ -4048,15 +3984,15 @@ fn focus_on_a_knob_closes_a_text_field_as_a_press_does() {
     assert!(ui.app().session.value_draft.is_some(), "a draft is typed");
     assert!(ui.app().focus.is_some());
     let cutoff = |app: &App| app.session.controller.graph().node(ModuleId(module)).unwrap().params[index];
-    let before = cutoff(ui.app());
 
     let _ = ui.app_mut().a11y_tree(&Places::default());
     let target = widget_node(ui.app_mut(), module, knob);
     ui.send(Message::A11y(Event::Action(request(Action::Focus, target, None))));
     let _ = ui.redraw();
     assert!(!ui.app().focus.is_some(), "the field is closed");
-    assert!(ui.app().session.value_draft.is_none(), "its draft is dropped");
-    assert_eq!(cutoff(ui.app()), before, "and not submitted");
+    assert!(ui.app().session.value_draft.is_none(), "its draft is done with");
+    assert!((cutoff(ui.app()) - 1234.0).abs() < 1.0, "and committed");
+    let before = cutoff(ui.app());
     let _ = ui.tap(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp),
         iced::keyboard::Modifiers::empty(),
@@ -4082,20 +4018,25 @@ fn every_inspector_state_is_reported_with_named_parts() {
             "{name}: the inspector shows the state"
         );
         // A variant the runtime draws gives its own nodes, whose names the
-        // runtime checks as it lays them out (section 7, rule 2).
+        // runtime checks as it lays them out (section 7, rule 2); its items
+        // still say what each part sends (`inspector/panel/routes.rs`).
         if ui.app().inspector_ours() {
             let shown = match ui.app().inspector_model() {
-                Inspector::Several(_) => loom_ui_core::UiId::panel("inspector").with("several"),
-                Inspector::Port(port) => crate::inspector::ids::panel(port.id),
-                Inspector::Patch(_) => crate::inspector::ids::patch(),
-                _ => return,
+                Inspector::Several(_) => Some(loom_ui_core::UiId::panel("inspector").with("several")),
+                Inspector::Port(port) => Some(crate::inspector::ids::panel(port.id)),
+                Inspector::Patch(_) => Some(crate::inspector::ids::patch()),
+                Inspector::Module(m) => Some(crate::inspector::ids::panel(m.id)),
+                Inspector::Unknown(m) => Some(crate::inspector::ids::panel(m.id)),
+                Inspector::Slot(s) => Some(crate::inspector::ids::panel(s.id)),
+                _ => None,
             };
             ui.lay_out_panels();
-            assert!(ui.runtime().bounds(&shown).is_some(), "{name}: the runtime lays it out");
+            if let Some(shown) = shown {
+                assert!(ui.runtime().bounds(&shown).is_some(), "{name}: the runtime lays it out");
+            }
             assert!(ui.app().a11y_frames().panel.is_empty(), "{name}: no Iced items too");
-            return;
         }
-        let items = ui.app().a11y_frames().panel;
+        let items = crate::inspector::access::items(&ui.app().inspector_model());
         assert!(!items.is_empty(), "{name}: the panel is reported");
         let mut acting = 0;
         for item in items.iter().flat_map(super::items::Item::walk) {
@@ -4174,13 +4115,10 @@ fn every_inspector_state_is_reported_with_named_parts() {
     }));
     check(&mut ui, "options", |m| matches!(m, Inspector::Module(_)));
     for _ in 0..2 {
-        let mode = ui
-            .app()
-            .a11y_frames()
-            .panel
+        let mode = crate::inspector::access::items(&ui.app().inspector_model())
             .iter()
             .flat_map(super::items::Item::walk)
-            .find(|item| item.id.to_string().ends_with("midi/mode"))
+            .find(|item| item.id.to_string().ends_with("midi/settings/mode"))
             .cloned()
             .expect("the mapping's mode");
         for message in messages(&mode, Action::Increment, None) {
@@ -4189,12 +4127,10 @@ fn every_inspector_state_is_reported_with_named_parts() {
     }
     check(&mut ui, "relative", |m| matches!(m, Inspector::Module(_)));
     assert!(
-        ui.app()
-            .a11y_frames()
-            .panel
+        crate::inspector::access::items(&ui.app().inspector_model())
             .iter()
             .flat_map(super::items::Item::walk)
-            .any(|item| item.id.to_string().ends_with("midi/encoding")),
+            .any(|item| item.id.to_string().ends_with("midi/settings/encoding")),
         "the Relative mode shows its encoding"
     );
     ui.send(Message::Modulation(crate::modulation::Message::AddModulation {

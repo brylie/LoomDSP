@@ -42,25 +42,29 @@ fn click(ui: &mut Ui, at: loom_ui_core::Point) {
     let _ = ui.release();
 }
 
-/// Patch info, a selection of several, and a module that went are the
-/// runtime's; a module's own inspector is still Iced's, and so is any
-/// other tab, until their rows move (plan 3.2, row 4d).
+/// Patch info, a selection of several, a module's rows, and a module that
+/// went are the runtime's; a sub-patch's inspector is still Iced's, and so
+/// is any other tab, until their rows move (plan 3.2, row 4d).
 #[test]
 fn the_runtime_draws_only_the_variants_moved_so_far() {
-    let mut ui = patch_info();
-    let module = first_module(&ui);
+    let mut ui = nested_patch_info();
     ui.lay_out_panels();
     assert!(ui.runtime().bounds(&tags_part()).is_some(), "patch info is laid out");
 
-    ui.send(Message::Canvas(CanvasEvent::Select(vec![module])));
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![SUB_PATCH])));
     let _ = ui.redraw();
-    assert!(!ui.app().inspector_ours(), "a module's inspector is Iced's");
+    assert!(!ui.app().inspector_ours(), "a sub-patch's inspector is Iced's");
     ui.lay_out_panels();
     assert!(
         ui.runtime().bounds(&tags_part()).is_none(),
         "the runtime draws no column"
     );
 
+    let mut ui = patch_info();
+    let module = first_module(&ui);
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![module])));
+    let _ = ui.redraw();
+    assert!(ui.app().inspector_ours(), "a module's rows are the runtime's");
     let mut modules: Vec<u32> = ui
         .app()
         .session
@@ -77,6 +81,19 @@ fn the_runtime_draws_only_the_variants_moved_so_far() {
     ui.send(Message::Canvas(CanvasEvent::Select(Vec::new())));
     ui.send(Message::Matrix(crate::MatrixEvent::Tab(Tab::Matrix)));
     assert!(!ui.app().inspector_ours(), "the matrix tab is Iced's");
+}
+
+/// The sub-patch tile of the nested example patch, whose inspector is
+/// Iced's until plan 3.2, row 4d.3.
+const SUB_PATCH: u32 = 2;
+
+/// The nested example patch with nothing selected.
+fn nested_patch_info() -> Ui {
+    let mut ui = Ui::open("nested-subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(Vec::new())));
+    let _ = ui.redraw();
+    assert!(ui.app().inspector_ours(), "patch info is the runtime's");
+    ui
 }
 
 /// The root panel's fill still passes a press on to the canvas and to
@@ -194,15 +211,15 @@ fn the_wheel_scrolls_the_column() {
 
 /// While some variants are the runtime's and some Iced's, a selection can
 /// swap who draws the column while the focus is in it. The focus never
-/// stays on a part that went, either way, and a tag being typed stays in
-/// its draft, unadded, as it did on Iced.
+/// stays on a part that went, either way, and a tag being typed is added,
+/// since leaving the Tags field by any means adds it (Brylie's decision,
+/// 2026-11-25).
 #[test]
 fn a_selection_that_swaps_the_toolkit_drops_the_focus_it_had() {
-    let mut ui = patch_info();
-    let module = first_module(&ui);
+    let mut ui = nested_patch_info();
     ui.focus(&tags_part());
     let _ = ui.typewrite("half");
-    ui.send(Message::Canvas(CanvasEvent::Select(vec![module])));
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![SUB_PATCH])));
     let _ = ui.redraw();
     assert_eq!(ui.focused_field(), None, "no field keeps the focus");
     assert!(
@@ -212,26 +229,17 @@ fn a_selection_that_swaps_the_toolkit_drops_the_focus_it_had() {
             .is_none_or(|focus| !focus.is_under(&ids::patch())),
         "the app's copy of the focus left patch info"
     );
-    assert_eq!(ui.app().session.patch_info.tag_draft, "half", "the draft stays");
-    assert!(ui.app().session.document.info().tags.is_empty(), "and is not added");
+    assert_eq!(ui.app().session.patch_info.tag_draft, "", "the draft is done with");
+    assert_eq!(ui.app().session.document.info().tags, ["half"], "and added");
 
     // The other way: a field of Iced's, then patch info.
-    let crate::inspector::Inspector::Module(rows) = ui.app().inspector_model() else {
-        panic!("a module's inspector");
-    };
-    let index = rows
-        .params
-        .iter()
-        .find(|row| row.field.is_some())
-        .map(|row| row.index)
-        .expect("a module with a value field");
-    let at = ui.value_field(module, index);
+    let name = ids::part(&ids::panel(SUB_PATCH), "name");
+    let at = ui.field(&name);
     click(&mut ui, at);
-    assert!(ui.focused_field().is_some(), "Iced's value field has focus");
+    assert_eq!(ui.focused_field(), Some(name), "Iced's name field has focus");
     ui.send(Message::Canvas(CanvasEvent::Select(Vec::new())));
     let _ = ui.redraw();
     assert_eq!(ui.focused_field(), None, "no field keeps the focus");
-    assert!(ui.app().session.value_draft.is_none(), "the value draft went");
 }
 
 /// Under an overlay the column is drawn but inert: a click on one of its
@@ -244,6 +252,13 @@ fn under_an_overlay_the_column_takes_no_click() {
     let shortcuts = ids::part(&ids::patch(), "shortcuts");
     assert!(ui.app().inspector_click(&shortcuts).is_none());
     assert!(ui.app().inspector_stops().is_empty());
+
+    // A real press on Keyboard shortcuts, under the chooser, opens nothing:
+    // the routing, not only the guard.
+    let at = centre(&mut ui, &shortcuts);
+    click(&mut ui, at);
+    assert!(ui.app().overlays.help.is_none(), "no shortcut help opened");
+    assert!(ui.app().overlays.chooser.is_some(), "the chooser stays open");
 }
 
 /// Patch info with the tags `tags`, nothing selected.
@@ -452,4 +467,206 @@ fn patch_infos_nodes_are_named_and_placed() {
         tree.node_by_id(&authors_part()).role(),
         accesskit::Role::MultilineTextInput
     );
+}
+
+/// A press on Keyboard shortcuts opens the shortcut help: the column's
+/// buttons take a real pointer's click.
+#[test]
+fn a_press_on_keyboard_shortcuts_opens_help() {
+    let mut ui = patch_info();
+    let at = centre(&mut ui, &ids::part(&ids::patch(), "shortcuts"));
+    click(&mut ui, at);
+    assert!(ui.app().overlays.help.is_some(), "the shortcut help opened");
+}
+
+/// A choice's radios are keyed directly under `<row>/value`, by name for a
+/// list whose names switch with a count and by index otherwise (the 4d.2
+/// renames). No two of any registered module's choices share a key, and
+/// the radio group holds nothing else, so none can collide.
+#[test]
+fn no_choice_key_collides_under_its_value() {
+    let mut checked = 0;
+    for descriptor in loom_modules::registry().iter() {
+        for spec in descriptor.params {
+            let names = spec.options.choices;
+            if names.is_empty() {
+                continue;
+            }
+            let keys: std::collections::BTreeSet<String> = names
+                .iter()
+                .enumerate()
+                .map(|(at, name)| format!("{:?}", super::rows::choice_key(spec, at, name)))
+                .collect();
+            assert_eq!(keys.len(), names.len(), "{} {}: {names:?}", descriptor.id, spec.name);
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "some module has choices");
+}
+
+/// In learn mode, a parameter's Learn button is on its mapping line,
+/// `<row>/midi/line/learn`, with no mapping yet and once mapped, so its ID
+/// does not move when a mapping is made; Options and × join it there.
+#[test]
+fn learn_stays_on_the_mapping_line_with_and_without_a_mapping() {
+    let mut ui = Ui::open("modulation.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.send(Message::Learn(crate::learn::Message::Toggle));
+    let _ = ui.redraw();
+    assert!(ui.app().inspector_ours(), "a module's inspector is the runtime's");
+    let row = ids::row(4, ids::Kind::Param, "cutoff");
+    let line = ids::part(&row, "midi/line");
+    let learn = ids::part(&row, "midi/line/learn");
+    ui.lay_out_panels();
+    assert!(ui.runtime().bounds(&learn).is_some(), "Learn with no mapping");
+    assert!(ui.runtime().bounds(&ids::part(&row, "midi/line/remove")).is_none());
+
+    ui.app_mut()
+        .session
+        .controller
+        .map_midi_named(
+            loom_core::MidiControl {
+                channel: 0,
+                controller: 74,
+            },
+            loom_core::ModuleId(4),
+            "cutoff",
+        )
+        .unwrap();
+    ui.send(Message::Tick);
+    let _ = ui.redraw();
+    ui.lay_out_panels();
+    for part in [
+        learn,
+        ids::part(&row, "midi/line/options"),
+        ids::part(&row, "midi/line/remove"),
+    ] {
+        let at = ui.runtime().bounds(&part).unwrap_or_else(|| panic!("{part} is drawn"));
+        let on_line = ui.runtime().bounds(&line).expect("the line");
+        assert!(
+            at.y >= on_line.y - 0.5 && at.y + at.height <= on_line.y + on_line.height + 0.5,
+            "{part} is on the line"
+        );
+    }
+}
+
+/// A module's column taller than the window scrolls with the wheel, and
+/// its rows' nodes move with the rows (section 7, rule 7); the column's
+/// node is as tall as what shows, not as what it holds, so a screen reader
+/// does not take rows out of view as visible. The runtime's versions of
+/// the Iced inspector's scroll tests (plan 3.2, row 4d.2).
+#[test]
+fn a_modules_column_scrolls_its_rows_and_says_what_shows() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.resize(900.0, 300.0);
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.app_mut().a11y_event(crate::a11y::Event::Activated);
+    let _ = ui.redraw();
+    let column = ids::panel(4);
+    let row = ids::row(4, ids::Kind::Param, "resonance");
+    let tree = ui.a11y_tree();
+    let shown = tree.node_by_id(&column).bounds().expect("the column's bounds");
+    let before = tree.node_by_id(&row).bounds().expect("the row's bounds");
+    ui.lay_out_panels();
+    let (_, most) = ui.runtime().scroll_offset(&column).expect("the column scrolls");
+    assert!(most > 0.0, "the rows are taller than the window leaves them");
+    let slot = ui.runtime().bounds(&column).expect("the column is laid out");
+    let scale = f64::from(ui.app().window_scale);
+    assert!(
+        (shown.height() - f64::from(slot.height) * scale).abs() < 1.0,
+        "the column's node is as tall as what shows: {shown:?} {slot:?}"
+    );
+
+    let at = centre(&mut ui, &ids::part(&ids::panel(4), "description"));
+    let _ = ui.move_to(at);
+    let _ = ui.step(&[iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+        delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -3.0 },
+    })]);
+    let _ = ui.redraw();
+    let after = ui.a11y_tree().node_by_id(&row).bounds().expect("the row's bounds");
+    assert!(
+        after.y0 < before.y0,
+        "the row's node moved up with the row: {before:?} to {after:?}"
+    );
+}
+
+/// A screen reader's SetValue on a row's value field commits the value as
+/// one undo step, as Iced's field did: it goes to the app's item, not the
+/// runtime's field, which would only make a draft of it (plan 3.2, row
+/// 4d.2).
+#[test]
+fn a_screen_readers_set_value_on_a_value_field_commits_one_step() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.app_mut().a11y_event(crate::a11y::Event::Activated);
+    let _ = ui.redraw();
+    let row = ids::row(4, ids::Kind::Param, "cutoff");
+    let field = ids::part(&row, "field");
+    let steps = ui.app().session.edits.history.len();
+    ui.a11y_set_value(&field, "1234");
+    let node = ui
+        .app()
+        .session
+        .controller
+        .graph()
+        .node(loom_core::ModuleId(4))
+        .unwrap();
+    let value = node.params[node.descriptor.param_index("cutoff").unwrap()];
+    assert!((value - 1234.0).abs() < 1.0, "committed: {value}");
+    assert!(ui.app().session.value_draft.is_none(), "no draft left");
+    assert_eq!(ui.app().session.edits.history.len(), steps + 1, "one undo step");
+}
+
+/// Two screen reader Increments on an inspector slider in quick turn, then
+/// only time passing: the runtime wakes at the group's deadline, the group
+/// ends, and the two steps are one undo step (section 7, rule 6).
+#[test]
+fn a_screen_readers_slider_steps_end_with_time_alone() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.app_mut().a11y_event(crate::a11y::Event::Activated);
+    let _ = ui.redraw();
+    let slider = ids::part(&ids::row(4, ids::Kind::Param, "cutoff"), "value");
+    let steps = ui.app().session.edits.history.len();
+    ui.a11y_action(&slider, accesskit::Action::Increment);
+    ui.a11y_action(&slider, accesskit::Action::Increment);
+    assert_eq!(ui.app().session.edits.history.len(), steps, "the group is still open");
+    let heard = ui.wake_after(std::time::Duration::from_millis(600));
+    let ends = heard
+        .iter()
+        .filter(|m| matches!(m, Message::Inspector(crate::inspector::Message::Slid { end: true, .. })))
+        .count();
+    assert_eq!(ends, 1, "one End: {heard:?}");
+    assert_eq!(ui.app().session.edits.history.len(), steps + 1, "one undo step");
+}
+
+/// Leaving the Tags field adds what is typed, by a press elsewhere or by
+/// Tab, as Enter does; Escape drops it (Brylie's decision, 2026-11-25).
+#[test]
+fn leaving_the_tags_field_adds_the_typed_tag_and_escape_drops_it() {
+    let mut ui = patch_info();
+    ui.focus(&tags_part());
+    let _ = ui.typewrite("drone");
+    let _ = ui.tap(Key::Named(Named::Tab), Modifiers::empty());
+    assert_eq!(ui.app().session.document.info().tags, ["drone"], "Tab adds it");
+
+    ui.focus(&tags_part());
+    let _ = ui.typewrite("dark");
+    let at = centre(&mut ui, &authors_part());
+    click(&mut ui, at);
+    assert_eq!(
+        ui.app().session.document.info().tags,
+        ["drone", "dark"],
+        "a press elsewhere adds it"
+    );
+
+    ui.focus(&tags_part());
+    let _ = ui.typewrite("slow");
+    let _ = ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    assert_eq!(
+        ui.app().session.document.info().tags,
+        ["drone", "dark"],
+        "Escape drops it"
+    );
+    assert_eq!(ui.app().session.patch_info.tag_draft, "");
 }

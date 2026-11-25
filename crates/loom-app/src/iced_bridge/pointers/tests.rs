@@ -81,6 +81,40 @@ fn ui_with(view: fn(&mut View)) -> Ui {
     ui
 }
 
+/// The nested patch with `view`'s panels added and its sub-patch tile 2
+/// selected, whose inspector's name field is Iced's until plan 3.2, row
+/// 4d.3: the Iced field these tests hand the keyboard to and from. Returns
+/// the field's centre.
+fn ui_with_iced_field(view: fn(&mut View)) -> (Ui, Point) {
+    let mut ui = Ui::open("nested-subtractive.ron");
+    ui.with_test_panels(TestPanels {
+        view,
+        clicked,
+        focuses,
+        fields: |_, _| None,
+    });
+    ui.app_mut().session.selection = [2].into_iter().collect();
+    ui.redraw();
+    assert!(!ui.app().inspector_ours(), "a sub-patch's inspector is Iced's");
+    let field = ui.field(&iced_field());
+    (ui, field)
+}
+
+/// The sub-patch's name field, Iced's until row 4d.3.
+fn iced_field() -> loom_ui_core::UiId {
+    crate::inspector::ids::part(&crate::inspector::ids::panel(2), "name")
+}
+
+/// The centre of the toolbar's button `key`, by its UI ID: text such as
+/// Open is shown by the inspector too.
+fn toolbar_centre(ui: &mut Ui, key: &'static str) -> Point {
+    ui.lay_out_panels();
+    ui.runtime()
+        .bounds(&crate::toolbar::toolbar_id().with(key))
+        .expect("the toolbar's button")
+        .center()
+}
+
 /// The middle of the bar's button.
 fn on_go() -> Point {
     Point::new(GO.0 / 2.0, crate::WINDOW.height - GO.1 / 2.0)
@@ -106,7 +140,7 @@ fn a_question_holds_presses_on_both_toolkits() {
     let mut ui = ui_with(bar);
     ui.app_mut().overlays.question = Some(crate::question::Question::error("No".to_string()));
     ui.redraw();
-    let open = ui.text("Open").expect("the toolbar shows Open").center();
+    let open = toolbar_centre(&mut ui, "open");
     let heard = click(&mut ui, open);
     assert!(!heard.iter().any(|m| matches!(m, Message::File(_))), "{heard:?}");
     let heard = click(&mut ui, on_go());
@@ -148,18 +182,15 @@ fn a_press_iced_captures_leaves_our_focus() {
 /// copy of focus is the field.
 #[test]
 fn an_iced_field_taking_the_keyboard_ends_our_focus() {
-    let mut ui = ui_with(bar);
-    ui.app_mut().session.selection = [4].into_iter().collect();
-    ui.redraw();
+    let (mut ui, field) = ui_with_iced_field(bar);
     // Focused as one of the app's panels would ask, with no click, which
     // the test's hook would turn into opening Help.
     ui.send(Message::MidiGhosts);
     assert_eq!(ui.runtime().focused(), Some(&go()));
-    let field = ui.value_field(4, 0);
     click(&mut ui, field);
     ui.redraw();
     let part = ui.focused_field();
-    assert!(part.is_some(), "the value field has the keyboard");
+    assert!(part.is_some(), "the name field has the keyboard");
     assert_eq!(ui.runtime().focused(), None, "ours let go");
     assert_eq!(ui.app().focus, part, "the app's copy is the field");
 }
@@ -173,15 +204,15 @@ fn an_iced_field_taking_the_keyboard_ends_our_focus() {
 #[test]
 fn a_layer_above_iced_keeps_its_points_from_iced() {
     let mut ui = ui_with(bar_and_pop);
-    let open = ui
-        .runtime()
-        .text_bounds("Open")
-        .expect("the toolbar shows Open")
-        .center();
+    let open = toolbar_centre(&mut ui, "open");
     assert!(open.x < POP.0 && open.y < POP.1, "the pop-up covers Open at {open:?}");
     // The other half of what the pop-up's size assumes: Undo starts past
     // its right edge.
-    let undo_box = ui.runtime().text_bounds("Undo").expect("the toolbar shows Undo");
+    ui.lay_out_panels();
+    let undo_box = ui
+        .runtime()
+        .bounds(&crate::toolbar::toolbar_id().with("undo"))
+        .expect("the toolbar shows Undo");
     assert!(undo_box.x >= POP.0, "the pop-up leaves Undo out, at {undo_box:?}");
     let heard = click(&mut ui, open);
     assert!(heard.iter().any(|m| matches!(m, Message::ShowShortcuts)), "{heard:?}");
@@ -229,23 +260,20 @@ fn shift_tab_from_nothing_enters_our_last_stop_and_not_iced() {
 /// the next key, so the key never lands in the field (section 6, rule 1).
 #[test]
 fn a_key_after_our_element_takes_the_focus_misses_the_old_field() {
-    let mut ui = ui_with(bar);
-    ui.app_mut().session.selection = [4].into_iter().collect();
-    ui.redraw();
-    let field = ui.value_field(4, 0);
+    let (mut ui, field) = ui_with_iced_field(bar);
     click(&mut ui, field);
-    assert!(ui.focused_field().is_some(), "the value field has the focus");
+    assert!(ui.focused_field().is_some(), "the name field has the focus");
     ui.send(Message::MidiGhosts);
     assert_eq!(ui.runtime().focused(), Some(&go()));
     let typed = ui.typewrite("7");
     // Iced's field would send its new text if it still had the key.
     assert!(
-        !typed
-            .iter()
-            .any(|m| matches!(m, Message::Inspector(crate::inspector::Message::ValueText { .. }))),
+        !typed.iter().any(|m| matches!(
+            m,
+            Message::Inspector(crate::inspector::Message::SubPatchNameDraft { .. })
+        )),
         "the key missed the field: {typed:?}"
     );
-    assert!(ui.app().session.value_draft.is_none());
     assert_eq!(ui.focused_field(), None);
 }
 
@@ -406,21 +434,14 @@ fn a_key_our_field_takes_is_kept_from_iced() {
 fn our_field_gives_the_keyboard_to_an_iced_field() {
     use crate::ui_test::key_press;
     let a = keyboard::Key::Character("a".into());
-    let mut ui = ui_with(bar_with_field);
-    ui.app_mut().session.selection = [4].into_iter().collect();
-    ui.redraw();
+    let (mut ui, field) = ui_with_iced_field(bar_with_field);
     ui.send(Message::MidiGhosts);
     assert_eq!(ui.runtime().focused(), Some(&go()), "our field has the focus");
 
-    let field = ui.value_field(4, 0);
     click(&mut ui, field);
     ui.redraw();
     let part = ui.focused_field();
-    assert_eq!(
-        part,
-        ui.app().value_field_part(4, 0),
-        "the clicked value field has the keyboard"
-    );
+    assert_eq!(part, Some(iced_field()), "the clicked name field has the keyboard");
     assert_eq!(ui.runtime().focused(), None, "ours let go");
 
     // Iced's field uses the key, so its listener reports no `Key`: the
@@ -429,11 +450,7 @@ fn our_field_gives_the_keyboard_to_an_iced_field() {
     assert!(
         heard.iter().any(|m| matches!(
             m,
-            Message::Inspector(crate::inspector::Message::ValueText {
-                module: 4,
-                index: 0,
-                ..
-            })
+            Message::Inspector(crate::inspector::Message::SubPatchNameDraft { module: 2, .. })
         )),
         "the clicked field typed it: {heard:?}"
     );

@@ -144,7 +144,7 @@ fn midi_range_fields_follow_the_slot_part_and_mapping_mode() {
         .unwrap();
     assert_eq!(
         app.midi_range_fields(),
-        Some(["midi/low", "midi/high"].map(|name| ids::part(&row.ui, name)))
+        Some(["midi/settings/low", "midi/settings/high"].map(|name| ids::part(&row.ui, name)))
     );
 
     app.session
@@ -1120,4 +1120,99 @@ fn a_slot_menu_reads_each_item_in_its_place_among_all() {
         .collect();
     expected.sort_by_key(ToString::to_string);
     assert_eq!(nodes, expected, "the columns add no node");
+}
+
+/// Every row a slot shows is the one the canvas's focus goes to from its
+/// control (`inspected_param_id`): a role row at `<slot>/<part>/param/…`,
+/// and a part-only row inside the `<slot>/<part>/others` group (the 4d.2
+/// renames). Checked for a module part and for a sub-patch part's
+/// `exposed/<name>` rows.
+#[test]
+fn the_canvas_focus_reaches_each_slot_row() {
+    let check = |app: &App, slot: u32| {
+        let Inspector::Slot(rows) = app.inspector_model() else {
+            panic!("a slot inspector");
+        };
+        let others = rows.rows_id.clone().expect("a part").with("others");
+        assert!(!rows.other_params.is_empty(), "a part-only row to check");
+        for (label, module, row) in rows.role_params.iter().chain(&rows.other_params) {
+            assert_eq!(
+                app.inspected_param_id(loom_core::ModuleId(*module), row.index).as_ref(),
+                Some(&row.ui),
+                "{label}"
+            );
+        }
+        for (label, _, row) in &rows.role_params {
+            assert!(!row.ui.is_under(&others), "{label} is a role row");
+        }
+        for (label, _, row) in &rows.other_params {
+            assert!(row.ui.is_under(&others), "{label} is in the group");
+        }
+        let _ = slot;
+    };
+    let (mut app, slot, _) = with_slot();
+    let _ = app.send(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.ladder@1".to_string()),
+    });
+    app.session.selection = std::collections::BTreeSet::from([slot]);
+    check(&app, slot);
+
+    // A sub-patch part that exposes an item the role does not have.
+    let text = COMB_SLOT.replace(
+        r#"exposed: [Exposed(name: "cutoff", module: 3, param: "cutoff")],"#,
+        r#"exposed: [Exposed(name: "cutoff", module: 3, param: "cutoff"), Exposed(name: "time", module: 2, param: "time")],"#,
+    );
+    let mut app = app_with(&text);
+    let slot = inside(&app, 9);
+    app.session.selection = std::collections::BTreeSet::from([slot]);
+    let Inspector::Slot(rows) = app.inspector_model() else {
+        panic!("a slot inspector");
+    };
+    assert!(
+        rows.other_params
+            .iter()
+            .any(|(_, _, row)| row.ui.to_string().contains("/others/exposed/time")),
+        "{:?}",
+        rows.other_params
+            .iter()
+            .map(|(_, _, row)| row.ui.to_string())
+            .collect::<Vec<_>>()
+    );
+    check(&app, slot);
+}
+
+/// The tree has the part-only rows in a group named by its heading,
+/// "Ladder only", and the role rows outside it.
+#[test]
+fn the_part_only_rows_are_a_group_named_by_its_heading() {
+    let (mut app, slot, _) = with_slot();
+    let _ = app.send(Message::SwapSlot {
+        slot,
+        to: SwapTarget::Module("loom.filter.ladder@1".to_string()),
+    });
+    app.session.selection = std::collections::BTreeSet::from([slot]);
+    let Inspector::Slot(rows) = app.inspector_model() else {
+        panic!("a slot inspector");
+    };
+    let others = rows.rows_id.clone().expect("a part").with("others");
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.app_mut().a11y_event(crate::a11y::Event::Activated);
+    let _ = ui.redraw();
+    let tree = ui.a11y_tree();
+    let group = tree.node_by_id(&others);
+    assert_eq!(group.role(), accesskit::Role::Group);
+    assert_eq!(group.name(), Some("Ladder only"));
+    let inside = tree.parts_under(&others);
+    for (label, _, row) in &rows.other_params {
+        assert!(inside.contains(&row.ui), "{label} is in the group");
+    }
+    for (label, _, row) in &rows.role_params {
+        assert!(!inside.contains(&row.ui), "{label} is outside it");
+        assert_eq!(
+            tree.node_by_id(&row.ui).role(),
+            accesskit::Role::Group,
+            "{label} is reported"
+        );
+    }
 }

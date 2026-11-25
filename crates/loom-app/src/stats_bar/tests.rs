@@ -6,7 +6,7 @@ use super::*;
 use crate::ui_test::Ui;
 use accesskit::{Action as KitAction, Role as KitRole, Toggled};
 use iced::keyboard::{self, key::Named};
-use loom_ui_core::Point;
+use loom_ui_core::{Point, UiId};
 
 /// The subtractive patch with module 4 selected, so the inspector shows
 /// its rows and no patch info fields, and an error kept in the bar.
@@ -354,7 +354,17 @@ fn the_app_stops_are_the_runtimes() {
     ui.lay_out_panels();
     let stops = ui.app().bar_stops();
     assert_eq!(stops.len(), 3, "two switches and the kept error's ×: {stops:?}");
-    assert_eq!(ui.runtime().focus_stops(), ui.app().our_stops().as_slice());
+    // A module's rows are the runtime's to order (plan 3.2, row 4d.2): Tab
+    // walks them by the runtime's reading order, so the app lists none.
+    let inspector = crate::inspector::panel::inspector_id();
+    let runtime: Vec<UiId> = ui
+        .runtime()
+        .focus_stops()
+        .iter()
+        .filter(|stop| !stop.is_under(&inspector))
+        .cloned()
+        .collect();
+    assert_eq!(runtime, ui.app().our_stops());
 }
 
 /// A status longer than the bar is cut, not the fixed items: each keeps its

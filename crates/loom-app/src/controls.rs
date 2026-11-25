@@ -46,7 +46,14 @@ impl App {
                     Err(e) => app.alerts.warn(e.to_string()),
                 });
             }
-            learn::Message::MidiOptionsRows { module, index } => self.session.learn.toggle_options((module, index)),
+            learn::Message::MidiOptionsRows { module, index } => {
+                // Closing the rows leaves the pair of range fields, which
+                // commits their draft (Brylie, 2026-11-25).
+                if let Some(param) = self.session.learn.range_draft_param() {
+                    self.leave_midi_range(param);
+                }
+                self.session.learn.toggle_options((module, index));
+            }
             learn::Message::MidiOptions { module, index, options } => self.set_midi_options(module, index, options),
             learn::Message::MidiRangeText {
                 module,
@@ -315,6 +322,32 @@ impl App {
         else {
             return;
         };
+        self.select_range(module, index, range);
+    }
+
+    /// Sets parameter `index` of `module` to its whole range, **Full** in
+    /// the Range select (control-ranges.md, rule 4: a range must be one
+    /// listed, or the full one). One undo step, as a range is.
+    pub(crate) fn set_full_range(&mut self, module: u32, index: usize) {
+        let Some(range) = self
+            .session
+            .controller
+            .graph()
+            .node(ModuleId(module))
+            .and_then(|n| n.descriptor.params.get(index))
+            .map(|spec| loom_core::ParamRange {
+                min: spec.min,
+                max: spec.max,
+            })
+        else {
+            return;
+        };
+        self.select_range(module, index, range);
+    }
+
+    /// Selects `range` for parameter `index` of `module`, and its range
+    /// partner's, as one undo step.
+    fn select_range(&mut self, module: u32, index: usize, range: loom_core::ParamRange) {
         self.close_slider_gesture();
         self.edit(|app| {
             if let Err(e) = app.session.controller.set_range(ModuleId(module), index, range) {
@@ -404,19 +437,25 @@ impl App {
     pub(crate) fn focus_moved(&mut self, focus: Option<UiId>) {
         self.part_authors_focus_moved(focus.as_ref());
         self.authors_focus_moved(focus.as_ref());
-        // Only its own field, still shown, keeps a draft: a field that left
-        // the inspector has no part to match.
+        // Leaving a value field commits its draft, as Enter does: by Tab,
+        // a press elsewhere, another field, or a selection change (Brylie's
+        // decision, 2026-11-25). Escape drops the draft before the focus
+        // leaves, so nothing is left to commit.
         if let Some(draft) = &self.session.value_draft
             && (focus.is_none() || focus != self.value_field_part(draft.module, draft.index))
+            && !self.focus_went_into_an_overlay()
         {
-            self.session.value_draft = None;
+            let (module, index) = (draft.module, draft.index);
+            self.leave_value_field(module, index);
         }
-        if self.session.learn.has_range_draft()
+        // Leaving the MIDI range pair commits it (Brylie, 2026-11-25).
+        if let Some(param) = self.session.learn.range_draft_param()
+            && !self.focus_went_into_an_overlay()
             && !focus
                 .as_ref()
                 .is_some_and(|part| self.midi_range_fields().is_some_and(|fields| fields.contains(part)))
         {
-            self.session.learn.set_range_draft(None);
+            self.leave_midi_range(param);
         }
         let gained = focus
             .clone()
@@ -460,7 +499,7 @@ impl App {
             return None;
         }
         let row = self.inspected_param_id(ModuleId(module), index)?;
-        Some(["midi/low", "midi/high"].map(|part| crate::inspector::ids::part(&row, part)))
+        Some(["midi/settings/low", "midi/settings/high"].map(|part| crate::inspector::ids::part(&row, part)))
     }
 
     /// Every parameter row of the inspector, with the
@@ -538,6 +577,47 @@ impl App {
         }
         if let Some(part) = self.value_field_part(module, index) {
             self.effect(loom_ui::Effects::focus_and_select_all(part));
+        }
+    }
+
+    /// True when the focus moved because an overlay or a question opened
+    /// over the window and took it: that is not leaving a field. The
+    /// overlay gives the focus back as it closes (ui-layer.md, section 6,
+    /// rule 4), and the field keeps its draft until then, so nothing
+    /// changes the patch under the overlay.
+    pub(crate) fn focus_went_into_an_overlay(&self) -> bool {
+        self.input_owner() != crate::input_owner::InputOwner::Canvas
+    }
+
+    /// Commits the draft of the value field for `module`'s parameter
+    /// `index` as the focus leaves it (Brylie's decision, 2026-11-25): as
+    /// Enter does, when the text is a value; otherwise the parameter keeps
+    /// its last good value, the draft goes, and the status line says why.
+    /// It leaves the focus where it went.
+    pub(crate) fn leave_value_field(&mut self, module: u32, index: usize) {
+        self.submit_value_draft(module, index);
+        let left = self
+            .session
+            .value_draft
+            .take_if(|draft| (draft.module, draft.index) == (module, index));
+        if let Some(draft) = left {
+            let reason = draft.draft.error().unwrap_or("not a value").to_string();
+            self.alerts.warn(format!("The value was not changed: {reason}"));
+        }
+    }
+
+    /// Commits the MIDI range draft for `param` as the pair of fields is
+    /// left, by Tab past either end, a press elsewhere, or a selection
+    /// change (Brylie's decision, 2026-11-25): as Enter does, when the text
+    /// is a range; otherwise the mapping keeps its last good range, the
+    /// draft goes, and the status line says why.
+    pub(crate) fn leave_midi_range(&mut self, param: learn::Param) {
+        let (module, index) = param;
+        self.submit_midi_range(module, index);
+        if let Some(draft) = self.session.learn.range_draft(param).cloned() {
+            self.session.learn.set_range_draft(None);
+            let reason = draft.error.unwrap_or_else(|| "not a range".to_string());
+            self.alerts.warn(format!("The MIDI range was not changed: {reason}"));
         }
     }
 

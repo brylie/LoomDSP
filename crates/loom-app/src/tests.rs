@@ -2902,7 +2902,13 @@ fn the_status_bar_shows_a_kept_error_beside_later_messages() {
         alerts::Severity::Alarm,
         "the latest message is the error"
     );
-    assert!(ui.text("×").is_some(), "the latest message can be dismissed too");
+    // By the ×'s UI ID: the inspector shows × buttons of its own too.
+    let status_x: loom_ui_core::UiId = crate::bars::STATUS_DISMISS_ID.parse().unwrap();
+    ui.lay_out_panels();
+    assert!(
+        ui.runtime().bounds(&status_x).is_some(),
+        "the latest message can be dismissed too"
+    );
 
     ui.app_mut().alerts.say("saved");
     ui.redraw();
@@ -2928,7 +2934,15 @@ fn pressing_x_dismisses_a_kept_error_but_a_lost_output_has_none() {
     ui.app_mut().alerts.error(alerts::Cause::Other, "the recording stopped");
     ui.app_mut().alerts.say("saved");
     ui.redraw();
-    let x = ui.text("×").expect("a kept error can be dismissed").center();
+    // By the ×'s UI ID: the inspector shows × buttons of its own too.
+    let kept_x: loom_ui_core::UiId = crate::bars::KEPT_DISMISS_ID.parse().unwrap();
+    let status_x: loom_ui_core::UiId = crate::bars::STATUS_DISMISS_ID.parse().unwrap();
+    ui.lay_out_panels();
+    let x = ui
+        .runtime()
+        .bounds(&kept_x)
+        .expect("a kept error can be dismissed")
+        .center();
     ui.move_to(x);
     ui.press();
     ui.release();
@@ -2938,7 +2952,11 @@ fn pressing_x_dismisses_a_kept_error_but_a_lost_output_has_none() {
     ui.app_mut().alerts.error(alerts::Cause::AudioOutput, "Audio: lost");
     ui.redraw();
     assert!(ui.text("Error: Audio: lost").is_some());
-    assert!(ui.text("×").is_none(), "only sound or a choice ends a lost output");
+    ui.lay_out_panels();
+    assert!(
+        ui.runtime().bounds(&kept_x).is_none() && ui.runtime().bounds(&status_x).is_none(),
+        "only sound or a choice ends a lost output"
+    );
     let json = serde_json::to_value(ui.app().ui_snapshot()).unwrap();
     assert_eq!(json["status_severity"], "error");
     assert_eq!(json["errors"][0]["cause"], "audio_output");

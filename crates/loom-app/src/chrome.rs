@@ -146,6 +146,21 @@ impl App {
             return step;
         }
         let column = self.inspector_stops();
+        // A module's, an unknown module's, or a slot's rows have no list of
+        // stops of the app's: Tab follows the runtime's reading order among
+        // them, and past either end leaves the column as patch info does.
+        // A step onto the toolbar lands on its one stop.
+        if self.inspector_owns() && from.is_under(&crate::inspector::panel::inspector_id()) {
+            let toolbar = self.toolbar_stops();
+            let step = match next {
+                Some(stop) if toolbar.contains(stop) => to(self.toolbar_entry().as_ref()),
+                Some(stop) => TabStep::To(stop.clone()),
+                None if back => to(bar.last().or(top.last())),
+                None => to(bar.first().or(top.first())),
+            };
+            return step;
+        }
+        let rows = self.inspector_owns() && column.is_empty();
         // Any toolbar button stands for the toolbar's one stop.
         let toolbar = self.toolbar_stops();
         let entry = self.toolbar_entry();
@@ -155,8 +170,16 @@ impl App {
         };
         if let Some(at) = top.iter().position(|stop| stop == from) {
             if back {
-                at.checked_sub(1)
-                    .map_or_else(|| to(bar.last().or(column.last())), |at| to(top.get(at)))
+                at.checked_sub(1).map_or_else(
+                    || {
+                        if rows && bar.is_empty() {
+                            to(next)
+                        } else {
+                            to(bar.last().or(column.last()))
+                        }
+                    },
+                    |at| to(top.get(at)),
+                )
             } else {
                 top.get(at + 1).map_or(TabStep::Leave, |stop| TabStep::To(stop.clone()))
             }
@@ -165,6 +188,8 @@ impl App {
         } else if bar.contains(from) && back && bar.first() == Some(from) {
             if let Some(last) = column.last() {
                 TabStep::To(last.clone())
+            } else if rows {
+                to(next)
             } else if self.fields_among_ours() {
                 TabStep::Send(Message::EnterFields { backwards: true })
             } else {
