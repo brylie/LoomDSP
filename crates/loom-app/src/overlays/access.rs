@@ -57,17 +57,12 @@ impl App {
                     None => (Vec::new(), None),
                 }
             }
-            InputOwner::Browser => match self.overlays.browser() {
-                Some(open) => {
-                    let (item, focus) = crate::browser::access::items(open.model());
-                    (vec![item], focus)
-                }
-                None => (Vec::new(), None),
-            },
-            InputOwner::Patches => match self.overlays.patches() {
-                Some(open) => (vec![crate::patches::access::items(open.model())], None),
-                None => (Vec::new(), None),
-            },
+            // The module browser is the runtime's (row 5): its nodes come
+            // from its panels, and its focus is the runtime's search field.
+            InputOwner::Browser => (Vec::new(), None),
+            // Your patches is the runtime's (row 5b): its nodes come from
+            // its panels.
+            InputOwner::Patches => (Vec::new(), None),
             // No part of these has the keys until a field does, so the
             // dialog itself has the focus, as help does.
             InputOwner::Preferences => match self.preferences_model() {

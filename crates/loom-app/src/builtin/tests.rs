@@ -95,10 +95,7 @@ fn the_browser_inserts_a_builtin_as_a_copy() {
         first,
         [("Synth voice", "Built in", false), ("Effect chain", "Built in", false)]
     );
-    assert_eq!(
-        model.rows[0].id,
-        browser::browser_id().with("builtin").with("synth-voice")
-    );
+    assert_eq!(model.rows[0].id, browser::list_id().with("builtin").with("synth-voice"));
     assert_eq!(model.rows[0].description, ALL[0].description());
     let about = model.about.expect("the first row is highlighted");
     assert_eq!(about.detail, "Built in, inserted as a copy");

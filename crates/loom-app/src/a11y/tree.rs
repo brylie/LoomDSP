@@ -422,7 +422,7 @@ pub(crate) fn tree(
     };
     // The runtime's own panels: the toolbar, the breadcrumb inside a
     // sub-patch, and the bar, each in its named group.
-    let groups = frame.ours(ours);
+    let groups = frame.ours(ours, frames);
     let mut children = groups.toolbar;
     children.extend(groups.breadcrumb);
     children.push(frame.tabs(snapshot.matrix.tab));
@@ -772,6 +772,10 @@ pub(crate) struct Frames {
     /// How many items the runtime menu in `ours_overlay` holds, for its
     /// node's set size, so an item in a column still reads as one of all.
     pub ours_overlay_items: Option<usize>,
+    /// A menu the runtime draws inside that overlay, as a panel of its
+    /// own: its name and UI ID, around its items. A library row's menu in
+    /// the module browser (row 5).
+    pub ours_menu: Option<(String, UiId)>,
 }
 
 /// The UI ID a fixed text names. The texts are this app's own constants,
@@ -1074,37 +1078,27 @@ impl Frame<'_> {
     /// breadcrumb's entries in one named "Patch levels", and the stats
     /// bar's items in one named "Status bar". Below a panel that owns the
     /// input they are hidden, as the window's other parts are.
-    fn ours(&mut self, ours: &loom_ui::AccessNodes) -> Ours {
+    fn ours(&mut self, ours: &loom_ui::AccessNodes, frames: &Frames) -> Ours {
+        // Only the overlay that owns the input and what is inside it: help
+        // over the module browser leaves the browser covered (rule 24).
+        let owner = frames.ours_overlay.as_ref().map(|(_, _, id)| id);
+        let owns = |root: &UiId| owner.is_none_or(|owner| root == owner || root.is_under(owner));
         let tops: Vec<NodeId> = ours
             .roots
             .iter()
             .flat_map(|(_, _, tops)| tops.iter().copied())
             .collect();
-        // The runtime's top overlay (the question, help, the licence
-        // chooser, a menu) owns the input while it is open: it is reported
-        // and acts, while what it covers is hidden (section 7, rule 27).
-        // An overlay under it, such as the chooser under help, is drawn
-        // but not reported at all, as a covered menu is not (rule 24): its
-        // nodes would otherwise sit inside the top one's dialog. The top is
-        // the last root drawn in the highest layer, with the roots under
-        // its key, such as help's backdrop.
+        // The overlay that owns the input (the question, help, the licence
+        // chooser, a menu, a browser) is reported and acts, while what it
+        // covers is hidden (section 7, rule 27). An overlay under it, such
+        // as the chooser under help, is drawn but not reported at all, as a
+        // covered menu is not (rule 24): its nodes would otherwise sit
+        // inside the top one's dialog.
         let within = |id: &UiId, root: &UiId| id == root || id.is_under(root);
-        let top = ours
-            .roots
-            .iter()
-            .filter(|(_, layer, _)| *layer >= loom_ui::Layer::Overlays)
-            .max_by_key(|(_, layer, _)| *layer)
-            .map(|(root, layer, _)| (root, *layer));
-        let top = ours
-            .roots
-            .iter()
-            .rev()
-            .find(|(_, layer, _)| top.is_some_and(|(_, top)| *layer == top))
-            .map(|(root, _, _)| root);
         let overlay_roots: Vec<&UiId> = ours
             .roots
             .iter()
-            .filter(|(root, layer, _)| *layer >= loom_ui::Layer::Overlays && top.is_some_and(|top| within(root, top)))
+            .filter(|(root, layer, _)| *layer >= loom_ui::Layer::Overlays && owns(root))
             .map(|(root, _, _)| root)
             .collect();
         let covered_roots: Vec<&UiId> = ours
@@ -1128,12 +1122,20 @@ impl Frame<'_> {
             }
             self.nodes.push((*id, node));
         }
-        let overlay: Vec<NodeId> = ours
+        let mut overlay: Vec<NodeId> = ours
             .roots
             .iter()
             .filter(|(root, _, _)| overlay_roots.contains(&root))
             .flat_map(|(_, _, tops)| tops.iter().copied())
             .collect();
+        // A menu drawn as a panel of its own is named around its items.
+        if let Some((label, menu)) = &frames.ours_menu {
+            let (items, rest): (Vec<NodeId>, Vec<NodeId>) = overlay
+                .iter()
+                .partition(|top| self.table.id(top.0).is_some_and(|id| id.is_under(menu)));
+            overlay = rest;
+            overlay.extend(self.group(items, Role::Menu, label, menu));
+        }
         let under = |panel: &UiId| -> Vec<NodeId> {
             tops.iter()
                 .copied()

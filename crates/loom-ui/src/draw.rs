@@ -124,6 +124,25 @@ impl<A: App> Panels<'_, A> {
         self.reveal_caret();
         self.place_hint(text);
         self.report_focus();
+        self.report_hidden_anchors();
+    }
+
+    /// Tells the app of each root placed under an element that stopped
+    /// showing, scrolled out of view or cut away, once, on the next turn
+    /// (section 5, rule 13). Only a settled layout says, since where things
+    /// are is known only then. A root whose anchor shows again, or that
+    /// leaves the view, is told again when it next hides.
+    fn report_hidden_anchors(&mut self) {
+        if !self.window.is_settled(self.size) {
+            return;
+        }
+        let hidden = self.window.hidden_anchors();
+        for root in hidden.iter().filter(|root| !self.window.anchors_hidden.contains(root)) {
+            if let Some(message) = self.app.anchor_hidden(root) {
+                self.waker.send(message);
+            }
+        }
+        self.window.anchors_hidden = hidden;
     }
 
     /// Brings the element a keyboard focus move or a scroll effect named

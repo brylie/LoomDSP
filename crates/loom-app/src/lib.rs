@@ -530,13 +530,6 @@ enum Message {
     OverlayTab {
         back: bool,
     },
-    /// An arrow key from a script on an answer of the licence chooser: the
-    /// next answer, or the one before, takes the focus and is chosen, as
-    /// the runtime's radio keys do for a real key (row 3c). Only until
-    /// scripted keys take the runtime's path (lane C's 1b).
-    ChooserArrow {
-        back: bool,
-    },
     /// One step of the runtime's focus, after a menu closed and gave back
     /// the focus it opened over (row 3b).
     FocusStep {
@@ -735,7 +728,13 @@ impl Message {
                 use patches::Message as M;
                 let field = match message {
                     M::Search(_) | M::Author(_) | M::Tag(_) | M::Submit => true,
-                    M::Found { .. } | M::Licence(..) | M::Hover(_) | M::Pick(_) | M::Step(_) | M::Close => false,
+                    M::Found { .. }
+                    | M::Licence(..)
+                    | M::Hover(_)
+                    | M::Pick(_)
+                    | M::Step(_)
+                    | M::Close
+                    | M::FocusTag(_) => false,
                 };
                 from(field, InputOwner::Patches)
             }
@@ -748,7 +747,7 @@ impl Message {
                     | M::Menu { .. }
                     | M::InsertLinked(_)
                     | M::Library(_)
-                    | M::Scrolled(_)
+                    | M::CloseMenu
                     | M::Key(_)
                     | M::Close => false,
                 };
@@ -870,7 +869,6 @@ impl Message {
             | Self::ToolbarFocus(_)
             | Self::MenuTab { .. }
             | Self::OverlayTab { .. }
-            | Self::ChooserArrow { .. }
             | Self::FocusStep { .. }
             | Self::SliderReleased
             | Self::Matrix(_)
@@ -1903,12 +1901,6 @@ impl App {
                     self.effect(loom_ui::Effects::focus(next));
                 }
             }
-            Message::ChooserArrow { back } => {
-                if let Some((next, choose)) = self.chooser_arrow(back) {
-                    self.effect(loom_ui::Effects::focus(next));
-                    self.post(choose);
-                }
-            }
             Message::ToolbarFocus(stop) => self.toolbar_focus(stop),
             Message::Canvas(CanvasEvent::Paste { world }) => {
                 let generation = self.generation;
@@ -2247,7 +2239,6 @@ impl App {
             | Message::ToolbarFocus(_)
             | Message::MenuTab { .. }
             | Message::OverlayTab { .. }
-            | Message::ChooserArrow { .. }
             | Message::FocusStep { .. }
             | Message::FocusMoved(_)
             | Message::Inspector(_)

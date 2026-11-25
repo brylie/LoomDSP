@@ -6,7 +6,7 @@ use crate::Element;
 use crate::edits::ArrowGroup;
 use crate::matrix::{Event as MatrixEvent, Tab as RightTab};
 use crate::style::button;
-use crate::{App, Message, browser, inspector, matrix, pointer, style};
+use crate::{App, Message, inspector, matrix, pointer, style};
 use iced::Length;
 use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, tooltip};
 use loom_canvas::{DragLine, EditGroupView, PatchCanvas};
@@ -88,11 +88,8 @@ impl App {
         {
             layers = layers.push(DragLine::new(drag.start, at, port.colour, drag.zoom));
         }
-        if let Some(open) = self.overlays.browser() {
-            let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
-                .on_press(Message::Browser(browser::Message::Close));
-            layers = layers.push(outside).push(open.view().map(Message::Browser));
-        }
+        // The module browser is the runtime's, in its Overlays layer, with
+        // its press outside (row 5, `browser/panel.rs`).
         // The menus (tile, probe, Recent) are the runtime's, in its Overlays
         // layer over everything Iced draws (rows 3b and 3d, `menus/panel.rs`).
         // The cable menu is still Iced's.
@@ -135,11 +132,9 @@ impl App {
         if let Some(window) = self.preferences_view() {
             layers = layers.push(window);
         }
-        if let Some(open) = self.overlays.patches() {
-            layers = layers.push(open.view().map(Message::Patches));
-        }
-        // The licence chooser is the runtime's, in its Overlays layer, over
-        // Preferences, which also opens it (row 3c).
+        // Your patches is the runtime's (row 5b, `patches/panel.rs`). So is
+        // the licence chooser (row 3c), in its Overlays layer over
+        // Preferences, which opens it.
         // Help is the runtime's, in its Overlays layer, over the dialogs
         // Iced draws, because F1 opens it from them (help-pages.md; row 6).
         // The question is the runtime's, in its Question layer, over

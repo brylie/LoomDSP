@@ -621,6 +621,9 @@ fn a_root_placed_at_a_point_stays_inside_the_window() {
     };
     let (at, screen) = place((100.0, 50.0), Size::new(300.0, 200.0));
     assert_eq!(at, Some(rect(100.0, 50.0, 40.0, 40.0)));
+    // The panel's own key gives its root's box, not the window: all of it
+    // that shows, as `locate` finds it.
+    assert_eq!(screen.at("menu"), at, "the placed panel is where its root is");
     let hit = |x, y| match screen.window.hit(Point::new(x, y)) {
         Some((_, Hit::Element(id))) => Some(id.to_string()),
         _ => None,

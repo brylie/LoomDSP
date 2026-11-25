@@ -10,13 +10,10 @@ fn quiet_text_meets_contrast() {
     let theme = app.theme();
     let palette = theme.extended_palette();
     let secondary = super::QUIET;
-    let highlight = crate::browser::row_style(&theme, true)
-        .background
-        .map(|b| match b {
-            iced::Background::Color(c) => c,
-            _ => panic!("a flat highlight"),
-        })
-        .expect("a highlight fill");
+    let highlight = {
+        use loom_canvas::iced_convert::ToIced as _;
+        super::highlighted_row(&theme).fill.to_iced()
+    };
     let closed_tab = super::tab(false)(&theme, iced::widget::button::Status::Active).text_color;
     let pick = super::quiet_pick_list(&theme, iced::widget::pick_list::Status::Active);
     for (name, text, fill) in [
@@ -221,13 +218,10 @@ fn the_focus_ring_stands_out() {
     let app = crate::tests::app();
     let theme = app.theme();
     let palette = theme.extended_palette();
-    let highlight = crate::browser::row_style(&theme, true)
-        .background
-        .map(|b| match b {
-            iced::Background::Color(c) => c,
-            _ => panic!("a flat highlight"),
-        })
-        .expect("a highlight fill");
+    let highlight = {
+        use loom_canvas::iced_convert::ToIced as _;
+        super::highlighted_row(&theme).fill.to_iced()
+    };
     for (name, fill) in [
         ("the panel", palette.background.base.color),
         ("a card", palette.background.weak.color),

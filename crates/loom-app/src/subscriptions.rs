@@ -9,7 +9,7 @@
 //! reference the plain calls are checked against (`subscriptions/tests.rs`).
 
 use crate::input_owner::Listening;
-use crate::{App, FileAction, Message, browser, lights};
+use crate::{App, FileAction, Message, lights};
 #[cfg(test)]
 use iced::Subscription;
 use iced::event::Status;
@@ -153,29 +153,6 @@ pub(crate) fn help_key(event: iced::Event, _status: iced::event::Status, _window
         }) => Some(Message::CloseHelp),
         _ => None,
     }
-}
-
-/// The keys the open browser handles, whether or not a widget used them.
-pub(crate) fn browser_key(
-    event: iced::Event,
-    _status: iced::event::Status,
-    _window: iced::window::Id,
-) -> Option<Message> {
-    use iced::keyboard::{Event, Key, key::Named};
-    let iced::Event::Keyboard(Event::KeyPressed { key, modifiers, .. }) = event else {
-        return None;
-    };
-    let nav = match key {
-        Key::Named(Named::ContextMenu) => browser::Nav::Menu,
-        Key::Named(Named::F10) if modifiers.shift() && !modifiers.command() && !modifiers.alt() => browser::Nav::Menu,
-        Key::Named(Named::ArrowUp) => browser::Nav::Up,
-        Key::Named(Named::ArrowDown) => browser::Nav::Down,
-        Key::Named(Named::PageUp) => browser::Nav::PageUp,
-        Key::Named(Named::PageDown) => browser::Nav::PageDown,
-        Key::Named(Named::Escape) => browser::Nav::Escape,
-        _ => return None,
-    };
-    Some(Message::Browser(browser::Message::Key(nav)))
 }
 
 /// The window's listeners as the app stood at one moment: the same ones

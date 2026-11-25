@@ -112,6 +112,11 @@ struct Inner {
     /// happened, for the runtime's own layers below Iced, as the bridge
     /// hands it a real event Iced left (`iced_bridge/pointers.rs`).
     for_runtime: Vec<(Event, Point, Delivery)>,
+    /// Scripted key presses and releases, for the bridge to give the
+    /// window as real keys: Iced keeps its copy, and the runtime's turn
+    /// routes it, as a key from the keyboard goes (ui-layer.md, section 6,
+    /// rule 6). In order.
+    scripted_keys: std::collections::VecDeque<Event>,
     /// Physical pointer events that the injector suppressed during a script.
     suppressed: Vec<loom_ui_core::Event>,
     /// Scripted holds to cancel before routing a physical event.
@@ -162,7 +167,12 @@ impl Pointer {
 
     /// True while a command still has events to send.
     pub fn busy(&self, serial: u64) -> bool {
-        self.0.borrow().queue.iter().any(|q| q.serial == serial)
+        let inner = self.0.borrow();
+        // A key the injector let go waits in `scripted_keys` for its turn,
+        // one a report: until the last has gone, the command has not been
+        // applied, so its answer waits too (control-channel.md, rule 5),
+        // and `type` then `snapshot` reads the whole text.
+        inner.queue.iter().any(|q| q.serial == serial) || !inner.scripted_keys.is_empty()
     }
 
     /// The error a command met, if any. It is forgotten once taken.
@@ -177,6 +187,19 @@ impl Pointer {
     pub fn position(&self) -> Option<Point> {
         let inner = self.0.borrow();
         inner.at.or_else(|| inner.seen.as_ref().and_then(|s| s.cursor))
+    }
+
+    /// Queues `key` as a scripted key, as the injector does, for a test of
+    /// what the bridge does with it.
+    #[cfg(test)]
+    pub(crate) fn script_key(&self, key: Event) {
+        self.0.borrow_mut().scripted_keys.push_back(key);
+    }
+
+    /// The oldest scripted key not yet given to the window, which then
+    /// goes as a real key goes (`scripted_keys`).
+    pub(crate) fn take_scripted_key(&self) -> Option<Event> {
+        self.0.borrow_mut().scripted_keys.pop_front()
     }
 
     /// Takes the scripted pointer events that Iced's widgets left unused,
@@ -659,30 +682,16 @@ impl Widget<Message, iced::Theme, crate::Renderer> for Injector<'_> {
                     });
                     continue;
                 }
-                // An arrow from a script on an answer of the licence chooser
-                // chooses as the runtime's radio keys do (row 3c). Only until
-                // scripted keys take the runtime's path (lane C's 1b).
-                if let Event::Keyboard(keyboard::Event::KeyPressed {
-                    key: keyboard::Key::Named(named),
-                    modifiers,
-                    ..
-                }) = &injected
-                    && modifiers.is_empty()
-                    && self.app.overlays.question.is_none()
-                    && self.app.overlays.help.is_none()
+                // A scripted key goes as a real one: the bridge gives it to
+                // the window, where Iced keeps its copy and the runtime's
+                // turn routes it (its Tab, an element's keys, a field), so
+                // what the runtime takes never reaches Iced. Modifier
+                // changes still reach the view only, below.
+                if let Event::Keyboard(keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. }) =
+                    &injected
                 {
-                    use keyboard::key::Named;
-                    let back = match named {
-                        Named::ArrowUp | Named::ArrowLeft => Some(true),
-                        Named::ArrowDown | Named::ArrowRight => Some(false),
-                        _ => None,
-                    };
-                    if let Some(back) = back
-                        && self.app.chooser_arrow(back).is_some()
-                    {
-                        shell.publish(Message::ChooserArrow { back });
-                        continue;
-                    }
+                    self.pointer.0.borrow_mut().scripted_keys.push_back(injected);
+                    continue;
                 }
                 // While one of the runtime's overlays owns the input, a
                 // pointer event is the runtime's layers' above Iced, as a

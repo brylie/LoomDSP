@@ -1419,6 +1419,34 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         Some(moved)
     }
 
+    /// A screen reader's ShowContextMenu on an element with a context menu
+    /// (section 5, rule 19): the app's message for it, as opened by a key,
+    /// for the next turn, as a right press sends. Nothing under a layer
+    /// that takes the input above it. `None` for any other action or
+    /// element, which goes on to the app's own handling.
+    fn context_action(&mut self, event: &AccessEvent) -> Option<bool> {
+        let AccessEvent::Action(request) = event else {
+            return None;
+        };
+        if request.action != KitAction::ShowContextMenu {
+            return None;
+        }
+        let target = self.app.access_target(request.target_node)?;
+        if !self.panels.has_context_menu(&target) {
+            return None;
+        }
+        // What a layer above covers stays inert (section 7, rule 24): the
+        // action is used up and opens nothing, as a right press there
+        // never reaches it.
+        if !self.in_input_layer(&target) {
+            return Some(false);
+        }
+        if let Some(message) = self.app.context_menu(&target, true) {
+            self.waker().send(message);
+        }
+        Some(false)
+    }
+
     /// Sends the app's message for a click on `id`, for the next turn.
     fn click(&self, id: &UiId) {
         if let Some(message) = self.app.clicked(id) {
@@ -1643,7 +1671,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     redraw |= changed;
                     reported |= changed;
                 }
-                None => match self.select_action(&event).or_else(|| self.slider_action(&event)) {
+                None => match self
+                    .select_action(&event)
+                    .or_else(|| self.slider_action(&event))
+                    .or_else(|| self.context_action(&event))
+                {
                     Some(changed) => redraw |= changed,
                     None => match self.scroll_action(&event) {
                         Some(moved) => redraw |= moved,

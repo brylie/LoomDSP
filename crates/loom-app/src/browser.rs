@@ -4,12 +4,7 @@
 //! Empty slots), and the sub-patches in the library folder, inserted as a
 //! copy, or linked from the item's menu (Library).
 
-use crate::Element;
-use crate::style;
-use iced::widget::{column, container, mouse_area, row, scrollable, space, text, text_input};
-use iced::{Length, Theme};
 use loom_canvas::BrowserPlacement;
-use loom_canvas::iced_convert::ToIced as _;
 pub(crate) use loom_canvas::snap;
 use loom_core::{Family, ModuleDescriptor, RoleDescriptor};
 use loom_ui::Effects;
@@ -18,6 +13,7 @@ use serde::Serialize;
 use std::cmp::Reverse;
 use std::path::{Path, PathBuf};
 
+mod panel;
 mod placement;
 
 /// Empty search results and how to recover.
@@ -37,10 +33,6 @@ const INPUT_HEIGHT: f32 = 30.0;
 /// Height of the whole panel, for keeping it inside the canvas.
 pub const HEIGHT: f32 = 2.0 * PADDING + INPUT_HEIGHT + LIST_HEIGHT + DESCRIPTION_HEIGHT + 2.0 * SPACING;
 const LIST_HEIGHT: f32 = ROWS as f32 * ROW_HEIGHT;
-/// Width of a library item's menu.
-const MENU_WIDTH: f32 = 140.0;
-
-const LIST: &str = "module-browser-list";
 
 /// The mark a library item's row shows in place of a module's family.
 pub(crate) const LIBRARY_MARK: &str = "Sub-patch";
@@ -71,8 +63,8 @@ pub enum Message {
     Library(Vec<LibraryItem>),
     /// Enter in the search field.
     Submit,
-    /// The list scrolled.
-    Scrolled(f32),
+    /// A press outside a library row's open menu closes only the menu.
+    CloseMenu,
     /// A key the browser handles itself: Up, Down, Page Up, Page Down, or
     /// Escape.
     Key(Nav),
@@ -171,7 +163,8 @@ pub struct Model {
 /// One row of the list, as it is shown.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BrowserRow {
-    /// Its UI ID: `browser/module/<type id>` or `browser/library/<path>`.
+    /// Its UI ID: `browser/list/module/<type id>`, `browser/list/library/<path>`,
+    /// and so on by kind.
     #[serde(serialize_with = "crate::snapshot::display")]
     pub id: UiId,
     /// The module's or the sub-patch's name.
@@ -210,15 +203,16 @@ pub(crate) fn browser_id() -> UiId {
     UiId::panel("browser")
 }
 
-/// The UI ID of a row: a module by its type ID, a slot by its role's ID, a
-/// library item by its path in the library folder, each one key
-/// (ui-layer.md, section 4).
+/// The UI ID of a row, inside the list and the group of its kind: a module
+/// by its type ID, a slot by its role's ID, a library item by its path in
+/// the library folder, each one key (ui-layer.md, section 4).
 fn row_id(entry: Entry, builtins: &[crate::builtin::Builtin], library: &[LibraryItem]) -> UiId {
+    let list = list_id();
     match entry {
-        Entry::Builtin(i) => browser_id().with("builtin").with(builtins[i].stem),
-        Entry::Module(d) => browser_id().with("module").with(d.id),
-        Entry::Role(r) => browser_id().with("role").with(r.id),
-        Entry::Library(i) => browser_id().with("library").with(library[i].library.as_str()),
+        Entry::Builtin(i) => list.with("builtin").with(builtins[i].stem),
+        Entry::Module(d) => list.with("module").with(d.id),
+        Entry::Role(r) => list.with("role").with(r.id),
+        Entry::Library(i) => list.with("library").with(library[i].library.as_str()),
     }
 }
 
@@ -249,14 +243,6 @@ pub struct Browser {
     placement: BrowserPlacement,
     /// The panel's top-left corner, in window coordinates.
     at: Point,
-    /// The list's scroll offset, which places a library row's menu beside
-    /// its row. The toolkit reports it after the wheel or a drag, but not
-    /// after the app scrolls the list itself (`on_scroll` does not fire
-    /// then), so [`Browser::reveal`] moves it by the same rule the window
-    /// scrolls by, from the fixed row height. `update` clamps it to the
-    /// list's rows after every message, as the list shows it. Our own
-    /// scroll state replaces it in phase 3.
-    scroll: f32,
 }
 
 impl Browser {
@@ -289,7 +275,6 @@ impl Browser {
                 toolbar => toolbar,
             },
             at: inside(at, area),
-            scroll: 0.0,
         };
         browser.search();
         browser.set_highlight(0);
@@ -342,8 +327,15 @@ impl Browser {
     /// that keeps the highlighted row in view.
     pub fn update(&mut self, message: Message) -> (Outcome, Effects<crate::Message>) {
         // Typing and keys may move the highlight out of view. A pointer is
-        // already on a visible row, and must not fight the scroll wheel.
-        let follow = matches!(message, Message::Query(_) | Message::Key(_));
+        // already on a visible row, and must not fight the scroll wheel. A
+        // row's menu opened by a screen reader may be on a row out of view:
+        // it is shown first, so the menu has a row to hang under, which
+        // would otherwise close it at once (ui-layer.md, section 5,
+        // rule 13).
+        let follow = matches!(
+            message,
+            Message::Query(_) | Message::Key(_) | Message::Menu { by_key: true, .. }
+        );
         let outcome = match message {
             Message::Query(query) => {
                 self.model.query = query;
@@ -402,8 +394,8 @@ impl Browser {
                 (Some(_), None) => Outcome::Stay,
                 (None, _) => self.add(false),
             },
-            Message::Scrolled(offset) => {
-                self.scroll = offset;
+            Message::CloseMenu => {
+                self.set_menu(None, None);
                 Outcome::Stay
             }
             // The menu key opens the highlighted row's menu, as a screen
@@ -453,17 +445,8 @@ impl Browser {
                 Outcome::Stay
             }
         };
-        // The list shows its offset clamped to its rows. Clamping ours the
-        // same way after every message keeps a library row's menu at its
-        // row when the list gets shorter without a reveal.
-        self.scroll = self.scroll.clamp(0.0, self.max_scroll());
         let effects = if follow { self.reveal() } else { Effects::none() };
         (outcome, effects)
-    }
-
-    /// The largest offset the list can show: zero while its rows fit.
-    fn max_scroll(&self) -> f32 {
-        (self.model.rows.len() as f32 * ROW_HEIGHT - LIST_HEIGHT).max(0.0)
     }
 
     /// The modules the list shows, best first, with the library items
@@ -596,140 +579,24 @@ impl Browser {
         });
     }
 
-    /// Scrolls the list just enough to show the highlighted row, and moves
-    /// [`Browser::scroll`] as the window will.
-    fn reveal(&mut self) -> Effects<crate::Message> {
-        let Some(row) = self.model.rows.get(self.highlight()) else {
-            return Effects::none();
-        };
-        let top = self.highlight() as f32 * ROW_HEIGHT;
-        let shown = loom_ui_core::Rect::new(
-            loom_ui_core::Point::new(0.0, self.scroll),
-            loom_ui_core::Size::new(1.0, LIST_HEIGHT),
-        );
-        let part = loom_ui_core::Rect::new(
-            loom_ui_core::Point::new(0.0, top),
-            loom_ui_core::Size::new(1.0, ROW_HEIGHT),
-        );
-        self.scroll += shown.reveal(part).y;
-        // Asked for even when the browser's own offset says the row shows:
-        // the toolkit keeps the offset it last scrolled to, though it
-        // shows it clamped while the list is short, so it can show another
-        // offset once the list grows again. The window knows which, and
-        // scrolls nothing when there is nothing to move.
-        Effects::scroll_into_view(row.id.clone())
+    /// Scrolls the list just enough to show the highlighted row: the
+    /// runtime's scroll container moves only as far as it must.
+    fn reveal(&self) -> Effects<crate::Message> {
+        match self.model.rows.get(self.highlight()) {
+            Some(row) => Effects::scroll_into_view(row.id.clone()),
+            None => Effects::none(),
+        }
     }
+}
 
-    /// The panel, placed at its corner, with a library item's menu over it
-    /// when one is open. The app lays it over the window. Drawn from the
-    /// model alone; each part is named by its UI ID, so the window says
-    /// where it is (`places.rs`).
-    pub fn view(&self) -> Element<'_, Message> {
-        let model = &self.model;
-        let input = container(
-            text_input("Search modules", &model.query)
-                .id(crate::places::field_widget_id(&search_id()))
-                .on_input(Message::Query)
-                .on_submit(Message::Submit)
-                .size(style::CONTROL)
-                .padding(6),
-        )
-        .id(crate::places::widget_id(&search_id()));
-
-        let swatch = |colour: iced::Color| {
-            container(space().width(8).height(8)).style(move |_: &Theme| container::Style {
-                background: Some(colour.into()),
-                border: iced::Border {
-                    radius: 2.0.into(),
-                    ..iced::Border::default()
-                },
-                ..container::Style::default()
-            })
-        };
-        let rows = model.rows.iter().enumerate().map(|(i, r)| {
-            let highlighted = model.highlight == Some(i);
-            // The family's colour and name, so colour is never the only cue
-            // (ADR-0029). A sub-patch shows the colour of a sub-patch tile.
-            let line = row![
-                text(r.name.as_str()).size(style::CONTROL),
-                swatch(family_swatch(r.family).to_iced()),
-                text(r.mark).size(style::SMALL).color(style::QUIET),
-            ]
-            .spacing(8)
-            .align_y(iced::Alignment::Center);
-            let cell = container(line)
-                .padding([0, 8])
-                .height(ROW_HEIGHT)
-                .width(Length::Fill)
-                .align_y(iced::alignment::Vertical::Center)
-                .style(move |theme: &Theme| row_style(theme, highlighted));
-            container(
-                mouse_area(cell)
-                    .on_move(move |_| Message::Hover(i))
-                    .on_press(Message::Pick(i))
-                    .on_right_press(Message::Menu { row: i, by_key: false }),
-            )
-            .id(iced::widget::Id::from(r.key.clone()))
-            .into()
-        });
-        let list: Element<'_, Message> = match model.empty {
-            Some(line) => container(text(line).size(style::CONTROL).color(style::QUIET))
-                .padding(8)
-                .height(LIST_HEIGHT)
-                .into(),
-            // The scrollbar takes its own space, so it covers no row text.
-            None => container(
-                scrollable(column(rows))
-                    .id(LIST)
-                    .spacing(4)
-                    .height(LIST_HEIGHT)
-                    .on_scroll(|viewport| Message::Scrolled(viewport.absolute_offset().y)),
-            )
-            .id(crate::places::widget_id(&list_id()))
-            .into(),
-        };
-        // The ID goes with the description, so no row is cut by a column
-        // or covered by the scrollbar (module-browser.md).
-        let about = match &model.about {
-            Some(about) => column![
-                text(about.text.as_str()).size(style::BODY),
-                text(about.detail.as_str()).size(style::SMALL).color(style::QUIET),
-            ]
-            .spacing(2),
-            None => column![],
-        };
-        let panel = column![input, list, container(about).height(DESCRIPTION_HEIGHT)]
-            .spacing(SPACING)
-            .padding(PADDING)
-            .width(WIDTH);
-        let panel = container(panel)
-            .style(panel_style)
-            .id(crate::places::widget_id(&browser_id()));
-        let panel: Element<'_, Message> = iced::widget::pin(iced::widget::opaque(panel))
-            .position(self.at.to_iced())
-            .into();
-        let Some(open) = model.menu else {
-            return panel;
-        };
-        let row = &model.rows[open].id;
-        // The menu hangs under its row's right end.
-        let row_top = self.at.y + PADDING + INPUT_HEIGHT + SPACING + open as f32 * ROW_HEIGHT - self.scroll;
-        let highlighted = model.menu_highlight == Some(0);
-        let menu = container(column![
-            container(
-                style::button(text(INSERT_LINKED).size(style::CONTROL))
-                    .style(style::outlined(style::secondary, highlighted))
-                    .on_press(Message::InsertLinked(open))
-                    .width(MENU_WIDTH)
-            )
-            .id(crate::places::widget_id(&insert_linked_id(row)))
-        ])
-        .padding(4)
-        .style(container::rounded_box)
-        .id(crate::places::widget_id(&menu_id(row)));
-        let menu = iced::widget::pin(iced::widget::opaque(menu))
-            .position(Point::new(self.at.x + WIDTH - MENU_WIDTH - PADDING, row_top + ROW_HEIGHT).to_iced());
-        iced::widget::stack![panel, menu].into()
+/// The browser's message for an edit of its search field, which the
+/// runtime holds (`runtime_fields.rs`): the new query. Enter never reaches
+/// the field, since the browser takes it first (`panel.rs`), and the focus
+/// leaving it means nothing to the browser.
+pub(crate) fn field_message(event: &loom_ui::FieldEvent) -> Option<crate::Message> {
+    match event {
+        loom_ui::FieldEvent::Edited(query) => Some(crate::Message::Browser(Message::Query(query.clone()))),
+        _ => None,
     }
 }
 
@@ -741,11 +608,6 @@ pub(crate) fn search_id() -> UiId {
 /// The UI ID of the browser's list.
 pub(crate) fn list_id() -> UiId {
     browser_id().with("list")
-}
-
-/// The UI ID of the text under the list.
-pub(crate) fn about_id() -> UiId {
-    browser_id().with("about")
 }
 
 /// What the list shows for `query`: the modules, then the library items.
@@ -1027,45 +889,6 @@ fn inside(at: Point, area: Rect) -> Point {
     let x = at.x.min(area.x + area.width - WIDTH).max(area.x);
     let y = at.y.min(area.y + area.height - HEIGHT).max(area.y);
     Point::new(x, y)
-}
-
-fn panel_style(theme: &Theme) -> container::Style {
-    use loom_canvas::iced_convert::ToIced as _;
-    let look = style::floating_panel(theme);
-    container::Style {
-        background: Some(look.fill.to_iced().into()),
-        border: iced::Border {
-            color: look.border.to_iced(),
-            width: look.border_width,
-            radius: look.radius.into(),
-        },
-        shadow: iced::Shadow {
-            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-            offset: iced::Vector::new(0.0, 4.0),
-            blur_radius: 12.0,
-        },
-        ..container::Style::default()
-    }
-}
-
-/// The highlighted row: a lifted grey with an orange outline, like a
-/// selected card, so its quieter text stays readable on it. From the
-/// style token (`style::highlighted_row`), which `loom-ui`'s rows take too.
-pub(crate) fn row_style(theme: &Theme, highlighted: bool) -> container::Style {
-    use loom_canvas::iced_convert::ToIced as _;
-    if !highlighted {
-        return container::Style::default();
-    }
-    let look = style::highlighted_row(theme);
-    container::Style {
-        background: Some(look.fill.to_iced().into()),
-        border: iced::Border {
-            color: look.border.to_iced(),
-            width: look.border_width,
-            radius: look.radius.into(),
-        },
-        ..container::Style::default()
-    }
 }
 
 /// A family tint that stays distinct on the browser's normal and highlighted rows.

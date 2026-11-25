@@ -249,3 +249,12 @@ fn each_problem_says_what_is_wrong() {
     assert_eq!(Access::new(Role::Tab, "Inspector").role(), Role::Tab);
     assert_eq!(Access::new(Role::Tab, "Inspector").name(), "Inspector");
 }
+
+/// A list box option is operated by being highlighted, so it may offer no
+/// Click: one that cannot be picked is listed, enabled, with no action.
+#[test]
+fn a_list_box_option_needs_no_click() {
+    let option = Access::new(Role::ListBoxOption, "broken.ron, could not read");
+    assert_eq!(option.problem(false), None);
+    assert!(!option.node(false).supports_action(KitAction::Click));
+}

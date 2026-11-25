@@ -2848,14 +2848,16 @@ fn measure_and_wgpu_lay_out_alike() {
     );
     assert_eq!(measured, drawn, "with module 4 selected");
 
-    ui.send(Message::OpenBrowser);
+    // Preferences is still Iced's, so its parts are walked; the browsers
+    // are the runtime's, laid out by its own text measure (row 5).
+    ui.send(Message::Preferences(crate::settings::Message::Open));
     let _ = ui.redraw();
     let (measured, drawn) = ui.places_on_both().expect("the adapter is still there");
     assert!(
-        measured.of(&"browser/search".parse().unwrap()).is_some(),
-        "the browser is open"
+        measured.of(&crate::settings::access::preferences_id()).is_some(),
+        "Preferences is open"
     );
-    assert_eq!(measured, drawn, "with the module browser open");
+    assert_eq!(measured, drawn, "with Preferences open");
 }
 
 /// A capture draws the toolbar's buttons in their role's looks
@@ -2975,11 +2977,13 @@ fn the_canvas_draws_under_the_overlays_over_it() {
     let canvas = ui.canvas().bounds;
     ui.move_to(Point::new(canvas.x + 8.0, canvas.y + 8.0));
     ui.tap(keyboard::Key::Character("a".into()), keyboard::Modifiers::default());
+    // The browser is the runtime's (row 5): its box is in the runtime's
+    // layout, drawn in the Overlays layer over the canvas.
+    ui.lay_out_panels();
     let browser = ui
-        .places()
-        .of(&crate::browser::browser_id())
-        .expect("the browser is open")
-        .rect;
+        .runtime()
+        .bounds(&crate::browser::browser_id())
+        .expect("the browser is open");
     assert!(
         canvas.contains(Point::new(browser.x, browser.y)),
         "the browser opens over the canvas"

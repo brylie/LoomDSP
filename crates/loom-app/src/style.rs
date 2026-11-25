@@ -142,6 +142,20 @@ pub const MENU_BORDER: f32 = 1.0;
 /// `MENU_ITEM`).
 pub const MENU_ITEM_RADIUS: f32 = 3.0;
 
+/// The corner radius of a browser's text field (visual-system.md,
+/// Overlays, `BROWSER_FIELD`), as Iced's text input drew it.
+pub const FIELD_RADIUS: f32 = 4.0;
+
+/// The corner radius of a family swatch beside a module browser row's
+/// name (visual-system.md, Overlays, `SWATCH`).
+pub const SWATCH_RADIUS: f32 = 2.0;
+
+/// A Your patches tag's outline width and corner radius (visual-system.md,
+/// Overlays, `TAG`): the open-tab look while it filters.
+pub const TAG_BORDER: f32 = 1.0;
+/// See [`TAG_BORDER`].
+pub const TAG_RADIUS: f32 = 4.0;
+
 /// The shadow under a menu (visual-system.md, Overlays): black at 35%,
 /// 4 logical pixels down, with a 12 pixel blur, as Iced's menu had.
 pub const MENU_SHADOW: loom_ui::ShadowStyle = loom_ui::ShadowStyle {
@@ -358,23 +372,6 @@ pub fn secondary(_theme: &Theme, status: iced_button::Status) -> iced_button::St
 /// Small inline actions, such as the × that removes a row: text only.
 pub fn plain(_theme: &Theme, status: iced_button::Status) -> iced_button::Style {
     Role::Plain.iced(status)
-}
-
-/// `base`, outlined in the primary colour while `on`: the item of a menu
-/// that its keys are on. The outline sits on the button's own border, so it
-/// moves nothing, and the highlight never depends on colour alone.
-pub fn outlined(
-    base: fn(&Theme, iced_button::Status) -> iced_button::Style,
-    on: bool,
-) -> impl Fn(&Theme, iced_button::Status) -> iced_button::Style {
-    move |theme, status| {
-        let mut style = base(theme, status);
-        if on {
-            style.border.color = theme.extended_palette().primary.base.color;
-            style.border.width = 1.5;
-        }
-        style
-    }
 }
 
 /// The cable menu's surface, which Iced still draws, with an opaque fill and a visible

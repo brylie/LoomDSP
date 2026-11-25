@@ -165,6 +165,8 @@ impl App {
             || self.overlays.help.is_some()
             || self.overlays.chooser.is_some()
             || self.runtime_menu().is_some()
+            || self.overlays.browser().is_some()
+            || self.overlays.patches().is_some()
     }
 
     /// The runtime menu's items as focus stops, in order.

@@ -359,11 +359,22 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
         let ime = (!std::mem::replace(&mut self.ime.1, true))
             .then_some(self.ime.0)
             .flatten();
+        // One scripted key at a time, as the keyboard gives them: Iced keeps
+        // its copy now, as `window_event` keeps a real key's, the shell runs
+        // the runtime's turn for it, and the next report lets Iced hear it
+        // unless the runtime took it.
+        let mut input = Vec::new();
+        if let Some(key) = app.pointer.take_scripted_key() {
+            let _ = self.pointers.before(&parts.panels, key.clone(), &mut self.events);
+            input.extend(loom_canvas::iced_convert::event_to_core(&key));
+            self.redraw = Redraw::NextFrame;
+        }
         Report {
             cursor,
             ime,
             redraw: std::mem::take(&mut self.redraw),
             alone: !self.answers.is_empty(),
+            input,
         }
     }
 

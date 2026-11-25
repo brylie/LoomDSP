@@ -28,7 +28,10 @@ impl App {
         self.toolbar_panel(view);
         self.breadcrumb_panel(view);
         self.bar_panel(view);
-        // The chooser first, so help, which F1 opens over it, draws over it.
+        // The browsers, then the chooser, then help, which F1 opens over
+        // any of them (help-pages.md), so help draws over them.
+        self.browser_panel(view);
+        self.patches_panel(view);
         self.chooser_panel(view);
         self.help_panel(view);
         self.question_panel(view);
@@ -59,6 +62,9 @@ impl App {
         let mut stops = self.question_stops();
         stops.extend(self.help_stops());
         stops.extend(self.chooser_stops());
+        stops.extend(self.browser_stops());
+        stops.extend(self.patches_stops());
+        stops.extend(self.patches_tags());
         stops.extend(self.menu_stops());
         stops.extend(self.toolbar_stops());
         stops.extend(self.breadcrumb_stops());
@@ -93,6 +99,18 @@ impl App {
             return self
                 .help_next_stop(Some(from), back)
                 .map_or(TabStep::Leave, TabStep::To);
+        }
+        // The browser's search field is its dialog's only stop, so Tab and
+        // Shift+Tab stay on it (module-browser.md, Focus and Tab; the
+        // WAI-ARIA modal dialog pattern).
+        if self.browser_stops().contains(from) {
+            return TabStep::To(from.clone());
+        }
+        // Tab loops inside Your patches, the tags as one stop
+        // (patch-metadata.md, Keys; the WAI-ARIA modal dialog and toolbar
+        // patterns).
+        if let Some(to) = self.patches_next_stop(from, back) {
+            return TabStep::To(to);
         }
         // Tab stays inside the licence chooser, wrapping at both ends (the
         // WAI-ARIA modal dialog pattern; patch-metadata.md, Keys).

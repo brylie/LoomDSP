@@ -126,13 +126,14 @@ fn a_scroll_moves_only_its_own_area() {
 #[test]
 fn a_scroll_to_a_missing_part_does_nothing() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    ui.send(Message::OpenBrowser);
+    ui.app_mut().right_tab = crate::matrix::Tab::Matrix;
     let _ = ui.redraw();
-    let before = ui.scroll_translation("module-browser-list");
-    let missing = UiId::panel("browser").with("module").with("nothing-by-this-name");
+    let before = ui.scroll_translation("matrix-table");
+    assert!(before.is_some(), "the matrix's rows scroll in Iced");
+    let missing = UiId::panel("matrix").with("assignment").with(999u32);
     let messages = ui.scroll_to(&missing);
     assert!(messages.is_empty());
-    assert_eq!(ui.scroll_translation("module-browser-list"), before);
+    assert_eq!(ui.scroll_translation("matrix-table"), before);
 }
 
 /// Two scrolls in one turn become one task, the second after the first,
@@ -169,7 +170,7 @@ fn a_reveal_finds_its_part_and_chains_one_scroll() {
         }
     }
     let rect = |y: f32, height: f32| iced::Rectangle::new(iced::Point::new(0.0, y), iced::Size::new(100.0, height));
-    let row = UiId::panel("browser").with("module").with("loom.osc.sine");
+    let row = UiId::panel("matrix").with("assignment").with(3u32);
     // Two lists, each 100 tall; the row is 40 below the second one's view.
     let walk = |operation: &mut dyn Operation<()>, row_y: f32, areas: &mut [Area; 2]| {
         let [first, second] = areas;

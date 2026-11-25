@@ -26,6 +26,12 @@ impl App {
         if *id == crate::licence_chooser::panel::other_text_id() {
             return crate::licence_chooser::field_message(event);
         }
+        if *id == crate::browser::search_id() {
+            return crate::browser::field_message(event);
+        }
+        if crate::patches::text_fields().contains(id) {
+            return crate::patches::field_message(id, event);
+        }
         None
     }
 }

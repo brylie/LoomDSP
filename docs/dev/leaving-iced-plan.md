@@ -435,6 +435,8 @@ Gates (macOS, release, against main 447bb01f): `--dump-ui` and `--dump-ui --fram
 - **4d, app:** the inspector, with patch info (row 7, folded in) and the sub-patch inspector.
 - **4e, app:** the matrix, as a WAI-ARIA grid, whose Depth cell is entered with Enter or F2.
 
+**Rows 5 and 5b done** (plan 3.2, 2026-11-24): the module browser and Your patches are `loom-ui`'s (`browser/panel.rs`, `patches/panel.rs`; [module browser](../design/module-browser.md), Focus and Tab; [patch metadata](../design/patch-metadata.md), Keys; [spec](../design/ui-layer.md), section 5, rules 13, 14, and 19; section 6, rules 3 and 8). Each field takes its list's keys first and points at the highlighted row; the lists are the runtime's scroll containers, so row IDs moved under them (`browser/list/<kind>/<id>`, `patches/list/row/<path>`). The runtime gained hover and context menu reports, an anchored root told when its anchor stops showing, and stacked roots that close on a press outside. A control channel's scripted keys now go as the keyboard's (`Report::input`).
+
 ### 3.3 Text input and editing
 
 1. Single-line input (browser search, number entry, names) builds on Parley's `PlainEditor`, with Parley's `complex-scripts` feature for dictionary word breaking in Thai, Lao, Khmer, Burmese, Chinese, and Japanese, behind a field type of our own: cursor, selection, word movement, and clipboard come from it, and undo inside the field is ours, by snapshots of text and selection (about 80 lines).

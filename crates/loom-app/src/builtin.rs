@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 /// One built-in abstraction.
 #[derive(Debug)]
 pub struct Builtin {
-    /// The file's stem, which keys its browser row (`browser/builtin/<stem>`).
+    /// The file's stem, which keys its browser row (`browser/list/builtin/<stem>`).
     pub stem: &'static str,
     /// The name the browser shows: the patch's own name.
     pub name: &'static str,

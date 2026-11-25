@@ -8,7 +8,7 @@
 //! the headless `Ui` all go through [`heard_messages`] or the same two listeners,
 //! so a test sees what the app does.
 
-use crate::{App, Message, panic, patches, recent, settings};
+use crate::{App, Message, panic, recent, settings};
 use crate::{controls, matrix, subscriptions};
 use iced::event::Status;
 use iced::keyboard::{self, Key, key::Named};
@@ -141,7 +141,7 @@ impl Listening {
     /// The listeners, each with whether it hears events, in the order their
     /// messages are applied. `Key` comes first, so a key no widget used
     /// reaches the overlay that has it before anything closes that overlay.
-    fn rows(self) -> [(bool, Listener); 7] {
+    fn rows(self) -> [(bool, Listener); 5] {
         // An open question has every key, Panic's included: the runtime
         // keeps each press from Iced and gives it to `question::key_of`
         // (ui-layer.md, section 6, rule 6, step 2), so no listener here
@@ -153,12 +153,10 @@ impl Listening {
             // The matrix owns arrows and Escape even when a child widget uses
             // the key. Its handler ignores them outside table focus.
             (self.open && self.matrix, matrix::key_listener),
-            // The search field takes Escape for itself, so the browser hears
-            // keys whether or not a widget used them.
-            (self.open && self.browser, subscriptions::browser_key),
+            // The module browser's keys are the runtime's: its search field
+            // leaves them to the browser before it edits (`browser/panel.rs`).
             (self.open, subscriptions::help_key),
-            // The patches browser hears Up, Down, and Escape over its fields.
-            (self.open && self.patches, patches::key),
+            // Your patches' keys are the runtime's too (`patches/panel.rs`).
             // A draft in a value field ends on Escape, and the app has to know
             // when text focus may have moved (panel-widgets.md, Typing a value).
             (self.open && self.value_draft, controls::value_draft_event),

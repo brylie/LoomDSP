@@ -1584,12 +1584,10 @@ fn typing_ui() -> crate::ui_test::Ui {
 }
 
 /// The variant names of the messages an input became. The channel's own
-/// messages are left out, and so are focus answers, which come from tasks,
-/// and a list reporting where it scrolled, which comes from a frame.
+/// messages are left out, and so are focus answers, which come from tasks.
 fn routed_names(messages: Vec<Message>) -> Vec<String> {
     messages
         .iter()
-        .filter(|message| !matches!(message, Message::Browser(crate::browser::Message::Scrolled(_))))
         .map(|message| {
             let debug = format!("{message:?}");
             debug
@@ -1607,8 +1605,6 @@ fn routed_names(messages: Vec<Message>) -> Vec<String> {
                 // A script's Tab inside help, which moves the focus as the
                 // runtime's own Tab does with no message of its own.
                 "OverlayTab",
-                // And an arrow on one of the licence chooser's answers.
-                "ChooserArrow",
                 "TypeFocus",
                 "Telemetry",
             ]
@@ -2593,19 +2589,24 @@ fn locate_takes_an_overlay_ui_id() {
     );
     assert!(cancel.contains(at), "{reply:?} in {cancel:?}");
 
-    // The module browser's parts are found by UI ID too.
+    // The module browser's parts are found by UI ID too, in the runtime's
+    // layout, since the browser is the runtime's (row 5).
     ui.app_mut().overlays.question = None;
     ui.send(Message::OpenBrowser);
     let _ = ui.redraw();
-    let places = ui.places();
-    let found = Found {
-        canvas: places.canvas,
-        text: None,
-        places,
-        ours: None,
+    ui.lay_out_panels();
+    let mut find = |target: &str| {
+        let places = ui.places();
+        let found = Found {
+            canvas: places.canvas,
+            text: None,
+            places,
+            ours: ui.runtime().bounds(&target.parse().expect("a UI ID")),
+        };
+        locate(ui.app(), target, &found).unwrap()
     };
-    let search = locate(ui.app(), "browser/search", &found).unwrap();
-    let browser = locate(ui.app(), "browser", &found).unwrap();
+    let search = find("browser/search");
+    let browser = find("browser");
     assert!(browser.contains(search.center()), "the field is in the browser");
 
     // Preferences' parts, and the chooser's over it, too.

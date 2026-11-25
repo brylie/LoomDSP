@@ -54,6 +54,10 @@ pub enum Role {
     ListBox,
     /// One row of a list box.
     ListBoxOption,
+    /// A row of buttons that is one Tab stop, with Left and Right moving
+    /// among them (the WAI-ARIA toolbar pattern), such as Your patches'
+    /// tags. It lies across the window, so its node says it is horizontal.
+    Toolbar,
     /// A row of tabs.
     TabList,
     /// One tab.
@@ -116,6 +120,7 @@ impl Role {
             Self::ListItem => KitRole::ListItem,
             Self::ListBox => KitRole::ListBox,
             Self::ListBoxOption => KitRole::ListBoxOption,
+            Self::Toolbar => KitRole::Toolbar,
             Self::TabList => KitRole::TabList,
             Self::Tab => KitRole::Tab,
             Self::Status => KitRole::Status,
@@ -420,7 +425,16 @@ impl Access {
             Some(Problem::NoName)
         } else if !value_fits {
             Some(Problem::NoValue)
-        } else if self.role.is_operable() && self.actions.is_empty() && !focusable && !self.is_disabled() {
+        } else if self.role.is_operable()
+            // A list box option is operated by being highlighted, as a
+            // field's active descendant (rule 27), so Click is its own to
+            // offer: an option that cannot be picked, such as a file that
+            // does not read, is listed with none and stays enabled.
+            && self.role != Role::ListBoxOption
+            && self.actions.is_empty()
+            && !focusable
+            && !self.is_disabled()
+        {
             Some(Problem::NotOperable)
         } else {
             None
@@ -450,6 +464,9 @@ impl Access {
             Some(Value::Text(text)) => node.set_value(text.clone()),
             Some(Value::On(on)) => node.set_toggled(if *on { Toggled::True } else { Toggled::False }),
             None => {}
+        }
+        if self.role == Role::Toolbar {
+            node.set_orientation(accesskit::Orientation::Horizontal);
         }
         if self.states.disabled {
             node.set_disabled();

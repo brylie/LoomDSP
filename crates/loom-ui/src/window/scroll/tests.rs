@@ -60,6 +60,9 @@ pub(crate) enum Message {
     CountNotices,
     /// What the tree reports changed (`App::access_changed`).
     Notice,
+    /// The root placed under an element that stopped showing
+    /// (`App::anchor_hidden`).
+    AnchorHidden(UiId),
 }
 
 /// Builds the panels from the version shown and the radio chosen.
@@ -88,6 +91,8 @@ pub(crate) struct Shown {
     count_notices: bool,
     /// How many notices came that what the tree reports changed.
     pub(crate) notices: usize,
+    /// Every root told its anchor stopped showing, in order.
+    pub(crate) hidden: Vec<UiId>,
 }
 
 impl App for Shown {
@@ -107,6 +112,7 @@ impl App for Shown {
             Message::Raise(layer) => self.layer = layer,
             Message::CountNotices => self.count_notices = true,
             Message::Notice => self.notices += 1,
+            Message::AnchorHidden(root) => self.hidden.push(root),
             Message::Chose(id, index) => {
                 // A select's builder reads its chosen option as the version's
                 // last two digits, so the app keeps the choice it heard.
@@ -140,6 +146,10 @@ impl App for Shown {
 
     fn chose(&self, id: &UiId, index: usize) -> Option<Message> {
         Some(Message::Chose(id.clone(), index))
+    }
+
+    fn anchor_hidden(&self, root: &UiId) -> Option<Message> {
+        Some(Message::AnchorHidden(root.clone()))
     }
 
     fn access_changed(&self) -> Option<Message> {
@@ -227,6 +237,7 @@ pub(crate) fn showing(build: Build) -> Harness<Shown, Toolkit> {
         layer: Layer::Canvas,
         count_notices: false,
         notices: 0,
+        hidden: Vec::new(),
     };
     let window = WindowState::new(Size::new(400.0, 200.0));
     let mut harness = Harness::new(app, Toolkit::default(), window, Instant::now());
@@ -804,3 +815,65 @@ fn a_link_moves_with_its_scroll_container() {
 }
 
 mod keys;
+
+/// Ten stops in a container 100 px tall, and a menu in the Overlays layer
+/// placed under the first stop.
+fn menu_under_a_row(_: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
+    let mut panels = ten_stops(0, None);
+    let menu = Element::space(Length::Fixed(40.0), Length::Fixed(20.0))
+        .key("item")
+        .placed(crate::element::Placement::Under(id("rows").with("s0")));
+    panels.push((UiId::panel("menu"), Layer::Overlays, menu));
+    panels
+}
+
+/// Section 5, rule 13: a root placed under a row follows the row while it
+/// shows, and once the row is scrolled out of view the app is told, once,
+/// on the next turn; not again while it stays hidden, and again after it
+/// shows and hides once more.
+#[test]
+fn a_root_whose_anchor_scrolls_away_is_told_once() {
+    let mut harness = showing(menu_under_a_row);
+    let row = harness.runtime().bounds(&id("rows").with("s0")).expect("the row");
+    let menu = harness.runtime().bounds(&UiId::panel("menu")).expect("the menu");
+    assert_eq!((menu.x, menu.y), (row.x, row.y + row.height), "under its row");
+    let inside = Point::new(50.0, 50.0);
+    step(&mut harness, wheel(-1.0, inside));
+    assert!(harness.app().hidden.is_empty(), "the row still shows in part");
+    step(&mut harness, wheel(-1.0, inside));
+    step(&mut harness, DriverEvent::Woken);
+    assert_eq!(harness.app().hidden, [UiId::panel("menu")]);
+    step(&mut harness, wheel(-1.0, inside));
+    step(&mut harness, DriverEvent::Woken);
+    assert_eq!(harness.app().hidden.len(), 1, "told once while it stays hidden");
+    for _ in 0..3 {
+        step(&mut harness, wheel(1.0, inside));
+    }
+    step(&mut harness, wheel(-3.0, inside));
+    step(&mut harness, DriverEvent::Woken);
+    assert_eq!(harness.app().hidden.len(), 2, "told again after it showed");
+}
+
+/// Section 5, rule 13: a root under an element near the window's corner is
+/// moved in to stay inside the window, as one placed at a point is.
+#[test]
+fn a_root_under_an_element_near_the_corner_stays_inside_the_window() {
+    fn near_corner(_: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
+        let anchor = Element::column([
+            Element::space(Length::FILL, Length::Fixed(180.0)),
+            Element::row([
+                Element::space(Length::Fixed(380.0), Length::Fixed(10.0)),
+                Element::space(Length::Fixed(10.0), Length::Fixed(10.0)).key("corner"),
+            ]),
+        ]);
+        let menu = Element::space(Length::Fixed(60.0), Length::Fixed(40.0))
+            .key("item")
+            .placed(crate::element::Placement::Under(id("corner")));
+        let mut panels = list_panel(anchor);
+        panels.push((UiId::panel("menu"), Layer::Overlays, menu));
+        panels
+    }
+    let harness = showing(near_corner);
+    let menu = harness.runtime().bounds(&UiId::panel("menu")).expect("the menu");
+    assert_eq!((menu.x, menu.y, menu.width, menu.height), (340.0, 160.0, 60.0, 40.0));
+}

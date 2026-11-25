@@ -6,12 +6,7 @@
 //! appear as files are read. Only the metadata of each file is kept, so a
 //! folder of hundreds of patches never freezes the window.
 
-use crate::Element;
-use crate::style::{self, button};
-use crate::{DIM, files, recovery};
-use iced::widget::{checkbox, column, container, mouse_area, opaque, row, scrollable, space, text, text_input};
-use iced::{Length, Theme};
-use loom_canvas::iced_convert::ToIced as _;
+use crate::{files, recovery};
 use loom_patch::Metadata;
 use loom_patch::metadata::{Filter, Licence, LicenceFilter, Prepared};
 use loom_ui::Effects;
@@ -30,8 +25,6 @@ use std::time::{Duration, Instant, SystemTime};
 pub(crate) fn text_fields() -> [UiId; 2] {
     [part_id("search"), part_id("author")]
 }
-/// The list's widget ID, for keeping the highlight in view.
-const LIST: &str = "patch-browser-list";
 /// Height of one row. Fixed, so the list can scroll to a row.
 const ROW_HEIGHT: f32 = 46.0;
 /// Rows the list shows at once: one page, for Page Up and Page Down.
@@ -254,6 +247,9 @@ pub enum Message {
     Step(i32),
     /// Escape, a click outside, or **Close**.
     Close,
+    /// Left, Right, Home, or End on the tags: the focus moves to this tag
+    /// (the WAI-ARIA toolbar pattern).
+    FocusTag(String),
 }
 
 /// What the app should do after a browser message.
@@ -319,7 +315,7 @@ pub struct TagChip {
 /// One row of the list, as it is shown.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PatchRow {
-    /// Its UI ID: `patches/row/<path in the library folder>`.
+    /// Its UI ID: `patches/list/row/<path in the library folder>`.
     #[serde(serialize_with = "crate::snapshot::display")]
     pub id: UiId,
     /// The patch's name, or its file name.
@@ -385,6 +381,9 @@ pub struct PatchBrowser {
     shown: Vec<usize>,
     /// The highlighted entry of `shown`.
     highlight: usize,
+    /// The tag last picked or unpicked, or moved to: where Tab enters the
+    /// tags (the WAI-ARIA toolbar pattern).
+    last_tag: Option<String>,
     /// What is shown.
     model: Model,
     /// Set when this browser goes, to stop the thread reading its folder.
@@ -424,6 +423,7 @@ impl PatchBrowser {
             filter: Filter::default(),
             shown: Vec::new(),
             highlight: 0,
+            last_tag: None,
             model,
             stop: Arc::new(AtomicBool::new(false)),
         };
@@ -505,6 +505,16 @@ impl PatchBrowser {
         self.shown.get(self.highlight).map(|&i| &self.rows[i])
     }
 
+    /// The tag Tab enters the tags on: the one last used while it is still
+    /// shown, or else the first. `None` while there are no tags.
+    pub(crate) fn tag_entry(&self) -> Option<&str> {
+        let tags = &self.model.tags;
+        self.last_tag
+            .as_deref()
+            .filter(|last| tags.iter().any(|tag| tag.text == *last))
+            .or_else(|| tags.first().map(|tag| tag.text.as_str()))
+    }
+
     /// Every tag in the folder, tidied, sorted, each once, for the tag
     /// filter.
     #[cfg(test)]
@@ -548,6 +558,7 @@ impl PatchBrowser {
                 Outcome::Stay
             }
             Message::Tag(tag) => {
+                self.last_tag = Some(tag.clone());
                 match self.filter.tags.iter().position(|t| *t == tag) {
                     Some(at) => {
                         self.filter.tags.remove(at);
@@ -591,6 +602,11 @@ impl PatchBrowser {
                 Outcome::Stay
             }
             Message::Close => Outcome::Close,
+            Message::FocusTag(tag) => {
+                let focus = Effects::focus_as_input(tag_id(&tag));
+                self.last_tag = Some(tag);
+                return (Outcome::Stay, focus);
+            }
         };
         let effects = if follow { self.reveal() } else { Effects::none() };
         (outcome, effects)
@@ -629,125 +645,6 @@ impl PatchBrowser {
             Some(row) => Effects::scroll_into_view(row.id.clone()),
             None => Effects::none(),
         }
-    }
-
-    /// The browser, as a panel over the canvas. Drawn from the model alone;
-    /// each part is named by its UI ID, so the window says where it is
-    /// (`places.rs`).
-    pub fn view(&self) -> Element<'_, Message> {
-        let model = &self.model;
-        let named = |id: &UiId, content: Element<'static, Message>| -> Element<'static, Message> {
-            container(content).id(crate::places::widget_id(id)).into()
-        };
-        let search = named(
-            &part_id("search"),
-            text_input("Search names, descriptions, and tags", &model.search)
-                .id(crate::places::field_widget_id(&part_id("search")))
-                .on_input(Message::Search)
-                .on_submit(Message::Submit)
-                .size(style::CONTROL)
-                .padding(6)
-                .into(),
-        );
-        let author = named(
-            &part_id("author"),
-            text_input("Author", &model.author)
-                .id(crate::places::field_widget_id(&part_id("author")))
-                .on_input(Message::Author)
-                .on_submit(Message::Submit)
-                .size(style::CONTROL)
-                .width(200)
-                .into(),
-        );
-        let mut licences = row![].spacing(12);
-        for licence in &model.licences {
-            let filter = licence.filter;
-            licences = licences.push(named(
-                &licence_id(licence.key),
-                checkbox(licence.on)
-                    .style(style::check_box)
-                    .label(licence.label)
-                    .size(style::SWITCH)
-                    .text_size(style::CONTROL)
-                    .on_toggle(move |on| Message::Licence(filter, on))
-                    .into(),
-            ));
-        }
-        let chips = model.tags.iter().map(|tag| {
-            named(
-                &tag_id(&tag.text),
-                button(text(tag.text.clone()).size(style::SMALL))
-                    .padding([2, 8])
-                    // A picked tag looks like an open tab: filled and outlined.
-                    // The primary role is kept for one main action per view.
-                    .style(style::tab(tag.picked))
-                    .on_press(Message::Tag(tag.text.clone()))
-                    .into(),
-            )
-        });
-        let tags = iced::widget::Row::with_children(chips).spacing(4).wrap();
-
-        let rows = model.rows.iter().enumerate().map(|(i, r)| {
-            let highlighted = model.highlight == Some(i);
-            let cell = container(
-                column![
-                    text(r.name.as_str()).size(style::CONTROL),
-                    text(r.details.as_str()).size(style::SMALL).color(style::QUIET),
-                ]
-                .spacing(2),
-            )
-            .padding([4, 8])
-            .height(ROW_HEIGHT)
-            .width(Length::Fill)
-            .style(move |theme: &Theme| crate::browser::row_style(theme, highlighted));
-            container(
-                mouse_area(cell)
-                    .on_move(move |_| Message::Hover(i))
-                    .on_press(Message::Pick(i)),
-            )
-            .id(iced::widget::Id::from(r.key.clone()))
-            .into()
-        });
-        let list: Element<'_, Message> = match &model.empty {
-            Some(line) => container(text(line.as_str()).size(style::CONTROL).color(style::QUIET))
-                .padding(8)
-                .height(LIST_HEIGHT)
-                .into(),
-            None => container(scrollable(column(rows)).id(LIST).spacing(4).height(LIST_HEIGHT))
-                .id(crate::places::widget_id(&part_id("list")))
-                .into(),
-        };
-        let panel = column![
-            row![
-                text("Your patches").size(style::TITLE),
-                space::horizontal(),
-                named(
-                    &part_id("close"),
-                    button(text("Close").size(style::CONTROL))
-                        .on_press(Message::Close)
-                        .into()
-                ),
-            ]
-            .align_y(iced::Alignment::Center),
-            search,
-            row![author, licences].spacing(12).align_y(iced::Alignment::Center),
-            tags,
-            list,
-            text(model.folder.as_str()).size(style::SMALL).color(DIM),
-        ]
-        .spacing(8);
-        let panel = container(panel)
-            .padding(16)
-            .width(720)
-            .style(crate::help::dialog_style)
-            .id(crate::places::widget_id(&patches_id()));
-        opaque(
-            container(panel)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center(Length::Fill)
-                .style(|_| container::background(style::SCRIM.to_iced())),
-        )
     }
 }
 
@@ -809,7 +706,8 @@ fn patch_rows(rows: &[Row], shown: &[usize], folder: &Path) -> Vec<PatchRow> {
             let path = library
                 .path_of(&row.path)
                 .unwrap_or_else(|| row.path.to_string_lossy().into_owned());
-            let id = ids.take(part_id("row").with(path.as_str()));
+            // Inside the list, which keeps its scroll offset by its UI ID.
+            let id = ids.take(part_id("list").with("row").with(path.as_str()));
             PatchRow {
                 key: id.to_string(),
                 id,
@@ -832,31 +730,23 @@ fn empty_line(rows: &[Row], shown: &[usize], folder: &Path) -> Option<String> {
     })
 }
 
-/// The keys the open browser handles, whether or not a widget used them:
-/// Up, Down, Page Up, Page Down, and Escape (Your patches browser, Keys).
-pub(crate) fn key(
-    event: iced::Event,
-    _status: iced::event::Status,
-    _window: iced::window::Id,
-) -> Option<crate::Message> {
-    use iced::keyboard::{Event, Key, key::Named};
-    let iced::Event::Keyboard(Event::KeyPressed { key, .. }) = event else {
+/// Your patches' message for an edit of one of its fields, which the
+/// runtime holds (`runtime_fields.rs`): the search or the author filter.
+/// Enter never reaches either field, since the browser takes it first
+/// (`panel.rs`).
+pub(crate) fn field_message(id: &UiId, event: &loom_ui::FieldEvent) -> Option<crate::Message> {
+    let loom_ui::FieldEvent::Edited(text) = event else {
         return None;
     };
-    let message = match key {
-        Key::Named(Named::ArrowUp) => Message::Step(-1),
-        Key::Named(Named::ArrowDown) => Message::Step(1),
-        // A page, as in the module browser (the WAI-ARIA list box
-        // pattern's optional keys).
-        Key::Named(Named::PageUp) => Message::Step(-PAGE_ROWS),
-        Key::Named(Named::PageDown) => Message::Step(PAGE_ROWS),
-        Key::Named(Named::Escape) => Message::Close,
-        _ => return None,
+    let message = if *id == part_id("search") {
+        Message::Search(text.clone())
+    } else {
+        Message::Author(text.clone())
     };
     Some(crate::Message::Patches(message))
 }
 
-pub(crate) mod access;
+mod panel;
 
 #[cfg(test)]
 mod tests;

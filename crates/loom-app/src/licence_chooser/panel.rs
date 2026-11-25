@@ -214,37 +214,6 @@ impl App {
         stops
     }
 
-    /// The radio a script's arrow key moves to from the focused one, and
-    /// the message that chooses it: the next answer of its question, or
-    /// the one before when `back`, wrapping, as the runtime's radio keys do
-    /// for a real key (ui-layer.md, section 6, rule 9). `None` when the
-    /// focus is on no answer of a question, so the key goes on.
-    pub(crate) fn chooser_arrow(&self, back: bool) -> Option<(UiId, crate::Message)> {
-        let model = self.overlays.chooser.as_ref()?.model();
-        let focus = self.focus.as_ref().filter(|_| self.chooser_owns())?;
-        let picks = [
-            ("changes", Some(&model.changes)),
-            ("commercial", model.commercial.as_ref()),
-        ];
-        let (key, picks) = picks
-            .into_iter()
-            .filter_map(|(key, picks)| Some((key, picks?)))
-            .find(|(key, picks)| picks.iter().any(|pick| question_id(key).with(pick.key) == *focus))?;
-        let at = picks
-            .iter()
-            .position(|pick| question_id(key).with(pick.key) == *focus)?;
-        let to = if back {
-            at.checked_sub(1).unwrap_or(picks.len() - 1)
-        } else {
-            (at + 1) % picks.len()
-        };
-        let pick = &picks[to];
-        Some((
-            question_id(key).with(pick.key),
-            crate::Message::Licence(pick.message.clone()),
-        ))
-    }
-
     /// The stop a script's Tab goes to inside the chooser from `from`, or
     /// the one before when `back`, wrapping at both ends; from no stop of
     /// the chooser's, the first (or the last). The runtime's own Tab gets

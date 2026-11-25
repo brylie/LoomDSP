@@ -17,7 +17,9 @@
 //! and comes back, so that is still a click; a release anywhere else
 //! cancels it (Brylie's decision, 2026-11-17). A click's message runs on
 //! the next turn, whichever path found it. Hover and pressed run no update
-//! (section 3, rule 4).
+//! (section 3, rule 4), except that an element that asks hears the pointer
+//! coming onto it ([`App::hovered`]). A right press on an element with a
+//! context menu opens it ([`App::context_menu`], rule 19).
 //!
 //! A scroll container's bar and the wheel are the pointer's too (section 5,
 //! rule 12). The wheel scrolls the innermost container under the pointer,
@@ -167,17 +169,21 @@ impl<A: App> Panels<'_, A> {
 
     /// The panels a press at `point` is outside of, when `event` is a press
     /// of any button and the input layer, above the target, has panels that
-    /// close on one (section 5, rule 14): each such panel, if the press is
-    /// inside none of them. Empty otherwise, and for a press inside one.
+    /// close on one (section 5, rule 14): each such panel drawn over the
+    /// topmost one the press is inside, or every one when it is inside
+    /// none. A press on a browser closes the row menu over it and keeps the
+    /// browser; a press on the menu keeps both, even where the menu hangs
+    /// past the browser's edge. Empty otherwise.
     fn pressed_outside(&self, input: Layer, event: &Event, point: Point) -> Vec<UiId> {
         if !matches!(event, Event::Pointer(PointerEvent::Pressed(_))) || Side::of(input) != Side::Above {
             return Vec::new();
         }
         let roots = self.window.closing_roots(input);
-        if roots.iter().any(|(_, at)| at.contains(point)) {
-            return Vec::new();
-        }
-        roots.into_iter().map(|(root, _)| root).collect()
+        let over = roots
+            .iter()
+            .rposition(|(_, at)| at.contains(point))
+            .map_or(0, |at| at + 1);
+        roots.into_iter().skip(over).map(|(root, _)| root).collect()
     }
 
     /// True for a move onto the hover text showing, or between it and its
@@ -506,16 +512,22 @@ impl<A: App> Panels<'_, A> {
         let mut redraw = false;
         match pointer {
             PointerEvent::Moved => {
+                let moves = self.pointer.hover_moves;
                 redraw = self.hover(at.clone());
+                self.report_hover(self.pointer.hover_moves != moves);
                 // The pointer over an option of an open list highlights it.
                 if let Some(index) = at.as_ref().and_then(|(_, id)| crate::select::option_index(id)) {
                     self.highlight_option(index);
                 }
                 // Section 6, rule 8: the pointer moving over a menu item
                 // focuses it, with no ring, as native menus move their
-                // highlight; the keys then go on from there.
+                // highlight; the keys then go on from there. Only a menu
+                // item that is a focus stop: one whose menu leaves the
+                // focus in a field, as a browser's row menu does, keeps it
+                // there.
                 if let Some((_, id)) = &at
                     && self.is_menu_item(id)
+                    && self.window.is_stop(id)
                     && self.focus.id() != Some(id)
                 {
                     self.focus.wanted = None;
@@ -527,7 +539,18 @@ impl<A: App> Panels<'_, A> {
             }
             PointerEvent::Pressed(button) => {
                 self.pointer.space = None;
+                let moves = self.pointer.hover_moves;
                 redraw = self.hover(at.clone());
+                self.report_hover(self.pointer.hover_moves != moves);
+                // A right press on an element with a context menu opens it
+                // (section 5, rule 19), after the press focused there.
+                if *button == PointerButton::Right
+                    && let Some((_, id)) = &at
+                    && self.window.has_context_menu(id)
+                    && let Some(message) = self.app.context_menu(id, false)
+                {
+                    self.waker.send(message);
+                }
                 let before = self.focus.id().cloned();
                 self.focus_in(point, |layer| Side::of(layer) == side && layer >= input.layer);
                 redraw |= self.focus.id() != before.as_ref();
@@ -580,6 +603,24 @@ impl<A: App> Panels<'_, A> {
         })
     }
 
+    /// Tells the app the pointer came onto the hovered element, when the
+    /// hover just `changed` and that element asked to hear it (section 3,
+    /// rule 4). Only the pointer's own move or press reports: a layout that
+    /// moves rows under a still pointer, as typing in a search field does,
+    /// moves the hover without telling the app, so the highlight stays
+    /// where the keys left it.
+    fn report_hover(&self, changed: bool) {
+        if !changed {
+            return;
+        }
+        if let Some((_, id)) = &self.pointer.hovered
+            && self.window.reports_hover(id)
+            && let Some(message) = self.app.hovered(id)
+        {
+            self.waker.send(message);
+        }
+    }
+
     /// Moves the hover to `at`. Returns true when it changed.
     /// A move onto an element, even the one already hovered, makes the
     /// pointer the latest input for hover text (section 5, rule 11).
@@ -622,6 +663,16 @@ impl<A: App> Panels<'_, A> {
                 .window
                 .bounds(&crate::select::list_id())
                 .is_some_and(|list| list.contains(point))
+        {
+            return;
+        }
+        // A press in a list whose keys come from the focused field, as a
+        // combobox's list box does, leaves the focus in the field: the list
+        // is the field's, and its rows are no stops (section 6, rule 3).
+        if self
+            .focus
+            .id()
+            .is_some_and(|focused| self.window.in_keys_of(point, focused))
         {
             return;
         }
