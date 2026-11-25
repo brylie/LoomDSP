@@ -249,6 +249,9 @@ pub(crate) enum FieldAction {
     SetValue(String),
     /// Put this text in place of the selection, as one undo step.
     ReplaceSelection(String),
+    /// Select all of its text, as a focus effect that asks for it does
+    /// (`Effects::focus_and_select_all`).
+    SelectAll,
     /// Select from `anchor` to `focus`, each a run and a character in it.
     Select {
         /// Where the selection starts.
@@ -1084,6 +1087,7 @@ impl FieldState {
                 let text = self.fit(&text);
                 self.editor.driver(fonts, layouts).insert_or_replace_selection(&text);
             }
+            FieldAction::SelectAll => self.editor.driver(fonts, layouts).select_all(),
             FieldAction::Select { .. } => {
                 if let Some((anchor, focus)) = range {
                     self.editor.driver(fonts, layouts).select_byte_range(anchor, focus);

@@ -1963,6 +1963,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 }
                 Effect::Focus { target, select } => {
                     redraw |= self.focus_effect(&target, select);
+                    // One of the runtime's fields that took the focus
+                    // selects all of its text when asked, as the target's do.
+                    if select == Selection::All
+                        && let FocusTarget::Element(id) = &target
+                        && self.focus.id() == Some(id)
+                        && self.panels.fields.has(id)
+                    {
+                        let used = self.panels.fields.act(id, crate::field::FieldAction::SelectAll, now);
+                        redraw |= used.changed;
+                    }
                     self.field_left_after_focus(now);
                 }
                 // The runtime's own element is its own to scroll, once its
