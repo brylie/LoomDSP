@@ -273,6 +273,15 @@ impl<A: App> Panels<'_, A> {
             .is_some_and(|access| access.role() == crate::access::Role::MenuItem)
     }
 
+    /// True when the element with UI ID `id` is a turned-off menu item,
+    /// which a click picks nothing on, though it may be a focus stop
+    /// ([`Element::focusable_while_off`](crate::Element::focusable_while_off)).
+    fn is_off_menu_item(&self, id: &UiId) -> bool {
+        self.window
+            .access_of(id)
+            .is_some_and(|access| access.role() == crate::access::Role::MenuItem && access.is_disabled())
+    }
+
     /// True when the element with UI ID `id` is a button, a switch, a
     /// check box, a link, or a menu item, which a pointer press does not
     /// focus: each acts, and none takes input the keys would then go to
@@ -576,6 +585,9 @@ impl<A: App> Panels<'_, A> {
                     if let Some(index) = crate::select::option_index(&pressed.1) {
                         self.highlight_option(index);
                         self.choose_highlighted();
+                    } else if self.is_off_menu_item(&pressed.1) {
+                        // A turned-off menu item picks nothing, by the
+                        // pointer as by a key (section 6, rule 2).
                     } else if let Some(message) = self.app.clicked(&pressed.1) {
                         self.waker.send(message);
                     }

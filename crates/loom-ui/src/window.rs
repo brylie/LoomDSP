@@ -410,6 +410,8 @@ impl Window {
             let anchor = match &placement {
                 crate::element::Placement::At(point) => Some(*point),
                 crate::element::Placement::Under(id) => self.bounds(id).map(|at| Point::new(at.x, at.y + at.height)),
+                // Its corner waits for its size, just below.
+                crate::element::Placement::Centred => Some(Point::ORIGIN),
             };
             let Some(anchor) = anchor else {
                 // Under an element that is gone: not placed, so nothing
@@ -421,6 +423,15 @@ impl Window {
                 .records
                 .get(&root)
                 .map_or(Size::ZERO, |record| record.layout.size());
+            let anchor = if placement == crate::element::Placement::Centred {
+                // On whole logical pixels, as every edge is.
+                Point::new(
+                    ((size.width - content.width) / 2.0).round(),
+                    ((size.height - content.height) / 2.0).round(),
+                )
+            } else {
+                anchor
+            };
             let origin = Point::new(
                 anchor.x.min(size.width - content.width).max(0.0),
                 anchor.y.min(size.height - content.height).max(0.0),

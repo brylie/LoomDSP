@@ -362,6 +362,8 @@ pub enum Placement {
     /// Under the element with this UI ID, in another panel, its left edge
     /// at that element's, read from the layout already made.
     Under(UiId),
+    /// Centred in the window, for a panel that belongs to no one place.
+    Centred,
 }
 
 /// A link inside a rich text: the bytes of the text it covers, and what

@@ -5,15 +5,15 @@
 //! runtime's focus on an item. The tile menu is one too (row 3d): placed
 //! at the tile's top-left corner from the keyboard, or where the pointer
 //! pressed. So is the cable picker: centred in the window, with its name
-//! as a heading over a scrolling list, and a clear backdrop a press on
-//! which closes it.
+//! as a heading over a scrolling list, closing on a press outside as
+//! the others do.
 
 use super::{MenuKind, MenuModel};
 use crate::style;
 use crate::{App, Message};
 use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role};
-use loom_ui::{Align, Element, Layer, Length, Placement, View};
+use loom_ui::{Element, Layer, Length, Placement, View};
 use loom_ui_core::{Color, IdKey, Key, KeyEvent, UiId};
 
 /// The width of the tile menu, in logical pixels: its items' 200 and the
@@ -30,18 +30,6 @@ const CABLE_MENU_HEIGHT: f32 = 350.0;
 /// How many rows Page Up and Page Down move in the cable picker: about as
 /// many as its box shows, as the module browser's list moves by its own.
 const CABLE_PAGE_ROWS: usize = 10;
-
-/// The UI ID of the cable picker's backdrop panel, under the menu's own,
-/// so the menu owns it and its press is told apart from the box's.
-fn cable_backdrop_panel() -> UiId {
-    crate::cable_picker::cable_id().with("backdrop")
-}
-
-/// The UI ID of the clear backdrop around the cable picker, a press on
-/// which closes it (ui-layer.md, section 5, rule 14).
-fn cable_backdrop_id() -> UiId {
-    cable_backdrop_panel().with("clear")
-}
 
 /// One item as the menu's panel shows it.
 #[derive(Debug, Clone, PartialEq)]
@@ -150,9 +138,6 @@ impl App {
             hover: palette.background.weak.color.to_core(),
             text: palette.background.base.text.to_core(),
         };
-        if panel.placement.is_none() {
-            view.panel_with(cable_backdrop_panel(), Layer::Overlays, &(), backdrop);
-        }
         view.panel_with(menu.id, Layer::Overlays, &panel, build);
     }
 
@@ -176,9 +161,6 @@ impl App {
     /// pointer, Enter or Space, or a screen reader: what picking it sends.
     pub(crate) fn menu_click(&self, id: &UiId) -> Option<Message> {
         let menu = self.runtime_menu()?;
-        if menu.kind == MenuKind::Cable && *id == cable_backdrop_id() {
-            return Some(Message::CloseTileMenu);
-        }
         menu.items
             .into_iter()
             .find(|item| item.id == *id)
@@ -192,10 +174,11 @@ impl App {
             Some(Message::ProbeMenu(crate::probe_menu::Message::Close))
         } else if *root == super::recent_id() {
             Some(Message::Recent(crate::recent::Message::Close))
-        } else if self
-            .overlays
-            .tile_menu()
-            .is_some_and(|(module, _)| *root == super::tile_id(module))
+        } else if *root == crate::cable_picker::cable_id()
+            || self
+                .overlays
+                .tile_menu()
+                .is_some_and(|(module, _)| *root == super::tile_id(module))
         {
             Some(Message::CloseTileMenu)
         } else {
@@ -260,16 +243,6 @@ impl App {
     }
 }
 
-/// The clear backdrop under the cable picker: it takes a press beside the
-/// box, so the press reaches nothing under it, and closes the menu.
-fn backdrop(_: &()) -> Element {
-    Element::column([])
-        .width(Length::FILL)
-        .height(Length::FILL)
-        .key("clear")
-        .opaque()
-}
-
 /// The menu: a column of items in a box with the menu shadow, placed, and
 /// closing on a press outside. The cable picker's box is centred, with its
 /// heading over its rows in a scroll.
@@ -294,10 +267,10 @@ fn build(panel: &Panel) -> Element {
 }
 
 /// The cable picker: its heading, then its rows in a scroll keyed `list`,
-/// in a box centred in the window. Only the box takes presses, so one
-/// beside it reaches the backdrop under it. The heading gives no node: the
-/// menu is named by the same text, and a menu holds only its items (the
-/// WAI-ARIA menu pattern).
+/// in a box centred in the window (ui-layer.md, section 5, rule 13),
+/// closing on a press outside it with either button (rule 14). The heading
+/// gives no node: the menu is named by the same text, and a menu holds only
+/// its items (the WAI-ARIA menu pattern).
 fn centred(panel: &Panel, items: &[&Item]) -> Element {
     let heading = panel.heading.clone().unwrap_or_default();
     let list = Element::scroll(
@@ -312,7 +285,7 @@ fn centred(panel: &Panel, items: &[&Item]) -> Element {
     .height(Length::FILL)
     .min_height(0.0)
     .width(Length::FILL);
-    let menu = Element::column([Element::text(heading, style::HEADING_TEXT).colour(panel.text), list])
+    Element::column([Element::text(heading, style::HEADING_TEXT).colour(panel.text), list])
         .spacing(6.0)
         .padding(8.0)
         .width(Length::Fixed(panel.width))
@@ -322,12 +295,9 @@ fn centred(panel: &Panel, items: &[&Item]) -> Element {
         .border(style::MENU_BORDER, style::QUIET.to_core())
         .radius(style::MENU_RADIUS)
         .shadow(style::MENU_SHADOW)
-        .opaque();
-    Element::column([menu])
-        .width(Length::FILL)
-        .height(Length::FILL)
-        .align_x(Align::Center)
-        .align_y(Align::Center)
+        .opaque()
+        .placed(Placement::Centred)
+        .closes_on_press_outside()
 }
 
 /// True when `rows` can key every row with its whole UI ID and no two

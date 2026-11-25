@@ -234,6 +234,29 @@ fn a_press_beside_the_picker_closes_it_and_reaches_nothing_under_it() {
     assert_eq!(ui.app().session.selection, selection);
 }
 
+/// A right press beside the picker closes it too, as a press outside any
+/// menu does with either button, and opens no menu under it (ui-layer.md,
+/// section 5, rule 14).
+#[test]
+fn a_right_press_beside_the_picker_closes_it_and_opens_nothing() {
+    use iced::mouse::{Button, Event as Mouse};
+    let mut ui = open_on_the_filter();
+    let list = ui.runtime().bounds(&super::list_id()).expect("the list");
+    ui.move_to(Point::new(list.x - 40.0, list.y + 10.0));
+    let mut messages = ui.step(&[iced::Event::Mouse(Mouse::ButtonPressed(Button::Right))]);
+    messages.extend(ui.step(&[iced::Event::Mouse(Mouse::ButtonReleased(Button::Right))]));
+    let _ = ui.redraw();
+    assert!(
+        ui.app().overlays.cable_menu().is_none(),
+        "a right press beside it closes it"
+    );
+    assert!(ui.app().menu_model().is_none(), "and opens no menu: {messages:?}");
+    assert!(
+        !messages.iter().any(|m| matches!(m, crate::Message::Canvas(_))),
+        "the canvas never heard it: {messages:?}"
+    );
+}
+
 /// Tab closes the picker, as it closes any menu (the WAI-ARIA menu
 /// pattern; ui-layer.md, section 6, rule 8).
 #[test]

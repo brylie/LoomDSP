@@ -623,6 +623,22 @@ fn a_menu_item_focusable_while_off_is_a_stop_that_clicks_nothing() {
     assert!(node.is_disabled());
     assert!(node.supports_action(accesskit::Action::Focus));
     assert!(!node.supports_action(accesskit::Action::Click));
+    // A pointer's press and release on it picks nothing either.
+    let bounds = node.bounds().expect("its place");
+    let point = Point::new(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    );
+    for pointer in [
+        loom_ui_core::PointerEvent::Pressed(loom_ui_core::PointerButton::Left),
+        loom_ui_core::PointerEvent::Released(loom_ui_core::PointerButton::Left),
+    ] {
+        harness.step(DriverEvent::Input {
+            event: Event::Pointer(pointer),
+            pointer: Some(point),
+        });
+    }
+    assert_eq!(harness.app().clicks, [id("menu", "on")], "the click picked nothing");
 }
 
 /// An element that is turned off while it has focus is no stop any more,

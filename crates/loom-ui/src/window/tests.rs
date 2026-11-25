@@ -640,6 +640,35 @@ fn a_root_placed_at_a_point_stays_inside_the_window() {
     );
 }
 
+/// Section 5, rule 13: a root placed in the centre takes its content size
+/// in the middle of the window, on whole pixels, and in a window smaller
+/// than it keeps its top-left corner inside.
+#[test]
+fn a_centred_root_sits_in_the_middle_of_the_window() {
+    let place = |window: Size| {
+        let mut screen = Screen::new();
+        let mut view = View::new();
+        view.panel_with(panel("menu"), Layer::Overlays, &(), |_| {
+            Element::space(Length::Fixed(40.0), Length::Fixed(40.0))
+                .key("square")
+                .placed(crate::element::Placement::Centred)
+        });
+        screen.show_view(view);
+        screen.lay_out(window);
+        screen.at("menu/square")
+    };
+    assert_eq!(place(Size::new(300.0, 200.0)), Some(rect(130.0, 80.0, 40.0, 40.0)));
+    assert_eq!(
+        place(Size::new(301.0, 201.0)),
+        Some(rect(131.0, 81.0, 40.0, 40.0)),
+        "rounded to a whole pixel"
+    );
+    assert_eq!(
+        place(Size::new(30.0, 20.0)).map(|at| at.position()),
+        Some(Point::ORIGIN)
+    );
+}
+
 /// Section 5, rule 13: a root placed under an element opens at that
 /// element's bottom-left corner, read from the panels laid out before it,
 /// and a root under an element that is gone is not placed: no bounds, no
