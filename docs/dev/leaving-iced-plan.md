@@ -565,7 +565,7 @@ Gates: every parity gate; `--measure-idle` (counts may fall, since the bridge's 
 
 ### The duplicate baseline
 
-`cargo tree -d`, normal dependencies, macOS, at `323ead6a`: bitflags 1.3.2 and 2.13.2; block2 0.5.1 and 0.6.2; core-foundation 0.9.4 and 0.10.1; core-graphics-types 0.1.3 and 0.2.0; font-types 0.10.1 and 0.12.6; harfrust 0.3.2 and 0.12.0; hashbrown 0.16.1 and 0.17.1; miniz_oxide 0.8.9 and 0.9.1; objc2 0.5.3 and 0.6.5; objc2-app-kit 0.2.2 and 0.3.2; objc2-foundation 0.2.2 and 0.3.2; read-fonts 0.35.0 and 0.41.0; rustc-hash 1.1.0 and 2.1.3; skrifa 0.37.0 and 0.44.0; syn 2.0.119 and 3.0.9.
+`cargo tree -d -e normal --workspace`, macOS, at `6ffb482e` (main with #896; the same list as at `323ead6a`): bitflags 1.3.2 and 2.13.2; block2 0.5.1 and 0.6.2; core-foundation 0.9.4 and 0.10.1; core-graphics-types 0.1.3 and 0.2.0; font-types 0.10.1 and 0.12.6; harfrust 0.3.2 and 0.12.0; hashbrown 0.16.1 and 0.17.1; miniz_oxide 0.8.9 and 0.9.1; objc2 0.5.3 and 0.6.5; objc2-app-kit 0.2.2 and 0.3.2; objc2-foundation 0.2.2 and 0.3.2; read-fonts 0.35.0 and 0.41.0; rustc-hash 1.1.0 and 2.1.3; skrifa 0.37.0 and 0.44.0; syn 2.0.119 and 3.0.9.
 
 The older `harfrust` and `skrifa` should leave with Iced, and likely `read-fonts` and `font-types` (through `cosmic-text`). The `objc2` 0.5 family stays, with `winit` 0.30. P5 records the same list on Linux and Windows before it removes anything.
 
