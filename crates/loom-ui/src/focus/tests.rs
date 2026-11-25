@@ -1332,3 +1332,23 @@ fn a_focus_report_runs_before_a_message_that_waited() {
         "told of the focus given back before the waiting message ran"
     );
 }
+
+/// `Runtime::unfocus` lets go of the focus outside a turn, and the app
+/// hears of it as any move, on the next turn, so its copy stays in step.
+#[test]
+fn unfocus_lets_go_and_the_app_hears_of_it() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let app = Panels {
+        reports: true,
+        ..Panels::default()
+    };
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
+    harness.send(Message::Show(vec![panel("bar", row(&["a", "b"]))]));
+    harness.lay_out(&mut Mono::default());
+    harness.send(Message::Focus(id("bar", "a")));
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "a")));
+    harness.unfocus();
+    assert_eq!(harness.runtime().focused(), None);
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.app().moves.last(), Some(&None), "the app heard of it");
+}

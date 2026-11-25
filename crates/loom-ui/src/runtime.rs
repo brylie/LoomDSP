@@ -416,6 +416,18 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.focus.id().cloned()
     }
 
+    /// Lets go of the runtime's focus, as [`Effects::unfocus`](crate::Effects::unfocus)
+    /// does, for a driver or a test harness outside a turn. The app hears
+    /// of it as any focus move, through [`App::focus_moved`](crate::App::focus_moved)
+    /// on the next turn, so its copy of the focus stays in step. For tests:
+    /// a real driver's app lets go of the focus through its effects.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn unfocus(&mut self) {
+        if self.focus_to(None) {
+            self.panels().report_focus();
+        }
+    }
+
     /// The highlighted option of a select's open list, or `None` while no
     /// list is open, for tests.
     #[cfg(test)]

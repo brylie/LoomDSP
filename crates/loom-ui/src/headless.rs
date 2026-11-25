@@ -322,6 +322,12 @@ impl<A: App, T: Target<A::Message>> Harness<A, T> {
         self.runtime.parts()
     }
 
+    /// Lets go of the runtime's focus outside a turn ([`Runtime::unfocus`]).
+    #[cfg(any(test, feature = "testing"))]
+    pub fn unfocus(&mut self) {
+        self.runtime.unfocus();
+    }
+
     /// Focuses what a press at `point` reaches, as a router does when the
     /// runtime's layer takes the press ([`Runtime::focus_at`]).
     pub fn focus_at(&mut self, point: Point) -> Option<UiId> {
