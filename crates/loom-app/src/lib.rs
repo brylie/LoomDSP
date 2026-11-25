@@ -522,13 +522,11 @@ enum Message {
     MenuTab {
         back: bool,
     },
-    /// Tab or Shift+Tab from a script inside help or the licence chooser:
-    /// the focus moves to that overlay's next stop, or the one before,
-    /// wrapping at both ends, as the runtime's own Tab does (the WAI-ARIA
-    /// modal dialog pattern; rows 6 and 3c). Only until scripted keys take
-    /// the runtime's path (lane C's 1b).
-    OverlayTab {
-        back: bool,
+    /// Up, Down, Home, or End in the cable picker's list, which takes
+    /// them before its scroll: the highlight and the focus move to item
+    /// `to` (row 3d).
+    MenuMove {
+        to: usize,
     },
     /// One step of the runtime's focus, after a menu closed and gave back
     /// the focus it opened over (row 3b).
@@ -868,7 +866,7 @@ impl Message {
             | Self::EnterFields { .. }
             | Self::ToolbarFocus(_)
             | Self::MenuTab { .. }
-            | Self::OverlayTab { .. }
+            | Self::MenuMove { .. }
             | Self::FocusStep { .. }
             | Self::SliderReleased
             | Self::Matrix(_)
@@ -1892,16 +1890,7 @@ impl App {
                 }
             }
             Message::FocusStep { back } => self.effect(loom_ui::Effects::focus_step(back)),
-            Message::OverlayTab { back } => {
-                let next = if self.overlays.help.is_some() {
-                    self.help_next_stop(self.focus.as_ref(), back)
-                } else {
-                    self.chooser_next_stop(self.focus.as_ref(), back)
-                };
-                if let Some(next) = next {
-                    self.effect(loom_ui::Effects::focus(next));
-                }
-            }
+            Message::MenuMove { to } => self.menu_move(to),
             Message::ToolbarFocus(stop) => self.toolbar_focus(stop),
             Message::Canvas(CanvasEvent::Paste { world }) => {
                 let generation = self.generation;
@@ -2252,7 +2241,7 @@ impl App {
             | Message::EnterFields { .. }
             | Message::ToolbarFocus(_)
             | Message::MenuTab { .. }
-            | Message::OverlayTab { .. }
+            | Message::MenuMove { .. }
             | Message::FocusStep { .. }
             | Message::FocusMoved(_)
             | Message::Inspector(_)

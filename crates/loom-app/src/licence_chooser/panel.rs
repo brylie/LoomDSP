@@ -181,58 +181,6 @@ impl App {
     }
 }
 
-impl App {
-    /// The stops Tab meets in the chooser, in order, while it owns the
-    /// input: each question once, on the radio Tab lands on (the focused
-    /// one while the focus is in its group, otherwise the chosen one, or
-    /// the first), then **Other**, its field, and the buttons, Use only
-    /// while it is on (ui-layer.md, section 6, rules 2 and 9).
-    fn chooser_tab_stops(&self) -> Vec<UiId> {
-        let Some(model) = self.overlays.chooser.as_ref().map(super::Chooser::model) else {
-            return Vec::new();
-        };
-        if !self.chooser_owns() {
-            return Vec::new();
-        }
-        let entry = |key: &str, picks: &[Pick]| {
-            let ids: Vec<UiId> = picks.iter().map(|pick| question_id(key).with(pick.key)).collect();
-            self.focus
-                .as_ref()
-                .filter(|focus| ids.contains(focus))
-                .cloned()
-                .or_else(|| picks.iter().position(|pick| pick.chosen).map(|at| ids[at].clone()))
-                .or_else(|| ids.first().cloned())
-        };
-        let mut stops: Vec<UiId> = entry("changes", &model.changes).into_iter().collect();
-        if let Some(picks) = &model.commercial {
-            stops.extend(entry("commercial", picks));
-        }
-        stops.extend([other_id(), other_text_id(), button_id("clear"), button_id("cancel")]);
-        if model.ready {
-            stops.push(button_id("use"));
-        }
-        stops
-    }
-
-    /// The stop a script's Tab goes to inside the chooser from `from`, or
-    /// the one before when `back`, wrapping at both ends; from no stop of
-    /// the chooser's, the first (or the last). The runtime's own Tab gets
-    /// the same from its reading order ([`Self::chooser_tab`]).
-    pub(crate) fn chooser_next_stop(&self, from: Option<&UiId>, back: bool) -> Option<UiId> {
-        let stops = self.chooser_tab_stops();
-        let last = stops.len().checked_sub(1)?;
-        let at = from.and_then(|focus| stops.iter().position(|stop| stop == focus));
-        let to = match (at, back) {
-            (Some(at), false) if at == last => 0,
-            (Some(at), false) => at + 1,
-            (Some(at), true) => at.checked_sub(1).unwrap_or(last),
-            (None, false) => 0,
-            (None, true) => last,
-        };
-        stops.get(to).cloned()
-    }
-}
-
 impl super::Chooser {
     /// Where the focus goes when the chooser opens: the first question's
     /// chosen answer, or its first when none is, the first focusable

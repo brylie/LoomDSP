@@ -1602,9 +1602,6 @@ fn routed_names(messages: Vec<Message>) -> Vec<String> {
                 "ControlFrame",
                 "Located",
                 "FocusMoved",
-                // A script's Tab inside help, which moves the focus as the
-                // runtime's own Tab does with no message of its own.
-                "OverlayTab",
                 "TypeFocus",
                 "Telemetry",
             ]
@@ -3265,4 +3262,58 @@ fn a_scripted_tab_moves_the_focus_in_preferences() {
     let stops = ui.app().preferences_stops();
     run_ui(&mut ui, r#"{"cmd": "key", "key": "tab"}"#).unwrap();
     assert_eq!(ui.runtime().focused(), stops.get(1), "Tab went to the next stop");
+}
+
+/// A script's Tab and Shift+Tab move the runtime's focus as a real one
+/// does, step by step, in help on a page with links and in the licence
+/// chooser: scripted keys take the runtime's key path (#894), so neither
+/// overlay needs a route of its own.
+#[test]
+fn a_scripted_tab_moves_the_focus_as_a_real_one_in_help_and_the_chooser() {
+    use iced::keyboard::{Key, Modifiers, key::Named};
+    /// An overlay's name, and how to open it.
+    type Open = (&'static str, fn(&mut crate::ui_test::Ui));
+    let opens: [Open; 2] = [
+        ("the chooser", |ui| {
+            ui.app_mut().session.document.edit_info(|info| info.license = None);
+            ui.send(Message::PatchInfo(crate::patch_info::Message::ChooseLicence));
+        }),
+        ("help", |ui| {
+            ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![4])));
+            ui.send(Message::ShowHelp);
+        }),
+    ];
+    for (name, open) in opens {
+        for back in [false, true] {
+            let modifiers = if back { Modifiers::SHIFT } else { Modifiers::empty() };
+            let mut real = typing_ui();
+            open(&mut real);
+            let _ = real.redraw();
+            let start = real.runtime().focused().cloned();
+            let mut seen = Vec::new();
+            for _ in 0..3 {
+                real.tap(Key::Named(Named::Tab), modifiers);
+                let _ = real.redraw();
+                seen.push(real.runtime().focused().cloned());
+            }
+            assert!(seen.iter().any(|stop| *stop != start), "{name}: a real Tab moved");
+            let mut scripted = typing_ui();
+            open(&mut scripted);
+            let _ = scripted.redraw();
+            let line = if back {
+                r#"{"cmd": "key", "key": "tab", "modifiers": ["shift"]}"#
+            } else {
+                r#"{"cmd": "key", "key": "tab"}"#
+            };
+            for (step, expected) in seen.iter().enumerate() {
+                run_ui(&mut scripted, line).unwrap();
+                let _ = scripted.redraw();
+                assert_eq!(
+                    scripted.runtime().focused(),
+                    expected.as_ref(),
+                    "{name}, back {back}, step {step}"
+                );
+            }
+        }
+    }
 }

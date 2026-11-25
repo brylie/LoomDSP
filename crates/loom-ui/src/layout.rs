@@ -904,6 +904,7 @@ impl Layout {
             opaque,
             look,
             focusable,
+            focusable_while_off,
             access,
             hover,
             keys_from,
@@ -1009,7 +1010,7 @@ impl Layout {
         });
         // A scroll container is a stop only when nothing inside is, which
         // is known once its children are added.
-        let stop = kept.is_some() && is_stop(focusable, access.as_ref());
+        let stop = kept.is_some() && is_stop(focusable, focusable_while_off, access.as_ref());
         if let Some(problem) = access.as_ref().and_then(|access| access.problem(stop)) {
             self.problem(kept.clone(), problem);
         }
@@ -1079,7 +1080,7 @@ impl Layout {
             // itself: that stop moves it, and Tab would stop twice.
             let inside = self.records[index + 1..].iter().any(|record| record.focusable);
             let named = self.records[index].keys_from.is_some() || passive;
-            let stop = !inside && !named && is_stop(true, self.records[index].access.as_ref());
+            let stop = !inside && !named && is_stop(true, false, self.records[index].access.as_ref());
             self.records[index].focusable = stop;
             if stop && self.records[index].access.is_none() {
                 let id = self.records[index].id.clone();
@@ -1134,7 +1135,7 @@ impl Layout {
         let id = scope.clone().with(link.key);
         let (kept, _) = self.claim(Some(&id), index, lost);
         let access = kept.as_ref().map(|_| link.access);
-        let stop = kept.is_some() && is_stop(true, access.as_ref());
+        let stop = kept.is_some() && is_stop(true, false, access.as_ref());
         if let Some(problem) = access.as_ref().and_then(|access| access.problem(stop)) {
             self.problem(kept.clone(), problem);
         }
@@ -1175,9 +1176,13 @@ impl Layout {
 /// focus stop. This is the one place that says so (ui-layer.md, section
 /// 6, rule 2). A turned-off element is not one, as on macOS and Windows:
 /// Tab passes over it. Its node stays in the tree with its description
-/// (section 7, rule 23), and offers no Focus.
-fn is_stop(focusable: bool, access: Option<&Access>) -> bool {
-    focusable && !access.is_some_and(Access::is_disabled)
+/// (section 7, rule 23), and offers no Focus. A menu item that asks
+/// for it ([`Element::focusable_while_off`]) stays a stop while off, as
+/// the APG keeps a disabled menu item focusable.
+fn is_stop(focusable: bool, while_off: bool, access: Option<&Access>) -> bool {
+    let off = access.is_some_and(Access::is_disabled);
+    let menu_item = access.is_some_and(|access| access.role() == crate::access::Role::MenuItem);
+    focusable && (!off || (while_off && menu_item))
 }
 
 /// The root's size along one axis, in `space`. A fill root takes a

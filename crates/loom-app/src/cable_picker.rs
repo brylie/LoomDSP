@@ -6,9 +6,16 @@ use crate::{App, Message};
 use loom_canvas::{CanvasEvent, PortRef};
 use loom_ui_core::UiId;
 
-/// The Iced scrolling area containing the cable picker rows.
+/// The UI ID of the cable picker, a menu of the runtime's.
+pub(crate) fn cable_id() -> UiId {
+    UiId::panel("menu").with("cable")
+}
+
+/// The UI ID of the picker's scrolling list. Every row is keyed under it,
+/// since a scroll container keeps its offset by its UI ID (ui-layer.md,
+/// section 5, rule 12).
 pub(crate) fn list_id() -> UiId {
-    UiId::panel("menu").with("cable").with("list")
+    cable_id().with("list")
 }
 
 impl App {
@@ -31,27 +38,34 @@ impl App {
         true
     }
 
-    /// Opens a fresh stage of the picker with its first row highlighted.
+    /// Opens a fresh stage of the picker with the focus on its first row.
+    /// A new stage keeps the list's UI ID, so its old offset would stay;
+    /// focusing the first row scrolls it back to the top.
     fn show_cable_picker(&mut self, module: u32, start: Option<PortRef>) {
         self.overlays.open(Overlay::Menu(ContextMenu::Cable { module, start }));
         self.overlays.set_menu_highlight(Some(0));
         if let Some(item) = self.cable_menu_model(module, start, Some(0)).items.first() {
-            self.effect(loom_ui::Effects::scroll_into_view(item.id.clone()));
+            self.effect(loom_ui::Effects::focus(item.id.clone()));
         }
     }
 
     /// The same port rows for the pointer, keys and accessibility tree.
     pub(crate) fn cable_menu_model(&self, module: u32, start: Option<PortRef>, highlight: Option<usize>) -> MenuModel {
-        let id = UiId::panel("menu").with("cable");
+        let id = cable_id();
+        let list = list_id();
         let scene = &self.session.scene;
         let structure = &self.session.patch_map.structure;
         let mut items = Vec::new();
         if let Some(port) = start.filter(|port| self.input_has_cable(*port)) {
             items.push(MenuItem {
-                id: id.clone().with("disconnect").with(port.module).with(port.index as u32),
+                id: list
+                    .clone()
+                    .with("disconnect")
+                    .with(port.module)
+                    .with(port.index as u32),
                 label: "Disconnect cable".to_string(),
                 description: None,
-                message: Message::CablePort { start, port: None },
+                message: Some(Message::CablePort { start, port: None }),
             });
         }
         for tile in scene
@@ -71,16 +85,28 @@ impl App {
                         index,
                     };
                     items.push(MenuItem {
-                        id: id.clone().with(tile.id).with(direction).with(index as u32),
+                        id: list.clone().with(tile.id).with(direction).with(index as u32),
                         label: format!("{} ({direction})", structure.named_port(port)),
                         description: Some(direction.to_string()),
-                        message: Message::CablePort {
+                        message: Some(Message::CablePort {
                             start,
                             port: Some(port),
-                        },
+                        }),
                     });
                 }
             }
+        }
+        // With no port to offer, one item says so: turned off, it keeps
+        // the focus, so Escape and Tab still reach the menu and a screen
+        // reader hears why there is nothing to pick (the WAI-ARIA menu
+        // pattern, which needs an item in a menu).
+        if items.is_empty() {
+            items.push(MenuItem {
+                id: list.clone().with("none"),
+                label: "No ports to connect".to_string(),
+                description: None,
+                message: None,
+            });
         }
         let name = start
             .filter(|port| scene.port(*port).is_some())

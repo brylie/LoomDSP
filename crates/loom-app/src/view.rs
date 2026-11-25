@@ -8,7 +8,7 @@ use crate::matrix::{Event as MatrixEvent, Tab as RightTab};
 use crate::style::button;
 use crate::{App, Message, inspector, matrix, pointer, style};
 use iced::Length;
-use iced::widget::{column, container, mouse_area, row, rule, space, stack, text, tooltip};
+use iced::widget::{column, container, row, rule, space, stack, text, tooltip};
 use loom_canvas::{DragLine, EditGroupView, PatchCanvas};
 
 impl App {
@@ -90,45 +90,9 @@ impl App {
         }
         // The module browser is the runtime's, in its Overlays layer, with
         // its press outside (row 5, `browser/panel.rs`).
-        // The menus (tile, probe, Recent) are the runtime's, in its Overlays
-        // layer over everything Iced draws (rows 3b and 3d, `menus/panel.rs`).
-        // The cable menu is still Iced's.
-        if self.overlays.cable_menu().is_some()
-            && let Some(menu) = self.menu_model()
-        {
-            let outside = mouse_area(space().width(Length::Fill).height(Length::Fill))
-                .on_press(Message::CloseTileMenu)
-                .on_right_press(Message::CloseTileMenu);
-            let mut items = column![].spacing(2);
-            if menu.items.is_empty() {
-                items = items.push(iced::widget::text("No ports to connect").size(style::CONTROL));
-            }
-            for (index, item) in menu.items.into_iter().enumerate() {
-                items = items.push(crate::inspector::ids::named(
-                    &item.id,
-                    button(iced::widget::text(item.label).size(style::CONTROL))
-                        .on_press(item.message)
-                        .width(Length::Fill)
-                        .style(style::menu_item(menu.highlight == Some(index))),
-                ));
-            }
-            let panel = column![
-                iced::widget::text(menu.label).size(style::HEADING),
-                iced::widget::scrollable(items).id(crate::places::widget_id(&crate::cable_picker::list_id()))
-            ]
-            .spacing(6);
-            let panel = crate::inspector::ids::named(
-                &menu.id,
-                container(panel)
-                    .padding(8)
-                    .width(270)
-                    .max_height(350)
-                    .style(style::canvas_menu),
-            );
-            layers = layers
-                .push(outside)
-                .push(iced::widget::center(iced::widget::opaque(panel)));
-        }
+        // The menus (tile, cable, probe, Recent) are the runtime's, in its
+        // Overlays layer over everything Iced draws (rows 3b and 3d,
+        // `menus/panel.rs`).
         // Preferences (row 8), Your patches (row 5b), and the licence
         // chooser (row 3c) are the runtime's, in its Overlays layer; the
         // chooser is over Preferences, which opens it.

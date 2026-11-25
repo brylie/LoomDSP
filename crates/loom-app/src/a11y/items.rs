@@ -45,11 +45,6 @@ pub(crate) enum Kind {
     List,
     /// One row of a list, holding that row's parts.
     ListItem,
-    /// A menu over the rest that owns the input: the cable menu, which
-    /// Iced still draws (#856).
-    Menu,
-    /// One item of a menu. Click picks it.
-    MenuItem,
     /// A list of options to pick from, one selected, such as the module
     /// browser's results. Its children are list box options, each told its
     /// position and the list's size.

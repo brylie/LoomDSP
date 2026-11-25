@@ -35,8 +35,10 @@ pub(crate) struct MenuItem {
     pub label: String,
     /// More about it: a Recent file's folder, or that it is missing.
     pub description: Option<String>,
-    /// What picking it sends.
-    pub message: Message,
+    /// What picking it sends, or `None` for an item that is turned off:
+    /// it keeps the focus, as the APG keeps a disabled menu item
+    /// focusable, and picks nothing (ui-layer.md, section 6, rule 2).
+    pub message: Option<Message>,
 }
 
 /// The open menu, as its view, its keys, and the tree see it.
@@ -147,7 +149,7 @@ impl App {
                     id: tile_item_id(&id, &message),
                     label,
                     description: None,
-                    message,
+                    message: Some(message),
                 })
                 .collect();
             return Some(MenuModel {
@@ -169,7 +171,7 @@ impl App {
                 id: id.clone().with(key),
                 label: label.to_string(),
                 description: None,
-                message: Message::ProbeMenu(probe_menu::Message::Pick(probe)),
+                message: Some(Message::ProbeMenu(probe_menu::Message::Pick(probe))),
             })
             .collect();
             return Some(MenuModel {
@@ -193,7 +195,7 @@ impl App {
                 } else {
                     row.folder.clone()
                 }),
-                message: Message::Recent(recent::Message::Pick(at)),
+                message: Some(Message::Recent(recent::Message::Pick(at))),
             })
             .collect();
         Some(MenuModel {
@@ -208,7 +210,7 @@ impl App {
     /// A key a menu uses ([`is_menu_key`]) while a menu is open. It stops
     /// here, so it reaches neither the canvas nor a window behind the menu.
     pub(crate) fn menu_key(&mut self, event: &keyboard::Event) {
-        let keyboard::Event::KeyPressed { key, repeat, .. } = event else {
+        let keyboard::Event::KeyPressed { key, .. } = event else {
             return;
         };
         let Some(menu) = self.menu_model() else {
@@ -218,32 +220,27 @@ impl App {
             Key::Named(Named::Escape) => {
                 self.close_menu(menu.kind);
             }
-            // The cable menu is still Iced's (#856): Enter sends its
-            // highlighted item's message, as its own update on the next turn,
-            // as a click on the item would (ui-layer.md, section 2, rule 5).
-            Key::Named(Named::Enter) if menu.kind == MenuKind::Cable => {
-                if !repeat && let Some(item) = menu.highlight.and_then(|at| menu.items.get(at)) {
-                    self.post(item.message.clone());
-                }
-            }
-            // In the runtime's menus, Enter and Space on an item are the
-            // runtime's activation (section 3, rule 4), which reaches the app
-            // as `App::clicked`. Here Enter only stops at the menu, with no
-            // item focused.
+            // Enter and Space on an item are the runtime's activation
+            // (section 3, rule 4), which reaches the app as `App::clicked`.
+            // Here Enter only stops at the menu, with no item focused.
             Key::Named(Named::Enter) => {}
             _ => {
                 if let Some(at) = step(menu.highlight, menu.items.len(), key) {
-                    self.overlays.set_menu_highlight(Some(at));
-                    if menu.kind == MenuKind::Cable {
-                        self.effect(loom_ui::Effects::scroll_into_view(menu.items[at].id.clone()));
-                    } else {
-                        // In a runtime menu the highlight is the focus, with a
-                        // ring, as the keys put it there (rows 3b and 3d).
-                        self.effect(loom_ui::Effects::focus(menu.items[at].id.clone()));
-                    }
+                    self.menu_move(at);
                 }
             }
         }
+    }
+
+    /// Moves the open menu's highlight to item `at`. The highlight is the
+    /// runtime's focus, with a ring, as the keys put it there (rows 3b and
+    /// 3d), and the cable picker's scroll follows it.
+    pub(crate) fn menu_move(&mut self, at: usize) {
+        let Some(item) = self.menu_model().and_then(|menu| menu.items.into_iter().nth(at)) else {
+            return;
+        };
+        self.overlays.set_menu_highlight(Some(at));
+        self.effect(loom_ui::Effects::focus(item.id));
     }
 
     /// Closes the open menu of kind `kind`.

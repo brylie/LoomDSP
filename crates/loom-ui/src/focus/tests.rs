@@ -37,6 +37,8 @@ enum Message {
     ShowThenDescribe(Vec<Panel>),
     /// The runtime's focus moved here (`App::focus_moved`).
     Moved(Option<UiId>),
+    /// An element was clicked, from the pointer or a key (`App::clicked`).
+    Clicked(UiId),
 }
 
 /// An app that shows whatever panels a test gives it, and turns a screen
@@ -55,6 +57,8 @@ struct Panels {
     /// When the focus is reported on the first, the app moves it to the
     /// second.
     redirect: Option<(UiId, UiId)>,
+    /// Every click the runtime reported, in order.
+    clicks: Vec<UiId>,
 }
 
 impl App for Panels {
@@ -80,6 +84,10 @@ impl App for Panels {
                 self.panels = panels;
                 Effects::after_draw(Message::Describe)
             }
+            Message::Clicked(id) => {
+                self.clicks.push(id);
+                Effects::none()
+            }
             Message::Moved(focus) => {
                 let redirect = self.redirect.clone().filter(|(from, _)| focus.as_ref() == Some(from));
                 self.moves.push(focus);
@@ -99,6 +107,10 @@ impl App for Panels {
             title: "Focus".into(),
             min_size: None,
         }
+    }
+
+    fn clicked(&self, id: &UiId) -> Option<Message> {
+        Some(Message::Clicked(id.clone()))
     }
 
     fn focus_moved(&self, focus: Option<&UiId>) -> Option<Message> {
@@ -535,6 +547,82 @@ fn tab_passes_over_a_turned_off_element_and_its_node_stays() {
     assert_eq!(save.description(), Some("Nothing to save"));
     assert!(!save.supports_action(accesskit::Action::Focus));
     assert!(!save.supports_action(accesskit::Action::Click));
+}
+
+/// Rule 2's exception: a turned-off menu item that asks to stay a stop
+/// (`Element::focusable_while_off`) is one, as the APG keeps a disabled
+/// menu item focusable. Its node says it is off and offers Focus alone,
+/// and Enter and Space click nothing. A turned-off button that does not
+/// ask is still passed over.
+#[test]
+fn a_menu_item_focusable_while_off_is_a_stop_that_clicks_nothing() {
+    let disabled = States {
+        disabled: true,
+        ..States::default()
+    };
+    let item = Element::text("none", STYLE).key("none").focusable_while_off().access(
+        Access::new(Role::MenuItem, "No ports")
+            .action(Action::Click)
+            .states(disabled),
+    );
+    let button = Element::text("save", STYLE)
+        .key("save")
+        .focusable_while_off()
+        .access(Access::new(Role::Button, "Save").action(Action::Click).states(disabled));
+    let on = Element::text("on", STYLE)
+        .key("on")
+        .focusable()
+        .access(Access::new(Role::MenuItem, "Connect").action(Action::Click));
+    let mut harness = showing(vec![panel("menu", Element::row([item, button, on]))]);
+    assert_eq!(
+        harness.runtime().focus_stops(),
+        [id("menu", "none"), id("menu", "on")],
+        "the item is a stop; the button, of another role, is not"
+    );
+    harness.send(Message::Focus(id("menu", "none")));
+    assert_eq!(harness.runtime().focused(), Some(&id("menu", "none")));
+    for key in [Key::Enter, Key::Space] {
+        harness.step(DriverEvent::Input {
+            event: Event::Key(KeyEvent::Pressed {
+                key,
+                modifiers: Modifiers::NONE,
+                repeat: false,
+                text: None,
+            }),
+            pointer: None,
+        });
+        harness.step(DriverEvent::Input {
+            event: Event::Key(KeyEvent::Released { key }),
+            pointer: None,
+        });
+    }
+    assert!(
+        harness.app().clicks.is_empty(),
+        "nothing clicked: {:?}",
+        harness.app().clicks
+    );
+    // Enter on a menu item that is on does click it, so the test can tell.
+    harness.send(Message::Focus(id("menu", "on")));
+    harness.step(DriverEvent::Input {
+        event: Event::Key(KeyEvent::Pressed {
+            key: Key::Enter,
+            modifiers: Modifiers::NONE,
+            repeat: false,
+            text: None,
+        }),
+        pointer: None,
+    });
+    assert_eq!(harness.app().clicks, [id("menu", "on")]);
+    harness.send(Message::Describe);
+    let nodes = harness.app().nodes.as_ref().expect("described");
+    let (_, node) = nodes
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("No ports"))
+        .expect("its node");
+    assert!(node.is_disabled());
+    assert!(node.supports_action(accesskit::Action::Focus));
+    assert!(!node.supports_action(accesskit::Action::Click));
 }
 
 /// An element that is turned off while it has focus is no stop any more,

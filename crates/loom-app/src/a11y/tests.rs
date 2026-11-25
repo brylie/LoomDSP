@@ -2388,8 +2388,6 @@ fn every_inspector_part_is_named_and_placed() {
                 Kind::Field => Role::TextInput,
                 Kind::List => Role::List,
                 Kind::ListItem => Role::ListItem,
-                Kind::Menu => Role::Menu,
-                Kind::MenuItem => Role::MenuItem,
                 Kind::ListBox => Role::ListBox,
                 Kind::ListBoxOption => Role::ListBoxOption,
             };

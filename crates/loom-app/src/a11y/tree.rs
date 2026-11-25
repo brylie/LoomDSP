@@ -933,16 +933,9 @@ impl Frame<'_> {
             Kind::Field => Role::TextInput,
             Kind::List => Role::List,
             Kind::ListItem => Role::ListItem,
-            Kind::Menu => Role::Menu,
-            Kind::MenuItem => Role::MenuItem,
             Kind::ListBox => Role::ListBox,
             Kind::ListBoxOption => Role::ListBoxOption,
         });
-        // A menu owns the input while it is open, as the pointer finds:
-        // nothing outside it can be reached (section 7, rule 27).
-        if item.kind == Kind::Menu {
-            node.set_modal();
-        }
         // A list says how many rows it has, and each row its place, so a
         // screen reader can say "3 of 7". AccessKit puts the size on the
         // list and counts places from zero.
@@ -986,7 +979,7 @@ impl Frame<'_> {
             node.set_active_descendant(node_id(self.table, active));
         }
         if item.enabled {
-            if matches!(item.kind, Kind::Button | Kind::Check | Kind::Option | Kind::MenuItem) {
+            if matches!(item.kind, Kind::Button | Kind::Check | Kind::Option) {
                 node.add_action(Action::Click);
             }
             // An option offers Click only when it can be picked: a file that

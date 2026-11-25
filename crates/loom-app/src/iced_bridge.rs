@@ -350,6 +350,7 @@ impl loom_ui::App for Hosted {
         self.0
             .browser_panel_key(id, key)
             .or_else(|| self.0.patches_panel_key(id, key))
+            .or_else(|| self.0.menu_panel_key(id, key))
     }
 
     /// What a choice in one of the runtime's selects means: Preferences'

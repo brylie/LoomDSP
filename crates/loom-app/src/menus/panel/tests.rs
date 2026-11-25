@@ -12,6 +12,7 @@ fn item(path: &str) -> Item {
         label: path.to_string(),
         second: None,
         dim: false,
+        off: false,
         highlighted: false,
     }
 }
