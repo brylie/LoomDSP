@@ -43,6 +43,8 @@ The commands are buttons in the toolbar and shortcuts anywhere in the window. A 
 
 An edit that goes into the [undo history](undo.md) counts: add, delete, connect, disconnect, parameter, assignment, MIDI mapping, and **module moves**. *Why moves count:* positions are saved in the patch, so a save after a move changes the file.
 
+A draft being typed in a field also counts, though it is not in the history ([Text still being typed](#asking-before-losing-work)).
+
 Not counted: selection, pan, zoom, transport start or stop, playing notes, and Hold note. They are not in the patch file.
 
 The mark is set when a step is recorded. It is cleared by a successful save, an open, or New. Undoing back to the saved state clears it again: the app remembers the history position at save (closes [undo](undo.md#open-points) open point 1). If the history was trimmed past the saved position, the patch stays marked unsaved.
@@ -62,6 +64,20 @@ New, Open, closing the window, and quitting from the OS menu all ask when there 
 - **Save:** saves (with Save As for an untitled patch), then continues. If the save fails or its dialog is cancelled, the app stays and nothing is lost.
 - **Don't Save:** continues without saving.
 - **Cancel:** stops the command.
+
+**Text still being typed.** *Agreed 2026-11-25, not built yet ([#897](https://github.com/brylie/LoomDSP/issues/897)); the code follows plan 3.2, row 4d.* A field may hold a draft: text typed but not yet committed. There are three: a value in an inspector value field, a tag in patch info's Tags field, and a MIDI mapping's Low and High pair. While the question is open, a draft stays as it is, and nothing changes the patch. Each answer says what happens to it:
+
+- **Save** first commits each draft, as Enter would (one undo step each), then saves, so the file holds what the user typed. A draft that cannot commit (text that is not a value, a range that does not pass, a tag the [tag rules](patch-metadata.md#rules) refuse) stops the save. Nothing is written, the command does not go on, and the question closes. The focus goes to that field, which keeps its text and shows its reason, in its warning outline and in its node's description (ui-layer.md, section 7, rule 23), and the status line says "Not saved: <field>: <reason>". The user fixes the text, or presses Escape to drop it, and asks again.
+- **Don't Save:** the drafts go with the other changes.
+- **Cancel:** the field gets the focus back with its draft as it was (ui-layer.md, section 6, rule 4).
+
+**Save** and **Save As** on their own do the same. Each draft commits first, and one that cannot commit stops the save, as above. A field that keeps the focus after its draft commits shows the committed text: a value field selects it, as after Enter, the Tags field is empty, and the range pair shows the new range. The control channel's `save` follows the same rule, and its reply gives the reason.
+
+An open draft counts as unsaved: it sets the [title's mark](#window-title), and New, Open, closing the window, and quitting ask, even when the patch has no other change. When Escape drops the draft and nothing else is unsaved, the mark clears again. The draft is still not in the undo history until it commits. *Why the mark:* the title and the question always agree, so a user who sees no mark is never asked, and one who is asked can see why.
+
+Autosave writes the patch as it is: a draft is not in the recovery copy ([autosave](autosave.md)).
+
+*Why:* desktop platforms commit the field being edited before a document saves, and stop with the field's error when it cannot commit (Cocoa's `NSEditor` `commitEditing`, which `NSDocument` asks of its editors before it saves or closes; a web form's submit, which stops at a field that fails its constraints). A notice in the status line would not help on Quit, because the window closes with it, so dropping the text would lose it unseen. Only Save can be stopped, so Don't Save and Cancel are always one press away, and Escape drops a draft. Autosave does not commit, because that would change the patch under the user's typing.
 
 The question is drawn inside the window, so it needs no other program. **Tab** and the arrow keys move a highlight, **Enter** activates it, and **Escape** is Cancel. The highlight starts on the safe answer: **Save** here, **Cancel** in the Replace question, **OK** in an error. *Why:* a stray Enter must never lose work.
 
@@ -127,6 +143,11 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 - [x] Opening a file inside the bundled examples folder gives an untitled patch with its content, and Save asks for a place. The example file is unchanged (test with a temporary examples folder). Closing the window after opening one asks nothing. (`example_tests.rs`; the control channel's `open` in `control/run.rs`)
 - [x] Opening a file in some other folder that happens to be named `examples` is not a copy, and Save writes it in place (test). (`example_tests.rs`)
 - [ ] `cargo deny check` passes with the dialog crate on macOS, Windows, and Linux (CI).
+- [ ] Given a tag, a value, or a MIDI range typed but not committed, when the question's Save is chosen, then the file holds it, and one undo takes it back. (`question/tests.rs`)
+- [ ] Given a draft that cannot commit, when the question's Save is chosen, then the file on disk is unchanged, the app has not quit, and the focus is on the field, which keeps its text and whose node's description gives the reason. Don't Save quits; Cancel keeps the draft and its focus. (`question/tests.rs`)
+- [ ] Given a draft in a focused field, when Save or Save As is chosen, then the draft is saved and the field keeps the focus; a draft that cannot commit stops the save the same way. (`file_commands/tests.rs`)
+- [ ] Given a clean patch with only a draft, when the window is closed, then the question appears, and Don't Save quits without writing. (`question/tests.rs`)
+- [ ] Given a clean patch, when a draft is typed, then the title shows the mark, and the undo history has no new step; when Escape drops it, the mark clears. (`file_commands/tests.rs`)
 
 ## Recent files, the last folder, and dropping a file
 
@@ -155,3 +176,4 @@ A failed save keeps the unsaved mark. A save writes to a temporary file in the s
 2. **Open in the same window or a new one.** The same window.
 3. **Linux dialog backend.** *Leaning:* `rfd` with the XDG portal backend, to avoid linking GTK. Confirm with `cargo deny` and a test on a Linux desktop.
 4. **Reuse the engine on Open.** Rebuilding the engine is simple; reusing it with a cleared graph keeps the audio stream running. *Leaning:* rebuild and hand the new engine to the stream, if the audio host allows swapping an engine; otherwise reopen the stream.
+5. **Drafts at a save** ([#897](https://github.com/brylie/LoomDSP/issues/897); Brylie, 2026-11-25). A draft that cannot commit at the question's Save: "Block and show error". Plain Save and Save As: "Yes, same rule". An open draft by itself makes Close, New, and Open ask: "Yes, a draft counts". It also sets the title's mark: "Yes, mark it". See [Asking before losing work](#asking-before-losing-work), Text still being typed.
