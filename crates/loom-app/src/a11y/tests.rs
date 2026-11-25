@@ -2329,8 +2329,12 @@ fn the_tree_follows_the_pointer_under_every_panel() {
     for (owner, mut ui) in with_each_panel() {
         let open = owner == InputOwner::Canvas;
         let shortcuts = crate::inspector::ids::part(&crate::inspector::ids::patch(), "shortcuts");
-        let place = ui.places().of(&shortcuts).expect("the inspector's button is drawn");
-        let mut messages = ui.move_to(place.rect.center());
+        ui.lay_out_panels();
+        let place = ui
+            .runtime()
+            .bounds(&shortcuts)
+            .expect("the inspector's button is drawn");
+        let mut messages = ui.move_to(place.center());
         messages.extend(ui.press());
         messages.extend(ui.release());
         let reached = messages.iter().any(|message| matches!(message, Message::ShowShortcuts));
@@ -2351,16 +2355,14 @@ fn inspector_of(ui: &mut crate::ui_test::Ui, select: &[u32]) -> (Places, TreeUpd
 
 /// Every part the inspector reports has a role, every part but text has a
 /// name, and every part that acts is where the window drew it, inside the
-/// panel. Checked for a module, a sub-patch tile, and the patch itself, so
-/// the items and the view cannot drift apart.
+/// panel. Checked for a module and a sub-patch tile, so the items and the
+/// view cannot drift apart.
 #[test]
 fn every_inspector_part_is_named_and_placed() {
     use super::items::Kind;
-    let cases = [
-        ("subtractive.ron", vec![4]),
-        ("subtractive.ron", vec![]),
-        ("nested-subtractive.ron", vec![2]),
-    ];
+    // Patch info, with nothing selected, is the runtime's (plan 3.2, row
+    // 4d): `inspector/panel/tests.rs` checks its nodes.
+    let cases = [("subtractive.ron", vec![4]), ("nested-subtractive.ron", vec![2])];
     for (patch, select) in cases {
         let mut ui = crate::ui_test::Ui::open(patch);
         let (places, update, items) = inspector_of(&mut ui, &select);
@@ -4079,6 +4081,20 @@ fn every_inspector_state_is_reported_with_named_parts() {
             want(&ui.app().inspector_model()),
             "{name}: the inspector shows the state"
         );
+        // A variant the runtime draws gives its own nodes, whose names the
+        // runtime checks as it lays them out (section 7, rule 2).
+        if ui.app().inspector_ours() {
+            let shown = match ui.app().inspector_model() {
+                Inspector::Several(_) => loom_ui_core::UiId::panel("inspector").with("several"),
+                Inspector::Port(port) => crate::inspector::ids::panel(port.id),
+                Inspector::Patch(_) => crate::inspector::ids::patch(),
+                _ => return,
+            };
+            ui.lay_out_panels();
+            assert!(ui.runtime().bounds(&shown).is_some(), "{name}: the runtime lays it out");
+            assert!(ui.app().a11y_frames().panel.is_empty(), "{name}: no Iced items too");
+            return;
+        }
         let items = ui.app().a11y_frames().panel;
         assert!(!items.is_empty(), "{name}: the panel is reported");
         let mut acting = 0;

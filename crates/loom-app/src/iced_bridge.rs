@@ -321,6 +321,7 @@ impl loom_ui::App for Hosted {
             .or_else(|| self.0.menu_click(id))
             .or_else(|| self.0.browser_click(id))
             .or_else(|| self.0.patches_click(id))
+            .or_else(|| self.0.inspector_click(id))
             .or_else(|| self.2.clicked(id))
     }
 
@@ -351,6 +352,7 @@ impl loom_ui::App for Hosted {
             .browser_panel_key(id, key)
             .or_else(|| self.0.patches_panel_key(id, key))
             .or_else(|| self.0.menu_panel_key(id, key))
+            .or_else(|| self.0.inspector_panel_key(id, key))
     }
 
     /// What a choice in one of the runtime's selects means: Preferences'

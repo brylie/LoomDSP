@@ -151,9 +151,13 @@ impl App {
             .spacing(4)
             .padding([6, 8]),
         )
+        .height(style::RIGHT_TABS_HEIGHT)
         .id("panel");
         let panel = self.jump_view().unwrap_or_else(|| match self.right_tab {
             RightTab::Outline => self.outline_view(),
+            // The runtime's inspector draws in the root panel's slot here
+            // (`inspector/panel.rs`), so Iced keeps the space.
+            RightTab::Inspector if self.inspector_ours() => space().width(Length::Fill).height(Length::Fill).into(),
             RightTab::Inspector => self.inspector(),
             RightTab::Matrix => matrix::view(
                 self.session.matrix.model(
@@ -166,7 +170,10 @@ impl App {
                 self.a11y.is_active(),
             ),
         });
-        column![tabs, panel].width(280).height(Length::Fill).into()
+        column![tabs, panel]
+            .width(style::RIGHT_COLUMN_WIDTH)
+            .height(Length::Fill)
+            .into()
     }
 }
 

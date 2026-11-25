@@ -23,11 +23,15 @@ impl App {
     /// Adds the root panel and every panel in its slots to the runtime's
     /// view.
     pub(crate) fn chrome_panels(&self, view: &mut View) {
-        let inside = !self.session.level.is_root();
-        view.panel_with(window_id(), Layer::Panels, &inside, root);
+        let shape = Shape {
+            inside: !self.session.level.is_root(),
+            inspector: self.inspector_ours(),
+        };
+        view.panel_with(window_id(), Layer::Panels, &shape, root);
         self.toolbar_panel(view);
         self.breadcrumb_panel(view);
         self.bar_panel(view);
+        self.inspector_panel(view);
         // The browsers, then Preferences, then the chooser over it, then
         // help, which F1 opens over any of them (help-pages.md), so help
         // draws over them.
@@ -71,6 +75,8 @@ impl App {
         stops.extend(self.menu_stops());
         stops.extend(self.toolbar_stops());
         stops.extend(self.breadcrumb_stops());
+        stops.extend(self.inspector_stops());
+        stops.extend(self.inspector_tags());
         stops.extend(self.bar_stops());
         stops
     }
@@ -134,6 +140,12 @@ impl App {
         }
         let (top, bar) = (self.top_stops(), self.bar_stops());
         let to = |stop: Option<&UiId>| stop.map_or(TabStep::Leave, |stop| TabStep::To(stop.clone()));
+        // The inspector's column, while the runtime draws it (plan 3.2,
+        // row 4d): between the canvas and the bar in reading order.
+        if let Some(step) = self.inspector_next_stop(from, back) {
+            return step;
+        }
+        let column = self.inspector_stops();
         // Any toolbar button stands for the toolbar's one stop.
         let toolbar = self.toolbar_stops();
         let entry = self.toolbar_entry();
@@ -143,14 +155,17 @@ impl App {
         };
         if let Some(at) = top.iter().position(|stop| stop == from) {
             if back {
-                at.checked_sub(1).map_or_else(|| to(bar.last()), |at| to(top.get(at)))
+                at.checked_sub(1)
+                    .map_or_else(|| to(bar.last().or(column.last())), |at| to(top.get(at)))
             } else {
                 top.get(at + 1).map_or(TabStep::Leave, |stop| TabStep::To(stop.clone()))
             }
         } else if bar.contains(from) && !back && bar.last() == Some(from) {
             to(top.first())
         } else if bar.contains(from) && back && bar.first() == Some(from) {
-            if self.fields_among_ours() {
+            if let Some(last) = column.last() {
+                TabStep::To(last.clone())
+            } else if self.fields_among_ours() {
                 TabStep::Send(Message::EnterFields { backwards: true })
             } else {
                 TabStep::Leave
@@ -184,15 +199,40 @@ impl App {
     }
 }
 
-/// The root: the toolbar's slot, the breadcrumb's when `inside` a
-/// sub-patch, the fill, and the bar's slot.
-fn root(inside: &bool) -> Element {
+/// What the root's slots are: the breadcrumb's is there `inside` a
+/// sub-patch, and the inspector's while the runtime draws the inspector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Shape {
+    inside: bool,
+    inspector: bool,
+}
+
+/// The root: the toolbar's slot, the breadcrumb's inside a sub-patch, the
+/// fill beside the inspector's slot, and the bar's slot. The inspector's
+/// slot is at the right edge, below the right column's tabs, which Iced
+/// draws, and above the rule over the bar, as wide as the column.
+fn root(shape: &Shape) -> Element {
     let slot = |id: UiId, height: f32| Element::slot(id).width(Length::FILL).height(Length::Fixed(height));
     let mut parts = vec![slot(crate::toolbar::toolbar_id(), style::TOOLBAR_HEIGHT)];
-    if *inside {
+    if shape.inside {
         parts.push(slot(crate::breadcrumb::breadcrumb_id(), style::BREADCRUMB_HEIGHT));
     }
-    parts.push(Element::space(Length::Shrink, Length::FILL));
+    let fill = Element::space(Length::FILL, Length::FILL);
+    if shape.inspector {
+        let column = Element::column([
+            Element::space(Length::FILL, Length::Fixed(style::RIGHT_TABS_HEIGHT)),
+            Element::slot(crate::inspector::panel::inspector_id())
+                .width(Length::FILL)
+                .height(Length::FILL)
+                .min_height(0.0),
+            Element::space(Length::FILL, Length::Fixed(style::RULE)),
+        ])
+        .width(Length::Fixed(style::RIGHT_COLUMN_WIDTH))
+        .height(Length::FILL);
+        parts.push(Element::row([fill, column]).width(Length::FILL).height(Length::FILL));
+    } else {
+        parts.push(Element::space(Length::Shrink, Length::FILL));
+    }
     parts.push(slot(crate::stats_bar::stats_id(), style::STATS_BAR_HEIGHT));
     Element::column(parts).width(Length::FILL).height(Length::FILL)
 }

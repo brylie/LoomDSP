@@ -738,6 +738,8 @@ impl crate::App {
     /// the matrix's parts come from the same models their views draw.
     pub(crate) fn a11y_frames(&self) -> tree::Frames {
         let panel = match self.right_tab {
+            // The runtime's inspector gives its own nodes (`inspector/panel.rs`).
+            crate::matrix::Tab::Inspector if self.inspector_ours() => Vec::new(),
             crate::matrix::Tab::Inspector => crate::inspector::access::items(&self.inspector_model()),
             crate::matrix::Tab::Matrix => self.matrix_items(),
             crate::matrix::Tab::Outline => Vec::new(),
@@ -893,6 +895,7 @@ impl crate::App {
                     || self.runtime_menu().is_some_and(|menu| id.is_under(&menu.id))
                     || (!self.browser_stops().is_empty() && id.is_under(&crate::browser::browser_id()))
                     || (!self.patches_stops().is_empty() && id.is_under(&crate::patches::patches_id()))
+                    || (self.inspector_owns() && id.is_under(&crate::inspector::panel::inspector_id()))
             })
             .cloned()
         {
@@ -906,6 +909,7 @@ impl crate::App {
                     .or_else(|| self.menu_click(&id))
                     .or_else(|| self.browser_click(&id))
                     .or_else(|| self.patches_click(&id))
+                    .or_else(|| self.inspector_click(&id))
                     .into_iter()
                     .collect(),
                 accesskit::Action::Focus if self.our_stops().contains(&id) => {

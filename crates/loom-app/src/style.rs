@@ -34,6 +34,16 @@ pub const STATS_BAR_HEIGHT: f32 = 24.0;
 /// since the runtime's layout rounds to them.
 pub const TOOLBAR_HEIGHT: f32 = 40.0;
 
+/// How high the right column's row of tabs is, in logical pixels: Iced's
+/// row, which keeps this height, and the space the root panel leaves above
+/// the inspector's slot (plan 3.2, row 4d). Iced's own was 36.9: a 13 px
+/// label at a line height of 1.3, with 4 px of padding in each tab and 6 px
+/// around the row.
+pub const RIGHT_TABS_HEIGHT: f32 = 37.0;
+
+/// How wide the right column is, its inspector, matrix, and outline.
+pub const RIGHT_COLUMN_WIDTH: f32 = 280.0;
+
 /// How high the breadcrumb is, its rule included, inside a sub-patch. At
 /// the top level it takes no height. Iced's was 30.9 with a 1 px rule.
 pub const BREADCRUMB_HEIGHT: f32 = 32.0;

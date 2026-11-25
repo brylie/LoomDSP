@@ -155,7 +155,7 @@ impl App {
             // The authors box shows the new name, so its next edit
             // keeps it.
             // Only the authors box: a tag being typed stays.
-            self.session.patch_info.authors = crate::patch_info::State::new(self.session.document.info()).authors;
+            self.session.patch_info.authors = self.session.document.info().authors.join("\n");
         }
         self.write_now_then(path, next);
     }

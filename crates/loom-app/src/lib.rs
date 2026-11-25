@@ -696,7 +696,10 @@ impl Message {
             Self::PatchInfo(message) => {
                 use patch_info::Message as M;
                 let field = match message {
-                    M::Authors(_) | M::PartAuthors(..) | M::TagDraft(_) | M::TagSubmit => true,
+                    // A key on a focused part of patch info, as a field's typing is.
+                    M::Authors(_) | M::PartAuthors(..) | M::TagDraft(_) | M::TagSubmit | M::FocusTag(_) | M::Leave => {
+                        true
+                    }
                     M::RemoveTag(_) | M::ChooseLicence => false,
                 };
                 from(field, InputOwner::Canvas)

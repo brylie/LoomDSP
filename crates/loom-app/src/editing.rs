@@ -77,7 +77,10 @@ impl App {
         if self.input_owner() == crate::input_owner::InputOwner::Patches {
             crate::patches::text_fields().to_vec()
         } else if self.no_overlay() && self.right_tab == RightTab::Inspector {
-            if self.session.selection.is_empty() {
+            // The runtime's column walks its own stops (`inspector/panel.rs`).
+            if self.inspector_ours() {
+                Vec::new()
+            } else if self.session.selection.is_empty() {
                 crate::patch_info::text_fields().to_vec()
             } else {
                 self.midi_range_fields().map_or_else(Vec::new, |fields| fields.to_vec())

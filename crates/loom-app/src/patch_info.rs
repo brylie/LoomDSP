@@ -8,11 +8,10 @@
 //! unsaved. Authors on a selected sub-patch edit its definition.
 
 use crate::Element;
-use crate::style::{self, button};
-use crate::view::remove_button;
+use crate::style;
 use crate::{App, DIM, licence_chooser};
 use iced::Length;
-use iced::widget::{column, container, row, text, text_editor, text_input};
+use iced::widget::{column, text, text_editor};
 use loom_patch::Metadata;
 use loom_patch::metadata::{self, Licence};
 use serde::Serialize;
@@ -35,16 +34,47 @@ pub(crate) fn tags_part() -> loom_ui_core::UiId {
     crate::inspector::ids::part(&crate::inspector::ids::patch(), "tags")
 }
 
+/// The tags' toolbar: `inspector/patch/tag`.
+pub(crate) fn tags_toolbar_id() -> loom_ui_core::UiId {
+    crate::inspector::ids::part(&crate::inspector::ids::patch(), "tag")
+}
+
+/// The remove button of the chip for `tag`:
+/// `inspector/patch/tag/<tag>/remove`.
+pub(crate) fn tag_remove_id(tag: &str) -> loom_ui_core::UiId {
+    crate::inspector::ids::part(&tags_toolbar_id().with(tag), "remove")
+}
+
 /// The form's text fields, in the order Tab moves between them.
 pub(crate) fn text_fields() -> [loom_ui_core::UiId; 2] {
     [authors_part(), tags_part()]
 }
 
+/// The message for an event on the Tags field: an edit's text, where a
+/// comma adds a tag, or Enter, which adds what is left.
+pub(crate) fn tags_message(event: &loom_ui::FieldEvent) -> Option<crate::Message> {
+    match event {
+        loom_ui::FieldEvent::Edited(text) => Some(crate::Message::PatchInfo(Message::TagDraft(text.clone()))),
+        loom_ui::FieldEvent::Committed(_) => Some(crate::Message::PatchInfo(Message::TagSubmit)),
+        _ => None,
+    }
+}
+
+/// The message for an event on the Authors box: each edit's text. It has
+/// no Enter of its own, since Enter there inserts a line break.
+pub(crate) fn authors_message(event: &loom_ui::FieldEvent) -> Option<crate::Message> {
+    match event {
+        loom_ui::FieldEvent::Edited(text) => Some(crate::Message::PatchInfo(Message::Authors(text.clone()))),
+        _ => None,
+    }
+}
+
 /// A patch info edit.
 #[derive(Debug, Clone)]
 pub enum Message {
-    /// An edit in the authors box.
-    Authors(text_editor::Action),
+    /// The Authors box's text, as typed, from an edit or a screen
+    /// reader's SetValue (ui-layer.md, section 8, rule 7).
+    Authors(String),
     /// An edit to the selected sub-patch's list of authors.
     PartAuthors(u32, text_editor::Action),
     /// The tag field's text changed. A comma adds what comes before it.
@@ -55,17 +85,27 @@ pub enum Message {
     RemoveTag(usize),
     /// The **Choose** button opens the licence chooser.
     ChooseLicence,
+    /// Left, Right, Home, or End on the tags moved the focus to this tag's
+    /// remove button (the WAI-ARIA toolbar pattern).
+    FocusTag(String),
+    /// Escape on one of patch info's buttons: the keys go back to the
+    /// canvas, as from the toolbar.
+    Leave,
 }
 
 /// What patch info keeps between messages: the text being typed.
 pub struct State {
-    /// The authors box, one author per line, as the user typed it. The
-    /// patch stores the tidied list.
-    pub authors: text_editor::Content<crate::Renderer>,
+    /// The Authors box's text: as typed while it has focus, and the stored
+    /// authors, one per line, once focus leaves it. The patch stores the
+    /// tidied list (ui-layer.md, section 8, rule 7).
+    pub authors: String,
     /// The tag being typed.
     pub tag_draft: String,
     /// Why the last tag was not added, until the next one is typed.
     pub tag_note: Option<String>,
+    /// The tag whose remove button the tags' one Tab stop lands on: the
+    /// one last focused while it is still there.
+    pub last_tag: Option<String>,
     /// The text box for the sub-patch currently selected.
     part: Option<PartAuthors>,
 }
@@ -82,9 +122,10 @@ impl State {
     /// The fields for a patch just opened or started.
     pub fn new(info: &Metadata) -> Self {
         Self {
-            authors: text_editor::Content::with_text(&info.authors.join("\n")),
+            authors: info.authors.join("\n"),
             tag_draft: String::new(),
             tag_note: None,
+            last_tag: None,
             part: None,
         }
     }
@@ -195,6 +236,29 @@ impl App {
         self.session.patch_info.part = next;
     }
 
+    /// Shows the stored authors in patch info's Authors box when focus
+    /// leaves it, so a blank line typed between names goes once the box is
+    /// done with (ui-layer.md, section 8, rule 7).
+    ///
+    /// A tag's remove button that takes the focus becomes the one the
+    /// tags' Tab stop lands on next.
+    pub(crate) fn authors_focus_moved(&mut self, focus: Option<&loom_ui_core::UiId>) {
+        if focus != Some(&authors_part()) {
+            self.session.patch_info.authors = self.session.document.info().authors.join("\n");
+        }
+        if let Some(focus) = focus
+            && let Some(tag) = self
+                .session
+                .document
+                .info()
+                .tags
+                .iter()
+                .find(|tag| tag_remove_id(tag) == *focus)
+        {
+            self.session.patch_info.last_tag = Some(tag.clone());
+        }
+    }
+
     /// Records the sub-patch authors step when focus leaves its field.
     pub(crate) fn part_authors_focus_moved(&mut self, focus: Option<&loom_ui_core::UiId>) {
         if let Some(part) = &self.session.patch_info.part
@@ -207,15 +271,19 @@ impl App {
     /// Handles a patch info edit.
     pub(crate) fn patch_info_message(&mut self, message: Message) {
         match message {
-            Message::Authors(action) => {
-                let edits = action.is_edit();
-                self.session.patch_info.authors.perform(action);
-                if edits {
-                    let authors = metadata::tidy_authors(self.session.patch_info.authors.text().lines());
-                    if authors != self.session.document.info().authors {
-                        self.session.document.edit_info(|info| info.authors = authors);
-                    }
+            Message::Authors(text) => {
+                let authors = metadata::tidy_authors(text.lines());
+                if authors != self.session.document.info().authors {
+                    self.session.document.edit_info(|info| info.authors = authors);
                 }
+                // A box without focus, as a screen reader's SetValue can
+                // reach it, shows the stored authors at once; with focus it
+                // keeps what was typed until focus leaves.
+                self.session.patch_info.authors = if self.focus.as_ref() == Some(&authors_part()) {
+                    text
+                } else {
+                    self.session.document.info().authors.join("\n")
+                };
             }
             Message::PartAuthors(tile, action) => {
                 let Some(part) = self.session.patch_info.part.as_mut().filter(|part| part.tile == tile) else {
@@ -269,11 +337,21 @@ impl App {
             }
             Message::RemoveTag(index) => {
                 if index < self.session.document.info().tags.len() {
+                    self.tag_removed(index);
                     self.session.document.edit_info(|info| {
                         info.tags.remove(index);
                     });
                     self.session.patch_info.tag_note = None;
                 }
+            }
+            Message::FocusTag(tag) => {
+                let id = tag_remove_id(&tag);
+                self.session.patch_info.last_tag = Some(tag);
+                self.effect(loom_ui::Effects::focus_as_input(id));
+            }
+            Message::Leave => {
+                self.effect(loom_ui::Effects::unfocus());
+                self.toolbar_focus(None);
             }
             Message::ChooseLicence => {
                 let current = self.session.document.info().license.clone();
@@ -281,6 +359,32 @@ impl App {
                     licence_chooser::Target::Patch,
                     current.as_deref(),
                 ));
+            }
+        }
+    }
+
+    /// Before tag `index` goes: when its remove button has the focus, the
+    /// focus goes to the next tag's, or else the previous one's, or else to
+    /// the Tags field, so a keyboard user keeps their place (the WAI-ARIA
+    /// toolbar pattern). The tags' Tab stop never lands on a tag that went.
+    fn tag_removed(&mut self, index: usize) {
+        let tags = &self.session.document.info().tags;
+        let gone = &tags[index];
+        let neighbour = tags
+            .get(index + 1)
+            .or_else(|| index.checked_sub(1).and_then(|i| tags.get(i)))
+            .cloned();
+        let focused = self.focus.as_ref() == Some(&tag_remove_id(gone));
+        if self.session.patch_info.last_tag.as_ref() == Some(gone) {
+            self.session.patch_info.last_tag.clone_from(&neighbour);
+        }
+        if focused {
+            match neighbour {
+                Some(tag) => {
+                    self.effect(loom_ui::Effects::focus_as_input(tag_remove_id(&tag)));
+                    self.session.patch_info.last_tag = Some(tag);
+                }
+                None => self.effect(loom_ui::Effects::focus_as_input(tags_part())),
             }
         }
     }
@@ -298,86 +402,6 @@ impl App {
             Err(e) => self.session.patch_info.tag_note = Some(e.to_string()),
         }
     }
-}
-
-/// Patch info, drawn from its rows.
-pub fn view<'a>(rows: PatchRows, authors: &'a text_editor::Content<crate::Renderer>) -> Element<'a, crate::Message> {
-    let msg = crate::Message::PatchInfo;
-    let label = |s: &'static str| text(s).size(style::BODY).color(DIM);
-    let mut chips: Vec<Element<'a, crate::Message>> = Vec::new();
-    let panel = crate::inspector::ids::patch();
-    let part = |name| crate::inspector::ids::part(&panel, name);
-    for (index, tag) in rows.tags.into_iter().enumerate() {
-        let key = part("tag").with(tag.as_str());
-        let chip = container(
-            row![
-                text(tag.clone()).size(style::SMALL),
-                crate::inspector::ids::named(
-                    &crate::inspector::ids::part(&key, "remove"),
-                    remove_button(format!("Remove tag {tag}"), msg(Message::RemoveTag(index)))
-                )
-            ]
-            .spacing(2)
-            .align_y(iced::Alignment::Center),
-        )
-        .padding([0, 6])
-        .style(container::rounded_box);
-        chips.push(chip.into());
-    }
-    // No row at all without tags, so the field sits under its label.
-    let tags: Element<'a, crate::Message> = if chips.is_empty() {
-        column![].into()
-    } else {
-        iced::widget::Row::with_children(chips).spacing(4).wrap().into()
-    };
-    let mut column = column![
-        text(rows.name).size(style::HEADING),
-        label("Authors, one per line"),
-        crate::inspector::ids::named(
-            &part("authors"),
-            text_editor(authors)
-                .id(crate::places::field_widget_id(&authors_part()))
-                .placeholder("Your name")
-                .on_action(move |action| msg(Message::Authors(action)))
-                .size(style::CONTROL)
-                .height(Length::Shrink)
-        ),
-        label("Tags"),
-        tags,
-        crate::inspector::ids::named(
-            &part("tags"),
-            text_input("Type a tag, then Enter or comma", &rows.tag_draft)
-                .id(crate::places::field_widget_id(&tags_part()))
-                .on_input(move |value| msg(Message::TagDraft(value)))
-                .on_submit(msg(Message::TagSubmit))
-                .size(style::CONTROL)
-        ),
-    ]
-    .spacing(6);
-    if let Some(note) = rows.tag_note {
-        column = column.push(text(note).size(style::SMALL));
-    }
-    column = column.push(label("Licence")).push(
-        row![
-            text(rows.licence).size(style::CONTROL).width(Length::Fill),
-            crate::inspector::ids::named(
-                &part("choose_licence"),
-                button(text("Choose").size(style::CONTROL)).on_press(msg(Message::ChooseLicence))
-            ),
-        ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center),
-    );
-    if let Some(summary) = rows.licence_summary {
-        column = column.push(text(summary).size(style::SMALL));
-    }
-    if let Some(url) = rows.licence_url {
-        column = column.push(text(url).size(style::SMALL).color(DIM));
-    }
-    if !rows.parts_by.is_empty() {
-        column = column.push(text(format!("Includes parts by {}", rows.parts_by.join(", "))).size(style::SMALL));
-    }
-    column.into()
 }
 
 /// The editable credit on a selected sub-patch's inspector.

@@ -403,6 +403,7 @@ impl App {
     /// (panel-widgets.md, Typing a value).
     pub(crate) fn focus_moved(&mut self, focus: Option<UiId>) {
         self.part_authors_focus_moved(focus.as_ref());
+        self.authors_focus_moved(focus.as_ref());
         // Only its own field, still shown, keeps a draft: a field that left
         // the inspector has no part to match.
         if let Some(draft) = &self.session.value_draft

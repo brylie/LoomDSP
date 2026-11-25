@@ -21,6 +21,7 @@ use serde::Serialize;
 
 pub(crate) mod access;
 pub(crate) mod ids;
+pub(crate) mod panel;
 
 /// What the inspector's controls send. The control channel sends the two that
 /// set a parameter too.
@@ -1291,21 +1292,9 @@ pub fn view<'a>(
         Inspector::Port(p) => Some(ids::panel(p.id)),
     };
     let content: Element<'a, AppMessage> = match model {
-        // Short, with the full list one click away (visual-system.md).
-        Inspector::Patch(rows) => column![
-            crate::patch_info::view(rows, &patch_info.authors),
-            iced::widget::rule::horizontal(1),
-            text("Select a module to edit it.").size(style::BODY).color(DIM),
-            text("Press A over the canvas to add one.").size(style::BODY).color(DIM),
-            ids::named(
-                &ids::part(&ids::patch(), "shortcuts"),
-                button(text("Keyboard shortcuts").size(style::CONTROL)).on_press(AppMessage::ShowShortcuts)
-            ),
-        ]
-        .spacing(8)
-        .into(),
-        Inspector::Several(n) => text(format!("{n} modules selected")).size(style::CONTROL).into(),
-        Inspector::Empty => text("").into(),
+        // Patch info, a selection of several, a port, and nothing are the
+        // runtime's (`panel.rs`); the view never draws them here.
+        Inspector::Patch(_) | Inspector::Several(_) | Inspector::Empty | Inspector::Port(_) => text("").into(),
         Inspector::Unknown(m) => {
             let id = m.id;
             let mut rows = column![
@@ -1455,13 +1444,6 @@ pub fn view<'a>(
             }
             rows.into()
         }
-        Inspector::Port(p) => column![
-            text(p.name).size(style::HEADING),
-            text(p.direction).size(style::BODY).color(DIM),
-            text("A port of this sub-patch. Its name is the port's label on the tile outside.").size(style::BODY),
-        ]
-        .spacing(6)
-        .into(),
     };
     let content = match &panel {
         Some(panel) => container(content).id(crate::places::widget_id(panel)),
