@@ -462,17 +462,117 @@ No view uses an Iced widget. The parity gates pass. The VoiceOver check covers t
 
 ## Phase 4: Remove Iced
 
-1. Remove `iced`, `iced_wgpu`, and `iced_runtime` from `Cargo.toml` files. Depend on `winit`, `wgpu`, Parley, `swash`, `accesskit`, and `accesskit_winit` directly. With Iced gone, `cosmic-text` and `cryoglyph` leave the tree, and the canvas and the panels share one Parley font context. Once our `wgpu` is free to move, weigh Vello against our glyph atlas.
-2. Run `cargo deny check` and `cargo tree -d`, and remove duplicates.
-   - The runtime builds the whole accessibility tree and keeps the table of node IDs (`IdTable`), which the app keeps until then (spec section 7, Behaviour). The app's tree code in `a11y/` is left only for the canvas's custom element.
-3. Update the documents:
-   - `AGENTS.md` (App and Canvas paragraphs, commands);
-   - `docs/dev/architecture.md`;
-   - `docs/design/visual-system.md` and `docs/design/control-channel.md`;
-   - the `ui_test.rs` module comment;
-   - OQ-13 and OQ-14 in `docs/product/open-questions.md`. OQ-14 closes; OQ-13 now depends on our shell, not Iced.
-4. Delete the text gate tool (`crates/loom-app/src/screenshot/text_gate_tests.rs`): it measures with Iced's paragraph.
-5. Write an explainer in `docs/learn/` on how the UI layer works: the runtime, effects, layout, and the accessibility tree. It is the documentation Iced did not have.
+Written 2026-11-25 from a read-only breakdown at `323ead6a` (rows 4d and 4e still open). The rules are in [the spec](../design/ui-layer.md): the host contract (section 9), the keys (section 1, Keys in `loom-ui-core`), the key order (section 6, rule 6), the end of the bridge (section 2), the harness (section 10), and the [phase 4 criteria](../design/ui-layer.md#acceptance-criteria). Brylie's decisions of 2026-11-25 are in its decisions table. What is marked Proposed there is settled before P0 merges.
+
+Phase 4 is more than removing dependencies. The canvas is still an Iced widget at the window's root, and `loom-ui` cannot host it yet. That is the main new work (P1). The canvas's place and camera, the `Places` and `Find` window questions, and the window's root move here, not in row 4e (Brylie, 2026-11-25).
+
+Order: P0, then P1, P2, and P3 side by side, then P4, P5, P6, P7, and P8. P6 needs only P4, so it can go beside P5. Each pull request says `Part of #683`, updates the specs it changes, and passes the parity gates. P8 closes #683.
+
+| Step | What | Size | Starts after |
+|---|---|---|---|
+| P0 | This spec and plan (docs only) | S | now |
+| P1 | `loom-ui` hosts a custom element | L | row 4d |
+| P2 | The app's keys and events on `loom-ui-core` | M | row 4e |
+| P3 | Colours off Iced's theme | M | row 4e |
+| P4 | The cut-over: the window, the harness, the canvas, the control channel | XL | P1, P2, P3, all of phase 3 |
+| P5 | Remove the Iced dependencies | S to M | P4 |
+| P6 | The runtime owns the whole accessibility tree | L | P4 |
+| P7 | Docs and the explainer | M | P5, P6 |
+| P8 | The final check; closes #683 | S | P7 |
+
+### P0. The spec and this plan
+
+Docs only. The phase 4 criteria, section 9 as a host contract, the key types, section 6, rule 6's order once Iced's listeners go, the end of the "until phase 3" text, and section 10, rule 2's allowance for a mechanical type change. *Why first:* P1 and P2 would otherwise guess (spec first).
+
+### P1. `loom-ui` hosts a custom element
+
+1. Build the host of spec section 9, in `loom-ui`, with no patch words: layout bounds, pointer routing with capture during a drag, keys while it has the keyboard, one Tab stop, the cursor, deadlines and animation frames, the draw callback, nodes under its UI ID, focus requests into inner parts, and drawing above the panels.
+2. The host gets the app's model through the `App` trait or the view (spec section 9, the design point). The pull request says which and why.
+3. It replaces nothing yet. Proof: an example program with a custom element and no LoomDSP (spec section 1, rule 3); headless tests for routing, capture, focus, and nodes; `loom-ui`'s `tests/purity.rs`.
+4. Risks: the order of render passes, and who owns the element's state across a level change (spec section 9, rule 1).
+
+### P2. The app's keys and events on `loom-ui-core`
+
+1. Add `Key::F1`, `Key::F2`, and the physical key (spec section 1, Keys in `loom-ui-core`), and map them in the shell.
+2. `Message::Key`, `Message::Input`, the matrix's keys, `menus.rs` (`step`, `menu_key`), `panic.rs`, the Outline's keys, the shortcuts in `lib.rs`, the listeners in `controls.rs`, and the control channel's `key()` take `loom-ui-core` values. Iced still delivers until P4, so the bridge converts once (`event_to_core`).
+3. A dropped file and a close request go through `App::window_event` where the shell path allows.
+4. Commits: the types and the shell's mapping; the app; the tests, mechanical and alone (spec section 10, rule 2).
+5. Gates: the key order test (spec section 6, rule 6); the control channel's `key` examples give the same replies; Panic works under a field, a question, and a drag.
+6. Risks: the platform's shortcut key (`Platform`) must give Cmd on a Mac and Ctrl elsewhere for every shortcut; non-US layouts for `.`, `,`, `[`, and `]`.
+
+### P3. Colours off Iced's theme
+
+1. `style.rs` tokens give `loom_ui_core::Color` from our own palette constants; `boot.rs` drops Iced's `Theme`; the Iced role style functions with no user left are deleted.
+2. **Clean room:** about 20 files read the shades Iced works out from its palette. Do not port how Iced works them out. Record each shade the app uses as a named constant with its resolved value.
+3. Gates: `--screenshot-window` byte-identical; the contrast tests in `style/tests.rs` unchanged.
+
+### P4. The cut-over
+
+One pull request with ordered commits (Brylie, 2026-11-25), since the window and the harness must switch together (spec section 10, rule 1).
+
+1. The window's root as a panel of the runtime's, and the canvas as a custom element around `CanvasInput` (`PatchCanvas`, `loom-canvas`'s `widget.rs`, `widget/`, and `iced_convert.rs` go).
+2. The app's own shell layers, in spec section 9, rule 8's order; the app implements `loom_ui::App` itself.
+3. The harness on `loom_ui::headless`, laid out with the `Typesetter`; captures on an offscreen `wgpu` texture; `screenshot.rs` loses Iced's `UserInterface`.
+4. The control channel: pointer commands as `DriverEvent`s, and `locate` from the runtime's layout and the canvas's camera (spec section 10, rule 6). `places.rs`, `window_question.rs`, and the pointer injector go.
+5. Delete the bridge. Its native dialogs (`services.rs`) move into the app; Iced's futures and its copy of `wgpu` become `pollster` or `std` and `wgpu` itself.
+6. The tests' mechanical type changes, alone (spec section 10, rule 2).
+
+Delete the text gate tool (`crates/loom-app/src/screenshot/text_gate_tests.rs`) and the measuring renderer (`iced_bridge/measure.rs`): both measure with Iced's paragraph.
+
+Before the cut, if it shrinks P4, move `services.rs` out and give offscreen captures a device of their own, as small commits or a small pull request.
+
+Risks to check, each in the pull request:
+
+- **Render passes:** the canvas's order, the dragged cable above the panels, and the canvas's scissor.
+- **Colour:** Iced's colour features decide the surface format and blending today; the shell's format and both paint renderers must give the same pixels.
+- **Layout:** the window's root moves to our layout, so `--screenshot-window` may differ once by part of a pixel; `--screenshot` stays identical.
+- **IME:** `preedit.rs` goes; every field draws its own composition, and `Runtime::ime` places the candidate window. A Japanese or Chinese check by hand.
+- **Accessibility:** focus requests into the canvas, its typed value field, and Focus on inner parts.
+- **Clipboard:** the bridge's blocking read goes; nothing else may read synchronously.
+- **Tests:** a bridge test that also tests behaviour is moved, not deleted. The pull request lists every deleted test and why.
+
+Gates: every parity gate; `--measure-idle` (counts may fall, since the bridge's redraw after any update goes); `--generate 300 --bench`; the `--control-script` examples; every `locate` answer before and after, for every kind of target; VoiceOver.
+
+### P5. Remove the Iced dependencies
+
+1. Drop `iced`, `iced_wgpu`, `iced_renderer`, `iced_winit`, and `iced_runtime` from the workspace and every crate. #683 names three; all five go (the spec wins).
+2. Set `wgpu`'s and `winit`'s features directly, where Iced turned some on. Check Linux window decorations survive: `cargo tree --target x86_64-unknown-linux-gnu -e features -i winit`.
+3. Purity: the Iced rules in `loom-app`'s and `loom-canvas`'s `tests/purity.rs` give way to one test over every crate (spec section 1, rule 7), and `rfd` gets its own rule.
+4. `deny.toml`: remove each ignored advisory that left with Iced, and reword the OQ-14 comment.
+5. Gates: `cargo deny check`; `cargo tree -d` against the baseline below, on macOS, Linux, and Windows; CI on all three.
+
+### P6. The runtime owns the whole accessibility tree
+
+1. The runtime builds the tree from panels and custom elements' nodes and keeps the only `IdTable` (spec section 7). The app's tree code in `a11y/` is left only for the canvas's nodes; `a11y/items.rs` goes.
+2. Risks: node IDs stay stable; hiding the layers under an overlay or a question; the 250 ms cap on live values (spec section 7, rule 7); `controls` relations across the canvas and the panels.
+3. Gates: `Ui::a11y_tree()` dumps identical before and after, recorded for every view and overlay; node ID stability tests; VoiceOver.
+
+### P7. Docs and the explainer
+
+- `AGENTS.md` (the App, Canvas, UI runtime, Panels, and accessibility tree paragraphs, and any command that changed); `docs/dev/architecture.md`; `docs/design/visual-system.md`; `docs/design/control-channel.md` (say which limits the injector and Iced's overlay cursor set, and that they are gone); the `ui_test.rs` module comment.
+- OQ-13 and OQ-14 in `docs/product/open-questions.md`: OQ-14 closes; OQ-13 now depends on our shell and driver trait.
+- `README.md`'s crate table, `roadmap.md`, and the specs that name Iced (`panels.md`, `undo.md`, `telemetry.md`, `modulation.md`, `preferences.md`).
+- `ui-layer.md`: tick the phase 4 criteria and remove the bridge's text. This plan: mark phase 4 done.
+- An explainer in `docs/learn/` on how the UI layer works: the runtime's turn, effects, layout, custom elements, and the accessibility tree. Link it from the spec and from `loom-ui`. It is the documentation Iced did not have.
+- ADRs and research snapshots are history and keep their text.
+
+### P8. The final check
+
+1. `cargo deny check` and `cargo tree -d`.
+2. Run every command in `AGENTS.md`'s Commands section, the `--measure*`, `--bench`, `--control*`, `--screenshot*`, `--dump-ui`, `--fake-audio --record`, `midi-port`, and `scripts/bundle-macos.sh` ones included, and a real device `audio` command where one is at hand.
+3. The parity gates and VoiceOver.
+4. Close #683. Step 1.5 (filing the AccessKit gaps upstream and taking the fix) and the Narrator and Orca checks move to issues of their own first (Brylie, 2026-11-25).
+
+### The duplicate baseline
+
+`cargo tree -d`, normal dependencies, macOS, at `323ead6a`: bitflags 1.3.2 and 2.13.2; block2 0.5.1 and 0.6.2; core-foundation 0.9.4 and 0.10.1; core-graphics-types 0.1.3 and 0.2.0; font-types 0.10.1 and 0.12.6; harfrust 0.3.2 and 0.12.0; hashbrown 0.16.1 and 0.17.1; miniz_oxide 0.8.9 and 0.9.1; objc2 0.5.3 and 0.6.5; objc2-app-kit 0.2.2 and 0.3.2; objc2-foundation 0.2.2 and 0.3.2; read-fonts 0.35.0 and 0.41.0; rustc-hash 1.1.0 and 2.1.3; skrifa 0.37.0 and 0.44.0; syn 2.0.119 and 3.0.9.
+
+The older `harfrust` and `skrifa` should leave with Iced, and likely `read-fonts` and `font-types` (through `cosmic-text`). The `objc2` 0.5 family stays, with `winit` 0.30. P5 records the same list on Linux and Windows before it removes anything.
+
+### Not decided (Proposed)
+
+- The `wgpu` upgrade and Vello become a follow-up issue after #683, not part of it.
+- Binary size and build time are recorded before and after P5, and are not a gate.
 
 ## Stop points
 
