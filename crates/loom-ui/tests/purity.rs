@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 /// The dependencies users of the crate get: the required ones, then the
 /// shell's.
-const ALLOWED: [&str; 13] = [
+const ALLOWED: [&str; 15] = [
     "dependencies.loom-ui-core.workspace",
     "dependencies.taffy.workspace",
     "dependencies.accesskit",
@@ -41,10 +41,21 @@ const ALLOWED: [&str; 13] = [
     "dependencies.pollster",
     "dependencies.accesskit_winit",
     "dependencies.arboard",
+    "target.'cfg(target_os = \"linux\")'.dependencies.wl-clipboard-rs",
+    "target.'cfg(target_os = \"linux\")'.dependencies.rustix",
 ];
 
 /// The shell's dependencies, each optional and turned on only by `shell`.
 const SHELL_DEPENDENCIES: [&str; 4] = ["winit", "wgpu", "pollster", "accesskit_winit"];
+
+/// The clipboard's dependencies, each optional and turned on only by
+/// `clipboard`: `arboard` everywhere, and on Linux the crates that read
+/// Wayland with a deadline.
+const CLIPBOARD_DEPENDENCIES: [&str; 3] = ["arboard", "wl-clipboard-rs", "rustix"];
+
+/// The clipboard's crates, as code names them, which only the clipboard's
+/// own files may.
+const CLIPBOARD: [&str; 3] = ["arboard", "wl_clipboard_rs", "rustix"];
 
 /// A path into a window toolkit or the GPU.
 const TOOLKITS: [&str; 4] = ["winit", "wgpu", "iced::", "iced_"];
@@ -197,23 +208,30 @@ fn the_required_dependencies_are_loom_ui_core_and_taffy() {
         "no image support: {arboard}"
     );
     let clipboard = dependency_line(manifest, "clipboard").expect("the clipboard feature is declared");
-    assert!(
-        clipboard.contains("\"dep:arboard\""),
-        "`clipboard` turns on arboard: {clipboard}"
-    );
+    for name in CLIPBOARD_DEPENDENCIES {
+        let line = dependency_line(manifest, name).expect("the clipboard's dependency is declared");
+        assert!(line.contains("optional = true"), "{name} is optional: {line}");
+        assert!(
+            clipboard.contains(&format!("\"dep:{name}\"")),
+            "`clipboard` turns on {name}: {clipboard}"
+        );
+    }
     assert!(shell.contains("\"clipboard\""), "`shell` turns on `clipboard`: {shell}");
-    assert!(
-        !shell.contains("dep:arboard"),
-        "only `clipboard` names arboard: {shell}"
-    );
+    for name in CLIPBOARD_DEPENDENCIES {
+        assert!(
+            !shell.contains(&format!("dep:{name}")),
+            "only `clipboard` names {name}: {shell}"
+        );
+    }
 }
 
-/// Only the clipboard's own files name `arboard` (`clipboard.rs` and its
-/// tests), so every other part of the crate reaches the system clipboard
-/// through `loom_ui::clipboard`.
+/// Only the clipboard's own files (`clipboard.rs` and the files under
+/// `clipboard/`) name `arboard`, `wl-clipboard-rs`, or `rustix`, so every
+/// other part of the crate reaches the system clipboard through
+/// `loom_ui::clipboard`.
 #[test]
-fn only_the_clipboard_names_arboard() {
-    let (scanned, found) = scan(&["arboard"], |path| {
+fn only_the_clipboard_names_its_crates() {
+    let (scanned, found) = scan(&CLIPBOARD, |path| {
         path != Path::new("clipboard.rs") && !path.starts_with("clipboard")
     });
     assert!(scanned >= 1, "the scan found the crate's files, not {scanned}");
