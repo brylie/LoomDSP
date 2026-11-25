@@ -268,7 +268,15 @@ fn head(label: &str, p: &ParamRow, own: Option<&ExposureRow>, looks: Looks) -> E
         let buttons = exposures
             .into_iter()
             .map(|(exposure, own)| expose(exposure, own, looks));
-        line.push(Element::row(buttons).spacing(6.0).align_y(Align::Center).key("expose"));
+        // The buttons wrap too: two surfaces, each with the name it is
+        // exposed as, can be wider than the column on their own.
+        line.push(
+            Element::row(buttons)
+                .spacing(6.0)
+                .align_y(Align::Center)
+                .wrap()
+                .key("expose"),
+        );
     }
     line.push(Element::space(Length::FILL, Length::Shrink));
     if let Some(unused) = &p.unused {
