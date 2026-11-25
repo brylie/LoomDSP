@@ -1777,9 +1777,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             self.waiting_for_draw.append(&mut self.after_draw);
         }
 
-        // 6. What comes next: a moved focus is reported for the next turn.
-        self.panels().report_focus();
+        // 6. What comes next: a moved focus is reported for the next turn,
+        // ahead of any message that waited in the queue, so none of them
+        // runs while the app's copy of the focus is behind the runtime's:
+        // a dialog's answer sent as its question closed and gave a field
+        // its focus back, for one (plan 3.2, row 4d).
+        let report = self.panels().focus_report();
         self.drain_queue();
+        if let Some(report) = report {
+            self.pending.push_front(report);
+        }
         Next {
             draw,
             again: !self.exited && (!self.pending.is_empty() || !self.pasted.is_empty()),
