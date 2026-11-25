@@ -285,9 +285,15 @@ fn in_a_short_window_the_body_scrolls_to_a_focused_part() {
     let body = ui.runtime().bounds(&body_id()).expect("the body");
     let field = ui.runtime().bounds(&other_text_id()).expect("the field");
     assert!(field.y > body.y + body.height, "the field starts out of view");
-    while focused(&ui) != Some(other_text_id()) {
+    // At most one lap of the stops, so a Tab order that skips the field
+    // fails here instead of looping for ever.
+    for _ in 0..ui.app().chooser_stops().len() {
+        if focused(&ui) == Some(other_text_id()) {
+            break;
+        }
         tap(&mut ui, Key::Named(Named::Tab), Modifiers::default());
     }
+    assert_eq!(focused(&ui), Some(other_text_id()), "Tab reached the field");
     let (offset, _) = ui.runtime().scroll_offset(&body_id()).expect("the body scrolls");
     assert!(offset > 0.0, "Tab scrolled the body");
 }
