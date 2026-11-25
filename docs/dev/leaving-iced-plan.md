@@ -488,7 +488,7 @@ Docs only. The phase 4 criteria, section 9 as a host contract, the key types, se
 
 1. Build the host of spec section 9, in `loom-ui`, with no patch words: layout bounds, pointer routing with capture during a drag, keys while it has the keyboard, one Tab stop, the cursor, deadlines and animation frames, the draw callback, nodes under its UI ID, focus requests into inner parts, and drawing above the panels.
 2. The host gets the app's model through the `App` trait or the view (spec section 9, the design point). The pull request says which and why.
-3. It replaces nothing yet. Proof: an example program with a custom element and no LoomDSP (spec section 1, rule 3); headless tests for routing, capture, focus, and nodes; `loom-ui`'s `tests/purity.rs`.
+3. It replaces nothing yet. Proof: an example program with no LoomDSP (spec section 1, rule 3) and two custom elements, a level meter and a piano roll, each giving its nodes (spec section 9, A contract for every app); a table in the pull request of how each host part holds on the desktop, in a plugin window, and on the web; headless tests for routing, capture, focus, and nodes; `loom-ui`'s `tests/purity.rs`.
 4. Risks: the order of render passes, and who owns the element's state across a level change (spec section 9, rule 1).
 
 ### P2. The app's keys and events on `loom-ui-core`
@@ -571,8 +571,16 @@ The older `harfrust` and `skrifa` should leave with Iced, and likely `read-fonts
 
 ### Not decided (Proposed)
 
-- The `wgpu` upgrade and Vello become a follow-up issue after #683, not part of it.
 - Binary size and build time are recorded before and after P5, and are not a gate.
+- P1 builds the host for every app on `loom-ui`, not only LoomDSP's window ([spec section 9, A contract for every app](../design/ui-layer.md#a-contract-for-every-app-built-on-loom-ui)): its example has a level meter and a piano roll beside nothing of LoomDSP's, and its pull request says how each host part holds for a plugin window and the web.
+
+### After #683 (Proposed)
+
+Recommendations for follow-up issues, filed when Brylie agrees. None is part of phase 4.
+
+- **A plugin driver** (CLAP, VST3): the host owns the loop and the parent window; repaint and deadlines come from its idle or timer callback. After the OQ-13 spike.
+- **A web driver** (`wasm32`): a canvas element, DOM events, and the accessibility tree mirrored to the DOM. OQ-23 is decided first.
+- **The `wgpu` upgrade, then Vello** weighed against our glyph atlas, now that Iced no longer fixes the version (rule 7 above held it).
 
 ## Stop points
 

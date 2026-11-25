@@ -700,6 +700,44 @@ A custom element is the layer's supported escape hatch. The patch canvas is the 
 
 *Why:* a pure pipeline never covers everything. An editor or a canvas needs its own drawing and input. A hatch that is part of the contract keeps such elements inside focus, the accessibility tree, and the tests, rather than beside them.
 
+### A contract for every app built on `loom-ui`
+
+**Status:** **Proposed** (plan step P0, 2026-11-25). It widens what Brylie decided, by his scope note of the same day: `loom-ui` is the base for an ecosystem of accessible audio tools (effects, instruments, modular composition), so the host is written for them and not only for LoomDSP's window. It holds once he signs off on P0.
+
+1. **The host is general.** Its API names no patch, canvas, module, or cable, and holds nothing the patch canvas needs that a meter, a waveform view, a spectrum, an XY pad, or a piano roll would not. The words above that name the canvas or the dragged cable are examples of use, not API. P1's example program proves it with two elements besides the canvas, and no LoomDSP crate:
+
+   | Host part | Patch canvas | A plugin's level meter | A piano roll |
+   |---|---|---|---|
+   | Layout bounds | yes | yes | yes |
+   | Pointer routing | yes | no: it takes no input | yes |
+   | Capture during a drag | cables, lassos, tiles | no | notes, a selection box |
+   | Keys while it has the keyboard, one Tab stop | yes | no: it is no stop | yes: arrows move the focused note |
+   | Cursor shape | yes | no | resize at a note's edge |
+   | Deadlines and animation frames | while something moves | frames while the level moves, none when silent (section 3, rule 8) | while playback moves the playhead |
+   | Draw callback | yes | yes | yes |
+   | Nodes under its UI ID | tiles, controls, ports | one meter node, a live value (section 7, rule 7) | one per note, in time order |
+   | Focus requests into inner parts | a tile control | no: it has none | a note |
+   | Drawing above the panels | the dragged cable | no | a note dragged out of view, if ever |
+
+   A part an element does not use costs it nothing: each is a method with a default, as `App`'s are (section 2). *Why:* a host shaped by one canvas would make the next app's element fight it, and every part the table needs is one a published UI crate is expected to have.
+
+2. **Accessibility from day one, for custom elements too.** A custom element gives a node for every part a user can reach, under its UI ID, follows section 7's rules as built-in elements do (roles, names, values, actions, live values, hidden under the input layer), takes focus requests, and shows a ring for keyboard focus (section 6, rule 3). An element that draws pixels with no nodes is refused: in a debug build the host panics when an element that takes input or focus gives no node. There is no "nodes later". *Why:* design goal 4; a hatch without this rule would be the one place a blind user meets a wall.
+
+3. **Every target is first class** (design goal 3). Phase 4 builds only the desktop shell. The contract already holds for the others, so their drivers need no change to the runtime, the `App` trait, or the host (section 2, rule 9; OQ-13; OQ-23):
+
+   | Host part | Desktop shell (`winit`) | Plugin window (CLAP, VST3) | Web (`wasm32`) |
+   |---|---|---|---|
+   | Events, routing, capture | from `winit`'s events | from the parent window the host gives us; capture through the platform's own call on that window | from the canvas element's DOM events; capture through pointer capture on it |
+   | Keys | from `winit` | from the host, which may keep some for itself; a key it keeps never arrives, which is no change to the contract | from DOM key events, with `code` from `KeyboardEvent.code` (section 1, Keys) |
+   | Deadlines and frames | the shell's loop | the host's idle or timer callback; we never own the loop, and the runtime never reads the clock (section 2, rule 11) | `requestAnimationFrame` and timers |
+   | Draw callback | a `wgpu` surface on our window | a `wgpu` surface on the parent window's handle | a `wgpu` surface on the canvas element (WebGPU, or WebGL where `wgpu` offers it) |
+   | Cursor | `winit` | the platform's call on the parent window | CSS `cursor` on the canvas element |
+   | Nodes | `accesskit_winit` | an AccessKit platform adapter on the parent window | a DOM mirror of the same tree, by OQ-23's choice |
+
+   What phase 4 guarantees for them: no `winit` type reaches the runtime, `App`, or the host; every answer from the system (clipboard, dialogs, capture) comes as a message on a later turn, never in the same call; the runtime never reads the clock or blocks. Known gaps, for the driver that meets them, not phase 4: a file dialog answers a `PathBuf`, which a web page cannot give, and the Tab wrap at the window's ends (section 6, rule 2).
+
+4. **Which crates a sibling app uses.** An effect plugin or a mastering tool takes `loom-ui-core` (geometry, events, keys, UI IDs, text measuring), and `loom-ui`: with its `shell` feature for a stand-alone window, or without it, with `gpu` for painting (`loom_ui::paint`) and `clipboard` if it wants one, under a driver of its own for a plugin. Neither crate holds anything of LoomDSP's (section 1, rule 1), and P0 adds nothing to them. `loom-canvas` and `loom-app` are LoomDSP's and no sibling needs them. *Why:* the crates are candidates for publishing (FR-SDK-06), and a sibling that had to take LoomDSP's patch types to draw a meter would show the line was drawn wrong.
+
 ## 10. Test harness and control channel
 
 **Status:** Agreed, phase 2. Rules 3 and 4 are built (step 2.3, items 2 to 4: `iced_bridge/measure.rs`, `ui_test/a11y.rs`); phase 1's tests in `a11y/tests.rs` still read the tree from `a11y/tree.rs` directly.
@@ -781,7 +819,7 @@ Phase 4 (Agreed, Brylie, 2026-11-25; plan steps P0 to P8):
 
 Not gates, and **Proposed** for Brylie to settle:
 
-- **The `wgpu` upgrade and Vello** (the old plan's phase 4, step 1) become a follow-up issue after #683, not part of it. *Why:* each changes what is drawn, and phase 4 should change only who draws it.
+- **The `wgpu` upgrade and Vello** (the old plan's phase 4, step 1) become a follow-up issue after #683, not part of it (Out of scope, After #683). *Why:* each changes what is drawn, and phase 4 should change only who draws it.
 - **Binary size and build time** are recorded before and after P5, in its pull request, but are not a gate. *Why:* both should fall with Iced gone, and a number recorded once shows that; a gate would need a threshold nobody has a reason for yet.
 
 ## Out of scope
@@ -793,6 +831,10 @@ Not gates, and **Proposed** for Brylie to settle:
 - **Read-tracking state, such as signals.** Comparing panel models is enough at LoomDSP's size ([research](../research/2026-11-ui-change-propagation.md#not-proposed)). Revisit if a measured panel cannot meet its cost with section 3, rule 1.
 - **Components with their own message types** inside `loom-ui`. LoomDSP's panels use the app's message. A mapping like Elm's `Html.map` can be added when a second app needs it.
 - **Publishing the crates.** Waits until the API settles (FR-SDK-06).
+- **After #683** (**Proposed**, recommendations for follow-up issues, so the ambition is on record without growing phase 4):
+  - **A plugin driver** (CLAP, VST3) on the host's parent window and callbacks, after the OQ-13 spike (section 9, A contract for every app).
+  - **A web driver** (`wasm32`), with OQ-23 decided first for its accessibility mirror.
+  - **The `wgpu` upgrade, then Vello weighed against our glyph atlas,** once Iced no longer fixes our `wgpu` version.
 - **Embedding a UI font.** Text uses the system sans-serif today, so it differs between macOS, Windows, and Linux. An embedded font would fix that and make screenshots match across machines, but it is a visual change with its own licence check. It is its own issue and decision, not part of this move (section 8, rule 6).
 
 ## Decisions made for this spec
