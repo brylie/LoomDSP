@@ -239,11 +239,11 @@ fn a_press_ends_the_group() {
     assert_slid(&harness, &[(0.5, Start), (0.51, Move), (0.51, End)]);
 }
 
-/// Section 7, rule 5: a screen reader's Increment moves one key step, as
-/// one Start, Move, and End, and SetValue goes to the app, which knows the
-/// parameter's units.
+/// Section 7, rules 5 and 6: a screen reader's Increment moves one key
+/// step, steps in quick turn are one group, as keys are, and SetValue goes
+/// to the app, which knows the parameter's units.
 #[test]
-fn a_screen_readers_increment_is_one_step() {
+fn a_screen_readers_increments_in_quick_turn_are_one_group() {
     let mut harness = showing(one);
     harness.send(Message::Describe);
     let nodes = harness.app().nodes.clone().expect("the nodes");
@@ -264,10 +264,18 @@ fn a_screen_readers_increment_is_one_step() {
             data: None,
         }))
     };
+    // Steps in quick turn are one group, so one undo step (section 7,
+    // rule 6), whatever has the focus; it ends 500 ms after the last.
     step(&mut harness, action(accesskit::Action::Increment));
-    assert_slid(&harness, &[(0.5, Start), (0.51, Move), (0.51, End)]);
+    assert_slid(&harness, &[(0.5, Start), (0.51, Move)]);
+    harness.advance(Duration::from_millis(300));
+    step(&mut harness, action(accesskit::Action::Increment));
+    assert_slid(&harness, &[(0.5, Start), (0.51, Move), (0.52, Move)]);
+    assert!(harness.next().deadline.is_some(), "the runtime wakes to end the group");
+    harness.advance(Duration::from_millis(500));
+    assert_slid(&harness, &[(0.5, Start), (0.51, Move), (0.52, Move), (0.52, End)]);
     step(&mut harness, action(accesskit::Action::Decrement));
-    assert_eq!(harness.app().slid.len(), 6, "a Decrement too");
+    assert_eq!(harness.app().slid.len(), 6, "a Decrement opens a new group");
 }
 
 /// A slider turned off is no stop, and neither a press nor a screen

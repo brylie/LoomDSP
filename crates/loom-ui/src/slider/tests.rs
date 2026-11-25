@@ -93,23 +93,29 @@ fn other_keys_and_modifiers_are_not_taken() {
     assert_eq!(slider.after_key(0.5, Key::PageUp, SHIFT), None);
 }
 
-/// Section 7, rule 5: Increment and Decrement move one key step.
+/// Section 7, rule 5: Increment and Decrement move one key step; and rule
+/// 6: steps on one slider each within 500 ms of the last are one group,
+/// Start and Move first, a Move for each after, and End when it closes,
+/// whatever has the focus, since a screen reader does not move it.
 #[test]
-fn a_screen_readers_step_is_one_key_step() {
+fn a_screen_readers_steps_are_one_group() {
     let slider = Slider::new(0.5).key_step(0.1);
-    assert!(near(slider.after_step(true), 0.6));
-    assert!(near(slider.after_step(false), 0.4));
+    assert!(near(slider.after_step(0.5, true), 0.6));
+    assert!(near(slider.after_step(0.5, false), 0.4));
+    let now = Instant::now();
     let mut sliding = Sliding::default();
-    let reports = sliding.step(&level(), 0.5, 0.6);
-    assert_reports(
-        &reports,
-        &[
-            (0.5, SlidePhase::Start),
-            (0.6, SlidePhase::Move),
-            (0.6, SlidePhase::End),
-        ],
+    let reports = sliding.step(&level(), 0.5, 0.6, now);
+    assert_reports(&reports, &[(0.5, SlidePhase::Start), (0.6, SlidePhase::Move)]);
+    let later = now + Duration::from_millis(300);
+    let reports = sliding.step(&level(), sliding.key_base(&level(), 0.5), 0.7, later);
+    assert_reports(&reports, &[(0.7, SlidePhase::Move)]);
+    assert!(
+        sliding.close_keys_if(later, None).is_empty(),
+        "no focus on the slider keeps a screen reader's group open"
     );
-    assert!(sliding.step(&level(), 1.0, 1.0).is_empty(), "nothing at an end");
+    let reports = sliding.close_keys_if(later + KEY_GROUP, None);
+    assert_reports(&reports, &[(0.7, SlidePhase::End)]);
+    assert!(sliding.step(&level(), 1.0, 1.0, later).is_empty(), "nothing at an end");
 }
 
 /// Section 5, rule 16: a press on the track jumps there and drags from
@@ -278,4 +284,48 @@ fn the_thumb_stays_inside_at_both_ends() {
     assert_eq!(position_at(BOUNDS, 500.0), 1.0);
     let narrow = Rect::new(Point::ORIGIN, Size::new(10.0, 14.0));
     assert_eq!(position_at(narrow, 5.0), 0.0, "no travel");
+}
+
+/// A screen reader's group and a group of keys never join: an arrow key on
+/// the same slider within 500 ms closes the screen reader's group and
+/// starts its own, a screen reader's step closes an open group of keys,
+/// and a step on another slider closes the first slider's group. Each is
+/// then an undo step of its own (section 7, rule 6).
+#[test]
+fn a_screen_readers_group_and_keys_never_join() {
+    let now = Instant::now();
+    let other = UiId::panel("panel").with("other");
+    let soon = now + Duration::from_millis(100);
+
+    let mut sliding = Sliding::default();
+    let _ = sliding.step(&level(), 0.5, 0.6, now);
+    let reports = sliding.key(&level(), 0.6, 0.7, soon);
+    assert_reports(
+        &reports,
+        &[
+            (0.6, SlidePhase::End),
+            (0.6, SlidePhase::Start),
+            (0.7, SlidePhase::Move),
+        ],
+    );
+
+    let mut sliding = Sliding::default();
+    let _ = sliding.key(&level(), 0.5, 0.6, now);
+    let reports = sliding.step(&level(), 0.6, 0.7, soon);
+    assert_reports(
+        &reports,
+        &[
+            (0.6, SlidePhase::End),
+            (0.6, SlidePhase::Start),
+            (0.7, SlidePhase::Move),
+        ],
+    );
+
+    let mut sliding = Sliding::default();
+    let _ = sliding.step(&level(), 0.5, 0.6, now);
+    let reports = sliding.step(&other, 0.2, 0.3, soon);
+    assert_eq!(reports[0].0, level(), "the first slider's group ends");
+    assert_eq!(reports[0].2, SlidePhase::End);
+    assert_eq!(reports[1].0, other, "and the other's starts");
+    assert_eq!(reports[1].2, SlidePhase::Start);
 }

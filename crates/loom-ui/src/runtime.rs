@@ -1307,7 +1307,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// even on a slider that is turned off or below the input layer, where
     /// it does nothing. `None` for any other action, or another element,
     /// which goes on. Returns whether anything that shows changed.
-    fn slider_action(&mut self, event: &AccessEvent) -> Option<bool> {
+    fn slider_action(&mut self, event: &AccessEvent, now: Instant) -> Option<bool> {
         let AccessEvent::Action(request) = event else {
             return None;
         };
@@ -1325,10 +1325,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if off || !self.in_input_layer(&target) {
             return Some(false);
         }
-        let reports = self
-            .pointer
-            .slide
-            .step(&target, slider.position(), slider.after_step(up));
+        // From where an open group of its steps last left it, which the
+        // app may not have laid out yet.
+        let from = self.pointer.slide.key_base(&target, slider.position());
+        let reports = self.pointer.slide.step(&target, from, slider.after_step(from, up), now);
         self.panels().report_slid(reports);
         Some(false)
     }
@@ -1682,7 +1682,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 }
                 None => match self
                     .select_action(&event)
-                    .or_else(|| self.slider_action(&event))
+                    .or_else(|| self.slider_action(&event, now))
                     .or_else(|| self.context_action(&event))
                 {
                     Some(changed) => redraw |= changed,
