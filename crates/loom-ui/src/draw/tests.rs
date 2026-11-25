@@ -786,3 +786,23 @@ fn a_select_paints_its_box_label_and_mark() {
         .collect();
     assert_eq!(marks, [style.mark, style.mark]);
 }
+
+/// Section 5, rule 16: a slider's ghost mark is a hollow 10 px ring in
+/// the text colour, where the thumb would be at its position, over the
+/// thumb; a slider with none paints no ring.
+#[test]
+fn a_slider_paints_its_ghost_mark_where_the_thumb_would_be() {
+    let shown = |ghost| {
+        let element = slider(crate::Slider::new(0.25).ghost(ghost), "level");
+        painted(Element::column([element]).width(Length::FILL), Point::ORIGIN)
+    };
+    let plain = quads(&shown(None));
+    let marked = quads(&shown(Some(0.75)));
+    assert_eq!(marked.len(), plain.len() + 1, "one ring more");
+    let ring = marked.last().expect("the ring is painted last");
+    assert_eq!(ring.fill, Color::TRANSPARENT);
+    assert_eq!((ring.border, ring.border_width), (PANEL.text, 1.5));
+    assert_eq!(ring.rect.size(), Size::new(10.0, 10.0));
+    // The thumb's centre travels from 7 to 193: at 0.75 it is at 146.5.
+    assert!((ring.rect.x + 5.0 - 146.5).abs() < 1e-3, "{:?}", ring.rect);
+}

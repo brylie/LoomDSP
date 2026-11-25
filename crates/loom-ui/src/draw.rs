@@ -634,7 +634,29 @@ fn paint_slider(bounds: Rect, slider: &crate::slider::Slider, painter: &mut dyn 
         style.primary,
         THUMB / 2.0,
     ));
+    // The ghost mark, over the thumb: a hollow ring in the text colour,
+    // as Iced's inspector drew it.
+    if let Some(ghost) = slider.ghost_position() {
+        let at = thumb_centre(bounds, ghost);
+        painter.quad(Quad {
+            rect: Rect::new(
+                Point::new(at.x - GHOST / 2.0, at.y - GHOST / 2.0),
+                Size::new(GHOST, GHOST),
+            ),
+            fill: Color::TRANSPARENT,
+            border: style.text,
+            border_width: GHOST_BORDER,
+            radius: GHOST / 2.0,
+        });
+    }
 }
+
+/// The size of a slider's ghost mark, in logical pixels (section 5, rule
+/// 16), as Iced's inspector drew it.
+const GHOST: f32 = 10.0;
+
+/// The width of a ghost mark's ring, in logical pixels.
+const GHOST_BORDER: f32 = 1.5;
 
 /// `value` in logical pixels, moved to the nearest whole physical pixel
 /// at `scale`.

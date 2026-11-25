@@ -80,6 +80,7 @@ pub struct Slider {
     drag: Drag,
     default: Option<f32>,
     fill: Fill,
+    ghost: Option<f32>,
 }
 
 impl Slider {
@@ -97,6 +98,7 @@ impl Slider {
             drag: Drag::Continuous,
             default: None,
             fill: Fill::FromMin,
+            ghost: None,
         }
     }
 
@@ -143,6 +145,22 @@ impl Slider {
     pub fn centred(mut self) -> Self {
         self.fill = Fill::FromMiddle;
         self
+    }
+
+    /// A ghost mark at `position`, from 0 to 1: a hollow ring where the
+    /// thumb would be at that position, over the track (section 5, rule
+    /// 16). It shows a waiting MIDI pickup's hardware (midi-learn.md,
+    /// Seeing a waiting pickup). It takes no press, moves nothing, and
+    /// adds nothing to the slider's node. `None` shows none.
+    #[must_use]
+    pub fn ghost(mut self, position: Option<f32>) -> Self {
+        self.ghost = position.map(unit);
+        self
+    }
+
+    /// Where its ghost mark is, if it has one.
+    pub(crate) fn ghost_position(&self) -> Option<f32> {
+        self.ghost
     }
 
     /// The position it shows, from 0 to 1.

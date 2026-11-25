@@ -336,6 +336,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             self.waker().nudge();
         }
         self.release_if_owed();
+        // An element the app was told is hovered may have left the layout.
+        self.panels().report_unhover();
     }
 
     /// The runtime's own element with keyboard focus, if any. Elements a
@@ -1782,6 +1784,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // runs while the app's copy of the focus is behind the runtime's:
         // a dialog's answer sent as its question closed and gave a field
         // its focus back, for one (plan 3.2, row 4d).
+        self.panels().report_unhover();
         let report = self.panels().focus_report();
         self.drain_queue();
         if let Some(report) = report {
