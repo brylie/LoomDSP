@@ -339,7 +339,7 @@ fn sub_patch(s: &SubPatchRows) -> Item {
         let last = s.members.len().saturating_sub(1);
         let mut members = Vec::new();
         for (n, member) in s.members.iter().enumerate() {
-            let key = ids::part(&panel, "member").with(member.id);
+            let key = ids::part(&panel, "members").with(member.id);
             let name = format!("{}. {}", n + 1, member.name);
             members.push(Item::group(
                 key.clone(),

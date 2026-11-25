@@ -15,22 +15,13 @@ fn quiet_text_meets_contrast() {
         super::highlighted_row(&theme).fill.to_iced()
     };
     let closed_tab = super::tab(false)(&theme, iced::widget::button::Status::Active).text_color;
-    let pick = super::quiet_pick_list(&theme, iced::widget::pick_list::Status::Active);
     for (name, text, fill) in [
         ("quiet text on the panel", secondary, palette.background.base.color),
         ("quiet text on a card", secondary, palette.background.weak.color),
         ("quiet text on the highlighted row", secondary, highlight),
         ("a closed tab's title", closed_tab, palette.background.base.color),
-        (
-            "a quiet pick list's handle on a card",
-            pick.handle_color,
-            palette.background.weak.color,
-        ),
-        (
-            "a quiet pick list's placeholder on a card",
-            pick.placeholder_color,
-            palette.background.weak.color,
-        ),
+        // A modulation card's quiet polarity select marks itself in the
+        // quiet colour (plan 3.2, row 4d.2), which the card rows check.
     ] {
         let ratio = contrast_ratio(text.to_core(), fill.to_core());
         assert!(ratio >= MIN_TEXT_CONTRAST, "{name}: {ratio:.2}:1");

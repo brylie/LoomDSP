@@ -52,6 +52,9 @@ struct Panel {
     rows: rows::Looks,
     /// The row a dragged output is over, while one is dragged.
     drop_row: Option<(u32, usize)>,
+    /// A selected sub-patch's Authors box as typed, while it has focus;
+    /// its saved authors otherwise.
+    part_authors: String,
 }
 
 /// The colours the inspector is painted in, from the style tokens.
@@ -70,7 +73,7 @@ impl App {
     /// answer the view, the stops, Tab, and the tree read, so the column is
     /// drawn, focused, and reported by one toolkit at a time.
     pub(crate) fn inspector_ours(&self) -> bool {
-        self.right_tab == Tab::Inspector && self.jump_view().is_none() && ours(&self.inspector_model())
+        self.right_tab == Tab::Inspector && self.jump_view().is_none()
     }
 
     /// Whether the inspector's panel owns the input: it is the runtime's,
@@ -117,12 +120,21 @@ impl App {
             card_border: palette.background.strong.color.scale_alpha(0.5).to_core(),
         };
         let dragging = self.session.gestures.assign_drag().is_some() && !self.session.learn.is_on();
+        let model = self.inspector_model();
         let panel = Panel {
-            model: self.inspector_model(),
+            model: model.clone(),
             authors: self.session.patch_info.authors.clone(),
             looks,
             rows,
             drop_row: self.session.gestures.drop_row().filter(|_| dragging),
+            part_authors: match &model {
+                Inspector::SubPatch(sub) => self
+                    .session
+                    .patch_info
+                    .part_authors(sub.id)
+                    .map_or_else(|| sub.authors.join("\n"), ToString::to_string),
+                _ => String::new(),
+            },
         };
         view.panel_with(inspector_id(), Layer::Panels, &panel, build);
     }
@@ -264,20 +276,6 @@ impl App {
     }
 }
 
-/// Whether the runtime draws `model`: the variants moved so far.
-fn ours(model: &Inspector) -> bool {
-    matches!(
-        model,
-        Inspector::Patch(_)
-            | Inspector::Several(_)
-            | Inspector::Port(_)
-            | Inspector::Empty
-            | Inspector::Module(_)
-            | Inspector::Unknown(_)
-            | Inspector::Slot(_)
-    )
-}
-
 /// The column: the content, scrolling, under a key named for what it
 /// shows, so its parts keep their UI IDs.
 fn build(panel: &Panel) -> Element {
@@ -305,7 +303,7 @@ fn build(panel: &Panel) -> Element {
             .width(Length::FILL);
             return scroll(column, ids::panel(port.id).keys().last().cloned(), &port.name);
         }
-        Inspector::Module(_) | Inspector::Unknown(_) | Inspector::Slot(_) => {
+        Inspector::Module(_) | Inspector::Unknown(_) | Inspector::Slot(_) | Inspector::SubPatch(_) => {
             let shown = rows::Shown {
                 looks: panel.rows,
                 drop_row: panel.drop_row,
@@ -314,6 +312,16 @@ fn build(panel: &Panel) -> Element {
                 Inspector::Module(m) => (m.id, m.name.clone(), rows::module(m, shown)),
                 Inspector::Unknown(m) => (m.id, m.kind.clone(), rows::unknown(m, panel.rows)),
                 Inspector::Slot(s) => (s.id, s.name.clone(), rows::slot(s, shown)),
+                // A sub-patch may have no name yet; its column is named
+                // for what it is then (section 7, rule 2).
+                Inspector::SubPatch(s) => {
+                    let label = if s.name.is_empty() {
+                        "Sub-patch".to_string()
+                    } else {
+                        s.name.clone()
+                    };
+                    (s.id, label, rows::sub_patch(s, &panel.part_authors, shown))
+                }
                 _ => unreachable!("matched above"),
             };
             return scroll(content, ids::panel(id).keys().last().cloned(), &label);
@@ -332,7 +340,9 @@ fn scroll(content: Element, key: Option<loom_ui_core::IdKey>, label: &str) -> El
         .height(Length::FILL)
         .min_height(0.0)
         .width(Length::FILL)
-        .access(Access::new(Role::Group, label));
+        // A scroll view named by what it shows, its offset and the cut
+        // bounds of its parts the runtime's (section 7, rule 28).
+        .access(Access::new(Role::ScrollView, label));
     match key {
         Some(key) => scroll.key(key),
         None => scroll,
@@ -428,7 +438,10 @@ fn patch(rows: &PatchRows, authors: &str, looks: Looks) -> Element {
                 .access(Access::label(words.clone())),
         );
     }
-    let info = Element::column(parts).spacing(6.0).width(Length::FILL);
+    let info = Element::column(parts)
+        .spacing(6.0)
+        .width(Length::FILL)
+        .align_x(Align::Start);
     let hint = "Select a module to edit it.";
     let add = "Press A over the canvas to add one.";
     Element::column([
@@ -446,6 +459,7 @@ fn patch(rows: &PatchRows, authors: &str, looks: Looks) -> Element {
     ])
     .spacing(8.0)
     .width(Length::FILL)
+    .align_x(Align::Start)
 }
 
 /// One tag's chip: its name and a remove button, keyed by the tag, so the

@@ -32,6 +32,7 @@ fn rows(model: &Inspector) -> Vec<Row<'_>> {
             .chain(&s.other_params)
             .map(|(_, module, p)| (*module, p))
             .collect(),
+        Inspector::SubPatch(s) => s.params.iter().map(|e| (e.module, &e.row)).collect(),
         _ => Vec::new(),
     }
 }
@@ -42,7 +43,7 @@ impl App {
     /// for Click. `None` for a part that is turned off or sends nothing.
     pub(crate) fn inspector_rows_click(&self, id: &UiId) -> Option<crate::Message> {
         let model = self.inspector_model();
-        if !matches!(model, Inspector::Module(_) | Inspector::Unknown(_) | Inspector::Slot(_)) {
+        if matches!(model, Inspector::Patch(_)) {
             return None;
         }
         let parts = access::items(&model);
@@ -70,6 +71,18 @@ impl App {
                 slot: s.id,
                 to: choice.to.clone(),
             });
+        }
+        if let Inspector::SubPatch(sub) = &model {
+            use crate::modes::Message as Mode;
+            let panel = ids::panel(sub.id);
+            if *id == ids::part(&panel, "mode") {
+                let mode = *loom_patch::Mode::ALL.get(index)?;
+                return Some(Message::Mode(Mode::SetMode { tile: sub.id, mode }));
+            }
+            if *id == ids::part(&panel, "copies") {
+                let copies = u32::try_from(index + 1).ok()?;
+                return Some(Message::Mode(Mode::SetCopies { tile: sub.id, copies }));
+            }
         }
         for (module, p) in rows(&model) {
             let at = |name: &'static str| ids::part(&p.ui, name);
@@ -138,6 +151,21 @@ impl App {
         }
         let end = phase == SlidePhase::End;
         let model = self.inspector_model();
+        if let Inspector::SubPatch(sub) = &model {
+            let spreads = ids::part(&ids::panel(sub.id), "spread");
+            if let Some(spread) = sub
+                .spread
+                .iter()
+                .find(|spread| *id == spreads.clone().with(spread.name.as_str()))
+            {
+                return Some(Message::Inspector(super::super::Message::SpreadSlid {
+                    tile: sub.id,
+                    name: spread.name.clone(),
+                    amount: position,
+                    end,
+                }));
+            }
+        }
         for (module, p) in rows(&model) {
             if *id == ids::part(&p.ui, "value") {
                 return Some(Message::Inspector(super::super::Message::Slid {
@@ -169,6 +197,21 @@ impl App {
         use super::super::Message as Inspect;
         use crate::Message;
         let model = self.inspector_model();
+        if let Inspector::SubPatch(sub) = &model {
+            if *id == ids::part(&ids::panel(sub.id), "name") {
+                return match event {
+                    FieldEvent::Edited(value) => Some(Message::Inspector(Inspect::SubPatchNameDraft {
+                        module: sub.id,
+                        value: value.clone(),
+                    })),
+                    FieldEvent::Committed(_) => Some(Message::Inspector(Inspect::SubPatchNameApply { module: sub.id })),
+                    _ => None,
+                };
+            }
+            if *id == crate::patch_info::part_authors_id(sub.id) {
+                return crate::patch_info::part_authors_message(sub.id, event);
+            }
+        }
         if let Inspector::Unknown(m) = &model
             && *id == ids::part(&ids::panel(m.id), "label")
         {
@@ -233,7 +276,7 @@ impl App {
             return false;
         }
         let model = self.inspector_model();
-        if !matches!(model, Inspector::Module(_) | Inspector::Unknown(_) | Inspector::Slot(_)) {
+        if matches!(model, Inspector::Patch(_)) {
             return false;
         }
         items::find(&access::items(&model), id).is_some_and(|item| item.set_text.is_some())

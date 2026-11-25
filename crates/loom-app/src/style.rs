@@ -523,31 +523,6 @@ pub fn card(selected: bool) -> impl Fn(&Theme) -> iced::widget::container::Style
     }
 }
 
-/// A pick list that reads as plain text until hovered or opened, such as
-/// an assignment's polarity on its card. Its handle stays visible, so it
-/// still looks like a choice.
-pub fn quiet_pick_list(theme: &Theme, status: iced::widget::pick_list::Status) -> iced::widget::pick_list::Style {
-    let palette = theme.extended_palette();
-    let active = !matches!(status, iced::widget::pick_list::Status::Active);
-    iced::widget::pick_list::Style {
-        text_color: palette.background.base.text,
-        // Iced's strong background is 1.76:1 on the panel, too faint for
-        // the one mark that says "this is a choice" (WCAG 1.4.11).
-        placeholder_color: QUIET,
-        handle_color: QUIET,
-        background: if active {
-            palette.background.weak.color.into()
-        } else {
-            iced::Color::TRANSPARENT.into()
-        },
-        border: iced::Border {
-            color: if active { CONTROL_EDGE } else { iced::Color::TRANSPARENT },
-            width: 1.0,
-            radius: 3.0.into(),
-        },
-    }
-}
-
 /// How a dialog over the canvas looks: help and Your patches. Today's
 /// look, the palette's weak background with a corner of 2, now a token so
 /// `loom-ui`'s panels take it (plan 3.2, rows 5b and 6).

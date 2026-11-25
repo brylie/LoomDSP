@@ -2366,98 +2366,6 @@ fn inspector_of(ui: &mut crate::ui_test::Ui, select: &[u32]) -> (Places, TreeUpd
     (places, update, items)
 }
 
-/// Every part the inspector reports has a role, every part but text has a
-/// name, and every part that acts is where the window drew it, inside the
-/// panel. Checked for a sub-patch tile, Iced's until plan 3.2, row 4d.3;
-/// a module's rows are the runtime's, and `inspector/panel/rows/tests.rs`
-/// checks their nodes.
-#[test]
-fn every_inspector_part_is_named_and_placed() {
-    use super::items::Kind;
-    // Patch info, with nothing selected, is the runtime's (plan 3.2, row
-    // 4d): `inspector/panel/tests.rs` checks its nodes.
-    let cases = [("nested-subtractive.ron", vec![2])];
-    for (patch, select) in cases {
-        let mut ui = crate::ui_test::Ui::open(patch);
-        let (places, update, items) = inspector_of(&mut ui, &select);
-        assert_eq!(items.len(), 1, "{patch} {select:?}: one panel");
-        let panel = &items[0];
-        let panel_place = places
-            .of(&panel.id)
-            .unwrap_or_else(|| panic!("{}: the panel is drawn", panel.id));
-        let panel_node = node(&update, node_of(ui.app_mut(), &panel.id));
-        assert!(panel_node.clips_children(), "the panel cuts off what it scrolls away");
-        let mut acting = 0;
-        for item in panel.walk() {
-            let found = node(&update, node_of(ui.app_mut(), &item.id));
-            // The role the table in section 7 gives each kind, and the
-            // state each kind must say.
-            let role = match item.kind {
-                Kind::Group => Role::Group,
-                Kind::Text => Role::Label,
-                Kind::Button => Role::Button,
-                Kind::Check => Role::CheckBox,
-                Kind::Slider => Role::Slider,
-                Kind::Options => Role::RadioGroup,
-                Kind::Option => Role::RadioButton,
-                Kind::Choice => Role::ComboBox,
-                Kind::Field => Role::TextInput,
-                Kind::List => Role::List,
-                Kind::ListItem => Role::ListItem,
-                Kind::ListBox => Role::ListBox,
-                Kind::ListBoxOption => Role::ListBoxOption,
-            };
-            assert_eq!(found.role(), role, "{}", item.id);
-            match item.kind {
-                Kind::Check | Kind::Option => assert!(found.toggled().is_some(), "{} says on or off", item.id),
-                Kind::Choice => assert!(
-                    found.value().is_some_and(|value| !value.is_empty()),
-                    "{} says what is chosen",
-                    item.id
-                ),
-                Kind::Slider => assert!(found.numeric_value().is_some(), "{} says its value", item.id),
-                Kind::Field => assert!(found.value().is_some(), "{} says its text", item.id),
-                _ => {}
-            }
-            if item.enabled && matches!(item.kind, Kind::Button | Kind::Check | Kind::Option) {
-                assert!(found.supports_action(Action::Click), "{} can be pressed", item.id);
-            }
-            if item.kind == Kind::Text {
-                assert_eq!(found.label(), None, "{}: text says its words as its value", item.id);
-                assert!(found.value().is_some_and(|text| !text.is_empty()), "{}", item.id);
-                continue;
-            }
-            assert!(
-                item.label.as_deref().is_some_and(|name| !name.is_empty()),
-                "{} has a name",
-                item.id
-            );
-            let acts = item.click.is_some()
-                || item.step.0.is_some()
-                || item.step.1.is_some()
-                || item.set_number.is_some()
-                || item.set_text.is_some()
-                || item.focus.is_some();
-            if !acts {
-                continue;
-            }
-            acting += 1;
-            let place = places
-                .of(&item.id)
-                .unwrap_or_else(|| panic!("the window drew no `{}`", item.id));
-            assert!(place.rect.width > 0.0 && place.rect.height > 0.0, "{}", item.id);
-            assert!(found.bounds().is_some(), "{} has bounds", item.id);
-            assert!(
-                place.rect.x >= panel_place.rect.x - 0.5
-                    && place.rect.x + place.rect.width <= panel_place.rect.x + panel_place.rect.width + 0.5,
-                "{} lies in the panel",
-                item.id
-            );
-        }
-        assert!(acting > 0, "{patch} {select:?}: something acts");
-    }
-}
-
 /// A slider in the inspector reports the parameter's own value and range,
 /// with the value and unit the row shows as its description. Increment
 /// moves one of its own arrow-key steps, and screen reader steps on it in
@@ -2683,11 +2591,12 @@ fn an_exposed_row_and_the_inner_row_differ_and_are_both_found() {
         super::items::find(&items, &exposed).is_some(),
         "the tile shows its exposed Cutoff"
     );
+    ui.lay_out_panels();
     let found = crate::control::Found {
         canvas: places.canvas,
         text: None,
         places: places.clone(),
-        ours: None,
+        ours: ui.runtime().bounds(&exposed),
     };
     let at = crate::control::locate(ui.app(), &exposed.to_string(), &found).expect("found");
     assert!(at.width > 0.0);
@@ -4199,12 +4108,10 @@ fn every_inspector_state_is_reported_with_named_parts() {
     }));
     check(&mut ui, "layer", |m| matches!(m, Inspector::SubPatch(_)));
     assert!(
-        ui.app()
-            .a11y_frames()
-            .panel
+        crate::inspector::access::items(&ui.app().inspector_model())
             .iter()
             .flat_map(super::items::Item::walk)
-            .any(|item| item.id.to_string().contains("/member/")),
+            .any(|item| item.id.to_string().contains("/members/")),
         "the layer's members are reported"
     );
 }

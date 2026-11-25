@@ -7,11 +7,7 @@
 //! Root patch edits change the document's metadata at once and mark it
 //! unsaved. Authors on a selected sub-patch edit its definition.
 
-use crate::Element;
-use crate::style;
-use crate::{App, DIM, licence_chooser};
-use iced::Length;
-use iced::widget::{column, text, text_editor};
+use crate::{App, licence_chooser};
 use loom_patch::Metadata;
 use loom_patch::metadata::{self, Licence};
 use serde::Serialize;
@@ -69,14 +65,24 @@ pub(crate) fn authors_message(event: &loom_ui::FieldEvent) -> Option<crate::Mess
     }
 }
 
+/// The message for an event on a sub-patch's Authors box: each edit's
+/// text. It never commits; focus leaving ends its undo step.
+pub(crate) fn part_authors_message(tile: u32, event: &loom_ui::FieldEvent) -> Option<crate::Message> {
+    match event {
+        loom_ui::FieldEvent::Edited(text) => Some(crate::Message::PatchInfo(Message::PartAuthors(tile, text.clone()))),
+        _ => None,
+    }
+}
+
 /// A patch info edit.
 #[derive(Debug, Clone)]
 pub enum Message {
     /// The Authors box's text, as typed, from an edit or a screen
     /// reader's SetValue (ui-layer.md, section 8, rule 7).
     Authors(String),
-    /// An edit to the selected sub-patch's list of authors.
-    PartAuthors(u32, text_editor::Action),
+    /// The selected sub-patch's Authors box's text, as typed, from an edit
+    /// or a screen reader's SetValue (ui-layer.md, section 8, rule 7).
+    PartAuthors(u32, String),
     /// The tag field's text changed. A comma adds what comes before it.
     TagDraft(String),
     /// Enter in the tag field adds its text as a tag.
@@ -115,7 +121,9 @@ struct PartAuthors {
     tile: u32,
     saved: Vec<String>,
     before_edit: Option<Vec<String>>,
-    content: text_editor::Content<crate::Renderer>,
+    /// The box's text: as typed while it has focus, and the saved authors,
+    /// one per line, once focus leaves it.
+    content: String,
 }
 
 impl State {
@@ -131,11 +139,11 @@ impl State {
     }
 
     /// The current sub-patch's box, when the field belongs to this tile.
-    pub(crate) fn part_authors(&self, tile: u32) -> Option<&text_editor::Content<crate::Renderer>> {
+    pub(crate) fn part_authors(&self, tile: u32) -> Option<&str> {
         self.part
             .as_ref()
             .filter(|part| part.tile == tile)
-            .map(|part| &part.content)
+            .map(|part| part.content.as_str())
     }
 
     /// Whether the Authors box owns the current undo gesture.
@@ -230,7 +238,7 @@ impl App {
             tile,
             saved: saved.clone(),
             before_edit: None,
-            content: text_editor::Content::with_text(&saved.join("\n")),
+            content: saved.join("\n"),
         });
         self.close_part_authors_edit();
         self.session.patch_info.part = next;
@@ -276,6 +284,15 @@ impl App {
             && focus != Some(&part_authors_id(part.tile))
         {
             self.close_part_authors_edit();
+            self.show_part_authors();
+        }
+    }
+
+    /// Shows the saved authors in the sub-patch's Authors box, one per
+    /// line, as focus leaving it does (ui-layer.md, section 8, rule 7).
+    fn show_part_authors(&mut self) {
+        if let Some(part) = self.session.patch_info.part.as_mut() {
+            part.content = part.saved.join("\n");
         }
     }
 
@@ -296,17 +313,17 @@ impl App {
                     self.session.document.info().authors.join("\n")
                 };
             }
-            Message::PartAuthors(tile, action) => {
+            Message::PartAuthors(tile, text) => {
+                let focused = self.focus.as_ref() == Some(&part_authors_id(tile));
                 let Some(part) = self.session.patch_info.part.as_mut().filter(|part| part.tile == tile) else {
                     return;
                 };
-                let edits = action.is_edit();
-                part.content.perform(action);
-                if !edits {
-                    return;
-                }
-                let authors = metadata::tidy_authors(part.content.text().lines());
+                let authors = metadata::tidy_authors(text.lines());
+                part.content = text;
                 if authors == part.saved {
+                    if !focused {
+                        part.content = part.saved.join("\n");
+                    }
                     return;
                 }
                 let starting = if part.before_edit.is_none() {
@@ -330,6 +347,13 @@ impl App {
                 self.session
                     .hierarchy
                     .set_part_authors(loom_core::ModuleId(tile), authors);
+                // A box without focus, as a screen reader's SetValue can
+                // reach it, shows the saved authors at once, and its edit is
+                // its one undo step.
+                if !focused {
+                    self.show_part_authors();
+                    self.close_part_authors_edit();
+                }
             }
             Message::TagDraft(text) => {
                 self.session.patch_info.tag_note = None;
@@ -419,28 +443,6 @@ impl App {
             Err(e) => self.session.patch_info.tag_note = Some(e.to_string()),
         }
     }
-}
-
-/// The editable credit on a selected sub-patch's inspector.
-pub(crate) fn part_authors_view(
-    tile: u32,
-    authors: &text_editor::Content<crate::Renderer>,
-) -> Element<'_, crate::Message> {
-    let id = part_authors_id(tile);
-    column![
-        text("Authors, one per line").size(style::BODY).color(DIM),
-        crate::inspector::ids::named(
-            &id,
-            text_editor(authors)
-                .id(crate::places::field_widget_id(&id))
-                .placeholder("Author name")
-                .on_action(move |action| crate::Message::PatchInfo(Message::PartAuthors(tile, action)))
-                .size(style::CONTROL)
-                .height(Length::Shrink)
-        ),
-    ]
-    .spacing(6)
-    .into()
 }
 
 #[cfg(test)]

@@ -688,11 +688,11 @@ impl Message {
                     | M::FullRange { .. }
                     | M::Slid { .. }
                     | M::DepthSlid { .. }
+                    | M::SpreadSlid { .. }
                     | M::SelectModule(_)
                     | M::DropRow(_)
                     | M::Expose { .. }
-                    | M::Unexpose { .. }
-                    | M::Scrolled => false,
+                    | M::Unexpose { .. } => false,
                 };
                 from(field, InputOwner::Canvas)
             }

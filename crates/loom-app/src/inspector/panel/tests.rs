@@ -42,49 +42,34 @@ fn click(ui: &mut Ui, at: loom_ui_core::Point) {
     let _ = ui.release();
 }
 
-/// Patch info, a selection of several, a module's rows, and a module that
-/// went are the runtime's; a sub-patch's inspector is still Iced's, and so
-/// is any other tab, until their rows move (plan 3.2, row 4d).
+/// Every variant of the inspector is the runtime's since plan 3.2, row
+/// 4d.3, a sub-patch's included; the other tabs are still Iced's, until 4e.
 #[test]
-fn the_runtime_draws_only_the_variants_moved_so_far() {
+fn the_runtime_draws_every_variant_and_no_other_tab() {
     let mut ui = nested_patch_info();
     ui.lay_out_panels();
     assert!(ui.runtime().bounds(&tags_part()).is_some(), "patch info is laid out");
-
     ui.send(Message::Canvas(CanvasEvent::Select(vec![SUB_PATCH])));
     let _ = ui.redraw();
-    assert!(!ui.app().inspector_ours(), "a sub-patch's inspector is Iced's");
+    assert!(ui.app().inspector_ours(), "a sub-patch's inspector is the runtime's");
+    ui.lay_out_panels();
+    assert!(
+        ui.runtime()
+            .bounds(&ids::part(&ids::panel(SUB_PATCH), "name"))
+            .is_some()
+    );
+
+    ui.send(Message::Canvas(CanvasEvent::Select(Vec::new())));
+    ui.send(Message::Matrix(crate::MatrixEvent::Tab(Tab::Matrix)));
+    assert!(!ui.app().inspector_ours(), "the matrix tab is Iced's");
     ui.lay_out_panels();
     assert!(
         ui.runtime().bounds(&tags_part()).is_none(),
         "the runtime draws no column"
     );
-
-    let mut ui = patch_info();
-    let module = first_module(&ui);
-    ui.send(Message::Canvas(CanvasEvent::Select(vec![module])));
-    let _ = ui.redraw();
-    assert!(ui.app().inspector_ours(), "a module's rows are the runtime's");
-    let mut modules: Vec<u32> = ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .nodes()
-        .map(|(id, _)| id.0)
-        .collect();
-    modules.truncate(2);
-    ui.send(Message::Canvas(CanvasEvent::Select(modules)));
-    let _ = ui.redraw();
-    assert!(ui.app().inspector_ours(), "several is the runtime's");
-
-    ui.send(Message::Canvas(CanvasEvent::Select(Vec::new())));
-    ui.send(Message::Matrix(crate::MatrixEvent::Tab(Tab::Matrix)));
-    assert!(!ui.app().inspector_ours(), "the matrix tab is Iced's");
 }
 
-/// The sub-patch tile of the nested example patch, whose inspector is
-/// Iced's until plan 3.2, row 4d.3.
+/// The sub-patch tile of the nested example patch.
 const SUB_PATCH: u32 = 2;
 
 /// The nested example patch with nothing selected.
@@ -209,19 +194,17 @@ fn the_wheel_scrolls_the_column() {
     assert!(after.0 > before.0, "it scrolled: {before:?} to {after:?}");
 }
 
-/// While some variants are the runtime's and some Iced's, a selection can
-/// swap who draws the column while the focus is in it. The focus never
-/// stays on a part that went, either way, and a tag being typed is added,
+/// A selection that replaces what the column shows while the focus is in
+/// it leaves no focus on a part that went, and a tag being typed is added,
 /// since leaving the Tags field by any means adds it (Brylie's decision,
-/// 2026-11-25).
+/// 2026-11-25). Each variant is the runtime's since row 4d.3.
 #[test]
-fn a_selection_that_swaps_the_toolkit_drops_the_focus_it_had() {
+fn a_selection_that_replaces_the_column_drops_the_focus_it_had() {
     let mut ui = nested_patch_info();
     ui.focus(&tags_part());
     let _ = ui.typewrite("half");
     ui.send(Message::Canvas(CanvasEvent::Select(vec![SUB_PATCH])));
     let _ = ui.redraw();
-    assert_eq!(ui.focused_field(), None, "no field keeps the focus");
     assert!(
         ui.app()
             .focus
@@ -231,15 +214,6 @@ fn a_selection_that_swaps_the_toolkit_drops_the_focus_it_had() {
     );
     assert_eq!(ui.app().session.patch_info.tag_draft, "", "the draft is done with");
     assert_eq!(ui.app().session.document.info().tags, ["half"], "and added");
-
-    // The other way: a field of Iced's, then patch info.
-    let name = ids::part(&ids::panel(SUB_PATCH), "name");
-    let at = ui.field(&name);
-    click(&mut ui, at);
-    assert_eq!(ui.focused_field(), Some(name), "Iced's name field has focus");
-    ui.send(Message::Canvas(CanvasEvent::Select(Vec::new())));
-    let _ = ui.redraw();
-    assert_eq!(ui.focused_field(), None, "no field keeps the focus");
 }
 
 /// Under an overlay the column is drawn but inert: a click on one of its
@@ -431,6 +405,11 @@ fn patch_infos_nodes_are_named_and_placed() {
     let patch = ids::patch();
     let column = tree.node_by_id(&patch);
     assert_eq!(column.name(), Some("Patch"));
+    assert_eq!(
+        column.role(),
+        accesskit::Role::ScrollView,
+        "a scroll view (section 7, rule 28)"
+    );
     let left = column.bounds().expect("the column has bounds").x0;
     let parts = tree.parts_under(&patch);
     for id in &parts {
@@ -669,4 +648,270 @@ fn leaving_the_tags_field_adds_the_typed_tag_and_escape_drops_it() {
         "Escape drops it"
     );
     assert_eq!(ui.app().session.patch_info.tag_draft, "");
+}
+
+/// A sub-patch's inspector on the runtime (plan 3.2, row 4d.3): the Mode
+/// select changes the mode, a layer's members are rows of
+/// `<t>/members/<member>` with Up turned off on the first and Down on the
+/// last, Copies sets a stack's count, and a spread's slider moves it as one
+/// undo step.
+#[test]
+fn the_sub_patch_mode_rows_act() {
+    let mut ui = nested_patch_info();
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![SUB_PATCH])));
+    ui.app_mut().a11y_event(crate::a11y::Event::Activated);
+    let _ = ui.redraw();
+    let panel = ids::panel(SUB_PATCH);
+    let mode = |ui: &Ui| match ui.app().inspector_model() {
+        crate::inspector::Inspector::SubPatch(s) => s.mode,
+        _ => panic!("a sub-patch's inspector"),
+    };
+    let layer = loom_patch::Mode::ALL
+        .iter()
+        .position(|m| *m == loom_patch::Mode::Layer)
+        .expect("a layer mode");
+    let chose = ui
+        .app()
+        .inspector_chose(&ids::part(&panel, "mode"), layer)
+        .expect("a choice");
+    ui.send(chose);
+    let _ = ui.redraw();
+    assert_eq!(mode(&ui), loom_patch::Mode::Layer);
+    let crate::inspector::Inspector::SubPatch(sub) = ui.app().inspector_model() else {
+        panic!("a sub-patch's inspector");
+    };
+    let members = ids::part(&panel, "members");
+    let tree = ui.a11y_tree();
+    let first = members.clone().with(sub.members[0].id);
+    assert!(
+        tree.node_by_id(&first.clone().with("up")).is_disabled(),
+        "the first can't go up"
+    );
+    let last = members.with(sub.members.last().unwrap().id);
+    assert!(
+        tree.node_by_id(&last.with("down")).is_disabled(),
+        "the last can't go down"
+    );
+
+    let stack = loom_patch::Mode::ALL
+        .iter()
+        .position(|m| *m == loom_patch::Mode::Stack)
+        .expect("a stack mode");
+    ui.send(ui.app().inspector_chose(&ids::part(&panel, "mode"), stack).unwrap());
+    ui.send(ui.app().inspector_chose(&ids::part(&panel, "copies"), 2).unwrap());
+    let _ = ui.redraw();
+    let crate::inspector::Inspector::SubPatch(sub) = ui.app().inspector_model() else {
+        panic!("a sub-patch's inspector");
+    };
+    assert_eq!(sub.copies, 3, "the third option is three copies");
+    if let Some(spread) = sub.spread.first() {
+        let id = ids::part(&panel, "spread").with(spread.name.as_str());
+        let steps = ui.app().session.edits.history.len();
+        let before = spread.amount;
+        ui.a11y_action(&id, accesskit::Action::Increment);
+        let _ = ui.wake_after(std::time::Duration::from_millis(600));
+        let crate::inspector::Inspector::SubPatch(sub) = ui.app().inspector_model() else {
+            panic!("a sub-patch's inspector");
+        };
+        assert!(sub.spread[0].amount > before, "the spread moved");
+        assert_eq!(ui.app().session.edits.history.len(), steps + 1, "one undo step");
+    }
+}
+
+/// A sub-patch's name field takes typing as a draft and Enter applies it,
+/// and its Authors box is a multi-line text input whose SetValue, with no
+/// focus, is saved and shown at once as one undo step.
+#[test]
+fn the_sub_patch_name_and_authors_are_runtime_fields() {
+    let mut ui = nested_patch_info();
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![SUB_PATCH])));
+    ui.app_mut().a11y_event(crate::a11y::Event::Activated);
+    let _ = ui.redraw();
+    let name = ids::part(&ids::panel(SUB_PATCH), "name");
+    ui.focus(&name);
+    let _ = ui.tap(Key::Named(Named::End), Modifiers::empty());
+    let _ = ui.typewrite("X");
+    let _ = ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    let crate::inspector::Inspector::SubPatch(sub) = ui.app().inspector_model() else {
+        panic!("a sub-patch's inspector");
+    };
+    assert!(sub.name.ends_with('X'), "renamed: {}", sub.name);
+
+    ui.unfocus_all();
+    let authors = crate::patch_info::part_authors_id(SUB_PATCH);
+    let tree = ui.a11y_tree();
+    assert_eq!(tree.node_by_id(&authors).role(), accesskit::Role::MultilineTextInput);
+    let steps = ui.app().session.edits.history.len();
+    ui.a11y_set_value(&authors, " Ada\n\nSam");
+    let crate::inspector::Inspector::SubPatch(sub) = ui.app().inspector_model() else {
+        panic!("a sub-patch's inspector");
+    };
+    assert_eq!(sub.authors, ["Ada", "Sam"]);
+    assert_eq!(
+        ui.app().session.patch_info.part_authors(SUB_PATCH),
+        Some("Ada\nSam"),
+        "shown at once"
+    );
+    assert_eq!(ui.app().session.edits.history.len(), steps + 1, "one undo step");
+}
+
+/// The general check across every kind of control in the inspector's
+/// column, as the runtime gives its nodes (plan 3.2, row 4d; it replaces
+/// the Iced item list's `every_inspector_part_is_named_and_placed`). For
+/// every variant the column shows, across the example patches, at the top
+/// level and inside each sub-patch: every role is one section 7's table
+/// allows; a check box and a radio say on or off, a select its choice, a
+/// slider its number, a field its text; every operable part that is on
+/// offers its action; every part but text and a field's runs has a name;
+/// every part with bounds has a size and lies inside the column; and the
+/// column is a scroll view that cuts its parts' bounds (section 7, rule 28).
+#[test]
+fn every_inspector_node_is_named_placed_and_acts() {
+    use crate::inspector::Inspector;
+    use accesskit::{Action, Role};
+    let allowed = [
+        Role::Group,
+        Role::Label,
+        Role::Button,
+        Role::CheckBox,
+        Role::RadioGroup,
+        Role::RadioButton,
+        Role::ComboBox,
+        Role::Slider,
+        Role::TextInput,
+        Role::MultilineTextInput,
+        Role::Toolbar,
+        Role::TextRun,
+        Role::ScrollView,
+    ];
+    let mut seen = std::collections::BTreeSet::new();
+    let mut check = |ui: &mut Ui, at: &str| {
+        let _ = ui.redraw();
+        let kind = match ui.app().inspector_model() {
+            Inspector::Patch(_) => "patch",
+            Inspector::Several(_) => "several",
+            Inspector::Port(_) => "port",
+            Inspector::Module(_) => "module",
+            Inspector::Unknown(_) => "unknown",
+            Inspector::Slot(_) => "slot",
+            Inspector::SubPatch(_) => "sub-patch",
+            Inspector::Empty => return,
+        };
+        seen.insert(kind);
+        let tree = ui.a11y_tree();
+        let inspector = inspector_id();
+        let parts = tree.parts_under(&inspector);
+        // The column's node: the scroll container under the panel.
+        let column = parts
+            .iter()
+            .find(|id| id.keys().len() == inspector.keys().len() + 1)
+            .unwrap_or_else(|| panic!("{at} {kind}: the column's node"));
+        let column = tree.node_by_id(column);
+        assert_eq!(
+            column.role(),
+            Role::ScrollView,
+            "{at} {kind}: the column is a scroll view"
+        );
+        let shown = column.bounds().expect("the column's bounds");
+        for id in &parts {
+            let node = tree.node_by_id(id);
+            let role = node.role();
+            assert!(allowed.contains(&role), "{at} {kind}: {id} is a {role:?}");
+            match role {
+                Role::CheckBox | Role::RadioButton => {
+                    assert!(node.toggled().is_some(), "{at}: {id} says on or off");
+                }
+                Role::ComboBox => assert!(node.value().is_some(), "{at}: {id} says its choice"),
+                Role::Slider => assert!(node.number().is_some(), "{at}: {id} says its number"),
+                Role::TextInput | Role::MultilineTextInput => {
+                    assert!(node.value().is_some(), "{at}: {id} says its text");
+                }
+                _ => {}
+            }
+            let operable = matches!(role, Role::Button | Role::CheckBox | Role::RadioButton);
+            if operable && !node.is_disabled() {
+                assert!(node.offers(Action::Click), "{at}: {id} can be pressed");
+            }
+            if role == Role::Slider && !node.is_disabled() {
+                assert!(node.offers(Action::Increment), "{at}: {id} steps");
+            }
+            if !matches!(role, Role::Label | Role::TextRun) {
+                assert!(
+                    node.name().is_some_and(|name| !name.is_empty()),
+                    "{at}: {id} has a name"
+                );
+            }
+            if let Some(bounds) = node.bounds().filter(|_| role != Role::TextRun) {
+                // A part scrolled out of view is cut to nothing both ways
+                // (section 7, rule 28); one squeezed to nothing one way is
+                // a layout bug.
+                let (wide, tall) = (bounds.width() > 0.0, bounds.height() > 0.0);
+                assert!(wide == tall, "{at}: {id} has a size both ways: {bounds:?} in {shown:?}");
+                // Cut by the column as drawn: inside it both ways.
+                assert!(
+                    bounds.x0 >= shown.x0 - 0.5
+                        && bounds.x1 <= shown.x1 + 0.5
+                        && bounds.y0 >= shown.y0 - 0.5
+                        && bounds.y1 <= shown.y1 + 0.5,
+                    "{at}: {id} lies inside the column: {bounds:?} {shown:?}"
+                );
+            }
+        }
+    };
+    let patches: Vec<String> = std::fs::read_dir("../../examples/patches")
+        .expect("the example patches")
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| name.ends_with(".ron"))
+        .collect();
+    for patch in &patches {
+        let mut ui = Ui::open(patch);
+        ui.app_mut().a11y_event(crate::a11y::Event::Activated);
+        let tiles: Vec<u32> = ui.app().ui_snapshot().tiles.iter().map(|tile| tile.id).collect();
+        ui.send(Message::Canvas(CanvasEvent::Select(Vec::new())));
+        check(&mut ui, patch);
+        if tiles.len() > 1 {
+            ui.send(Message::Canvas(CanvasEvent::Select(tiles[..2].to_vec())));
+            check(&mut ui, patch);
+        }
+        for &tile in &tiles {
+            ui.send(Message::Canvas(CanvasEvent::Select(vec![tile])));
+            check(&mut ui, patch);
+            // Inside a sub-patch: its port tiles and its own modules.
+            if matches!(ui.app().inspector_model(), Inspector::SubPatch(_)) {
+                ui.send(Message::OpenTile(tile));
+                let inner: Vec<u32> = ui.app().ui_snapshot().tiles.iter().map(|tile| tile.id).collect();
+                for inside in inner {
+                    ui.send(Message::Canvas(CanvasEvent::Select(vec![inside])));
+                    check(&mut ui, patch);
+                }
+                ui.send(Message::Canvas(CanvasEvent::Select(Vec::new())));
+                ui.app_mut().show_level(&loom_patch::ModulePath::root());
+            }
+        }
+    }
+    // An unknown module, which no example patch has.
+    let mut ui = Ui::open("subtractive.ron");
+    ui.app_mut().a11y_event(crate::a11y::Event::Activated);
+    let missing = loom_core::ModuleId(100);
+    ui.app_mut()
+        .session
+        .controller
+        .add_unknown_with_id(
+            missing,
+            loom_core::UnknownModule {
+                kind: "future.effect@1".into(),
+                params: std::collections::BTreeMap::from([("amount".into(), 0.5)]),
+                ranges: std::collections::BTreeMap::new(),
+                inputs: vec!["in".into()],
+                outputs: vec!["out".into()],
+                parameters: vec!["amount".into()],
+            },
+        )
+        .unwrap();
+    ui.app_mut().commit();
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![missing.0])));
+    check(&mut ui, "an unknown module");
+    for kind in ["patch", "several", "port", "module", "unknown", "slot", "sub-patch"] {
+        assert!(seen.contains(kind), "no example showed the {kind} inspector: {seen:?}");
+    }
 }

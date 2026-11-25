@@ -6,7 +6,7 @@ use crate::Element;
 use crate::edits::ArrowGroup;
 use crate::matrix::{Event as MatrixEvent, Tab as RightTab};
 use crate::style::button;
-use crate::{App, Message, inspector, matrix, pointer, style};
+use crate::{App, Message, matrix, pointer, style};
 use iced::Length;
 use iced::widget::{column, container, row, rule, space, stack, text, tooltip};
 use loom_canvas::{DragLine, EditGroupView, PatchCanvas};
@@ -121,16 +121,6 @@ impl App {
         }
     }
 
-    pub(crate) fn inspector(&self) -> Element<'_, Message> {
-        inspector::view(
-            self.inspector_model(),
-            &self.session.patch_info,
-            self.session.gestures.drop_row(),
-            self.session.gestures.assign_drag().is_some() && !self.session.learn.is_on(),
-            self.a11y.is_active(),
-        )
-    }
-
     /// Inspector and matrix share the same width in the right-hand column.
     pub(crate) fn right_panel(&self) -> Element<'_, Message> {
         // The open tab has a fill and a border (visual-system.md, Tabs).
@@ -157,8 +147,7 @@ impl App {
             RightTab::Outline => self.outline_view(),
             // The runtime's inspector draws in the root panel's slot here
             // (`inspector/panel.rs`), so Iced keeps the space.
-            RightTab::Inspector if self.inspector_ours() => space().width(Length::Fill).height(Length::Fill).into(),
-            RightTab::Inspector => self.inspector(),
+            RightTab::Inspector => space().width(Length::Fill).height(Length::Fill).into(),
             RightTab::Matrix => matrix::view(
                 self.session.matrix.model(
                     self.session.controller.graph(),

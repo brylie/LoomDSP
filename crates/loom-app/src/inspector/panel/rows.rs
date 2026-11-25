@@ -60,6 +60,13 @@ const RANGE_SELECT_WIDTH: f32 = 96.0;
 /// The width of a modulation card's depth text.
 const DEPTH_TEXT_WIDTH: f32 = 40.0;
 
+/// A column whose children start at its left edge, as Iced's did: a part
+/// that fills the width still fills it, and a button or a select that
+/// takes its own width keeps it, not stretched across the column.
+fn col(children: impl IntoIterator<Item = Element>) -> Element {
+    Element::column(children).align_x(Align::Start)
+}
+
 /// The last key of `id`: what an element is keyed by under its parent.
 fn last(id: &UiId) -> IdKey {
     id.keys().last().cloned().expect("an inspector part's UI ID has keys")
@@ -102,12 +109,12 @@ pub(super) fn module(m: &ModuleRows, shown: Shown) -> Element {
     if !m.ports.is_empty() {
         parts.push(ports(m, looks));
     }
-    Element::column(parts).spacing(6.0).width(Length::FILL)
+    col(parts).spacing(6.0).width(Length::FILL)
 }
 
 /// A column of rows keyed `key`, so each row's ID is `…/<key>/<name>`.
 fn rows_column(rows: impl IntoIterator<Item = Element>, key: &'static str) -> Element {
-    Element::column(rows).spacing(6.0).width(Length::FILL).key(key)
+    col(rows).spacing(6.0).width(Length::FILL).key(key)
 }
 
 /// **Drives**: one group per output, each line a button that selects its
@@ -131,14 +138,9 @@ fn drives(groups: &[DrivesGroup], looks: Looks) -> Element {
                     .access(Access::new(Role::Button, name).action(Action::Click)),
             );
         }
-        parts.push(
-            Element::column(lines)
-                .spacing(4.0)
-                .width(Length::FILL)
-                .key(group.output),
-        );
+        parts.push(col(lines).spacing(4.0).width(Length::FILL).key(group.output));
     }
-    Element::column(parts)
+    col(parts)
         .spacing(4.0)
         .width(Length::FILL)
         .key("drives")
@@ -170,10 +172,10 @@ fn ports(m: &ModuleRows, looks: Looks) -> Element {
         let heading = if direction == "Input" { "Inputs" } else { "Outputs" };
         [
             Element::text(heading, style::SMALL_TEXT).colour(looks.quiet),
-            Element::column(lines).width(Length::FILL).key(direction),
+            col(lines).width(Length::FILL).key(direction),
         ]
     });
-    Element::column(columns).spacing(2.0).width(Length::FILL).key("port")
+    col(columns).spacing(2.0).width(Length::FILL).key("port")
 }
 
 /// One parameter's row (`<row>` is its UI ID): its label line, with the
@@ -232,7 +234,7 @@ pub(super) fn param_row(module: u32, label: &str, p: &ParamRow, own: Option<&Exp
             }
         }
     }
-    let mut row = Element::column(parts).spacing(2.0).width(Length::FILL);
+    let mut row = col(parts).spacing(2.0).width(Length::FILL);
     // A dragged output over a row that takes it lights the row
     // (modulation.md); the row hears the pointer come and go.
     if p.accepts_drop {
@@ -279,10 +281,13 @@ fn head(label: &str, p: &ParamRow, own: Option<&ExposureRow>, looks: Looks) -> E
             .key("shown")
             .access(Access::label(p.value.clone())),
     });
+    // It wraps, so a row inside a sub-patch with two Expose buttons and
+    // its value field still shows them all in the column's width.
     Element::row(line)
         .spacing(6.0)
         .align_y(Align::Center)
         .width(Length::FILL)
+        .wrap()
 }
 
 /// The Expose or Unexpose button for its surface, keyed by that role, with
@@ -485,7 +490,7 @@ fn midi(module: u32, p: &ParamRow, label: &str, learn: Option<(bool, &str)>, loo
     if let Some(row) = p.mapping_options.as_ref().filter(|row| row.open) {
         parts.push(settings(row, looks));
     }
-    Element::column(parts).spacing(2.0).width(Length::FILL).key("midi")
+    col(parts).spacing(2.0).width(Length::FILL).key("midi")
 }
 
 /// A mapping's settings (`<row>/midi/settings`): mode, then range and
@@ -570,7 +575,7 @@ fn settings(row: &MappingRow, looks: Looks) -> Element {
                 .access(Access::label(note.clone())),
         );
     }
-    Element::column(parts).spacing(2.0).width(Length::FILL).key("settings")
+    col(parts).spacing(2.0).width(Length::FILL).key("settings")
 }
 
 /// A Relative mapping's encodings, in the order the select lists them.
@@ -592,12 +597,7 @@ fn modulation(
     let mut parts = Vec::new();
     if !assignments.is_empty() {
         let cards = assignments.iter().map(|a| card(a, looks));
-        parts.push(
-            Element::column(cards)
-                .spacing(6.0)
-                .width(Length::FILL)
-                .key("assignment"),
-        );
+        parts.push(col(cards).spacing(6.0).width(Length::FILL).key("assignment"));
     }
     if !allow_add {
         return parts;
@@ -630,11 +630,11 @@ fn modulation(
         }
         let columns = modules
             .into_iter()
-            .map(|(module, buttons)| Element::column(buttons).spacing(1.0).width(Length::FILL).key(module));
-        let column = Element::column(columns).spacing(1.0).width(Length::FILL).key("source");
+            .map(|(module, buttons)| col(buttons).spacing(1.0).width(Length::FILL).key(module));
+        let column = col(columns).spacing(1.0).width(Length::FILL).key("source");
         add.push(column.padding(Padding::symmetric(0.0, 8.0)));
     }
-    parts.push(Element::column(add).spacing(6.0).width(Length::FILL).key("modulation"));
+    parts.push(col(add).spacing(6.0).width(Length::FILL).key("modulation"));
     parts
 }
 
@@ -668,7 +668,7 @@ fn source(s: &SourceRow) -> Element {
 fn card(a: &AssignmentRow, looks: Looks) -> Element {
     let polarities = a.polarities.iter().map(ToString::to_string).collect();
     let at = a.polarities.iter().position(|choice| *choice == a.polarity);
-    Element::column([
+    col([
         Element::row([
             Element::checkbox("On", style::SMALL_TEXT, a.enabled).key("on"),
             Element::text(a.source.clone(), style::SMALL_TEXT)
@@ -679,7 +679,9 @@ fn card(a: &AssignmentRow, looks: Looks) -> Element {
         .spacing(4.0)
         .align_y(Align::Center)
         .width(Length::FILL),
-        Element::select(Select::new("Polarity", polarities, at, looks.quiet_select)).key("polarity"),
+        Element::select(Select::new("Polarity", polarities, at, looks.quiet_select))
+            .width(Length::Shrink)
+            .key("polarity"),
         Element::row([
             Element::slider(
                 Slider::new((a.depth + 1.0) / 2.0)
@@ -753,7 +755,7 @@ pub(super) fn unknown(m: &UnknownRows, looks: Looks) -> Element {
             let words = format!("{name}: {value}");
             body(&words, looks.text).key(name.as_str()).access(Access::label(words))
         });
-        parts.push(Element::column(saved).spacing(6.0).width(Length::FILL).key("saved"));
+        parts.push(col(saved).spacing(6.0).width(Length::FILL).key("saved"));
     }
     let (mut assignments, mut midi) = (Vec::new(), Vec::new());
     for link in &m.links {
@@ -776,20 +778,15 @@ pub(super) fn unknown(m: &UnknownRows, looks: Looks) -> Element {
     }
     let mut links = Vec::new();
     if !assignments.is_empty() {
-        links.push(
-            Element::column(assignments)
-                .spacing(6.0)
-                .width(Length::FILL)
-                .key("assignment"),
-        );
+        links.push(col(assignments).spacing(6.0).width(Length::FILL).key("assignment"));
     }
     if !midi.is_empty() {
-        links.push(Element::column(midi).spacing(6.0).width(Length::FILL).key("midi"));
+        links.push(col(midi).spacing(6.0).width(Length::FILL).key("midi"));
     }
     if !links.is_empty() {
-        parts.push(Element::column(links).spacing(6.0).width(Length::FILL).key("link"));
+        parts.push(col(links).spacing(6.0).width(Length::FILL).key("link"));
     }
-    Element::column(parts).spacing(6.0).width(Length::FILL)
+    col(parts).spacing(6.0).width(Length::FILL)
 }
 
 /// A slot's inspector: its name, its role, the Part select, a note, the
@@ -810,7 +807,9 @@ pub(super) fn slot(s: &SlotRows, shown: Shown) -> Element {
     parts.push(
         Element::row([
             Element::text("Part", style::BODY_TEXT).colour(looks.text),
-            Element::select(Select::new("Part", names, current, looks.select)).key("part"),
+            Element::select(Select::new("Part", names, current, looks.select))
+                .width(Length::Shrink)
+                .key("part"),
         ])
         .spacing(8.0)
         .align_y(Align::Center),
@@ -825,7 +824,7 @@ pub(super) fn slot(s: &SlotRows, shown: Shown) -> Element {
             let mut others = vec![body(&heading, looks.quiet)];
             others.extend(slot_rows(&s.other_params, shown));
             inside.push(
-                Element::column(others)
+                col(others)
                     .spacing(6.0)
                     .width(Length::FILL)
                     .key("others")
@@ -835,9 +834,9 @@ pub(super) fn slot(s: &SlotRows, shown: Shown) -> Element {
         // The part's keys after the slot's: its descriptor ID, or
         // `subpatch` and its key, one column each.
         let depth = super::super::ids::panel(s.id).keys().len();
-        let mut element = Element::column(inside).spacing(6.0).width(Length::FILL);
+        let mut element = col(inside).spacing(6.0).width(Length::FILL);
         for key in under.keys()[depth..].iter().rev() {
-            element = Element::column([element.key(key.clone())]).width(Length::FILL);
+            element = col([element.key(key.clone())]).width(Length::FILL);
         }
         parts.push(element);
     }
@@ -849,7 +848,7 @@ pub(super) fn slot(s: &SlotRows, shown: Shown) -> Element {
             ButtonRole::Secondary,
         ));
     }
-    Element::column(parts).spacing(6.0).width(Length::FILL)
+    col(parts).spacing(6.0).width(Length::FILL)
 }
 
 /// A slot's rows, grouped by their kind key (`param`, `exposed`), each
@@ -868,7 +867,7 @@ fn slot_rows(rows: &[(String, u32, ParamRow)], shown: Shown) -> Vec<Element> {
             .push(param_row(*module, label, row, None, shown));
     }
     out.into_iter()
-        .map(|(kind, rows)| Element::column(rows).spacing(6.0).width(Length::FILL).key(kind))
+        .map(|(kind, rows)| col(rows).spacing(6.0).width(Length::FILL).key(kind))
         .collect()
 }
 
@@ -911,4 +910,229 @@ fn remove(key: &'static str, what: &'static str) -> Element {
         .focusable()
         .takes_first(ESCAPE)
         .access(Access::new(Role::Button, what).action(Action::Click))
+}
+
+/// A sub-patch tile's inspector (sub-patches.md, Editor model): its name
+/// field, what it is, its ports, Open, its mode rows, each exposed item's
+/// row, and its Authors box, `authors` as typed while it has focus.
+pub(super) fn sub_patch(s: &super::super::SubPatchRows, authors: &str, shown: Shown) -> Element {
+    let looks = shown.looks;
+    let mut parts = vec![
+        Element::field(s.name.clone(), style::HEADING_TEXT)
+            .placeholder("Sub-patch name", looks.quiet)
+            .padding(style::FIELD_PADDING)
+            .background(looks.field.fill)
+            .border(style::RULE, looks.field.border)
+            .radius(looks.field.radius)
+            .width(Length::FILL)
+            .key("name")
+            .takes_first(ESCAPE)
+            .access(Access::new(Role::TextInput, "Sub-patch name")),
+        body("Sub-patch", looks.quiet)
+            .key("kind")
+            .access(Access::label("Sub-patch")),
+    ];
+    let ports: Vec<Element> = [("Inputs", &s.inputs), ("Outputs", &s.outputs)]
+        .into_iter()
+        .filter(|(_, ports)| !ports.is_empty())
+        .map(|(label, ports)| {
+            let words = format!("{label}: {}", ports.join(", "));
+            body(&words, looks.text).key(label).access(Access::label(words))
+        })
+        .collect();
+    if !ports.is_empty() {
+        parts.push(col(ports).spacing(6.0).width(Length::FILL).key("ports"));
+    }
+    parts.push(button_named(
+        "open",
+        "Open",
+        format!("Open {}", s.name),
+        ButtonRole::Secondary,
+        true,
+    ));
+    parts.extend(mode_rows(s, looks));
+    if s.params.is_empty() {
+        const NOTHING: &str = "Nothing exposed. Open it and press Expose on a parameter.";
+        parts.push(
+            body(NOTHING, looks.quiet)
+                .key("nothing_exposed")
+                .access(Access::label(NOTHING)),
+        );
+    } else {
+        let rows = s.params.iter().map(|exposed| {
+            // The Member control is the select's own: no Unexpose.
+            let own = (!exposed.member).then_some(&exposed.own);
+            param_row(exposed.module, &exposed.label, &exposed.row, own, shown)
+        });
+        parts.push(rows_column(rows, "exposed"));
+    }
+    parts.push(Element::text("Authors, one per line", style::BODY_TEXT).colour(looks.quiet));
+    parts.push(
+        Element::text_area(authors, style::CONTROL_TEXT)
+            .placeholder("Author name", looks.quiet)
+            .padding(style::FIELD_PADDING)
+            .background(looks.field.fill)
+            .border(style::RULE, looks.field.border)
+            .radius(looks.field.radius)
+            .width(Length::FILL)
+            .key("authors")
+            .takes_first(ESCAPE)
+            .access(Access::new(Role::TextInput, "Authors, one per line")),
+    );
+    col(parts).spacing(6.0).width(Length::FILL)
+}
+
+/// The mode rows (sub-patches.md, The editor for modes): the Mode select;
+/// for a layer or a select, its members, each with Open, Up, Down, and
+/// Remove (`<t>/members/<member>/…`), and Add member; for a stack, Copies,
+/// Stereo spread, and each spread's slider (`<t>/spread/<name>`).
+fn mode_rows(s: &super::super::SubPatchRows, looks: Looks) -> Vec<Element> {
+    let mut parts = Vec::new();
+    let modes = loom_patch::Mode::ALL;
+    let names = modes.iter().map(|mode| mode.label().to_string()).collect();
+    let at = modes.iter().position(|mode| *mode == s.mode);
+    parts.push(
+        Element::row([
+            Element::text("Mode", style::BODY_TEXT).colour(looks.text),
+            Element::select(Select::new("Mode", names, at, looks.select))
+                .width(Length::Shrink)
+                .key("mode"),
+        ])
+        .spacing(8.0)
+        .align_y(Align::Center),
+    );
+    if s.mode.has_members() {
+        let last = s.members.len().saturating_sub(1);
+        let mut members = vec![Element::text("Members", style::BODY_TEXT).colour(looks.quiet)];
+        for (n, member) in s.members.iter().enumerate() {
+            let name = format!("{}. {}", n + 1, member.name);
+            let line = Element::row([
+                Element::text(name.clone(), style::BODY_TEXT)
+                    .colour(looks.text)
+                    .width(Length::FILL),
+                button_named(
+                    "open",
+                    "Open",
+                    format!("Open {}", member.name),
+                    ButtonRole::Secondary,
+                    true,
+                ),
+                button_named(
+                    "up",
+                    "Up",
+                    format!("Move {} up", member.name),
+                    ButtonRole::Secondary,
+                    n > 0,
+                ),
+                button_named(
+                    "down",
+                    "Down",
+                    format!("Move {} down", member.name),
+                    ButtonRole::Secondary,
+                    n < last,
+                ),
+                button_named(
+                    "remove",
+                    "Remove",
+                    format!("Remove {}", member.name),
+                    ButtonRole::Secondary,
+                    true,
+                ),
+            ])
+            .spacing(6.0)
+            .align_y(Align::Center)
+            .width(Length::FILL)
+            .key(member.id)
+            .access(Access::new(Role::Group, name));
+            members.push(line);
+        }
+        parts.push(
+            col(members)
+                .spacing(6.0)
+                .width(Length::FILL)
+                .key("members")
+                .access(Access::new(Role::Group, "Members")),
+        );
+        parts.push(button_named(
+            "add_member",
+            "Add member",
+            "Add member".to_string(),
+            ButtonRole::Secondary,
+            true,
+        ));
+    }
+    if s.mode == loom_patch::Mode::Stack {
+        let counts: Vec<String> = (1..=loom_patch::MOST_MEMBERS as u32).map(|n| n.to_string()).collect();
+        let at = s.copies.checked_sub(1).map(|at| at as usize);
+        parts.push(
+            Element::row([
+                Element::text("Copies", style::BODY_TEXT).colour(looks.text),
+                Element::select(Select::new("Copies", counts, at, looks.select))
+                    .width(Length::Shrink)
+                    .key("copies"),
+            ])
+            .spacing(8.0)
+            .align_y(Align::Center),
+        );
+        parts.push(Element::checkbox("Stereo spread", style::BODY_TEXT, s.stereo_spread).key("stereo_spread"));
+        if !s.spread.is_empty() {
+            let mut spreads = vec![Element::text("Spread", style::BODY_TEXT).colour(looks.quiet)];
+            for spread in &s.spread {
+                let percent = (spread.amount * 100.0).round();
+                spreads.push(
+                    Element::row([
+                        Element::text(spread.name.clone(), style::BODY_TEXT).colour(looks.text),
+                        Element::slider(Slider::new(spread.amount).key_step(0.01).fine_key_step(0.001))
+                            .key(spread.name.as_str())
+                            .access(
+                                Access::new(Role::Slider, format!("Spread of {}", spread.name))
+                                    .description(format!("{percent:.0}%"))
+                                    .value(Value::Number {
+                                        value: f64::from(percent),
+                                        min: 0.0,
+                                        max: 100.0,
+                                        step: Some(1.0),
+                                    })
+                                    .action(Action::Increment)
+                                    .action(Action::Decrement)
+                                    .action(Action::SetValue),
+                            ),
+                        Element::text(format!("{percent:.0}%"), style::BODY_TEXT).colour(looks.text),
+                    ])
+                    .spacing(8.0)
+                    .align_y(Align::Center)
+                    .width(Length::FILL),
+                );
+            }
+            // The heading has no node of its own; each slider says what it
+            // spreads.
+            let column = col(spreads).spacing(6.0).width(Length::FILL).key("spread");
+            parts.push(column);
+        }
+    }
+    parts
+}
+
+/// A button in `role`, keyed `key`, showing `label`, named `name`, turned
+/// off unless `on`: no stop, and its node disabled (section 6, rule 2).
+fn button_named(key: &'static str, label: &'static str, name: String, role: ButtonRole, on: bool) -> Element {
+    let access = Access::new(Role::Button, name);
+    let access = if on {
+        access.action(Action::Click)
+    } else {
+        access.states(States {
+            disabled: true,
+            ..States::default()
+        })
+    };
+    // A turned-off element is no stop, by its node (`is_stop`), as in
+    // Preferences.
+    Element::text(label, style::CONTROL_TEXT)
+        .padding(style::BUTTON_PADDING)
+        .radius(role.tokens().radius)
+        .looks(role.looks())
+        .key(key)
+        .focusable()
+        .takes_first(ESCAPE)
+        .access(access)
 }

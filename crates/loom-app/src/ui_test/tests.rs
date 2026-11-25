@@ -2905,11 +2905,10 @@ fn gpu_required() -> bool {
 /// 2.3, item 2). Skips with no GPU adapter, unless one is required.
 #[test]
 fn measure_and_wgpu_lay_out_alike() {
-    // A sub-patch's inspector, Iced's until plan 3.2, row 4d.3: a module's
-    // rows are the runtime's.
-    let mut ui = Ui::open("nested-subtractive.ron");
-    ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2])));
-    assert!(!ui.app().inspector_ours(), "a sub-patch's inspector is Iced's");
+    // The Matrix tab, Iced's until plan 3.2, row 4e: the inspector is the
+    // runtime's since row 4d.
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Matrix(crate::MatrixEvent::Tab(crate::matrix::Tab::Matrix)));
     let Some((measured, drawn)) = ui.places_on_both() else {
         assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
         return;

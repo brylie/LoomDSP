@@ -461,10 +461,20 @@ fn part_credits_follow_nested_definitions_and_author_edits() {
     let authors = part_authors_id(2);
     ui.focus(&authors);
     assert_eq!(ui.focused_field(), Some(authors.clone()));
-    ui.send(AppMessage::PatchInfo(Message::PartAuthors(
-        2,
-        text_editor::Action::Move(text_editor::Motion::DocumentEnd),
-    )));
+    // To the text's end, as the platform's keys go there in a multi-line
+    // field (ui-layer.md, section 8, rule 7).
+    let end = if cfg!(target_os = "macos") {
+        (
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown),
+            iced::keyboard::Modifiers::COMMAND,
+        )
+    } else {
+        (
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::End),
+            iced::keyboard::Modifiers::CTRL,
+        )
+    };
+    ui.tap(end.0, end.1);
     ui.tap(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
         iced::keyboard::Modifiers::empty(),

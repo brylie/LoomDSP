@@ -81,28 +81,27 @@ fn ui_with(view: fn(&mut View)) -> Ui {
     ui
 }
 
-/// The nested patch with `view`'s panels added and its sub-patch tile 2
-/// selected, whose inspector's name field is Iced's until plan 3.2, row
-/// 4d.3: the Iced field these tests hand the keyboard to and from. Returns
-/// the field's centre.
+/// The subtractive patch with `view`'s panels added and the Matrix tab
+/// open, whose filter field is Iced's until plan 3.2, row 4e: the Iced
+/// field these tests hand the keyboard to and from. Returns the field's
+/// centre.
 fn ui_with_iced_field(view: fn(&mut View)) -> (Ui, Point) {
-    let mut ui = Ui::open("nested-subtractive.ron");
+    let mut ui = Ui::open("subtractive.ron");
     ui.with_test_panels(TestPanels {
         view,
         clicked,
         focuses,
         fields: |_, _| None,
     });
-    ui.app_mut().session.selection = [2].into_iter().collect();
+    ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
     ui.redraw();
-    assert!(!ui.app().inspector_ours(), "a sub-patch's inspector is Iced's");
     let field = ui.field(&iced_field());
     (ui, field)
 }
 
-/// The sub-patch's name field, Iced's until row 4d.3.
+/// The matrix's filter field, Iced's until row 4e.
 fn iced_field() -> loom_ui_core::UiId {
-    crate::inspector::ids::part(&crate::inspector::ids::panel(2), "name")
+    crate::matrix::filter_part()
 }
 
 /// The centre of the toolbar's button `key`, by its UI ID: text such as
@@ -190,7 +189,7 @@ fn an_iced_field_taking_the_keyboard_ends_our_focus() {
     click(&mut ui, field);
     ui.redraw();
     let part = ui.focused_field();
-    assert!(part.is_some(), "the name field has the keyboard");
+    assert!(part.is_some(), "the filter field has the keyboard");
     assert_eq!(ui.runtime().focused(), None, "ours let go");
     assert_eq!(ui.app().focus, part, "the app's copy is the field");
 }
@@ -262,16 +261,15 @@ fn shift_tab_from_nothing_enters_our_last_stop_and_not_iced() {
 fn a_key_after_our_element_takes_the_focus_misses_the_old_field() {
     let (mut ui, field) = ui_with_iced_field(bar);
     click(&mut ui, field);
-    assert!(ui.focused_field().is_some(), "the name field has the focus");
+    assert!(ui.focused_field().is_some(), "the filter field has the focus");
     ui.send(Message::MidiGhosts);
     assert_eq!(ui.runtime().focused(), Some(&go()));
     let typed = ui.typewrite("7");
     // Iced's field would send its new text if it still had the key.
     assert!(
-        !typed.iter().any(|m| matches!(
-            m,
-            Message::Inspector(crate::inspector::Message::SubPatchNameDraft { .. })
-        )),
+        !typed
+            .iter()
+            .any(|m| matches!(m, Message::Matrix(crate::matrix::Event::Filter(_)))),
         "the key missed the field: {typed:?}"
     );
     assert_eq!(ui.focused_field(), None);
@@ -441,17 +439,16 @@ fn our_field_gives_the_keyboard_to_an_iced_field() {
     click(&mut ui, field);
     ui.redraw();
     let part = ui.focused_field();
-    assert_eq!(part, Some(iced_field()), "the clicked name field has the keyboard");
+    assert_eq!(part, Some(iced_field()), "the clicked filter field has the keyboard");
     assert_eq!(ui.runtime().focused(), None, "ours let go");
 
     // Iced's field uses the key, so its listener reports no `Key`: the
     // field's own message is the sign it got there.
     let heard = ui.step(&[key_press(a, keyboard::Modifiers::default(), Some("a"), false)]);
     assert!(
-        heard.iter().any(|m| matches!(
-            m,
-            Message::Inspector(crate::inspector::Message::SubPatchNameDraft { module: 2, .. })
-        )),
+        heard
+            .iter()
+            .any(|m| matches!(m, Message::Matrix(crate::matrix::Event::Filter(_)))),
         "the clicked field typed it: {heard:?}"
     );
 }
