@@ -760,7 +760,7 @@ impl Element {
     }
 
     /// A check box named `label`, set in `style`, checked when `on`
-    /// (ui-layer.md, section 5, rule 17): a 14 px box with a 1.5 px border,
+    /// (ui-layer.md, section 5, rule 17): a 14 px box with a 1 px border,
     /// and a check mark in the panel style's primary colour when on, beside
     /// its label. A press on the box or the label toggles it and takes no
     /// focus; Space toggles it when it has focus (section 6, rule 11). Each

@@ -100,8 +100,16 @@ Ratios are by the WCAG 2.2 formula (`loom_canvas::contrast_ratio`), against the 
 
 Tile and probe menus share a solid panel and the same row style. Menu text, including a disabled row, has at least 4.5:1 contrast with its fill. The edge of a row and the outline on hover or keyboard focus have at least 3:1 contrast. The panel edge also stands out against a tile and the canvas.
 
-Active checkboxes use the control edge for the unchecked outline and the
-canvas value colour with a dark check mark for the checked state. The browser
+Check boxes take one look, `style::check_look`, which Iced's boxes and `loom-ui`'s read alike, so a box looks the same whichever toolkit draws it (plan 3.2, row 4d):
+
+| Part | Token | Contrast (WCAG 2.2, SC 1.4.11) |
+|---|---|---|
+| An off box's 1 px edge | `CONTROL_EDGE` (the quiet colour) | 3:1 or more against both panels |
+| An on box's fill and border | the canvas's control value colour | 3:1 or more against both panels |
+| An on box's check mark | the canvas background, dark | 3:1 or more against the fill |
+| The focus ring around either | `focus_ring()` | 3:1 or more against both panels |
+
+`style::tests::the_check_box_look_meets_contrast` checks each pair. The browser
 uses family tints inside its rows, where both the plain and selected fills are
 dark. Tile edges, inactive knob tracks, and unlit light markers keep at least
 3:1 against their adjacent canvas or control fills.

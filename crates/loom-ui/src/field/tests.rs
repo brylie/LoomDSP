@@ -51,6 +51,11 @@ const PANEL: PanelStyle = PanelStyle {
     mark: Color::rgb(0.9, 0.9, 0.9),
     primary: Color::rgb(0.3, 0.6, 1.0),
     track: Color::rgb(0.4, 0.4, 0.4),
+    check: crate::paint::CheckLook {
+        edge: Color::rgb(0.6, 0.6, 0.6),
+        fill: Color::rgb(0.3, 0.5, 0.9),
+        mark: Color::rgb(0.1, 0.1, 0.1),
+    },
 };
 
 /// A field and the contexts it edits with.

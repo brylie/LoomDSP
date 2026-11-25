@@ -1055,6 +1055,11 @@ fn ring_style() -> crate::paint::PanelStyle {
         mark: loom_ui_core::Color::WHITE,
         primary: loom_ui_core::Color::rgb(0.3, 0.6, 1.0),
         track: loom_ui_core::Color::rgb(0.4, 0.4, 0.4),
+        check: crate::paint::CheckLook {
+            edge: loom_ui_core::Color::rgb(0.6, 0.6, 0.6),
+            fill: loom_ui_core::Color::rgb(0.3, 0.5, 0.9),
+            mark: loom_ui_core::Color::rgb(0.1, 0.1, 0.1),
+        },
         ring: crate::focus::RingStyle {
             color: RING,
             width: 2.0,

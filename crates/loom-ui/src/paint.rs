@@ -82,12 +82,28 @@ pub struct PanelStyle {
     /// The colour of a radio's mark: its ring, and its dot when chosen. It
     /// needs a contrast of 3:1 or more against the panel (SC 1.4.11).
     pub mark: Color,
-    /// The colour of a check box's check mark, and of a slider's thumb and
-    /// the filled part of its track (section 5, rules 16 and 17). It needs
+    /// The colour of a slider's thumb and the filled part of its track
+    /// (section 5, rule 16). It needs
     /// a contrast of 3:1 or more against the panel (SC 1.4.11).
     pub primary: Color,
     /// The colour of the part of a slider's track that is not filled.
     pub track: Color,
+    /// How a check box looks (section 5, rule 17).
+    pub check: CheckLook,
+}
+
+/// How a check box looks: an off box is its edge, and an on box is filled,
+/// with its mark drawn on the fill (section 5, rule 17). The edge needs a
+/// contrast of 3:1 or more against the panel, and so do the fill against
+/// the panel and the mark against the fill (WCAG 2.2, SC 1.4.11).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CheckLook {
+    /// The border of a box that is off.
+    pub edge: Color,
+    /// The fill and border of a box that is on.
+    pub fill: Color,
+    /// The check mark on an on box's fill.
+    pub mark: Color,
 }
 
 /// How text sits on its anchor, left to right.

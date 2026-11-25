@@ -189,20 +189,37 @@ pub const QUIET: iced::Color = iced::Color::from_rgb(0.66, 0.69, 0.75);
 /// An unchecked switch's edge, and a choice's border on hover.
 pub const CONTROL_EDGE: iced::Color = QUIET;
 
-/// A checkbox that keeps its outline and check mark readable on cards and panels.
+/// How a check box looks, one token for both toolkits (visual-system.md,
+/// Check boxes): off, a 1 px edge in [`CONTROL_EDGE`]; on, filled in the
+/// canvas's control value colour, with its mark in the canvas background,
+/// so a checked box reads as a set value, as #856 made it for #463's
+/// contrast. Iced's boxes ([`check_box`]) and the runtime's
+/// (`PanelStyle::check`) read it; a test checks each pair for 3:1.
+pub fn check_look() -> loom_ui::paint::CheckLook {
+    use loom_canvas::iced_convert::ToCore as _;
+    let palette = loom_canvas::Palette::default();
+    loom_ui::paint::CheckLook {
+        edge: CONTROL_EDGE.to_core(),
+        fill: palette.control_value,
+        mark: palette.background,
+    }
+}
+
+/// A checkbox that keeps its outline and check mark readable on cards and
+/// panels, from [`check_look`].
 pub fn check_box(theme: &Theme, status: iced::widget::checkbox::Status) -> iced::widget::checkbox::Style {
     use iced::widget::checkbox::{Status, primary};
     use loom_canvas::iced_convert::ToIced as _;
     let mut style = primary(theme, status);
+    let look = check_look();
     match status {
         Status::Active { is_checked: true } | Status::Hovered { is_checked: true } => {
-            let palette = loom_canvas::Palette::default();
-            style.background = palette.control_value.to_iced().into();
-            style.icon_color = palette.background.to_iced();
-            style.border.color = palette.control_value.to_iced();
+            style.background = look.fill.to_iced().into();
+            style.icon_color = look.mark.to_iced();
+            style.border.color = look.fill.to_iced();
         }
         Status::Active { is_checked: false } | Status::Hovered { is_checked: false } => {
-            style.border.color = CONTROL_EDGE;
+            style.border.color = look.edge.to_iced();
             style.border.width = 1.0;
         }
         Status::Disabled { .. } => {}

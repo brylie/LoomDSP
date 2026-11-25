@@ -88,6 +88,30 @@ fn active_control_marks_and_family_tints_meet_contrast() {
     assert!(contrast_ratio(canvas.text, canvas.control_track) >= loom_canvas::MIN_TEXT_CONTRAST);
 }
 
+/// The check box look both toolkits read (`check_look`) meets 3:1 on both
+/// panels (WCAG 2.2, SC 1.4.11): an off box's edge and an on box's fill
+/// against the panel, the mark against the fill, and the focus ring around
+/// either against the panel.
+#[test]
+fn the_check_box_look_meets_contrast() {
+    use loom_canvas::contrast_ratio;
+    use loom_canvas::iced_convert::ToCore as _;
+    let theme = crate::tests::app().theme();
+    let app = theme.extended_palette();
+    let look = super::check_look();
+    let ring = super::focus_ring().color;
+    assert!(contrast_ratio(look.mark, look.fill) >= 3.0, "the mark on the fill");
+    for panel in [app.background.base.color, app.background.weak.color] {
+        let panel = panel.to_core();
+        for (what, colour) in [("edge", look.edge), ("fill", look.fill), ("ring", ring)] {
+            let ratio = contrast_ratio(colour, panel);
+            assert!(ratio >= 3.0, "{what} on {panel:?}: {ratio:.2}:1");
+        }
+    }
+    // The runtime's boxes read the same look as Iced's.
+    assert_eq!(crate::iced_bridge::paint::panel_style(&theme).check, look);
+}
+
 /// The app's Rust files under `dir`, in every folder, with `style.rs` and
 /// test files left out: tests may write a value to check it.
 fn app_sources(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
