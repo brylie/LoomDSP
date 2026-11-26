@@ -372,7 +372,14 @@ impl InputSession {
                         alerts.say(format!("Audio input: \"{name}\" is back."));
                     }
                 }
-                Err(error) => alerts.warn(format!("Audio input: {error}.")),
+                Err(error) => {
+                    // A full queue drains by itself, so this is a warning.
+                    // Said once, so retries do not overwrite newer status text.
+                    if !self.error_reported {
+                        alerts.warn(format!("Audio input: {error}."));
+                        self.error_reported = true;
+                    }
+                }
             },
             Err(error) => {
                 let reported = if matches!(error, InputError::PermissionDenied) {
