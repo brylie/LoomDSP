@@ -95,9 +95,13 @@ class ClassifyTests(unittest.TestCase):
             self.assertEqual(test_run.classify(path, MEMBERS), ("all", None), path)
 
     def test_a_crate_file_selects_its_crate(self):
-        """Any file under crates/NAME/ belongs to that member, its Cargo.toml included."""
+        """Any file under crates/NAME/ belongs to that member."""
         self.assertEqual(test_run.classify("crates/dsp/src/lib.rs", MEMBERS), ("crate", "loom-dsp"))
-        self.assertEqual(test_run.classify("crates/app/Cargo.toml", MEMBERS), ("crate", "loom-app"))
+        self.assertEqual(test_run.classify("crates/app/tests/data/x.ron", MEMBERS), ("crate", "loom-app"))
+
+    def test_a_crate_manifest_runs_everything(self):
+        """A crate's Cargo.toml can change shared features, so it runs every test."""
+        self.assertEqual(test_run.classify("crates/app/Cargo.toml", MEMBERS), ("all", None))
 
     def test_an_unknown_crate_folder_runs_everything(self):
         """A folder under crates/ that is no member is not trusted."""
@@ -329,15 +333,12 @@ class QueueTests(CleanEnv):
         waiter.stdout.close()
         wrapper.wait(timeout=20)
 
-    def test_the_slot_outlives_a_killed_wrapper_until_its_child_ends(self):
-        """kill -9 of the wrapper leaves the slot held by the child that inherited it, then frees it."""
-        wrapper, child_pid = self.start_holder()
+    def test_a_killed_wrapper_frees_the_slot(self):
+        """kill -9 of the wrapper frees the slot at once; its child does not keep it."""
+        wrapper, _child_pid = self.start_holder()
         os.kill(wrapper.pid, signal.SIGKILL)
         wrapper.wait(timeout=20)
         waiter = self.start_waiter()
-        self.wait_for_line(waiter, "slot 0:")
-        self.assertIsNone(waiter.poll())
-        os.kill(child_pid, signal.SIGKILL)
         self.assertEqual(waiter.wait(timeout=20), 0)
         waiter.stdout.close()
 

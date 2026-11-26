@@ -65,8 +65,10 @@ description = "Run every test (debug build, so the no-allocation test is active)
 # https://github.com/KhronosGroup/Vulkan-Loader/issues/1863
 # Nextest gives each test a process of its own. Cargo runs the doc tests.
 # The nextest run waits in the machine-wide test queue (docs/dev/test-runs.md);
-# the queue is off in CI. It builds first, then runs every test.
-run = ["python3 scripts/test_run.py --all", "mise run doctest"]
+# the queue is off in CI. It builds first, then runs every test. `python`,
+# not `python3`: CI runs this task on Windows, where mise's Python has no
+# python3 command.
+run = ["python scripts/test_run.py --all", "mise run doctest"]
 
 [tasks.coverage]
 description = "Run every test with line coverage, and fail under LOOM_COVERAGE_MIN"

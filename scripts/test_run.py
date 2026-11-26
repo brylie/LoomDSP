@@ -95,6 +95,10 @@ def classify(path, members):
     if path.startswith("crates/"):
         folder = path.split("/")[1] if path.count("/") >= 2 else ""
         if folder in members:
+            # A crate's manifest can change the features of shared
+            # dependencies, and so the build of every crate.
+            if path == "crates/%s/Cargo.toml" % folder:
+                return ("all", None)
             return ("crate", members[folder])
         return ("all", None)
     if matches(path, RUN_NONE):
@@ -326,7 +330,7 @@ class Slot:
         self.folder = folder
 
     def release(self):
-        """Free the slot. Child processes that inherited the file keep it held."""
+        """Free the slot."""
         try:
             os.remove(os.path.join(self.folder, "slot-%d.json" % self.index))
         except OSError:
@@ -348,12 +352,21 @@ def try_slots(folder, slots):
 
 
 def acquire(folder, slots, what, out=sys.stdout, clock=time.time):
-    """Wait for a slot, saying who holds them, and write this run's holder record."""
+    """Wait for a slot, saying who holds them, and write this run's holder record.
+
+    Returns the slot and the holder record of slot 0 when the wait began
+    (None when there was no wait). The lock file is not inherited by the
+    command: a long-lived process it starts, such as the sccache server,
+    would otherwise keep the slot after the run.
+    """
     os.makedirs(folder, exist_ok=True)
     slot = try_slots(folder, slots)
     next_report = 0.0
+    first_holder = None
     while slot is None:
         now = clock()
+        if first_holder is None:
+            first_holder = read_holder(folder, 0) or {}
         if now >= next_report:
             print("test queue: waiting for a test slot (%d of %d in use)" % (slots, slots), file=out)
             for index in range(slots):
@@ -376,8 +389,7 @@ def acquire(folder, slots, what, out=sys.stdout, clock=time.time):
         os.replace(path + ".tmp", path)
     except OSError:
         pass
-    os.set_inheritable(slot.fd, True)
-    return slot
+    return slot, first_holder
 
 
 # ---------------------------------------------------------------------------
@@ -385,14 +397,10 @@ def acquire(folder, slots, what, out=sys.stdout, clock=time.time):
 # ---------------------------------------------------------------------------
 
 
-def run_child(command, env, keep_fds=()):
-    """Run a command, pass on the signals that stop it, and return its exit code.
-
-    `keep_fds` are inherited by the child, so a held slot stays held for as
-    long as the child or anything it starts is alive.
-    """
+def run_child(command, env):
+    """Run a command, pass on the signals that stop it, and return its exit code."""
     try:
-        child = subprocess.Popen(command, env=env, pass_fds=tuple(keep_fds))
+        child = subprocess.Popen(command, env=env)
     except OSError as error:
         print("test_run: cannot run %s: %s" % (command[0], error), file=sys.stderr)
         return 127
@@ -453,7 +461,7 @@ def queued(command, what, spans, threads_flag=None, extra_attributes=None):
     wait_start = time.time_ns()
     if off is None:
         try:
-            slot = acquire(queue_dir(), slot_count(), what)
+            slot, holder = acquire(queue_dir(), slot_count(), what)
         except KeyboardInterrupt:
             spans.record("test queue wait", wait_start, time.time_ns(), {"loom.test.cancelled": True})
             return 130
@@ -468,18 +476,27 @@ def queued(command, what, spans, threads_flag=None, extra_attributes=None):
                 "test queue wait",
                 wait_start,
                 time.time_ns(),
-                {"loom.test.wait_ms": waited // 1_000_000, "loom.test.slots": slot_count()},
+                {
+                    "loom.test.wait_ms": waited // 1_000_000,
+                    "loom.test.slots": slot_count(),
+                    "loom.test.holder": os.path.basename((holder or {}).get("worktree", "")),
+                },
             )
             env["LOOM_TEST_SLOT_HELD"] = "1"
+    if off == "no flock on this system":
+        print("test queue: off (no flock on this system)", flush=True)
     held = slot is not None or off == "held"
-    full = list(command) + (threads_flag(held, off == "CI") if threads_flag else [])
+    threads = threads_flag(held, off == "CI") if threads_flag else []
+    full = list(command) + threads
     start = time.time_ns()
     try:
-        code = run_child(full, env, keep_fds=[slot.fd] if slot else [])
+        code = run_child(full, env)
     finally:
         if slot:
             slot.release()
     attributes = {"process.exit.code": code, "process.command_line": " ".join(full)[:2000]}
+    if threads:
+        attributes["loom.test.threads"] = int(threads[1])
     attributes.update(extra_attributes or {})
     spans.record("test run", start, time.time_ns(), attributes, code != 0)
     return code
@@ -516,14 +533,15 @@ def run_tests(run_all, nextest_args):
         return 0
     command = ["cargo", "nextest", "run", "--workspace"]
     if selection.kind == "some":
-        command += ["-E", selection.filterset()]
+        # A selected crate may have no tests of its own; that is no failure.
+        command += ["-E", selection.filterset(), "--no-tests=warn"]
     command += list(nextest_args)
     if queue_off_reason() is None:
         # Build before taking a slot, so only the run waits.
         code = run_child(["cargo", "nextest", "run", "--workspace", "--no-run"], dict(os.environ))
         if code != 0:
             return code
-    what = "%s tests" % ("every crate's" if selection.kind == "all" else "%d crates'" % len(selection.run))
+    what = "every test" if selection.kind == "all" else "the tests of %d crates" % len(selection.run)
     return queued(command, what, spans, nextest_threads, attributes)
 
 
