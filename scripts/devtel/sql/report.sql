@@ -49,12 +49,14 @@ with turns as (
 sized as (
   select *, input_tokens + coalesce(cache_read_tokens, 0) + coalesce(cache_write_tokens, 0) as all_input from turns
 )
-select agent_type, model, count(distinct coalesce(agent_id, session_id)) as agents, count(*) as turns,
+-- A subagent's ID is unique only within its session, so count the pair.
+select agent_type, model, count(distinct session_id || ':' || coalesce(agent_id, '')) as agents, count(*) as turns,
   round(sum(output_tokens) / 1e6, 2) as output_mtok, round(sum(all_input) / 1e6, 1) as input_mtok,
   round(100.0 * sum(all_input) / sum(sum(all_input)) over (), 1) as input_share_pct,
   round(sum(all_input) / count(*) / 1000) as input_k_per_turn,
   min(ts)::date as first_day, max(ts)::date as last_day
-from sized group by all order by input_mtok desc limit 15;
+-- No row limit: a small new row is the one a model change adds.
+from sized group by all order by input_mtok desc;
 
 .print '== Work done (from the git hooks; empty until they are installed)'
 select count(*) as commits,
