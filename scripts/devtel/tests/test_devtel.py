@@ -278,23 +278,32 @@ class ArchiveTests(StoreTestCase):
 
     def test_readers_share_the_archive_with_an_open_ui(self):
         """While another window reads the archive, the import skips and readers still work."""
+        import select
+
         devtel.import_all(quiet=True)
         holder = subprocess.Popen(
-            devtel.duckdb_cmd() + ["-readonly", devtel.archive_path()],
-            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True,
+            devtel.duckdb_cmd() + ["-readonly", "-noheader", "-list", devtel.archive_path()],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
         try:
-            holder.stdin.write("select 1;\n")
+            # The holder answers a query only once it has the archive open.
+            holder.stdin.write("select 4242;\n")
             holder.stdin.flush()
-            time.sleep(2)
+            ready, _, _ = select.select([holder.stdout], [], [], 60)
+            self.assertTrue(ready, "the holder never answered")
+            self.assertEqual(holder.stdout.readline().strip(), "4242")
+            # A span written now is new data the skipped import must leave out.
+            devtel.emit("hooks", "checks", [devtel.span("a" * 32, "d" * 16, None, "late", 1, 2, {})])
             self.assertEqual(devtel.import_all(quiet=True), 0)
+            count = "select count(*) as n from spool_spans where span_id = '%s'" % ("d" * 16)
+            self.assertEqual(json.loads(devtel.run_duckdb(count, json_output=True, readonly=True))[0]["n"], 0)
             self.assertGreater(devtel.export_otlp(os.path.join(self.dir, "out.jsonl"), 30), 0)
-            rows = json.loads(devtel.run_duckdb("select count(*) as n from devtel_tools", json_output=True, readonly=True))
-            self.assertEqual(rows[0]["n"], 2)
         finally:
             holder.stdin.close()
             holder.wait(timeout=30)
-
+        # Once the other window closes, the next import brings the new span in.
+        self.assertEqual(devtel.import_all(quiet=True), 0)
+        self.assertEqual(json.loads(devtel.run_duckdb(count, json_output=True, readonly=True))[0]["n"], 1)
 
 if __name__ == "__main__":
     unittest.main()

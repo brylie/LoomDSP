@@ -681,6 +681,9 @@ def open_ui():
     import_all()
     print("devtel: opening the DuckDB UI. The page loads its assets from ui.duckdb.org; your data stays local.")
     print("devtel: start with `from devtel_sessions` or `from devtel_reruns`. Quit with Ctrl-D.")
+    # The DuckDB shell gives up at once on a lock, so first wait, as other
+    # readers do, for an import that may still be running.
+    run_duckdb("select 1;", readonly=True, wait=30)
     # Read-only, so reports, imports of other windows, and the trace viewer
     # can still read the archive while the UI is open.
     return subprocess.call(duckdb_cmd() + ["-readonly", "-ui", archive_path()])
