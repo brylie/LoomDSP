@@ -217,6 +217,8 @@ pub(crate) struct Record {
     pub(crate) select: Option<Box<crate::select::Select>>,
     /// For a drawn mark: which.
     pub(crate) glyph: Option<crate::select::Glyph>,
+    /// For a custom element: its kind ([`Element::custom`]).
+    pub(crate) custom: Option<crate::CustomKind>,
     /// For a link inside a rich text: its bytes in its parent's text. It
     /// has no node of its own; its place comes from where the text sets
     /// those bytes.
@@ -721,6 +723,15 @@ impl Layout {
         self.size
     }
 
+    /// The custom elements laid out in the panel, in tree order: each one's
+    /// UI ID, kind, and bounds in the panel. One whose UI ID an earlier
+    /// element took has none, and is left out.
+    pub(crate) fn customs(&self) -> impl Iterator<Item = (&UiId, crate::CustomKind, Rect)> {
+        self.records
+            .iter()
+            .filter_map(|record| Some((record.id.as_ref()?, record.custom?, record.bounds)))
+    }
+
     /// Where the element with UI ID `id` is in the panel, as last computed.
     /// `None` when no element has it.
     pub fn bounds(&self, id: &UiId) -> Option<Rect> {
@@ -897,6 +908,10 @@ impl Layout {
             Kind::Glyph(glyph) => Some(glyph),
             _ => None,
         };
+        let custom = match element.kind {
+            Kind::Custom(kind) => Some(kind),
+            _ => None,
+        };
         let passive = element.passive;
         let Element {
             kind,
@@ -986,8 +1001,9 @@ impl Layout {
         let id = key.map(|key| scope.clone().with(key));
         let (kept, lost) = self.claim(id.as_ref(), index, lost);
         let keys_first = if kept.is_some() { keys_first } else { Vec::new() };
-        // A scroll container keeps its offset by its UI ID, so it needs one.
-        if (focusable || access.is_some() || scrollbar.is_some()) && id.is_none() {
+        // A scroll container keeps its offset by its UI ID, and a custom
+        // element its state, so each needs one.
+        if (focusable || access.is_some() || scrollbar.is_some() || custom.is_some()) && id.is_none() {
             self.problem(None, Problem::NoKey);
         }
         let hover = hover.filter(|_| kept.is_some());
@@ -1056,6 +1072,7 @@ impl Layout {
             check,
             select,
             glyph,
+            custom,
             inline: None,
             words: Vec::new(),
             pieces: Vec::new(),
@@ -1165,6 +1182,7 @@ impl Layout {
             check: None,
             select: None,
             glyph: None,
+            custom: None,
             inline: Some(link.range),
             words: Vec::new(),
             pieces: Vec::new(),
@@ -1247,6 +1265,7 @@ fn style(element: &Element, around: Parent) -> Style {
         | Kind::Field { .. }
         | Kind::Space
         | Kind::Slot(_)
+        | Kind::Custom(_)
         | Kind::RadioMark { .. }
         | Kind::Slider(_)
         | Kind::CheckMark { .. }

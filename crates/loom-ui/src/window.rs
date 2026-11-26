@@ -869,6 +869,24 @@ impl Window {
         self.record_of(id).is_some_and(|record| record.focusable)
     }
 
+    /// The custom elements in every panel, in view order: each one's UI ID,
+    /// kind, and bounds in the window. A placed panel whose anchor was gone
+    /// at the last layout still holds its elements, so their state lasts
+    /// while it is hidden.
+    pub(crate) fn customs(&self) -> Vec<(UiId, crate::CustomKind, Rect)> {
+        self.order
+            .iter()
+            .filter_map(|key| self.records.get(key))
+            .flat_map(|record| {
+                let origin = record.origin;
+                record.layout.customs().map(move |(id, kind, bounds)| {
+                    let at = Point::new(origin.x + bounds.x, origin.y + bounds.y);
+                    (id.clone(), kind, Rect::new(at, bounds.size()))
+                })
+            })
+            .collect()
+    }
+
     /// The laid-out record of the element with UI ID `id`, in its panel.
     fn record_of(&self, id: &UiId) -> Option<&crate::layout::Record> {
         let panel = self.panel_of(id)?;

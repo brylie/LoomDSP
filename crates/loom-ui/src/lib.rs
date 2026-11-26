@@ -60,6 +60,7 @@ pub mod access;
 mod app;
 #[cfg(feature = "clipboard")]
 pub mod clipboard;
+mod custom;
 mod draw;
 mod driver;
 pub mod effect;
@@ -85,6 +86,7 @@ mod waker;
 mod window;
 
 pub use app::{App, Context, Deadline, InputState, TabStep, WindowSpec};
+pub use custom::{Custom, CustomKind};
 pub use draw::Panels;
 pub use driver::{Driver, Paste};
 pub use effect::{ClipboardText, Effect, Effects};

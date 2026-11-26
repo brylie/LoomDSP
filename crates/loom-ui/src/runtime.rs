@@ -156,6 +156,8 @@ pub struct Runtime<A: App, T> {
     pasted: VecDeque<PasteAnswer>,
     /// The driver's wake function, for a paste's answer.
     wake: Wake,
+    /// The custom elements' state, by UI ID (ui-layer.md, section 9).
+    customs: crate::custom::Customs<A>,
 }
 
 impl<A: App, T: Target<A::Message>> Runtime<A, T> {
@@ -189,6 +191,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             paste_answers: mpsc::channel(),
             pasted: VecDeque::new(),
             wake,
+            customs: crate::custom::Customs::default(),
         }
     }
 
@@ -246,6 +249,20 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.view_stale
     }
 
+    /// The state of the custom element with UI ID `id`, as its own type
+    /// `S`, as [`Context::custom`] reads it: for a driver that draws it,
+    /// and for tests.
+    pub fn custom<S: 'static>(&self, id: &UiId) -> Option<&S> {
+        let state: &dyn std::any::Any = self.customs.state(id)?;
+        state.downcast_ref()
+    }
+
+    /// Where the custom element with UI ID `id` was at the last layout, in
+    /// the window, in logical pixels.
+    pub fn custom_bounds(&self, id: &UiId) -> Option<Rect> {
+        self.customs.bounds(id)
+    }
+
     /// The routing target, to read.
     pub fn target(&self) -> &T {
         &self.target
@@ -271,6 +288,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 app: &self.app,
                 waker: &self.waker,
                 scale: self.window.scale,
+                customs: &mut self.customs,
             },
         )
     }
@@ -1961,6 +1979,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             focused: self.focus.id().cloned().or_else(|| self.target.focused()),
             window: self.window,
             panels: Some(&self.panels),
+            customs: Some(&self.customs),
         };
         let effects = self.app.update(message, &cx);
         let mut redraw = false;

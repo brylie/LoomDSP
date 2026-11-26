@@ -65,6 +65,8 @@ pub struct Panels<'a, A: App> {
     pub(crate) waker: &'a Waker<A::Message>,
     /// Physical pixels per logical pixel, for the caret.
     pub(crate) scale: f32,
+    /// The custom elements' state, made, kept, or dropped at each layout.
+    pub(crate) customs: &'a mut crate::custom::Customs<A>,
 }
 
 /// What painting a panel needs besides its layout: the fields' state,
@@ -119,6 +121,7 @@ impl<A: App> Panels<'_, A> {
         let laid = self.window.lay_out(self.size, text);
         self.counts.panels_laid_out += laid.panels;
         self.counts.elements_laid_out += laid.elements;
+        self.customs.settle(self.window.customs(), self.app);
         self.focus.settle(self.window);
         self.reveal();
         self.reveal_caret();
