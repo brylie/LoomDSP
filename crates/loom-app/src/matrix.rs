@@ -812,11 +812,19 @@ impl App {
                 self.session.outline.close_jump();
                 self.session.outline.inspector_action = None;
                 self.right_tab = tab;
-                self.session.outline.active = tab == Tab::Outline;
-                if self.toolbar_has_focus() {
+                // From the tabs' own stop (a key, Enter, or a screen reader
+                // on a tab), the focus moves to the tab now open and the
+                // content keeps no keys until Tab enters it (the WAI-ARIA
+                // Tabs pattern). From the pointer, which focuses no tab,
+                // the open content takes the keys, as before.
+                let on_tabs = self.focus_on_tabs();
+                if on_tabs {
+                    self.effect(loom_ui::Effects::focus(crate::tabs::tab_id(tab)));
+                } else if self.toolbar_has_focus() {
                     self.effect(loom_ui::Effects::unfocus());
                 }
-                self.session.matrix.focused = tab == Tab::Matrix;
+                self.session.outline.active = tab == Tab::Outline && !on_tabs;
+                self.session.matrix.focused = tab == Tab::Matrix && !on_tabs;
                 self.session.matrix.edit = None;
                 self.session.matrix.add = None;
             }

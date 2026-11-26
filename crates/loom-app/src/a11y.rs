@@ -860,7 +860,6 @@ impl crate::App {
     /// × in the status line, or a developer switch. `None` for any other
     /// node or action, and for a button that is disabled now.
     pub(crate) fn a11y_frame_message(&self, request: &ActionRequest) -> Option<crate::Message> {
-        use crate::Message;
         // What a pointer press could not reach, a screen reader's Click
         // does not reach either.
         if request.action != accesskit::Action::Click || !self.pointer_reaches_window() {
@@ -879,9 +878,7 @@ impl crate::App {
         if id.is_under(&crate::stats_bar::stats_id()) {
             return self.bar_click(id);
         }
-        match tree::frame_part(id)? {
-            tree::FramePart::Tab(tab) => Some(Message::Matrix(crate::matrix::Event::Tab(tab))),
-        }
+        self.tabs_click(id)
     }
 
     /// The messages a screen reader's request that arrived at `at` sends,

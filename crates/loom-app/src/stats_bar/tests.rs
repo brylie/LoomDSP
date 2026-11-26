@@ -297,12 +297,15 @@ fn tab_reads_the_canvas_patch_info_the_bar_then_the_toolbar() {
         "past the bar, the toolbar's first"
     );
 
-    // Back the other way: before patch info's first stop, the top run's
-    // last stop.
+    // Back the other way: before patch info's first stop, the tab list,
+    // then the top run's last stop (plan 3.2, row 4e).
     let mut ui = ui_with_patch_info(true);
     click_authors(&mut ui);
     ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
-    assert_eq!(at(&mut ui), (None, Some(new)), "before patch info, the toolbar");
+    let inspector = crate::tabs::tab_id(crate::matrix::Tab::Inspector);
+    assert_eq!(at(&mut ui), (None, Some(inspector)), "before patch info, the tab list");
+    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    assert_eq!(at(&mut ui), (None, Some(new)), "before the tab list, the toolbar");
 }
 
 /// Shift+Tab from nothing enters the bar's last stop, the last in reading

@@ -298,6 +298,14 @@ fn tab_walks_patch_info_top_to_bottom() {
         tab(&mut ui, true);
         assert_eq!(focused(&ui).as_ref(), Some(id));
     }
+    // Before the first, the tab list, one stop before its panel (the
+    // WAI-ARIA Tabs pattern; plan 3.2, row 4e), then the top run.
+    tab(&mut ui, true);
+    assert_eq!(
+        focused(&ui),
+        Some(crate::tabs::tab_id(crate::matrix::Tab::Inspector)),
+        "back to the tab list"
+    );
     tab(&mut ui, true);
     assert_eq!(
         focused(&ui).as_ref(),

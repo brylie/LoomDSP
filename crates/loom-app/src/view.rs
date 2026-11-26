@@ -4,7 +4,7 @@
 
 use crate::Element;
 use crate::edits::ArrowGroup;
-use crate::matrix::{Event as MatrixEvent, Tab as RightTab};
+use crate::matrix::Tab as RightTab;
 use crate::style::button;
 use crate::{App, Message, matrix, pointer, style};
 use iced::Length;
@@ -123,26 +123,9 @@ impl App {
 
     /// Inspector and matrix share the same width in the right-hand column.
     pub(crate) fn right_panel(&self) -> Element<'_, Message> {
-        // The open tab has a fill and a border (visual-system.md, Tabs).
-        let tab = |label: &'static str, which: RightTab| {
-            button(text(label).size(style::CONTROL))
-                .padding([4, 12])
-                .style(style::tab(self.right_tab == which))
-                .on_press(Message::Matrix(MatrixEvent::Tab(which)))
-        };
-        // Each tab, and the row of them, is named for the window
-        // (`places.rs`).
-        let tabs = container(
-            row![
-                container(tab("Inspector", RightTab::Inspector)).id("panel/inspector"),
-                container(tab("Matrix", RightTab::Matrix)).id("panel/matrix"),
-                container(tab("Outline", RightTab::Outline)).id("panel/outline"),
-            ]
-            .spacing(4)
-            .padding([6, 8]),
-        )
-        .height(style::RIGHT_TABS_HEIGHT)
-        .id("panel");
+        // The runtime draws the tabs in the root panel's slot here
+        // (`tabs.rs`), so Iced keeps the space.
+        let tabs = space().width(Length::Fill).height(style::RIGHT_TABS_HEIGHT);
         let panel = self.jump_view().unwrap_or_else(|| match self.right_tab {
             RightTab::Outline => self.outline_view(),
             // The runtime's inspector draws in the root panel's slot here

@@ -2002,49 +2002,16 @@ fn a_click_on_a_toolbar_button_presses_it() {
     // layout, checked with the `Ui` harness (`toolbar/tests.rs`).
 }
 
-/// The right panel's tabs are a tab list with the open tab selected, and a
-/// Click on a tab opens it.
+/// What a UI ID names among the tabs: a tab, or nothing. The toolbar's,
+/// the breadcrumb's, and the stats bar's parts are `loom-ui`'s and act
+/// through their own clicks (`toolbar/tests.rs`, `stats_bar/tests.rs`).
 #[test]
-fn the_right_panel_has_tabs() {
-    let (mut app, _, _) = app_with_filter();
-    let update = app.a11y_tree(&Places::default());
-    let list = node_of(&mut app, &tree::tabs_id());
-    let inspector = node_of(&mut app, &tree::tab_id(crate::matrix::Tab::Inspector));
-    let matrix = node_of(&mut app, &tree::tab_id(crate::matrix::Tab::Matrix));
-    assert_eq!(node(&update, list).role(), Role::TabList);
-    let outline = node_of(&mut app, &tree::tab_id(crate::matrix::Tab::Outline));
-    assert_eq!(node(&update, list).children(), [inspector, matrix, outline]);
-    assert_eq!(node(&update, inspector).role(), Role::Tab);
-    assert_eq!(node(&update, inspector).label(), Some("Inspector"));
-    assert_eq!(node(&update, inspector).is_selected(), Some(true));
-    assert_eq!(node(&update, matrix).is_selected(), Some(false));
-
-    act(
-        &mut app,
-        &request(Action::Click, matrix, None),
-        std::time::Instant::now(),
-    );
-    let update = app.a11y_tree(&Places::default());
-    assert_eq!(node(&update, matrix).is_selected(), Some(true));
-    assert_eq!(node(&update, inspector).is_selected(), Some(false));
-}
-
-/// What a UI ID names outside the canvas: a tab, or nothing that acts. The
-/// toolbar's, the breadcrumb's, and the stats bar's parts are `loom-ui`'s
-/// and act through their own clicks (`toolbar/tests.rs`,
-/// `stats_bar/tests.rs`).
-#[test]
-fn frame_parts_are_told_by_their_ids() {
-    use tree::{FramePart, frame_part};
+fn tabs_are_told_by_their_ids() {
+    use crate::tabs::tab_of;
     let id = |text: &str| tree::fixed_id(text);
-    assert_eq!(
-        frame_part(&id("panel/matrix")),
-        Some(FramePart::Tab(crate::matrix::Tab::Matrix))
-    );
-    assert_eq!(
-        frame_part(&id("panel/inspector")),
-        Some(FramePart::Tab(crate::matrix::Tab::Inspector))
-    );
+    assert_eq!(tab_of(&id("panel/matrix")), Some(crate::matrix::Tab::Matrix));
+    assert_eq!(tab_of(&id("panel/inspector")), Some(crate::matrix::Tab::Inspector));
+    assert_eq!(tab_of(&id("panel/outline")), Some(crate::matrix::Tab::Outline));
     for nothing in [
         "toolbar/undo",
         "stats/load",
@@ -2054,59 +2021,9 @@ fn frame_parts_are_told_by_their_ids() {
         "panel",
         "canvas/4",
         "panel/other",
+        "panel/content",
     ] {
-        assert_eq!(frame_part(&id(nothing)), None, "{nothing}");
-    }
-}
-
-/// The window says where it drew each named part, and the tree gives that
-/// place to the part's node, in physical pixels. Every button, tab, and bar
-/// item the tree reports was found in the window, inside it, and not on top
-/// of another.
-#[test]
-fn frame_nodes_have_the_bounds_the_window_drew() {
-    let (app, _, _) = app_with_filter();
-    let mut ui = crate::ui_test::Ui::with_app(app);
-    let _ = ui.redraw();
-    let places = ui.places();
-    assert!(places.canvas.is_some());
-    ui.app_mut().window_scale = 2.0;
-    let update = ui.app_mut().a11y_tree(&places);
-
-    // The toolbar's and the stats bar's parts are `loom-ui`'s, placed by
-    // its layout (`toolbar/tests.rs`, `stats_bar/tests.rs`).
-    let ids: Vec<UiId> = vec![
-        tree::tab_id(crate::matrix::Tab::Inspector),
-        tree::tab_id(crate::matrix::Tab::Matrix),
-    ];
-    // The tab list holds the tabs, so only the tabs are compared for
-    // overlap below.
-    let group = tree::tabs_id();
-    let place = places
-        .of(&group)
-        .unwrap_or_else(|| panic!("the window drew no `{group}`"));
-    assert!(place.rect.width > 0.0 && place.rect.height > 0.0, "{group}");
-    assert!(
-        node(&update, node_of(ui.app_mut(), &group)).bounds().is_some(),
-        "{group}"
-    );
-    let mut seen: Vec<accesskit::Rect> = Vec::new();
-    for id in &ids {
-        let place = places.of(id).unwrap_or_else(|| panic!("the window drew no `{id}`"));
-        assert!(place.is_shown());
-        let bounds = node(&update, node_of(ui.app_mut(), id))
-            .bounds()
-            .unwrap_or_else(|| panic!("`{id}` has no bounds"));
-        assert!((bounds.x0 - f64::from(place.rect.x) * 2.0).abs() < 1e-3, "{id}");
-        assert!((bounds.y0 - f64::from(place.rect.y) * 2.0).abs() < 1e-3, "{id}");
-        assert!(bounds.x1 > bounds.x0 && bounds.y1 > bounds.y0, "{id} has a size");
-        assert!(bounds.x0 >= 0.0 && bounds.y0 >= 0.0, "{id} is inside the window");
-        for other in &seen {
-            let apart =
-                bounds.x1 <= other.x0 || other.x1 <= bounds.x0 || bounds.y1 <= other.y0 || other.y1 <= bounds.y0;
-            assert!(apart, "{id} lies on another part");
-        }
-        seen.push(bounds);
+        assert_eq!(tab_of(&id(nothing)), None, "{nothing}");
     }
 }
 
@@ -4864,12 +4781,14 @@ fn typed_value_field_reports_its_draft_selection_and_returns_focus_to_the_knob()
 #[test]
 fn a_stale_located_answer_is_read_again_after_resize() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    // The matrix's filter, a part Iced still draws and places.
+    ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
     ui.deliver(Message::A11y(Event::Activated));
     for _ in 0..3 {
         ui.redraw();
     }
     let old = ui.places();
-    let id = tree::tab_id(crate::matrix::Tab::Outline);
+    let id = crate::matrix::filter_part();
     let node_id = crate::a11y::tests::node_of(ui.app_mut(), &id);
     let old_x = old.of(&id).unwrap().rect.x;
     ui.take_sent_trees();

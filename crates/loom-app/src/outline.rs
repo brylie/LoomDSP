@@ -748,12 +748,26 @@ impl App {
             // as before, and the runtime focuses the one chosen.
             let panel = crate::inspector::access::items(&self.inspector_model());
             let stops = inspector_stops(&panel);
-            let saved = self.session.outline.last_inspector.as_ref();
+            // The stop last focused, while it is still there and turned on:
+            // any part the runtime let take the focus, a selected radio
+            // too, which offers no click and so is in no list of stops
+            // (CodeRabbit on #900, #905).
+            let saved = self
+                .session
+                .outline
+                .last_inspector
+                .as_ref()
+                .filter(|id| crate::a11y::items::find(&panel, id).is_some_and(|item| item.enabled));
             let stop = saved
-                .and_then(|id| stops.iter().copied().find(|item| &item.id == id))
-                .or_else(|| stops.iter().copied().find(|item| item.focus.is_some()))
-                .or_else(|| stops.first().copied())
-                .map(|item| item.id.clone());
+                .cloned()
+                .or_else(|| {
+                    stops
+                        .iter()
+                        .copied()
+                        .find(|item| item.focus.is_some())
+                        .map(|item| item.id.clone())
+                })
+                .or_else(|| stops.first().map(|item| item.id.clone()));
             self.session.outline.inspector_action = None;
             match stop {
                 Some(stop) => {
@@ -761,10 +775,7 @@ impl App {
                     self.effect(loom_ui::Effects::scroll_into_view(stop.clone()));
                     self.effect(loom_ui::Effects::focus(stop));
                 }
-                None => {
-                    self.session.outline.inspector_action =
-                        Some(crate::a11y::tree::tab_id(crate::matrix::Tab::Inspector));
-                }
+                None => self.focus_inspector_tab(),
             }
             return;
         }
@@ -785,7 +796,7 @@ impl App {
                 self.session.outline.inspector_action = None;
                 self.effect(loom_ui::Effects::focus(stop));
             } else {
-                self.session.outline.inspector_action = Some(crate::a11y::tree::tab_id(crate::matrix::Tab::Inspector));
+                self.focus_inspector_tab();
             }
             return;
         }
@@ -801,8 +812,18 @@ impl App {
         } else if let Some(item) = panel.first() {
             self.session.outline.inspector_action = Some(item.id.clone());
         } else {
-            self.session.outline.inspector_action = Some(crate::a11y::tree::tab_id(crate::matrix::Tab::Inspector));
+            self.focus_inspector_tab();
         }
+    }
+
+    /// An inspector with no stop of its own: the runtime's focus goes to
+    /// its tab, the one stop of the tab list, so the column still holds
+    /// the keys (plan 3.2, row 4e).
+    fn focus_inspector_tab(&mut self) {
+        self.session.outline.inspector_action = None;
+        self.effect(loom_ui::Effects::focus(crate::tabs::tab_id(
+            crate::matrix::Tab::Inspector,
+        )));
     }
 
     /// Takes a real text field through the focus bridge, or a keyboard-operable action.

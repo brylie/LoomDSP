@@ -262,6 +262,16 @@ impl<'a> A11yNode<'a> {
         self.raw().active_descendant().and_then(|node| self.tree.ids.get(&node))
     }
 
+    /// The UI IDs of the nodes it says it controls, such as an open
+    /// tab's panel.
+    pub fn controls(&self) -> Vec<&'a UiId> {
+        self.raw()
+            .controls()
+            .iter()
+            .filter_map(|node| self.tree.ids.get(node))
+            .collect()
+    }
+
     /// True when it has keyboard focus.
     pub fn is_focused(&self) -> bool {
         self.id == self.tree.focus

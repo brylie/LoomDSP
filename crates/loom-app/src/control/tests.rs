@@ -3365,10 +3365,14 @@ fn a_scripted_tab_after_a_click_stays_in_the_column() {
             };
             run_ui(&mut ui, line).unwrap();
             let now = ui.runtime().focused().cloned();
-            // Back from Authors, patch info's first stop, is the top run's
-            // last, as a real Shift+Tab goes (`tab_walks_patch_info_top_to_bottom`).
+            // Back from Authors, patch info's first stop, is the tab list,
+            // as a real Shift+Tab goes (`tab_walks_patch_info_top_to_bottom`).
             if back && id == crate::patch_info::authors_part() {
-                assert_eq!(now.as_ref(), ui.app().top_stops().last(), "back from Authors");
+                assert_eq!(
+                    now,
+                    Some(crate::tabs::tab_id(crate::matrix::Tab::Inspector)),
+                    "back from Authors"
+                );
                 assert_eq!(
                     selection(&ui),
                     before,

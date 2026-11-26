@@ -31,6 +31,7 @@ impl App {
         self.toolbar_panel(view);
         self.breadcrumb_panel(view);
         self.bar_panel(view);
+        self.tabs_panel(view);
         self.inspector_panel(view);
         // The browsers, then Preferences, then the chooser over it, then
         // help, which F1 opens over any of them (help-pages.md), so help
@@ -75,6 +76,7 @@ impl App {
         stops.extend(self.menu_stops());
         stops.extend(self.toolbar_stops());
         stops.extend(self.breadcrumb_stops());
+        stops.extend(self.tabs_stops());
         stops.extend(self.inspector_stops());
         stops.extend(self.inspector_tags());
         stops.extend(self.bar_stops());
@@ -140,6 +142,16 @@ impl App {
         }
         let (top, bar) = (self.top_stops(), self.bar_stops());
         let to = |stop: Option<&UiId>| stop.map_or(TabStep::Leave, |stop| TabStep::To(stop.clone()));
+        // The tab list is one stop before its panel (the WAI-ARIA Tabs
+        // pattern): Tab goes into the open panel, and Shift+Tab to the top
+        // run's last stop, where the column's first went before.
+        if self.tabs_stops().contains(from) {
+            return if back {
+                to(top.last().or(bar.last()))
+            } else {
+                self.tab_into_panel(next)
+            };
+        }
         // The inspector's column, while the runtime draws it (plan 3.2,
         // row 4d): between the canvas and the bar in reading order.
         if let Some(step) = self.inspector_next_stop(from, back) {
@@ -233,9 +245,11 @@ struct Shape {
 }
 
 /// The root: the toolbar's slot, the breadcrumb's inside a sub-patch, the
-/// fill beside the inspector's slot, and the bar's slot. The inspector's
-/// slot is at the right edge, below the right column's tabs, which Iced
-/// draws, and above the rule over the bar, as wide as the column.
+/// fill beside the right column, and the bar's slot. The column is at the
+/// right edge, as wide as Iced's: the tabs' slot (plan 3.2, row 4e), then
+/// the inspector's slot while the runtime draws the inspector, or room
+/// that is no element, so a point there goes on to Iced's content, then
+/// the rule over the bar.
 fn root(shape: &Shape) -> Element {
     let slot = |id: UiId, height: f32| Element::slot(id).width(Length::FILL).height(Length::Fixed(height));
     let mut parts = vec![slot(crate::toolbar::toolbar_id(), style::TOOLBAR_HEIGHT)];
@@ -243,21 +257,22 @@ fn root(shape: &Shape) -> Element {
         parts.push(slot(crate::breadcrumb::breadcrumb_id(), style::BREADCRUMB_HEIGHT));
     }
     let fill = Element::space(Length::FILL, Length::FILL);
-    if shape.inspector {
-        let column = Element::column([
-            Element::space(Length::FILL, Length::Fixed(style::RIGHT_TABS_HEIGHT)),
-            Element::slot(crate::inspector::panel::inspector_id())
-                .width(Length::FILL)
-                .height(Length::FILL)
-                .min_height(0.0),
-            Element::space(Length::FILL, Length::Fixed(style::RULE)),
-        ])
-        .width(Length::Fixed(style::RIGHT_COLUMN_WIDTH))
-        .height(Length::FILL);
-        parts.push(Element::row([fill, column]).width(Length::FILL).height(Length::FILL));
+    let content = if shape.inspector {
+        Element::slot(crate::inspector::panel::inspector_id())
+            .width(Length::FILL)
+            .height(Length::FILL)
+            .min_height(0.0)
     } else {
-        parts.push(Element::space(Length::Shrink, Length::FILL));
-    }
+        Element::space(Length::FILL, Length::FILL)
+    };
+    let column = Element::column([
+        slot(crate::tabs::tabs_id(), style::RIGHT_TABS_HEIGHT),
+        content,
+        Element::space(Length::FILL, Length::Fixed(style::RULE)),
+    ])
+    .width(Length::Fixed(style::RIGHT_COLUMN_WIDTH))
+    .height(Length::FILL);
+    parts.push(Element::row([fill, column]).width(Length::FILL).height(Length::FILL));
     parts.push(slot(crate::stats_bar::stats_id(), style::STATS_BAR_HEIGHT));
     Element::column(parts).width(Length::FILL).height(Length::FILL)
 }

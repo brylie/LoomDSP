@@ -92,6 +92,7 @@ mod stream;
 mod style;
 mod subscriptions;
 mod surface;
+mod tabs;
 mod targets;
 mod timers;
 mod toolbar;
@@ -546,6 +547,9 @@ enum Message {
     EnterFields {
         backwards: bool,
     },
+    /// Tab from the open tab reached content Iced still draws, the matrix
+    /// or the Outline: it takes the keys (plan 3.2, row 4e).
+    EnterTabPanel,
     /// An inspector slider was let go.
     SliderReleased,
     /// A change in the session-only modulation matrix.
@@ -871,6 +875,7 @@ impl Message {
             | Self::TextFieldTab { .. }
             | Self::TabFrom { .. }
             | Self::EnterFields { .. }
+            | Self::EnterTabPanel
             | Self::ToolbarFocus(_)
             | Self::MenuTab { .. }
             | Self::MenuMove { .. }
@@ -1886,6 +1891,7 @@ impl App {
                 self.tab_between_fields(from.as_ref(), backwards);
             }
             Message::EnterFields { backwards } => self.enter_fields(backwards),
+            Message::EnterTabPanel => self.enter_tab_panel(),
             Message::MenuTab { back } => {
                 if let Some(menu) = self.runtime_menu() {
                     self.close_menu(menu.kind);
@@ -2255,6 +2261,7 @@ impl App {
             | Message::TextFieldTab { .. }
             | Message::TabFrom { .. }
             | Message::EnterFields { .. }
+            | Message::EnterTabPanel
             | Message::ToolbarFocus(_)
             | Message::MenuTab { .. }
             | Message::MenuMove { .. }

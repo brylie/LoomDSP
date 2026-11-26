@@ -476,6 +476,12 @@ pub fn scroll() -> loom_ui::ScrollStyle {
     }
 }
 
+/// The radius of a right-column tab's corners.
+pub const TAB_RADIUS: f32 = 4.0;
+
+/// The width of the open right-column tab's border.
+pub const TAB_BORDER: f32 = 1.0;
+
 /// A tab title. The open tab has a fill and a border; the others are plain
 /// dim text. Shape as well as colour tells them apart (NFR-UX-03).
 pub fn tab(open: bool) -> impl Fn(&Theme, iced_button::Status) -> iced_button::Style {
@@ -491,8 +497,8 @@ pub fn tab(open: bool) -> impl Fn(&Theme, iced_button::Status) -> iced_button::S
                 } else {
                     iced::Color::TRANSPARENT
                 },
-                width: 1.0,
-                radius: 4.0.into(),
+                width: TAB_BORDER,
+                radius: TAB_RADIUS.into(),
             },
             ..iced_button::Style::default()
         }

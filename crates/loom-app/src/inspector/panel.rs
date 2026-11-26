@@ -256,8 +256,10 @@ impl App {
         let to = if back { at.checked_sub(1) } else { Some(at + 1) };
         let past = || {
             let (top, bar) = (self.top_stops(), self.bar_stops());
+            // Back past the first stop, the tab list, the one stop before
+            // its panel (the WAI-ARIA Tabs pattern).
             if back {
-                top.last().or(bar.last()).cloned()
+                self.tabs_stops().first().or(top.last()).or(bar.last()).cloned()
             } else {
                 bar.first().or(top.first()).cloned()
             }

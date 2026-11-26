@@ -163,15 +163,17 @@ fn a_question_holds_presses_on_both_toolkits() {
 
 /// A press Iced captures never reaches the runtime's layers, so the focus
 /// they had stays (section 6, rule 1 is the target's to keep there): a
-/// click on the right panel's Matrix tab, one of Iced's buttons.
+/// click on the matrix's Add, one of Iced's buttons until plan 3.2, row 4e
+/// moves the matrix.
 #[test]
 fn a_press_iced_captures_leaves_our_focus() {
     let mut ui = ui_with(bar);
+    ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
     // Focused as one of the app's panels would ask, with no click.
     ui.send(Message::MidiGhosts);
     assert_eq!(ui.runtime().focused(), Some(&go()));
-    let tab = ui.text("Matrix").expect("Iced shows the Matrix tab").center();
-    click(&mut ui, tab);
+    let add = ui.text("Add").expect("Iced shows the matrix's Add").center();
+    click(&mut ui, add);
     assert_eq!(ui.runtime().focused(), Some(&go()), "Iced took that press");
 }
 
