@@ -1816,7 +1816,7 @@ fn the_inside_outline_labels_heard_and_unheard_boundary_ports() {
     for (local, heard) in [(1, true), (3, true), (4, false), (5, false)] {
         let id = at(local);
         assert_eq!(app.session.patch_map.structure.heard.contains(&id), heard, "port {id}");
-        let id = crate::outline::tree_id().with("module").with(id);
+        let id = crate::outline::row_id(format!("module-{id}"));
         let row = rows.iter().find(|row| row.id == id).unwrap();
         assert_eq!(row.level, if heard { 1 } else { 2 });
         assert!(
@@ -1836,7 +1836,7 @@ fn the_inside_outline_labels_heard_and_unheard_boundary_ports() {
 fn outline_keyboard_enters_and_leaves_a_sub_patch() {
     let mut ui = Ui::with_app(nested_app());
     let outline = crate::outline::tree_id();
-    let row = outline.clone().with("module").with(2u32);
+    let row = crate::outline::row_id("module-2".into());
     let none = Modifiers::empty();
     ui.tap(keyboard::Key::Character("o".into()), none);
     ui.send(Message::OutlineRow(row.clone()));
@@ -1849,7 +1849,10 @@ fn outline_keyboard_enters_and_leaves_a_sub_patch() {
     assert_eq!(ui.a11y_tree().focused().ui_id(), Some(&row));
     ui.tap(keyboard::Key::Named(Named::Enter), Modifiers::COMMAND);
     assert_eq!(ui.app().session.level, voice());
-    assert_eq!(ui.a11y_tree().focused().ui_id(), Some(&outline.clone().with("summary")));
+    assert_eq!(
+        ui.a11y_tree().focused().ui_id(),
+        Some(&crate::outline::row_id("summary".into()))
+    );
     ui.tap(keyboard::Key::Named(Named::Escape), none);
     assert!(ui.app().session.level.is_root());
     assert_eq!(ui.a11y_tree().focused().ui_id(), Some(&row));

@@ -823,8 +823,11 @@ impl App {
                 } else if self.toolbar_has_focus() {
                     self.effect(loom_ui::Effects::unfocus());
                 }
-                self.session.outline.active = tab == Tab::Outline && !on_tabs;
+                self.session.outline.active = false;
                 self.session.matrix.focused = tab == Tab::Matrix && !on_tabs;
+                if tab == Tab::Outline && !on_tabs {
+                    self.focus_outline();
+                }
                 self.session.matrix.edit = None;
                 self.session.matrix.add = None;
             }

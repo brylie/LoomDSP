@@ -262,6 +262,17 @@ impl<'a> A11yNode<'a> {
         self.raw().active_descendant().and_then(|node| self.tree.ids.get(&node))
     }
 
+    /// How deep it sits in a tree, from 0, when it says.
+    pub fn level(&self) -> Option<usize> {
+        self.raw().level()
+    }
+
+    /// True when it says it is open, false when shut, `None` when it
+    /// holds nothing to open.
+    pub fn expanded(&self) -> Option<bool> {
+        self.raw().is_expanded()
+    }
+
     /// The UI IDs of the nodes it says it controls, such as an open
     /// tab's panel.
     pub fn controls(&self) -> Vec<&'a UiId> {

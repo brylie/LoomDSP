@@ -484,6 +484,14 @@ impl App {
         {
             self.session.outline.last_toolbar = Some(part.clone());
         }
+        // The tree has the keys while one of its rows has the runtime's
+        // focus, and lets them go when the focus leaves its rows.
+        let rows = crate::outline::panel::rows_id();
+        if focus.as_ref().is_some_and(|part| part.is_under(&rows)) {
+            self.session.outline.active = true;
+        } else if self.focus.as_ref().is_some_and(|part| part.is_under(&rows)) {
+            self.session.outline.active = false;
+        }
         self.focus = focus;
         if let Some(part) = gained {
             self.effect(loom_ui::Effects::focus_and_select_all(part));

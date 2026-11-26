@@ -448,17 +448,15 @@ pub(crate) fn tree(
     };
     // The open panel, drawn beside the canvas: each of its parts, and the
     // panel itself marked as cutting off what it scrolls out of view.
-    let outline = snapshot.matrix.tab == Tab::Outline && frames.jump.is_empty();
     let mut panel: Vec<NodeId> = frames.panel.iter().map(|item| frame.panel(item)).collect();
     // The runtime's inspector, when it draws the column (plan 3.2, row 4d):
     // its scroll container is the panel's node, as Iced's content was.
     panel.extend(groups.inspector);
-    if outline {
-        panel.push(frame.outline(&snapshot.outline, frames.focused_item.as_ref()));
-    }
-    if !frames.jump.is_empty() {
-        panel.push(frame.panel(&frames.jump[0]));
-    }
+    // The runtime's Outline tree and jump list (plan 3.2, row 4e), each in
+    // the group its pattern names, the rows flat under the tree (section
+    // 7, rule 12).
+    panel.extend(groups.outline);
+    panel.extend(groups.jump);
     // The open tab's content, in its tab panel (the WAI-ARIA Tabs pattern).
     let panel = frame.tab_panel(panel, snapshot.matrix.tab);
     // The overlay that owns the input is not below anything: it is reported
@@ -478,8 +476,8 @@ pub(crate) fn tree(
         .as_ref()
         .filter(|id| {
             items::find(&frames.panel, id).is_some()
-                || items::find(&frames.jump, id).is_some()
-                || (outline && snapshot.outline.iter().any(|row| &row.id == *id))
+                || id.is_under(&crate::outline::tree_id())
+                || id.is_under(&crate::outline::jump_id())
         })
         .map(|id| node_id(table, id));
     // Focus is on the window unless a control on the canvas has it.
@@ -753,8 +751,6 @@ pub(crate) struct Frames {
     /// The open panel's parts: the inspector's or the matrix's, by the tab
     /// that is open.
     pub panel: Vec<items::Item>,
-    /// The temporary cable branch list.
-    pub jump: Vec<items::Item>,
     /// The text field with keyboard focus, as the window last said.
     pub focused_field: Option<iced::advanced::widget::Id>,
     /// The panel part the keys act on while no text field has them: the
@@ -991,32 +987,6 @@ impl Frame<'_> {
         id
     }
 
-    /// The visible outline rows, flat under one tree.
-    fn outline(&mut self, rows: &[crate::outline::Row], focus: Option<&UiId>) -> NodeId {
-        let mut children = Vec::new();
-        for row in rows {
-            let mut node = Node::new(Role::TreeItem);
-            node.set_label(row.name.clone());
-            if !row.description.is_empty() {
-                node.set_description(row.description.clone());
-            }
-            node.set_level(row.level - 1);
-            node.set_position_in_set(row.position - 1);
-            node.set_size_of_set(row.size);
-            if let Some(expanded) = row.expanded {
-                node.set_expanded(expanded);
-            }
-            node.set_selected(focus == Some(&row.id));
-            node.add_action(Action::Focus);
-            node.add_action(Action::Click);
-            children.push(self.add(&row.id, node));
-        }
-        let mut tree = Node::new(Role::Tree);
-        tree.set_label("Outline");
-        tree.set_children(children);
-        self.add(&crate::outline::tree_id(), tree)
-    }
-
     /// The open tab's content, the nodes `content`, in a tab panel named by
     /// its tab, which the open tab says it controls (the WAI-ARIA Tabs
     /// pattern). Nothing when there is no content.
@@ -1104,11 +1074,16 @@ impl Frame<'_> {
         let bar = under(&crate::stats_bar::stats_id());
         let inspector = under(&crate::inspector::panel::inspector_id());
         let tabs = under(&tabs_id());
+        let outline = under(&crate::outline::tree_id());
+        // The jump list's list box is the runtime's node.
+        let jump = under(&crate::outline::jump_id());
         Ours {
             inspector,
             // The right panel's tabs, one stop with arrows inside (the
             // WAI-ARIA Tabs pattern).
             tabs: self.group(tabs, Role::TabList, "Right panel", &tabs_id()),
+            outline: self.group(outline, Role::Tree, "Outline", &crate::outline::tree_id()),
+            jump,
             // The toolbar is one stop with arrows inside, the WAI-ARIA
             // toolbar pattern (Brylie's decision, 2026-11-19), so its node
             // says so; the breadcrumb is a list of links, a group.
@@ -1170,6 +1145,10 @@ struct Ours {
     inspector: Vec<NodeId>,
     /// The right panel's tab list.
     tabs: Vec<NodeId>,
+    /// The Outline's tree, its rows flat under it.
+    outline: Vec<NodeId>,
+    /// The cable jump list's list box, while it is open.
+    jump: Vec<NodeId>,
     /// The top nodes of the runtime's overlay that owns the input.
     overlay: Vec<NodeId>,
 }

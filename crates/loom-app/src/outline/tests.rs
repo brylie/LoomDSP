@@ -129,21 +129,30 @@ fn outline_keyboard_moves_and_expands_rows_without_editing() {
     let first_count = ui.app().session.scene.modules().len();
     let saw = tile_named(ui.app(), "Saw");
     ui.tap(Key::Character("o".into()), NONE);
-    assert_eq!(focused(&mut ui), tree_id().with("summary"));
+    assert_eq!(focused(&mut ui), row_id("summary".into()));
     ui.tap(Key::Named(Named::ArrowDown), NONE);
     assert_eq!(focused(&mut ui), row(tile_named(ui.app(), "MIDI Note")));
     ui.tap(Key::Named(Named::ArrowUp), NONE);
-    assert_eq!(focused(&mut ui), tree_id().with("summary"));
+    assert_eq!(focused(&mut ui), row_id("summary".into()));
     ui.tap(Key::Named(Named::End), NONE);
     let end = ui.app().outline_rows().last().unwrap().id.clone();
     assert_eq!(focused(&mut ui), end);
     ui.tap(Key::Named(Named::Home), NONE);
-    assert_eq!(focused(&mut ui), tree_id().with("summary"));
+    assert_eq!(focused(&mut ui), row_id("summary".into()));
     ui.tap(Key::Character("s".into()), NONE);
     assert_eq!(focused(&mut ui), row(saw));
     ui.tap(Key::Named(Named::ArrowRight), NONE);
     ui.tap(Key::Named(Named::ArrowRight), NONE);
-    assert!(focused(&mut ui).is_under(&row(saw)));
+    // On the Saw's first connection: a row of its own, one level in, with
+    // the Saw as its parent (each row has one key under the list).
+    let child = focused(&mut ui);
+    assert!(
+        ui.app()
+            .outline_rows()
+            .iter()
+            .any(|r| r.id == child && r.parent.as_ref() == Some(&row(saw))),
+        "{child}"
+    );
     ui.tap(Key::Named(Named::ArrowLeft), NONE);
     assert_eq!(focused(&mut ui), row(saw));
     ui.tap(Key::Named(Named::Space), NONE);
@@ -761,7 +770,7 @@ fn assignments_from_an_output_keep_distinct_rows() {
         .collect();
     assert_eq!(ids.len(), 2);
     assert_ne!(ids[0], ids[1]);
-    assert!(ids.contains(&row(lfo).with("modulation-out").with(second.0)));
+    assert!(ids.contains(&row_id(format!("module-{lfo}-modulation-out-{}", second.0))));
 }
 
 /// Downstream and Back work from outline rows. A port's choice can reveal a collapsed section.
@@ -778,13 +787,13 @@ fn outline_cable_choices_reveal_a_destination_in_a_collapsed_section() {
     physical(&mut ui, Code::BracketLeft, "[", Modifiers::COMMAND);
     assert_eq!(focused(&mut ui), row(saw));
 
-    let section = tree_id().with("not-heard");
+    let section = row_id("not-heard".into());
     ui.send(Message::OutlineRow(section.clone()));
     ui.tap(Key::Named(Named::ArrowLeft), NONE);
     assert!(!ui.app().outline_rows().iter().any(|r| r.id == row(scope)));
     ui.send(Message::OutlineRow(row(filter)));
     ui.tap(Key::Named(Named::ArrowRight), NONE);
-    let output = row(filter).with("output").with("lowpass");
+    let output = row_id(format!("module-{filter}-output-lowpass"));
     ui.send(Message::OutlineRow(output));
     ui.tap(Key::Named(Named::Enter), NONE);
     assert!(ui.app().session.outline.has_jump());
@@ -855,7 +864,7 @@ fn an_all_heard_patch_has_no_not_heard_section() {
     )"#,
     );
     assert_eq!(app.session.patch_map.structure.heard, [1, 2, 3].into());
-    assert!(!app.outline_rows().iter().any(|r| r.id == tree_id().with("not-heard")));
+    assert!(!app.outline_rows().iter().any(|r| r.id == row_id("not-heard".into())));
 }
 
 /// Reading-order ties update when a move ends. Swapping two tiles preserves row identity.

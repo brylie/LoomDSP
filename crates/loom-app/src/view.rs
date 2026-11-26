@@ -126,12 +126,14 @@ impl App {
         // The runtime draws the tabs in the root panel's slot here
         // (`tabs.rs`), so Iced keeps the space.
         let tabs = space().width(Length::Fill).height(style::RIGHT_TABS_HEIGHT);
-        let panel = self.jump_view().unwrap_or_else(|| match self.right_tab {
-            RightTab::Outline => self.outline_view(),
-            // The runtime's inspector draws in the root panel's slot here
-            // (`inspector/panel.rs`), so Iced keeps the space.
-            RightTab::Inspector => space().width(Length::Fill).height(Length::Fill).into(),
-            RightTab::Matrix => matrix::view(
+        // The runtime's inspector, Outline, and jump list draw in the root
+        // panel's slot here (`inspector/panel.rs`, `outline/panel.rs`), so
+        // Iced keeps the space.
+        let ours = self.session.outline.has_jump() || self.right_tab != RightTab::Matrix;
+        let panel = if ours {
+            space().width(Length::Fill).height(Length::Fill).into()
+        } else {
+            matrix::view(
                 self.session.matrix.model(
                     self.session.controller.graph(),
                     &self.session.hierarchy,
@@ -140,8 +142,8 @@ impl App {
                     self.right_tab,
                 ),
                 self.a11y.is_active(),
-            ),
-        });
+            )
+        };
         column![tabs, panel]
             .width(style::RIGHT_COLUMN_WIDTH)
             .height(Length::Fill)

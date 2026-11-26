@@ -1,13 +1,11 @@
 //! Signal-flow rows, keyboard navigation and cable following for the canvas.
 
 use crate::patch_map::{PatchMap, Structure, Unit, names};
-use crate::style::button;
-use crate::{App, Element, Message, style};
+use crate::{App, Message};
 use iced::keyboard::{
     self, Key,
     key::{Code, Named, Physical},
 };
-use iced::widget::{column, container, scrollable, text};
 use loom_canvas::PortRef;
 use loom_ui_core::{Point, UiId};
 use serde::{Serialize, Serializer};
@@ -21,9 +19,15 @@ pub(crate) fn tree_id() -> UiId {
     UiId::panel("outline")
 }
 
+/// A row's UI ID: one key under the tree's list (`panel::rows_id`), so
+/// rows of every kind can sit between each other in tree order.
+pub(crate) fn row_id(key: String) -> UiId {
+    panel::rows_id().with(key)
+}
+
 /// The stable row ID of a tile.
 fn module_id(module: u32) -> UiId {
-    tree_id().with("module").with(module)
+    row_id(format!("module-{module}"))
 }
 
 /// Serializes a UI ID in the form accepted by the control channel.
@@ -83,6 +87,8 @@ struct Jump {
     from: Target,
     choices: Vec<Choice>,
     selected: usize,
+    /// It opened from the tree, so the place chosen is shown there.
+    outline: bool,
 }
 
 /// Rows shared by the view, keyboard and accessibility updates.
@@ -182,7 +188,7 @@ impl State {
     /// Reveals a module row and the section or loop containing it.
     fn reveal(&mut self, map: &PatchMap, module: u32) {
         if !map.structure.heard.contains(&module) {
-            self.set_expanded(tree_id().with("not-heard"), true);
+            self.set_expanded(row_id("not-heard".into()), true);
         }
         if let Some(group) = map.structure.loops.iter().find(|group| group.members.contains(&module)) {
             self.set_expanded(loop_id(group), true);
@@ -207,9 +213,10 @@ fn inspector_stops(items: &[crate::a11y::items::Item]) -> Vec<&crate::a11y::item
 
 /// A feedback group keeps its ID when its displayed number changes.
 fn loop_id(group: &crate::patch_map::Loop) -> UiId {
-    tree_id()
-        .with("loop")
-        .with(group.members.iter().copied().min().unwrap_or_default())
+    row_id(format!(
+        "loop-{}",
+        group.members.iter().copied().min().unwrap_or_default()
+    ))
 }
 
 /// Builds the name shared between an outline row and its tile description.
@@ -330,7 +337,7 @@ fn module_rows(rows: &mut Vec<Row>, map: &PatchMap, state: &State, module: u32, 
                 "Mono"
             };
             connections.push(Row::leaf(
-                id.clone().with(key).with(info.key.as_str()),
+                row_id(format!("module-{module}-{key}-{}", info.key)),
                 format!("{label}, {about}"),
                 format!("{}, {width}", edges[0].signal.name()),
                 level + 1,
@@ -350,7 +357,7 @@ fn module_rows(rows: &mut Vec<Row>, map: &PatchMap, state: &State, module: u32, 
             let from = structure.name(assignment.from.module);
             description.push(format!("{} modulated by {from}{off}.", assignment.parameter));
             connections.push(Row::leaf(
-                id.clone().with("modulation-in").with(assignment.id),
+                row_id(format!("module-{module}-modulation-in-{}", assignment.id)),
                 format!("{}, modulated by {from}, {rate:.0}%{off}", assignment.parameter),
                 String::new(),
                 level + 1,
@@ -364,7 +371,7 @@ fn module_rows(rows: &mut Vec<Row>, map: &PatchMap, state: &State, module: u32, 
         if assignment.from.module == module {
             let to = structure.name(assignment.to);
             connections.push(Row::leaf(
-                id.clone().with("modulation-out").with(assignment.id),
+                row_id(format!("module-{module}-modulation-out-{}", assignment.id)),
                 format!("Modulates {to} {}, {rate:.0}%{off}", assignment.parameter),
                 String::new(),
                 level + 1,
@@ -481,7 +488,7 @@ impl App {
             count(unheard, "module")
         );
         let mut rows = vec![Row::leaf(
-            tree_id().with("summary"),
+            row_id("summary".into()),
             summary,
             String::new(),
             1,
@@ -499,7 +506,7 @@ impl App {
             unit_rows(&mut rows, map, state, unit, 1, None);
         }
         if unheard > 0 {
-            let id = tree_id().with("not-heard");
+            let id = row_id("not-heard".into());
             let expanded = state.expanded.get(&id).copied().unwrap_or(true);
             let mut row = Row::leaf(
                 id.clone(),
@@ -531,64 +538,6 @@ impl App {
         rows
     }
 
-    /// Draws the outline as one focus stop with stable IDs for every row.
-    pub(crate) fn outline_view(&self) -> Element<'_, Message> {
-        let rows = self.outline_rows();
-        let index = self.session.outline.focused_index(&rows);
-        let active = self.session.outline.active;
-        let content = column(rows.iter().enumerate().map(|(i, row)| {
-            let mark = match row.expanded {
-                Some(true) => "▾ ",
-                Some(false) => "▸ ",
-                None => "",
-            };
-            let label = text(format!("{mark}{}", row.name)).size(style::BODY);
-            let id = row.id.to_string();
-            container(
-                button(label)
-                    .width(iced::Length::Fill)
-                    .padding([5, 8 + ((row.level - 1) * 12) as u16])
-                    .style(style::tab(active && i == index))
-                    .on_press(Message::OutlineRow(row.id.clone())),
-            )
-            .id(id)
-            .into()
-        }))
-        .spacing(2);
-        container(scrollable(content).height(iced::Length::Fill))
-            .id(tree_id().to_string())
-            .into()
-    }
-
-    /// Draws the short list of possible destinations while a jump is pending.
-    pub(crate) fn jump_view(&self) -> Option<Element<'_, Message>> {
-        let jump = self.session.outline.jump.as_ref()?;
-        let choices = column(jump.choices.iter().enumerate().map(|(index, choice)| {
-            container(
-                button(text(choice.name.as_str()).size(style::BODY))
-                    .width(iced::Length::Fill)
-                    .style(style::tab(index == jump.selected))
-                    .on_press(Message::JumpChoice(index)),
-            )
-            .id(jump_id().with(index as u64).to_string())
-            .into()
-        }));
-        Some(
-            container(
-                scrollable(
-                    column![
-                        text(count(jump.choices.len(), "connection")).size(style::HEADING),
-                        choices
-                    ]
-                    .spacing(6),
-                )
-                .height(iced::Length::Fill),
-            )
-            .id(jump_id().to_string())
-            .into(),
-        )
-    }
-
     /// The row with keyboard focus while the outline has the keys.
     pub(crate) fn outline_focus(&self, rows: &[Row]) -> Option<UiId> {
         (self.session.outline.active && self.right_tab == crate::matrix::Tab::Outline)
@@ -603,9 +552,8 @@ impl App {
     pub(crate) fn outline_select(&mut self, id: &UiId) {
         let rows = self.outline_rows();
         if let Some(index) = rows.iter().position(|row| &row.id == id) {
-            self.session.outline.active = true;
             self.session.outline.select(&rows, index);
-            self.reveal_outline_focus();
+            self.focus_outline();
         }
     }
 
@@ -639,7 +587,13 @@ impl App {
         if self.session.outline.inspector_action.is_some() && modifiers.is_empty() {
             return self.inspector_action_key(&key);
         }
-        if self.focus.is_some() || self.session.value_draft.is_some() || self.matrix_has_keys() {
+        // A row of the tree has the runtime's focus: the tree's own keys
+        // came by `outline_panel_key`, and the rest (type-ahead, the
+        // brackets) are heard here.
+        if (self.focus.is_some() && !self.focus_on_outline())
+            || self.session.value_draft.is_some()
+            || self.matrix_has_keys()
+        {
             return false;
         }
         if !outline
@@ -660,7 +614,7 @@ impl App {
         }
         if !outline && matches!(key, Key::Character(c) if c.eq_ignore_ascii_case("o")) && modifiers.is_empty() {
             self.right_tab = crate::matrix::Tab::Outline;
-            self.session.outline.active = true;
+            self.focus_outline();
             return true;
         }
         if *physical_key == Physical::Code(Code::BracketLeft) && modifiers.command() && !modifiers.alt() {
@@ -678,7 +632,9 @@ impl App {
                 return false;
             }
             self.outline_key(key, modifiers.command(), now);
-            self.reveal_outline_focus();
+            if !self.session.outline.has_jump() {
+                self.reveal_outline_focus();
+            }
         }
         outline
     }
@@ -704,9 +660,13 @@ impl App {
         }
         state.close_jump();
         let next = (current + if back { 2 } else { 1 }) % 3;
-        state.active = next == 1 && self.right_tab == Tab::Outline;
+        state.active = false;
         state.inspector_action = None;
         self.session.matrix.focused = next == 1 && self.right_tab == Tab::Matrix;
+        if next == 1 && self.right_tab == Tab::Outline {
+            self.focus_outline();
+            return;
+        }
         if next == 1 && self.right_tab == Tab::Inspector {
             self.a11y.request_control(None);
             self.focus_inspector_region();
@@ -864,10 +824,54 @@ impl App {
         true
     }
 
+    /// Gives the tree the keys: the runtime's focus goes to its current
+    /// row, its one stop, which also scrolls the row into view.
+    pub(crate) fn focus_outline(&mut self) {
+        self.session.outline.active = true;
+        if let Some(row) = self.outline_current(&self.outline_rows()) {
+            self.effect(loom_ui::Effects::focus(row));
+        }
+    }
+
+    /// The tree lets the keys go: the runtime's focus leaves its row.
+    fn leave_outline(&mut self) {
+        self.session.outline.active = false;
+        if self.focus_on_outline() {
+            self.effect(loom_ui::Effects::unfocus());
+        }
+    }
+
+    /// Carries out [`Message::OutlineKey`]: one of the tree keys the tree's
+    /// list took first, through the same tree logic as before.
+    pub(crate) fn outline_panel_key_pressed(&mut self, key: loom_ui_core::Key, command: bool, now: Instant) {
+        use loom_ui_core::Key as Core;
+        let named = match key {
+            Core::Up => Named::ArrowUp,
+            Core::Down => Named::ArrowDown,
+            Core::Left => Named::ArrowLeft,
+            Core::Right => Named::ArrowRight,
+            Core::Home => Named::Home,
+            Core::End => Named::End,
+            Core::Enter => Named::Enter,
+            Core::Space => Named::Space,
+            Core::Escape => Named::Escape,
+            _ => return,
+        };
+        if self.session.outline.has_jump() {
+            self.jump_key(&Key::Named(named));
+            return;
+        }
+        self.outline_key(Key::Named(named), command, now);
+        // A jump list that Enter opened has the focus now, over the row.
+        if self.session.outline.active && !self.session.outline.has_jump() {
+            self.reveal_outline_focus();
+        }
+    }
+
     /// Gives the outline's newly focused row room in its scrolling view.
     fn reveal_outline_focus(&mut self) {
         if let Some(id) = self.outline_focus(&self.outline_rows()) {
-            self.effect(loom_ui::Effects::scroll_into_view(id));
+            self.effect(loom_ui::Effects::focus(id));
         }
     }
 
@@ -966,7 +970,7 @@ impl App {
                     self.go_up();
                     self.session.outline.reveal(&self.session.patch_map, instance.0);
                 } else {
-                    self.session.outline.active = false;
+                    self.leave_outline();
                 }
             }
             Key::Named(Named::Enter) => match row.target {
@@ -1015,7 +1019,7 @@ impl App {
 
     /// Hands focus to the canvas and the tile's first control, when present.
     fn focus_outline_tile(&mut self, module: u32) {
-        self.session.outline.active = false;
+        self.leave_outline();
         self.centre_tile(module);
         let widget = self.session.scene.module(module).and_then(|tile| {
             tile.panel
@@ -1062,7 +1066,14 @@ impl App {
                     from,
                     choices,
                     selected: 0,
+                    outline,
                 });
+                // From the tree, whose row it covers, the focus goes to
+                // the list (the WAI-ARIA Listbox pattern); from the canvas
+                // it stays there, and the keys still reach the list.
+                if outline {
+                    self.effect(loom_ui::Effects::focus(jump_id().with("list")));
+                }
             }
         }
     }
@@ -1090,7 +1101,7 @@ impl App {
         if let Some(jump) = self.session.outline.jump.take()
             && let Some(choice) = jump.choices.get(index)
         {
-            self.jump_to(jump.from, choice.target, self.session.outline.active);
+            self.jump_to(jump.from, choice.target, jump.outline);
         }
     }
 
@@ -1125,7 +1136,7 @@ impl App {
         };
         if outline {
             self.session.outline.reveal(&self.session.patch_map, module);
-            self.reveal_outline_focus();
+            self.focus_outline();
         } else {
             self.a11y.request_control(None);
             self.session.outline.focus_port = match target {
@@ -1220,51 +1231,35 @@ pub(crate) fn jump_id() -> UiId {
     UiId::panel("cable-jump")
 }
 
+/// The UI ID of the jump list's option `index`, under its scrolling list.
+fn jump_option(index: usize) -> UiId {
+    jump_id().with("list").with(index as u64)
+}
+
 impl App {
     /// Moves the canvas's navigation focus to a port.
     pub(crate) fn focus_canvas_port(&mut self, port: PortRef) {
-        self.session.outline.active = false;
+        self.leave_outline();
         self.session.outline.focus_port = Some(port);
         self.a11y.request_control(None);
         self.centre_tile(port.module);
     }
 
-    /// The cable-choice panel as a list of accessible options.
-    pub(crate) fn jump_items(&self) -> Vec<crate::a11y::items::Item> {
-        use crate::a11y::items::{Item, Kind};
-        let Some(jump) = &self.session.outline.jump else {
-            return Vec::new();
-        };
-        let mut list = Item::new(jump_id(), Kind::ListBox);
-        list.label = Some(count(jump.choices.len(), "connection"));
-        list.children = jump
-            .choices
-            .iter()
-            .enumerate()
-            .map(|(index, choice)| {
-                let mut item = Item::new(jump_id().with(index as u64), Kind::ListBoxOption);
-                item.label = Some(choice.name.clone());
-                item.selected = Some(index == jump.selected);
-                item.click = Some(Message::JumpChoice(index));
-                item
-            })
-            .collect();
-        vec![list]
-    }
-
     /// The item chosen with the arrow keys in the cable list.
     pub(crate) fn jump_focus(&self) -> Option<UiId> {
-        Some(jump_id().with(self.session.outline.jump.as_ref()?.selected as u64))
+        Some(jump_option(self.session.outline.jump.as_ref()?.selected))
     }
 
     /// The action of clicking one of the visible cable destinations.
     pub(crate) fn jump_action(&self, id: &UiId) -> Option<Message> {
         let jump = self.session.outline.jump.as_ref()?;
         (0..jump.choices.len())
-            .find(|index| jump_id().with(*index as u64) == *id)
+            .find(|index| jump_option(*index) == *id)
             .map(Message::JumpChoice)
     }
 }
+
+pub(crate) mod panel;
 
 #[cfg(test)]
 mod tests;

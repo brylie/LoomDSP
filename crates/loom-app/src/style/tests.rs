@@ -14,7 +14,8 @@ fn quiet_text_meets_contrast() {
         use loom_canvas::iced_convert::ToIced as _;
         super::highlighted_row(&theme).fill.to_iced()
     };
-    let closed_tab = super::tab(false)(&theme, iced::widget::button::Status::Active).text_color;
+    // A closed tab's title is quiet text (`tabs.rs`).
+    let closed_tab = super::QUIET;
     for (name, text, fill) in [
         ("quiet text on the panel", secondary, palette.background.base.color),
         ("quiet text on a card", secondary, palette.background.weak.color),

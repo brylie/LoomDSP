@@ -161,8 +161,8 @@ fn tab_from_the_matrix_tab_enters_the_matrix() {
     assert_eq!(ui.runtime().focused(), None);
 }
 
-/// Tab from the open Outline tab gives the keys to the Outline Iced still
-/// draws, as Ctrl+Tab into the column does.
+/// Tab from the open Outline tab goes to the tree's one stop, its current
+/// row, the first, the summary (the WAI-ARIA Tree View pattern).
 #[test]
 fn tab_from_the_outline_tab_enters_the_outline() {
     let mut ui = on_the_inspector_tab();
@@ -170,7 +170,7 @@ fn tab_from_the_outline_tab_enters_the_outline() {
     assert_eq!(ui.app().right_tab, Tab::Outline);
     press(&mut ui, Named::Tab);
     assert!(ui.app().session.outline.active, "the Outline has the keys");
-    assert_eq!(ui.runtime().focused(), None);
+    assert_eq!(ui.runtime().focused(), Some(&crate::outline::row_id("summary".into())));
 }
 
 /// A module's rows: Tab from the open tab goes to the column's first stop,

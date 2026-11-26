@@ -75,7 +75,7 @@ impl App {
     /// answer the view, the stops, Tab, and the tree read, so the column is
     /// drawn, focused, and reported by one toolkit at a time.
     pub(crate) fn inspector_ours(&self) -> bool {
-        self.right_tab == Tab::Inspector && self.jump_view().is_none()
+        self.right_tab == Tab::Inspector && !self.session.outline.has_jump()
     }
 
     /// Whether the inspector's panel owns the input: it is the runtime's,

@@ -757,7 +757,6 @@ impl crate::App {
                 })
                 .or_else(|| self.matrix_focus())
                 .or_else(|| self.session.outline.inspector_action.clone()),
-            jump: self.jump_items(),
             overlay,
             overlay_focus,
             ours_overlay: self.ours_overlay(),

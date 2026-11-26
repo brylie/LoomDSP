@@ -476,34 +476,14 @@ pub fn scroll() -> loom_ui::ScrollStyle {
     }
 }
 
-/// The radius of a right-column tab's corners.
+/// The radius of a right-column tab's corners, and of an Outline row's
+/// (`tabs.rs`, `outline/panel.rs`). The open tab has a fill and a border;
+/// the others are plain dim text. Shape as well as colour tells them apart
+/// (NFR-UX-03).
 pub const TAB_RADIUS: f32 = 4.0;
 
 /// The width of the open right-column tab's border.
 pub const TAB_BORDER: f32 = 1.0;
-
-/// A tab title. The open tab has a fill and a border; the others are plain
-/// dim text. Shape as well as colour tells them apart (NFR-UX-03).
-pub fn tab(open: bool) -> impl Fn(&Theme, iced_button::Status) -> iced_button::Style {
-    move |theme, status| {
-        let palette = theme.extended_palette();
-        let hovered = matches!(status, iced_button::Status::Hovered | iced_button::Status::Pressed);
-        iced_button::Style {
-            background: (open || hovered).then(|| palette.background.weak.color.into()),
-            text_color: if open { palette.background.base.text } else { QUIET },
-            border: iced::Border {
-                color: if open {
-                    palette.background.strong.color
-                } else {
-                    iced::Color::TRANSPARENT
-                },
-                width: TAB_BORDER,
-                radius: TAB_RADIUS.into(),
-            },
-            ..iced_button::Style::default()
-        }
-    }
-}
 
 /// A card in a list, such as one modulation assignment. The selected card
 /// is outlined in the primary colour.

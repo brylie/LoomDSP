@@ -139,11 +139,17 @@ impl App {
 
     /// Where Tab from the open tab goes: into its panel. The runtime's
     /// inspector's first stop is `next` in reading order; with none, Tab
-    /// goes on as past the column's last stop. The content Iced still draws
-    /// (the matrix, the Outline, the cable jump list) is entered as
-    /// Ctrl+Tab enters it.
+    /// goes on as past the column's last stop. The matrix, which Iced
+    /// still draws, is entered as Ctrl+Tab enters it.
     pub(crate) fn tab_into_panel(&self, next: Option<&UiId>) -> loom_ui::TabStep<Message> {
         use loom_ui::TabStep;
+        // The Outline's tree, its current row, or the jump list's list.
+        if self.outline_slot().is_some() {
+            return self
+                .outline_stops()
+                .first()
+                .map_or(TabStep::Leave, |stop| TabStep::To(stop.clone()));
+        }
         if self.inspector_owns() {
             let column = next.filter(|stop| stop.is_under(&crate::inspector::panel::inspector_id()));
             let stop = column
@@ -154,11 +160,9 @@ impl App {
         TabStep::Send(Message::EnterTabPanel)
     }
 
-    /// Gives the open content that Iced draws the keys, as Ctrl+Tab into
-    /// the column does: the matrix's table or the Outline, and the
-    /// runtime's focus leaves the tab.
+    /// Gives the matrix, which Iced draws, the keys, as Ctrl+Tab into the
+    /// column does, and the runtime's focus leaves the tab.
     pub(crate) fn enter_tab_panel(&mut self) {
-        self.session.outline.active = self.right_tab == Tab::Outline;
         self.session.matrix.focused = self.right_tab == Tab::Matrix;
         if self.focus_on_tabs() {
             self.effect(loom_ui::Effects::unfocus());

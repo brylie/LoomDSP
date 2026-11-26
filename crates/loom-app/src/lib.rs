@@ -562,6 +562,12 @@ enum Message {
     OutlineRow(loom_ui_core::UiId),
     /// Takes one of the offered cable jumps.
     JumpChoice(usize),
+    /// One of the tree keys on the Outline's list, which took it first
+    /// (plan 3.2, row 4e): `command` while Command or Ctrl is held.
+    OutlineKey {
+        key: loom_ui_core::Key,
+        command: bool,
+    },
     /// A pointer press outside the cable jump list.
     DismissJump,
     /// An edit in patch info (`docs/design/patch-metadata.md`).
@@ -886,6 +892,7 @@ impl Message {
             | Self::Preferences(_)
             | Self::OutlineRow(_)
             | Self::JumpChoice(_)
+            | Self::OutlineKey { .. }
             | Self::DismissJump
             | Self::PatchInfo(_)
             | Self::Licence(_)
@@ -1854,6 +1861,7 @@ impl App {
             }
             Message::File(FileAction::Browse) => self.open_patches(),
             Message::Key(event) if self.navigation_key(&event, now) => {}
+            Message::OutlineKey { key, command } => self.outline_panel_key_pressed(key, command, now),
             // An open menu has its own keys (`menus.rs`): Enter sends what its item sends.
             Message::Key(event)
                 if menus::is_menu_key(&event)
@@ -2262,6 +2270,7 @@ impl App {
             | Message::TabFrom { .. }
             | Message::EnterFields { .. }
             | Message::EnterTabPanel
+            | Message::OutlineKey { .. }
             | Message::ToolbarFocus(_)
             | Message::MenuTab { .. }
             | Message::MenuMove { .. }

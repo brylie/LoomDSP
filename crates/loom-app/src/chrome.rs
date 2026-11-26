@@ -25,7 +25,11 @@ impl App {
     pub(crate) fn chrome_panels(&self, view: &mut View) {
         let shape = Shape {
             inside: !self.session.level.is_root(),
-            inspector: self.inspector_ours(),
+            content: if self.inspector_ours() {
+                Some(crate::inspector::panel::inspector_id())
+            } else {
+                self.outline_slot()
+            },
         };
         view.panel_with(window_id(), Layer::Panels, &shape, root);
         self.toolbar_panel(view);
@@ -33,6 +37,7 @@ impl App {
         self.bar_panel(view);
         self.tabs_panel(view);
         self.inspector_panel(view);
+        self.outline_panels(view);
         // The browsers, then Preferences, then the chooser over it, then
         // help, which F1 opens over any of them (help-pages.md), so help
         // draws over them.
@@ -79,6 +84,7 @@ impl App {
         stops.extend(self.tabs_stops());
         stops.extend(self.inspector_stops());
         stops.extend(self.inspector_tags());
+        stops.extend(self.outline_stops());
         stops.extend(self.bar_stops());
         stops
     }
@@ -237,11 +243,13 @@ impl App {
 }
 
 /// What the root's slots are: the breadcrumb's is there `inside` a
-/// sub-patch, and the inspector's while the runtime draws the inspector.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// sub-patch, and the right column's content slot holds the panel the
+/// runtime draws there: the inspector, the Outline's tree, or the jump
+/// list.
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Shape {
     inside: bool,
-    inspector: bool,
+    content: Option<UiId>,
 }
 
 /// The root: the toolbar's slot, the breadcrumb's inside a sub-patch, the
@@ -257,8 +265,8 @@ fn root(shape: &Shape) -> Element {
         parts.push(slot(crate::breadcrumb::breadcrumb_id(), style::BREADCRUMB_HEIGHT));
     }
     let fill = Element::space(Length::FILL, Length::FILL);
-    let content = if shape.inspector {
-        Element::slot(crate::inspector::panel::inspector_id())
+    let content = if let Some(panel) = shape.content.clone() {
+        Element::slot(panel)
             .width(Length::FILL)
             .height(Length::FILL)
             .min_height(0.0)

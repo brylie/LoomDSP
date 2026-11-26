@@ -258,3 +258,26 @@ fn a_list_box_option_needs_no_click() {
     assert_eq!(option.problem(false), None);
     assert!(!option.node(false).supports_action(KitAction::Click));
 }
+
+/// A tree item says its level, its place in its set, the set's size, and
+/// whether it is open, so a tree can send its rows flat and a screen
+/// reader still hears the shape (section 7, rule 12).
+#[test]
+fn a_tree_item_says_its_level_place_and_state() {
+    let node = Access::new(Role::TreeItem, "Filter")
+        .action(Action::Click)
+        .level(2)
+        .position_in_set(0)
+        .size_of_set(3)
+        .states(States {
+            expanded: Some(false),
+            ..States::default()
+        })
+        .node(true);
+    assert_eq!(node.role(), KitRole::TreeItem);
+    assert_eq!(node.level(), Some(2));
+    assert_eq!(node.position_in_set(), Some(0));
+    assert_eq!(node.size_of_set(), Some(3));
+    assert_eq!(node.is_expanded(), Some(false));
+    assert!(Access::new(Role::TreeItem, "Filter").node(false).level().is_none());
+}
