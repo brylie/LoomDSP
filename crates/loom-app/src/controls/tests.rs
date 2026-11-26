@@ -102,7 +102,7 @@ fn midi_range_fields_follow_the_selected_module_or_surface() {
         };
         assert_eq!(
             app.midi_range_fields(),
-            Some(["midi/low", "midi/high"].map(|part| ids::part(&row.ui, part)))
+            Some(["midi/settings/low", "midi/settings/high"].map(|part| ids::part(&row.ui, part)))
         );
     }
     app.right_tab = crate::RightTab::Matrix;

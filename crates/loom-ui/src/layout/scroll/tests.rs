@@ -75,6 +75,11 @@ fn the_thumb_is_painted_after_its_clip_layer_ends() {
         mark: Color::WHITE,
         primary: Color::rgb(0.3, 0.6, 1.0),
         track: Color::rgb(0.4, 0.4, 0.4),
+        check: crate::paint::CheckLook {
+            edge: Color::rgb(0.6, 0.6, 0.6),
+            fill: Color::rgb(0.3, 0.5, 0.9),
+            mark: Color::rgb(0.1, 0.1, 0.1),
+        },
         ring: crate::focus::RingStyle {
             color: Color::WHITE,
             width: 2.0,

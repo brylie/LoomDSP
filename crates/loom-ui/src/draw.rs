@@ -552,8 +552,8 @@ fn paint_mark(bounds: Rect, selected: bool, painter: &mut dyn TextPainter, style
 }
 
 /// The thickness of a check box's border, in logical pixels (section 5,
-/// rule 17).
-const CHECK_BORDER: f32 = 1.5;
+/// rule 17), as Iced's check box drew it.
+const CHECK_BORDER: f32 = 1.0;
 
 /// The radius of a check box's corners, in logical pixels.
 const CHECK_RADIUS: f32 = 2.0;
@@ -561,13 +561,14 @@ const CHECK_RADIUS: f32 = 2.0;
 /// The thickness of a check box's check mark, in logical pixels.
 const CHECK_STROKE: f32 = 2.0;
 
-/// Paints a check box's box in `bounds`: its border, and a check mark in
-/// the primary colour when it is `on`.
+/// Paints a check box's box in `bounds`: off, its edge; on, filled, with
+/// a check mark on the fill (`PanelStyle::check`).
 fn paint_check(bounds: Rect, on: bool, painter: &mut dyn TextPainter, style: &PanelStyle) {
+    let look = style.check;
     painter.quad(Quad {
         rect: bounds,
-        fill: Color::TRANSPARENT,
-        border: style.mark,
+        fill: if on { look.fill } else { Color::TRANSPARENT },
+        border: if on { look.fill } else { look.edge },
         border_width: CHECK_BORDER,
         radius: CHECK_RADIUS,
     });
@@ -580,7 +581,7 @@ fn paint_check(bounds: Rect, on: bool, painter: &mut dyn TextPainter, style: &Pa
                 from,
                 to,
                 width: CHECK_STROKE,
-                colour: style.primary,
+                colour: look.mark,
             });
         }
     }
@@ -633,7 +634,29 @@ fn paint_slider(bounds: Rect, slider: &crate::slider::Slider, painter: &mut dyn 
         style.primary,
         THUMB / 2.0,
     ));
+    // The ghost mark, over the thumb: a hollow ring in the text colour,
+    // as Iced's inspector drew it.
+    if let Some(ghost) = slider.ghost_position() {
+        let at = thumb_centre(bounds, ghost);
+        painter.quad(Quad {
+            rect: Rect::new(
+                Point::new(at.x - GHOST / 2.0, at.y - GHOST / 2.0),
+                Size::new(GHOST, GHOST),
+            ),
+            fill: Color::TRANSPARENT,
+            border: style.text,
+            border_width: GHOST_BORDER,
+            radius: GHOST / 2.0,
+        });
+    }
 }
+
+/// The size of a slider's ghost mark, in logical pixels (section 5, rule
+/// 16), as Iced's inspector drew it.
+const GHOST: f32 = 10.0;
+
+/// The width of a ghost mark's ring, in logical pixels.
+const GHOST_BORDER: f32 = 1.5;
 
 /// `value` in logical pixels, moved to the nearest whole physical pixel
 /// at `scale`.

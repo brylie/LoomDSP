@@ -54,6 +54,10 @@ pub(crate) struct Pointer {
     pub(crate) hovered: Option<(Layer, UiId)>,
     /// Counts hover changes, including ones between frames.
     pub(crate) hover_moves: u64,
+    /// The element the app was last told the pointer came onto
+    /// ([`App::hovered`]), until it is told the hover ended
+    /// ([`App::unhovered`]), so each start has one end.
+    pub(crate) told: Option<UiId>,
     /// The element a left press went down on, and its layer, until the
     /// release.
     pub(crate) pressed: Option<(Layer, UiId)>,
@@ -312,8 +316,14 @@ impl<A: App> Panels<'_, A> {
     }
 
     /// Sends the app's message for each of `reports` from a slider, for
-    /// the next turn ([`App::slid`]).
-    pub(crate) fn report_slid(&self, reports: impl IntoIterator<Item = crate::slider::Slid>) {
+    /// the next turn ([`App::slid`]). A focus move not yet told goes
+    /// first: a press on a slider both focuses it and moves it, and the
+    /// app handles the move with its copy of the focus current.
+    pub(crate) fn report_slid(&mut self, reports: impl IntoIterator<Item = crate::slider::Slid>) {
+        let mut reports = reports.into_iter().peekable();
+        if reports.peek().is_some() {
+            self.report_focus();
+        }
         for (id, position, phase) in reports {
             if let Some(message) = self.app.slid(&id, position, phase) {
                 self.waker.send(message);
@@ -624,14 +634,37 @@ impl<A: App> Panels<'_, A> {
     /// moves rows under a still pointer, as typing in a search field does,
     /// moves the hover without telling the app, so the highlight stays
     /// where the keys left it.
-    fn report_hover(&self, changed: bool) {
+    fn report_hover(&mut self, changed: bool) {
         if !changed {
             return;
         }
+        self.report_unhover();
         if let Some((_, id)) = &self.pointer.hovered
             && self.window.reports_hover(id)
-            && let Some(message) = self.app.hovered(id)
         {
+            self.pointer.told = Some(id.clone());
+            if let Some(message) = self.app.hovered(id) {
+                self.waker.send(message);
+            }
+        }
+    }
+
+    /// Tells the app a hover it heard of ended (section 5, rule 11), once:
+    /// when the element it was told of is no longer the hovered one, which
+    /// covers the pointer moving to another element or off every element,
+    /// leaving the window, and the input layer rising above it, or when
+    /// that element left the layout. Checked after each turn and each
+    /// layout, so every way the hover can change is heard the same way.
+    pub(crate) fn report_unhover(&mut self) {
+        let Some(told) = &self.pointer.told else {
+            return;
+        };
+        let still = self.pointer.hovered.as_ref().is_some_and(|(_, id)| id == told) && self.window.reports_hover(told);
+        if still {
+            return;
+        }
+        let told = self.pointer.told.take().expect("checked above");
+        if let Some(message) = self.app.unhovered(&told) {
             self.waker.send(message);
         }
     }

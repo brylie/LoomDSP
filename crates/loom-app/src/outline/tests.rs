@@ -947,18 +947,20 @@ fn toolbar_region_keys_move_the_runtime_focus() {
     assert!(!focused(&mut ui).is_under(&crate::a11y::tree::toolbar_id()));
 }
 
-/// Ctrl+Shift+Tab from the toolbar into an Inspector whose stop is an
-/// action, not a field, lets the toolbar's focus go, so the arrows, Enter,
-/// and Space no longer reach a toolbar button (CodeRabbit, #850). Tried
-/// with each module of the patch selected; at least one has such a stop.
+/// Ctrl+Shift+Tab from the toolbar into a module's Inspector, whose rows
+/// are the runtime's since plan 3.2, row 4d.2, focuses one of the column's
+/// stops, so the toolbar lets go and the arrows, Enter, and Space reach the
+/// column, not a toolbar button (CodeRabbit, #850). Tried with each module
+/// of the patch selected.
 #[test]
-fn ctrl_tab_from_the_toolbar_to_an_action_only_inspector_lets_the_toolbar_go() {
+fn ctrl_tab_from_the_toolbar_to_a_module_inspector_focuses_its_column() {
     let modules: Vec<u32> = crate::ui_test::open_app("subtractive.ron")
         .ui_snapshot()
         .tiles
         .iter()
         .map(|tile| tile.id)
         .collect();
+    let inspector = crate::inspector::panel::inspector_id();
     let mut tried = 0;
     for module in modules {
         let mut ui = Ui::open("subtractive.ron");
@@ -969,14 +971,16 @@ fn ctrl_tab_from_the_toolbar_to_an_action_only_inspector_lets_the_toolbar_go() {
             continue;
         }
         region(&mut ui, true);
-        if ui.app().session.outline.inspector_action.is_none() {
-            continue;
-        }
+        ui.redraw();
         tried += 1;
         assert!(!ui.app().toolbar_has_focus(), "module {module}: the toolbar let go");
-        assert_eq!(ui.runtime().focused(), None, "module {module}");
+        assert!(
+            ui.runtime().focused().is_some_and(|focus| focus.is_under(&inspector)),
+            "module {module}: the column has the focus: {:?}",
+            ui.runtime().focused()
+        );
     }
-    assert!(tried > 0, "a module whose Inspector stop is an action");
+    assert!(tried > 0, "a module was tried");
 }
 
 /// Ctrl+Shift+Tab from the toolbar into an Inspector with a field (no

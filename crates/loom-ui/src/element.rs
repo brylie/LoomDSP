@@ -760,9 +760,9 @@ impl Element {
     }
 
     /// A check box named `label`, set in `style`, checked when `on`
-    /// (ui-layer.md, section 5, rule 17): a 14 px box with a 1.5 px border,
-    /// and a check mark in the panel style's primary colour when on, beside
-    /// its label. A press on the box or the label toggles it and takes no
+    /// (ui-layer.md, section 5, rule 17): a 14 px box beside its label,
+    /// with a 1 px edge when off and filled with its check mark when on,
+    /// in the panel style's check box look (`PanelStyle::check`). A press on the box or the label toggles it and takes no
     /// focus; Space toggles it when it has focus (section 6, rule 11). Each
     /// toggle reaches the app as [`App::clicked`](crate::App::clicked) on
     /// the next turn, and a screen reader's Click through

@@ -2,8 +2,8 @@
 //! with no display.
 
 use super::{
-    BACKEND_READ_LIMIT, Backend, Clipboard, MAX_STUCK_READS, Native, READ_NOW_LIMIT, READS_BEFORE_RETRY, Reader,
-    System, answer,
+    BACKEND_READ_LIMIT, Backend, Clipboard, Desktop, MAX_STUCK_READS, Native, READ_NOW_LIMIT, READS_BEFORE_RETRY,
+    Reader, System, WAYLAND_READ_LIMIT, answer, text_of,
 };
 use crate::effect::ClipboardText;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -441,11 +441,11 @@ impl Native for Scripted {
         })
     }
 
-    fn get_text(&mut self) -> Result<String, arboard::Error> {
+    fn get_text(&mut self) -> ClipboardText {
         if self.text.is_empty() {
-            return Err(arboard::Error::ContentNotAvailable);
+            return answer(Err(arboard::Error::ContentNotAvailable));
         }
-        Ok(self.text.clone())
+        answer(Ok(self.text.clone()))
     }
 
     fn set_text(&mut self, text: String) -> Result<(), arboard::Error> {
@@ -473,4 +473,105 @@ fn the_system_backend_opens_again_after_a_failed_write() {
     assert!(system.clipboard.is_none(), "a failed write lets the handle go");
     assert_eq!(system.get(), ClipboardText::Empty, "and the next use opens another");
     assert!(OPENS.lock().unwrap().is_empty(), "three opens, as scripted");
+}
+
+/// What a pipe read gave becomes a `ClipboardText`: UTF-8 is text, no bytes
+/// are empty, and bytes that are not UTF-8, or a read that could not
+/// finish, are refused, never empty.
+#[test]
+fn pipe_reads_map_to_clipboard_text() {
+    assert_eq!(text_of(Some(b"osc".to_vec())), ClipboardText::Text("osc".into()));
+    assert_eq!(text_of(Some(Vec::new())), ClipboardText::Empty);
+    assert_eq!(text_of(Some(vec![0xff, 0xfe])), ClipboardText::Refused);
+    assert_eq!(text_of(None), ClipboardText::Refused);
+}
+
+/// A Wayland read gives up before the clipboard thread stops waiting for
+/// it, so it answers by itself and is never left stuck.
+#[test]
+fn a_wayland_read_ends_before_the_thread_stops_waiting() {
+    assert!(WAYLAND_READ_LIMIT < BACKEND_READ_LIMIT);
+}
+
+/// A backend that waits a while and then refuses, as a Wayland read that
+/// reached its deadline does.
+struct Bounded {
+    wait: Duration,
+    reads: Arc<AtomicUsize>,
+}
+
+impl Backend for Bounded {
+    fn get(&mut self) -> ClipboardText {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        std::thread::sleep(self.wait);
+        ClipboardText::Refused
+    }
+
+    fn set(&mut self, _: String) {}
+}
+
+/// A read that ends by itself within the thread's limit leaves nothing
+/// stuck: its handle comes back, and the next read reaches the backend at
+/// once instead of being refused unasked.
+#[test]
+fn a_read_that_ends_in_time_leaves_nothing_stuck() {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let opens = Arc::new(AtomicUsize::new(0));
+    let mut reader = Reader::default();
+    let mut open = {
+        let (reads, opens) = (reads.clone(), opens.clone());
+        move || {
+            opens.fetch_add(1, Ordering::SeqCst);
+            Bounded {
+                wait: Duration::from_millis(50),
+                reads: reads.clone(),
+            }
+        }
+    };
+    for _ in 0..READS_BEFORE_RETRY + 2 {
+        assert_eq!(reader.read(&mut open, WAIT), ClipboardText::Refused);
+    }
+    assert!(reader.stuck.is_empty(), "no read was left stuck");
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        READS_BEFORE_RETRY + 2,
+        "every read reached the backend"
+    );
+    assert_eq!(opens.load(Ordering::SeqCst), 1, "through the one handle");
+}
+
+/// A native handle that always opens, and holds its text in memory.
+#[derive(Default)]
+struct Memory {
+    text: String,
+}
+
+impl Native for Memory {
+    fn open() -> Result<Self, arboard::Error> {
+        Ok(Self::default())
+    }
+
+    fn get_text(&mut self) -> ClipboardText {
+        ClipboardText::from_text(Some(self.text.clone()))
+    }
+
+    fn set_text(&mut self, text: String) -> Result<(), arboard::Error> {
+        self.text = text;
+        Ok(())
+    }
+}
+
+/// The desktop's clipboard writes through its `arboard` handle, and reads
+/// through it too when it does not read Wayland itself.
+#[test]
+fn the_desktop_clipboard_reads_and_writes_through_arboard() {
+    let mut desktop = Desktop::<Memory>::open().unwrap();
+    // On a Wayland desktop the read would be the real clipboard's.
+    #[cfg(target_os = "linux")]
+    {
+        desktop.wayland = false;
+    }
+    assert_eq!(desktop.get_text(), ClipboardText::Empty);
+    desktop.set_text("osc".to_owned()).unwrap();
+    assert_eq!(desktop.get_text(), ClipboardText::Text("osc".to_owned()));
 }

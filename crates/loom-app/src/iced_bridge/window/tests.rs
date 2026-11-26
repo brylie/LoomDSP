@@ -283,3 +283,129 @@ fn a_scripted_key_is_handed_to_the_shell_one_a_report() {
     );
     assert!(report(&mut layers, &mut runtime).input.is_empty());
 }
+
+/// What one step of the shell's `after` loop did, as
+/// [`after`] copies it.
+#[derive(Debug, PartialEq)]
+enum Step {
+    /// The layers reported: whether they handed the shell a key, and
+    /// whether a message waits to run alone.
+    Report {
+        /// The report handed the shell a scripted key.
+        key: bool,
+        /// A message waits to run alone.
+        alone: bool,
+    },
+    /// The queued messages ran, then the layers' message, alone.
+    Alone,
+    /// The runtime's turn for a key the layers handed it.
+    Turn,
+}
+
+/// The shell's `after` loop (`crates/loom-ui/src/shell.rs`, `Shell::after`,
+/// line 533) over the layers and `runtime`, in its order: while a report
+/// says a message waits to run alone, run it and report again; then one
+/// turn for each input the reports handed over, reporting after each. The
+/// shell itself needs a window and its event loop, so this copies the order
+/// it keeps. If that order changes, change this too, or the test checks an
+/// order the window no longer has. It goes with this bridge in phase 4,
+/// when Iced does.
+fn after(layers: &mut WindowLayers, runtime: &mut Runtime<Hosted, IcedTarget>) -> Vec<Step> {
+    let mut driver = loom_ui::headless::Headless::new();
+    let mut queued = std::collections::VecDeque::new();
+    let mut steps = Vec::new();
+    loop {
+        loop {
+            let report = report(layers, runtime);
+            steps.push(Step::Report {
+                key: !report.input.is_empty(),
+                alone: report.alone,
+            });
+            queued.extend(report.input);
+            if !report.alone {
+                break;
+            }
+            steps.push(Step::Alone);
+            runtime.handle(loom_ui::DriverEvent::Woken, Instant::now(), &mut driver);
+            let waker = runtime.waker();
+            let window = runtime.window();
+            let (app, target, panels) = runtime.parts();
+            let message = layers.alone(Parts {
+                app,
+                target,
+                waker: &waker,
+                window,
+                panels,
+            });
+            if let Some(message) = message {
+                runtime.deliver(message, Instant::now(), &mut driver);
+            }
+        }
+        let Some(event) = queued.pop_front() else {
+            return steps;
+        };
+        steps.push(Step::Turn);
+        runtime.handle(
+            loom_ui::DriverEvent::Input { event, pointer: None },
+            Instant::now(),
+            &mut driver,
+        );
+    }
+}
+
+/// A scripted key waits while a focus answer runs alone, so Iced never
+/// hears it before the runtime's turn for it. The report that hands the
+/// key over keeps Iced's copy for the next report, and the shell reports
+/// again after a message that runs alone: had that report come between,
+/// Iced would hear the key with nothing yet saying the runtime took it (a
+/// Tab from a field a script's click focused selected a tile; UX review of
+/// #900).
+#[test]
+fn a_scripted_key_waits_for_the_answers_that_run_alone() {
+    use iced::keyboard::{Event as Keyboard, Key, Location, Modifiers, key::Named};
+    let mut runtime = runtime();
+    let mut layers = WindowLayers::new();
+    layers.answers.push_back(FocusAnswer {
+        any: false,
+        widget: None,
+    });
+    let tab = Key::Named(Named::Tab);
+    runtime
+        .app()
+        .0
+        .pointer
+        .script_key(iced::Event::Keyboard(Keyboard::KeyPressed {
+            key: tab.clone(),
+            modified_key: tab,
+            physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
+            location: Location::Standard,
+            modifiers: Modifiers::empty(),
+            text: None,
+            repeat: false,
+        }));
+    let steps = after(&mut layers, &mut runtime);
+    for pair in steps.windows(2) {
+        if matches!(pair[0], Step::Report { key: true, .. }) {
+            assert_eq!(pair[1], Step::Turn, "the key's turn comes next: {steps:?}");
+        }
+    }
+    assert_eq!(
+        steps,
+        [
+            Step::Report {
+                key: false,
+                alone: true
+            },
+            Step::Alone,
+            Step::Report {
+                key: true,
+                alone: false
+            },
+            Step::Turn,
+            Step::Report {
+                key: false,
+                alone: false
+            },
+        ]
+    );
+}

@@ -336,6 +336,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             self.waker().nudge();
         }
         self.release_if_owed();
+        // An element the app was told is hovered may have left the layout.
+        self.panels().report_unhover();
     }
 
     /// The runtime's own element with keyboard focus, if any. Elements a
@@ -412,6 +414,18 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         panels.report_focus();
         self.release_if_owed();
         self.focus.id().cloned()
+    }
+
+    /// Lets go of the runtime's focus, as [`Effects::unfocus`](crate::Effects::unfocus)
+    /// does, for a driver or a test harness outside a turn. The app hears
+    /// of it as any focus move, through [`App::focus_moved`](crate::App::focus_moved)
+    /// on the next turn, so its copy of the focus stays in step. For tests:
+    /// a real driver's app lets go of the focus through its effects.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn unfocus(&mut self) {
+        if self.focus_to(None) {
+            self.panels().report_focus();
+        }
     }
 
     /// The highlighted option of a select's open list, or `None` while no
@@ -820,6 +834,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
         let target = self.app.access_target(request.target_node)?;
         let field = self.panels.fields.owner_of(&target)?.clone();
+        // A SetValue the app commits whole is the app's; the field's
+        // selection and partial replacement stay the runtime's.
+        if request.action == KitAction::SetValue && self.app.commits_set_value(&field) {
+            return None;
+        }
         // A field below the layer taking input, or turned off, takes no
         // screen reader action (section 5, rule 3; rule 22): the action is
         // used up and changes nothing, so nothing is reported.
@@ -1305,7 +1324,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// even on a slider that is turned off or below the input layer, where
     /// it does nothing. `None` for any other action, or another element,
     /// which goes on. Returns whether anything that shows changed.
-    fn slider_action(&mut self, event: &AccessEvent) -> Option<bool> {
+    fn slider_action(&mut self, event: &AccessEvent, now: Instant) -> Option<bool> {
         let AccessEvent::Action(request) = event else {
             return None;
         };
@@ -1323,10 +1342,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if off || !self.in_input_layer(&target) {
             return Some(false);
         }
-        let reports = self
-            .pointer
-            .slide
-            .step(&target, slider.position(), slider.after_step(up));
+        // From where an open group of its steps last left it, which the
+        // app may not have laid out yet.
+        let from = self.pointer.slide.key_base(&target, slider.position());
+        let reports = self.pointer.slide.step(&target, from, slider.after_step(from, up), now);
         self.panels().report_slid(reports);
         Some(false)
     }
@@ -1680,7 +1699,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 }
                 None => match self
                     .select_action(&event)
-                    .or_else(|| self.slider_action(&event))
+                    .or_else(|| self.slider_action(&event, now))
                     .or_else(|| self.context_action(&event))
                 {
                     Some(changed) => redraw |= changed,
@@ -1777,9 +1796,17 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             self.waiting_for_draw.append(&mut self.after_draw);
         }
 
-        // 6. What comes next: a moved focus is reported for the next turn.
-        self.panels().report_focus();
+        // 6. What comes next: a moved focus is reported for the next turn,
+        // ahead of any message that waited in the queue, so none of them
+        // runs while the app's copy of the focus is behind the runtime's:
+        // a dialog's answer sent as its question closed and gave a field
+        // its focus back, for one (plan 3.2, row 4d).
+        self.panels().report_unhover();
+        let report = self.panels().focus_report();
         self.drain_queue();
+        if let Some(report) = report {
+            self.pending.push_front(report);
+        }
         Next {
             draw,
             again: !self.exited && (!self.pending.is_empty() || !self.pasted.is_empty()),
@@ -1953,6 +1980,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 }
                 Effect::Focus { target, select } => {
                     redraw |= self.focus_effect(&target, select);
+                    // One of the runtime's fields that took the focus
+                    // selects all of its text when asked, as the target's do.
+                    if select == Selection::All
+                        && let FocusTarget::Element(id) = &target
+                        && self.focus.id() == Some(id)
+                        && self.panels.fields.has(id)
+                    {
+                        let used = self.panels.fields.act(id, crate::field::FieldAction::SelectAll, now);
+                        redraw |= used.changed;
+                    }
                     self.field_left_after_focus(now);
                 }
                 // The runtime's own element is its own to scroll, once its

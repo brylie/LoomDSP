@@ -1288,7 +1288,8 @@ fn midi_learn_on_a_surface_control_maps_the_inner_parameter_within_its_range() {
     assert_eq!(saved.subpatches["filter"].midi[0].target, (3, "cutoff".to_string()));
 }
 
-/// The two surfaces of a same-named nested tile differ on screen and in speech.
+/// The two surfaces of a same-named nested tile differ on screen and in
+/// speech, and both buttons fit in the column, so neither is cut off.
 #[test]
 fn same_named_exposure_buttons_name_their_level() {
     let patch = include_str!("../../../../examples/patches/nested-subtractive.ron")
@@ -1301,7 +1302,11 @@ fn same_named_exposure_buttons_name_their_level() {
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![tile.0])));
     for surface in ["Voice (this tile)", "Voice (outer)"] {
         let label = format!("Unexpose on {surface}");
-        assert!(ui.text(&label).is_some(), "{label}");
+        let bounds = ui.text(&label).unwrap_or_else(|| panic!("{label}"));
+        // The column keeps a margin at its right, so a label that reaches
+        // the window's edge was cut by the column's clip.
+        let right = bounds.x + bounds.width;
+        assert!(right < crate::ui_test::WINDOW.width - 1.0, "{label} is cut at {right}");
         assert!(ui.a11y_tree().names().contains(&format!("{label}, exposed as cutoff")));
     }
 }

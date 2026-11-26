@@ -738,6 +738,8 @@ impl crate::App {
     /// the matrix's parts come from the same models their views draw.
     pub(crate) fn a11y_frames(&self) -> tree::Frames {
         let panel = match self.right_tab {
+            // The runtime's inspector gives its own nodes (`inspector/panel.rs`).
+            crate::matrix::Tab::Inspector if self.inspector_ours() => Vec::new(),
             crate::matrix::Tab::Inspector => crate::inspector::access::items(&self.inspector_model()),
             crate::matrix::Tab::Matrix => self.matrix_items(),
             crate::matrix::Tab::Outline => Vec::new(),
@@ -786,11 +788,21 @@ impl crate::App {
             return None;
         }
         let matrix = id.is_under(&crate::matrix::access::panel());
+        let inspector = id.is_under(&loom_ui_core::UiId::panel("inspector"));
+        // The runtime's inspector carries out its own Click, Focus,
+        // Increment, and Decrement; a SetValue on one of its sliders is the
+        // app's, with the number its item reads (section 7, rule 30).
+        if inspector && self.inspector_ours() {
+            if request.action != accesskit::Action::SetValue || in_overlay.is_some() {
+                return None;
+            }
+            let parts = crate::inspector::access::items(&self.inspector_model());
+            let item = items::find(&parts, &id)?.clone();
+            return Some(self.a11y_item_action(&item, request, at));
+        }
         let item = match in_overlay {
             Some(item) => item,
-            None if matrix || id.is_under(&loom_ui_core::UiId::panel("inspector")) => {
-                items::find(&frames.panel, &id)?.clone()
-            }
+            None if matrix || inspector => items::find(&frames.panel, &id)?.clone(),
             None => return None,
         };
         if request.action == accesskit::Action::Focus {
@@ -803,13 +815,34 @@ impl crate::App {
             }
             return Some(Vec::new());
         }
-        let messages = items::messages(&item, request.action, request.data.as_ref());
+        let messages = self.a11y_item_action(&item, request, at);
+        // A matrix cell is chosen first, as a click on it would choose it,
+        // so the keys and the reported focus stay where the screen reader
+        // is, also when a retarget gives the row a new ID.
+        if matrix && !messages.is_empty() {
+            self.matrix_reader_select(&id);
+        }
+        Some(messages)
+    }
+
+    /// The messages `item` sends for `request`, after the screen reader's
+    /// undo group: SetValue, Increment, and Decrement on a slider join it,
+    /// and any other action ends it first, also when it changes nothing
+    /// (section 7, rule 6).
+    fn a11y_item_action(
+        &mut self,
+        item: &items::Item,
+        request: &ActionRequest,
+        at: std::time::Instant,
+    ) -> Vec<crate::Message> {
+        use crate::edits::ReaderEvent;
+        let messages = items::messages(item, request.action, request.data.as_ref());
         let joins = item.groups && actions::joins_group(request.action);
         if messages.is_empty() {
             if !joins {
                 self.reader_event(ReaderEvent::Close);
             }
-            return Some(Vec::new());
+            return Vec::new();
         }
         self.reader_event(if joins {
             ReaderEvent::Action {
@@ -819,13 +852,7 @@ impl crate::App {
         } else {
             ReaderEvent::Close
         });
-        // A matrix cell is chosen first, as a click on it would choose it,
-        // so the keys and the reported focus stay where the screen reader
-        // is, also when a retarget gives the row a new ID.
-        if matrix {
-            self.matrix_reader_select(&id);
-        }
-        Some(messages)
+        messages
     }
 
     /// The message for a Click on a part of the window outside the canvas:
@@ -893,10 +920,16 @@ impl crate::App {
                     || self.runtime_menu().is_some_and(|menu| id.is_under(&menu.id))
                     || (!self.browser_stops().is_empty() && id.is_under(&crate::browser::browser_id()))
                     || (!self.patches_stops().is_empty() && id.is_under(&crate::patches::patches_id()))
+                    || (self.inspector_owns() && id.is_under(&crate::inspector::panel::inspector_id()))
             })
             .cloned()
         {
-            self.reader_event(ReaderEvent::Close);
+            // A step the runtime carried out on its own slider or select
+            // joins the screen reader's group there; only a Click or a
+            // Focus ends it (section 7, rule 6).
+            if matches!(request.action, accesskit::Action::Click | accesskit::Action::Focus) {
+                self.reader_event(ReaderEvent::Close);
+            }
             return match request.action {
                 accesskit::Action::Click => self
                     .question_click(&id)
@@ -906,9 +939,19 @@ impl crate::App {
                     .or_else(|| self.menu_click(&id))
                     .or_else(|| self.browser_click(&id))
                     .or_else(|| self.patches_click(&id))
+                    .or_else(|| self.inspector_click(&id))
                     .into_iter()
                     .collect(),
-                accesskit::Action::Focus if self.our_stops().contains(&id) => {
+                accesskit::Action::Focus
+                    if self.our_stops().contains(&id)
+                        || (self.inspector_owns() && id.is_under(&crate::inspector::panel::inspector_id())) =>
+                {
+                    // The inspector sits beside the canvas, not over it: a
+                    // knob that had the keys lets go, as on the canvas's
+                    // own Focus path, so only the field has them.
+                    if id.is_under(&crate::inspector::panel::inspector_id()) {
+                        self.a11y.release_canvas_focus();
+                    }
                     self.effect(loom_ui::Effects::focus(id));
                     Vec::new()
                 }

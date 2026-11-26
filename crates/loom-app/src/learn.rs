@@ -253,11 +253,17 @@ impl Learn {
     }
 
     /// Whether the open MIDI range has text being edited.
+    #[cfg(test)]
     pub fn has_range_draft(&self) -> bool {
         self.range_draft.is_some()
     }
 
     /// Sets or clears the draft in the range fields.
+    /// The parameter whose MIDI range has a draft, if one has.
+    pub fn range_draft_param(&self) -> Option<Param> {
+        self.range_draft.as_ref().map(|draft| draft.param)
+    }
+
     pub fn set_range_draft(&mut self, draft: Option<RangeDraft>) {
         self.range_draft = draft;
     }

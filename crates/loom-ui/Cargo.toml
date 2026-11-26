@@ -46,6 +46,14 @@ accesskit_winit = { version = "0.34", optional = true }
 # section 8, rule 2).
 arboard = { version = "3.7", default-features = false, features = ["wayland-data-control"], optional = true }
 
+# On Linux the clipboard reads Wayland itself, so a read has a deadline
+# (ui-layer.md, section 8, rule 2): `wl-clipboard-rs` asks the compositor for
+# the text, and `rustix` waits on its pipe with a timer the system holds.
+# Both are already in the tree through `arboard`.
+[target.'cfg(target_os = "linux")'.dependencies]
+wl-clipboard-rs = { version = "0.9", optional = true }
+rustix = { version = "1", features = ["event", "time"], optional = true }
+
 [features]
 default = ["shell"]
 # The winit shell: a window, its GPU surface, and the loop that drives the
@@ -53,7 +61,7 @@ default = ["shell"]
 shell = ["gpu", "clipboard", "dep:winit", "dep:wgpu", "dep:pollster", "dep:accesskit_winit"]
 # The system clipboard on a thread of its own (`loom_ui::clipboard`), for
 # any desktop driver: the winit shell, and a plugin's with no winit.
-clipboard = ["dep:arboard"]
+clipboard = ["dep:arboard", "dep:wl-clipboard-rs", "dep:rustix"]
 # The paint renderer (`paint::PaintRenderer`): wgpu, and no window.
 gpu = ["dep:wgpu"]
 # The recording painter (`paint::testing`), for other crates' tests.

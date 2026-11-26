@@ -179,9 +179,9 @@ impl PanelPass {
 /// still captures alike: text in the theme's text colour, and a field
 /// looking like one of Iced's while both draw, its caret in the text
 /// colour and its selection in the theme's weak primary, quiet text such
-/// as a radio's note in the app's quiet colour, a radio's mark and a check
-/// box's border in the text colour, a check mark and a slider's thumb and
-/// fill in the theme's primary, and a slider's track in its strong
+/// as a radio's note in the app's quiet colour, a radio's mark in the text
+/// colour, a check box from the app's one check box look
+/// (`style::check_look`), a slider's thumb and fill in the theme's primary, and a slider's track in its strong
 /// background, as Iced's slider rail is.
 pub(crate) fn panel_style(theme: &iced::Theme) -> loom_ui::paint::PanelStyle {
     use loom_canvas::iced_convert::ToCore as _;
@@ -194,6 +194,7 @@ pub(crate) fn panel_style(theme: &iced::Theme) -> loom_ui::paint::PanelStyle {
         mark: theme.palette().text.to_core(),
         primary: theme.palette().primary.to_core(),
         track: theme.extended_palette().background.strong.color.to_core(),
+        check: crate::style::check_look(),
     }
 }
 

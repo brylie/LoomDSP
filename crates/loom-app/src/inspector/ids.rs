@@ -48,7 +48,8 @@ pub(crate) fn row(tile: u32, kind: Kind, name: &str) -> UiId {
 
 /// The UI ID of one part of a row, or of the panel, by a fixed name:
 /// `value` for the slider or the choices, `field` for the typed value,
-/// `range`, `midi/options`, and so on.
+/// `range`, `midi/line/options`, and so on. An ID under another is
+/// inside it on screen (ui-layer.md, section 4).
 pub(crate) fn part(outer: &UiId, name: &'static str) -> UiId {
     name.split('/').fold(outer.clone(), UiId::with)
 }

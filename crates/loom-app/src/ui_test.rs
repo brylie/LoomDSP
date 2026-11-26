@@ -330,7 +330,13 @@ impl Ui {
     /// off, the dialog it asks for has no answer, so the harness panics,
     /// naming it. Save is not offered here: it would overwrite the example.
     pub fn press_open(&mut self) {
-        self.click_text("Open");
+        // By its UI ID: a sub-patch's inspector shows an Open of its own.
+        self.lay_out_panels();
+        let open = crate::toolbar::toolbar_id().with("open");
+        let at = self.runtime().bounds(&open).expect("the toolbar's Open");
+        let _ = self.move_to(loom_ui_core::Point::new(at.x + at.width / 2.0, at.y + at.height / 2.0));
+        let _ = self.press();
+        let _ = self.release();
     }
 
     /// What the window shows, as `--dump-ui` prints it.
@@ -592,6 +598,10 @@ impl Ui {
     /// Takes focus from every field, as the bridge does for a focus effect
     /// to no element, with no message.
     pub(crate) fn unfocus_all(&mut self) -> Vec<Message> {
+        // The runtime's focus too, as the app's own unfocus lets it go; the
+        // app hears of it on the next turn (plan 3.2, row 4d).
+        self.bridge.runtime_mut().unfocus();
+        let _ = self.deliver(Message::Tick);
         let task =
             crate::iced_bridge::focus_moves(&loom_ui::effect::FocusTarget::Nothing, loom_ui::effect::Selection::Keep);
         self.settle(vec![task]);
@@ -637,6 +647,17 @@ impl Ui {
     /// not see.
     pub(crate) fn wait(&mut self, by: Duration) {
         self.app().clock.advance(by);
+    }
+
+    /// Lets `by` pass and wakes the runtime, as the window's timer does at
+    /// a deadline the runtime asked for, with no input: a group of slider
+    /// steps that ends 500 ms after its last ends here (ui-layer.md,
+    /// section 5, rule 16).
+    pub(crate) fn wake_after(&mut self, by: Duration) -> Vec<Message> {
+        self.wait(by);
+        let task = self.bridge.update(crate::iced_bridge::Bridged::Woken);
+        self.settle(vec![task]);
+        self.bridge.take_log()
     }
 
     /// The harness's time now.

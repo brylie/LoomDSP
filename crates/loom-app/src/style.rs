@@ -34,6 +34,16 @@ pub const STATS_BAR_HEIGHT: f32 = 24.0;
 /// since the runtime's layout rounds to them.
 pub const TOOLBAR_HEIGHT: f32 = 40.0;
 
+/// How high the right column's row of tabs is, in logical pixels: Iced's
+/// row, which keeps this height, and the space the root panel leaves above
+/// the inspector's slot (plan 3.2, row 4d). Iced's own was 36.9: a 13 px
+/// label at a line height of 1.3, with 4 px of padding in each tab and 6 px
+/// around the row.
+pub const RIGHT_TABS_HEIGHT: f32 = 37.0;
+
+/// How wide the right column is, its inspector, matrix, and outline.
+pub const RIGHT_COLUMN_WIDTH: f32 = 280.0;
+
 /// How high the breadcrumb is, its rule included, inside a sub-patch. At
 /// the top level it takes no height. Iced's was 30.9 with a 1 px rule.
 pub const BREADCRUMB_HEIGHT: f32 = 32.0;
@@ -179,20 +189,37 @@ pub const QUIET: iced::Color = iced::Color::from_rgb(0.66, 0.69, 0.75);
 /// An unchecked switch's edge, and a choice's border on hover.
 pub const CONTROL_EDGE: iced::Color = QUIET;
 
-/// A checkbox that keeps its outline and check mark readable on cards and panels.
+/// How a check box looks, one token for both toolkits (visual-system.md,
+/// Check boxes): off, a 1 px edge in [`CONTROL_EDGE`]; on, filled in the
+/// canvas's control value colour, with its mark in the canvas background,
+/// so a checked box reads as a set value, as #856 made it for #463's
+/// contrast. Iced's boxes ([`check_box`]) and the runtime's
+/// (`PanelStyle::check`) read it; a test checks each pair for 3:1.
+pub fn check_look() -> loom_ui::paint::CheckLook {
+    use loom_canvas::iced_convert::ToCore as _;
+    let palette = loom_canvas::Palette::default();
+    loom_ui::paint::CheckLook {
+        edge: CONTROL_EDGE.to_core(),
+        fill: palette.control_value,
+        mark: palette.background,
+    }
+}
+
+/// A checkbox that keeps its outline and check mark readable on cards and
+/// panels, from [`check_look`].
 pub fn check_box(theme: &Theme, status: iced::widget::checkbox::Status) -> iced::widget::checkbox::Style {
     use iced::widget::checkbox::{Status, primary};
     use loom_canvas::iced_convert::ToIced as _;
     let mut style = primary(theme, status);
+    let look = check_look();
     match status {
         Status::Active { is_checked: true } | Status::Hovered { is_checked: true } => {
-            let palette = loom_canvas::Palette::default();
-            style.background = palette.control_value.to_iced().into();
-            style.icon_color = palette.background.to_iced();
-            style.border.color = palette.control_value.to_iced();
+            style.background = look.fill.to_iced().into();
+            style.icon_color = look.mark.to_iced();
+            style.border.color = look.fill.to_iced();
         }
         Status::Active { is_checked: false } | Status::Hovered { is_checked: false } => {
-            style.border.color = CONTROL_EDGE;
+            style.border.color = look.edge.to_iced();
             style.border.width = 1.0;
         }
         Status::Disabled { .. } => {}
@@ -469,6 +496,14 @@ pub fn tab(open: bool) -> impl Fn(&Theme, iced_button::Status) -> iced_button::S
 
 /// A card in a list, such as one modulation assignment. The selected card
 /// is outlined in the primary colour.
+/// The radius of a modulation card's corners, in the inspector and the
+/// matrix.
+pub const CARD_RADIUS: f32 = 5.0;
+
+/// The radius of an inspector row's corners while a dragged output over it
+/// lights it.
+pub const DROP_ROW_RADIUS: f32 = 4.0;
+
 pub fn card(selected: bool) -> impl Fn(&Theme) -> iced::widget::container::Style {
     move |theme| {
         let palette = theme.extended_palette();
@@ -481,35 +516,10 @@ pub fn card(selected: bool) -> impl Fn(&Theme) -> iced::widget::container::Style
                     palette.background.strong.color.scale_alpha(0.5)
                 },
                 width: if selected { 1.5 } else { 1.0 },
-                radius: 5.0.into(),
+                radius: CARD_RADIUS.into(),
             },
             ..iced::widget::container::Style::default()
         }
-    }
-}
-
-/// A pick list that reads as plain text until hovered or opened, such as
-/// an assignment's polarity on its card. Its handle stays visible, so it
-/// still looks like a choice.
-pub fn quiet_pick_list(theme: &Theme, status: iced::widget::pick_list::Status) -> iced::widget::pick_list::Style {
-    let palette = theme.extended_palette();
-    let active = !matches!(status, iced::widget::pick_list::Status::Active);
-    iced::widget::pick_list::Style {
-        text_color: palette.background.base.text,
-        // Iced's strong background is 1.76:1 on the panel, too faint for
-        // the one mark that says "this is a choice" (WCAG 1.4.11).
-        placeholder_color: QUIET,
-        handle_color: QUIET,
-        background: if active {
-            palette.background.weak.color.into()
-        } else {
-            iced::Color::TRANSPARENT.into()
-        },
-        border: iced::Border {
-            color: if active { CONTROL_EDGE } else { iced::Color::TRANSPARENT },
-            width: 1.0,
-            radius: 3.0.into(),
-        },
     }
 }
 

@@ -6,7 +6,7 @@ use super::*;
 use crate::ui_test::Ui;
 use accesskit::{Action as KitAction, Role as KitRole, Toggled};
 use iced::keyboard::{self, key::Named};
-use loom_ui_core::Point;
+use loom_ui_core::{Point, UiId};
 
 /// The subtractive patch with module 4 selected, so the inspector shows
 /// its rows and no patch info fields, and an error kept in the bar.
@@ -257,16 +257,19 @@ fn at(ui: &mut Ui) -> (Option<UiId>, Option<UiId>) {
     (ui.focused_field(), ui.runtime().focused().cloned())
 }
 
-/// Tab between the toolkits in reading order (section 6, rule 3, from row
-/// 2): Tab from nothing is the canvas's, as before; past patch info's last
-/// field, the bar's ×; past the ×, the order wraps to the toolbar's first
-/// button, New. Shift+Tab before patch info's first field reaches the top
-/// run's last stop, which at the top level is the toolbar's one stop, on
-/// its first button the first time (Brylie's decisions, 2026-11-18 and
-/// 2026-11-19).
+/// Tab in reading order (section 6, rule 3; Brylie's decisions,
+/// 2026-11-18, 2026-11-19, and 2026-11-25): Tab from nothing is the
+/// canvas's, as before; patch info's stops are the runtime's since plan
+/// 3.2, row 4d, top to bottom; past its last, Keyboard shortcuts, the
+/// bar's ×; past the ×, the order wraps to the toolbar's first button,
+/// New. Shift+Tab before patch info's first stop reaches the top run's
+/// last stop, which at the top level is the toolbar's one stop, on its
+/// first button the first time.
 #[test]
 fn tab_reads_the_canvas_patch_info_the_bar_then_the_toolbar() {
     let [authors, tags] = crate::patch_info::text_fields();
+    let patch = crate::inspector::ids::patch();
+    let part = |key: &'static str| crate::inspector::ids::part(&patch, key);
     let x = id(bars::STATUS_DISMISS_ID);
     let new = crate::toolbar::toolbar_id().with("new");
     let mut from_nothing = ui_with_patch_info(true);
@@ -279,9 +282,11 @@ fn tab_reads_the_canvas_patch_info_the_bar_then_the_toolbar() {
 
     let mut ui = ui_with_patch_info(true);
     click_authors(&mut ui);
-    assert_eq!(at(&mut ui), (Some(authors.clone()), None));
-    tap(&mut ui, Named::Tab);
-    assert_eq!(at(&mut ui), (Some(tags.clone()), None));
+    assert_eq!(ui.runtime().focused(), Some(&authors));
+    for stop in [tags, part("choose_licence"), part("shortcuts")] {
+        tap(&mut ui, Named::Tab);
+        assert_eq!(ui.runtime().focused(), Some(&stop));
+    }
     tap(&mut ui, Named::Tab);
     assert_eq!(at(&mut ui), (None, Some(x.clone())), "past patch info, the bar");
     assert!(ui.runtime().focus_ring().is_some(), "from the keyboard, with a ring");
@@ -292,7 +297,7 @@ fn tab_reads_the_canvas_patch_info_the_bar_then_the_toolbar() {
         "past the bar, the toolbar's first"
     );
 
-    // Back the other way: before patch info's first field, the top run's
+    // Back the other way: before patch info's first stop, the top run's
     // last stop.
     let mut ui = ui_with_patch_info(true);
     click_authors(&mut ui);
@@ -301,38 +306,40 @@ fn tab_reads_the_canvas_patch_info_the_bar_then_the_toolbar() {
 }
 
 /// Shift+Tab from nothing enters the bar's last stop, the last in reading
-/// order; before the bar's first, patch info's last field takes it.
+/// order; before the bar's first, patch info's last stop takes it.
 #[test]
 fn shift_tab_from_nothing_enters_the_bar() {
-    let [_, tags] = crate::patch_info::text_fields();
     let x = id(bars::STATUS_DISMISS_ID);
+    let shortcuts = crate::inspector::ids::part(&crate::inspector::ids::patch(), "shortcuts");
     let mut ui = ui_with_patch_info(true);
     ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
     assert_eq!(at(&mut ui), (None, Some(x)), "from nothing, the last stop");
     ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
     assert_eq!(
         at(&mut ui),
-        (Some(tags), None),
-        "before the bar, patch info's last field"
+        (None, Some(shortcuts)),
+        "before the bar, patch info's last stop"
     );
 }
 
-/// With no stop in the bar, patch info's fields hand Tab on to the
-/// toolbar, which always has a stop: past the last field, the toolbar's
-/// first button.
+/// With no stop in the bar, patch info's stops hand Tab on to the
+/// toolbar, which always has a stop: past the last, the toolbar's first
+/// button.
 #[test]
 fn with_no_stop_in_the_bar_the_fields_hand_on_to_the_toolbar() {
-    let [_, tags] = crate::patch_info::text_fields();
+    let shortcuts = crate::inspector::ids::part(&crate::inspector::ids::patch(), "shortcuts");
     let mut ui = ui_with_patch_info(false);
     assert!(ui.app().bar_stops().is_empty());
     click_authors(&mut ui);
-    tap(&mut ui, Named::Tab);
-    assert_eq!(at(&mut ui), (Some(tags), None));
+    for _ in 0..3 {
+        tap(&mut ui, Named::Tab);
+    }
+    assert_eq!(ui.runtime().focused(), Some(&shortcuts));
     tap(&mut ui, Named::Tab);
     assert_eq!(
         at(&mut ui),
         (None, Some(crate::toolbar::toolbar_id().with("new"))),
-        "past the fields, the toolbar"
+        "past patch info, the toolbar"
     );
 }
 
@@ -347,7 +354,17 @@ fn the_app_stops_are_the_runtimes() {
     ui.lay_out_panels();
     let stops = ui.app().bar_stops();
     assert_eq!(stops.len(), 3, "two switches and the kept error's ×: {stops:?}");
-    assert_eq!(ui.runtime().focus_stops(), ui.app().our_stops().as_slice());
+    // A module's rows are the runtime's to order (plan 3.2, row 4d.2): Tab
+    // walks them by the runtime's reading order, so the app lists none.
+    let inspector = crate::inspector::panel::inspector_id();
+    let runtime: Vec<UiId> = ui
+        .runtime()
+        .focus_stops()
+        .iter()
+        .filter(|stop| !stop.is_under(&inspector))
+        .cloned()
+        .collect();
+    assert_eq!(runtime, ui.app().our_stops());
 }
 
 /// A status longer than the bar is cut, not the fixed items: each keeps its

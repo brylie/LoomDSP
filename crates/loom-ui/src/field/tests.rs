@@ -51,6 +51,11 @@ const PANEL: PanelStyle = PanelStyle {
     mark: Color::rgb(0.9, 0.9, 0.9),
     primary: Color::rgb(0.3, 0.6, 1.0),
     track: Color::rgb(0.4, 0.4, 0.4),
+    check: crate::paint::CheckLook {
+        edge: Color::rgb(0.6, 0.6, 0.6),
+        fill: Color::rgb(0.3, 0.5, 0.9),
+        mark: Color::rgb(0.1, 0.1, 0.1),
+    },
 };
 
 /// A field and the contexts it edits with.
@@ -474,6 +479,8 @@ fn the_caret_lines_up_with_the_drawn_text_at_every_boundary() {
 enum Message {
     /// Focus the element with this UI ID.
     Focus(UiId),
+    /// Focus this field with all of its text selected.
+    FocusAll(UiId),
     /// What the field said.
     Field(FieldEvent),
     /// Make the nodes from the last layout and keep them.
@@ -526,6 +533,7 @@ impl App for Form {
     fn update(&mut self, message: Message, cx: &Context<'_, Message>) -> Effects<Message> {
         match message {
             Message::Focus(id) => return Effects::focus(id),
+            Message::FocusAll(id) => return Effects::focus_and_select_all(id),
             Message::Field(event) => {
                 if let (FieldEvent::Edited(text), true) = (&event, self.keeps) {
                     self.text.clone_from(text);
@@ -2427,4 +2435,24 @@ fn focused_field_follows_the_focus() {
     harness.send(Message::Remove);
     harness.lay_out(&mut text);
     assert_eq!(harness.runtime().focused_field(), None, "the field is gone");
+}
+
+/// A focus effect that asks for it selects all of a field's text, so typing
+/// replaces it, as the inspector's value field does when it takes focus
+/// (panel-widgets.md, Typing a value; plan 3.2, row 4d).
+#[test]
+fn focus_and_select_all_selects_the_whole_text() {
+    let Some((mut harness, mut typesetter)) = form("440", true) else {
+        return;
+    };
+    harness.send(Message::Focus(UiId::panel("form").with("ok")));
+    harness.send(Message::FocusAll(name()));
+    harness.lay_out(&mut typesetter);
+    assert_eq!(harness.runtime().focused(), Some(&name()));
+    type_in(&mut harness, "8");
+    assert_eq!(
+        harness.runtime().field_text(&name()),
+        Some("8"),
+        "typing replaced all of it"
+    );
 }

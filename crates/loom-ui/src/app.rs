@@ -102,6 +102,18 @@ pub trait App {
         None
     }
 
+    /// The message for the pointer leaving the element with UI ID `id`,
+    /// one the app heard [`App::hovered`] for: heard once for each time it
+    /// heard that, when the pointer moves onto another element or off
+    /// every one, leaves the window, or is no longer taken by the layer the
+    /// element is in, and when the element leaves the layout (ui-layer.md,
+    /// section 5, rule 11). It arrives on the next turn. It reads state and
+    /// changes none.
+    fn unhovered(&self, id: &UiId) -> Option<Self::Message> {
+        let _ = id;
+        None
+    }
+
     /// The message for opening the context menu of the element with UI ID
     /// `id`, one that has one
     /// ([`Element::context_menu`](crate::Element::context_menu)): a right
@@ -217,6 +229,17 @@ pub trait App {
     fn access_target(&self, node: accesskit::NodeId) -> Option<UiId> {
         let _ = node;
         None
+    }
+
+    /// Whether a screen reader's SetValue on the field `field` is the
+    /// app's to carry out, through [`App::accessibility_event`], rather
+    /// than the runtime's: a field whose value the app commits whole, as
+    /// one step, where the runtime would only make a draft of it. The
+    /// field's ReplaceSelectedText and SetTextSelection stay the
+    /// runtime's (section 7, rule 10). False by default.
+    fn commits_set_value(&self, field: &UiId) -> bool {
+        let _ = field;
+        false
     }
 
     /// The message for "what a field reports to a screen reader changed":

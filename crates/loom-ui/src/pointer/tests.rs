@@ -34,6 +34,10 @@ enum Message {
     QuestionKey,
     /// The pointer came onto this element, which reports its hover.
     Hovered(UiId),
+    /// The hover this element reported ended.
+    Unhovered(UiId),
+    /// The bar's second button reports its hover, or stops.
+    Reports(bool),
     /// This element's context menu, opened by a key or a screen reader
     /// (`true`) or by a right press (`false`).
     Menu(UiId, bool),
@@ -67,6 +71,7 @@ impl App for Layers {
         let mut effects = Effects::none();
         match &message {
             Message::Input(layer) => self.input = *layer,
+            Message::Reports(on) => self.reports = *on,
             Message::Canvas(on) => self.canvas = *on,
             Message::Refocus(ids) => {
                 for id in ids {
@@ -127,6 +132,10 @@ impl App for Layers {
 
     fn hovered(&self, id: &UiId) -> Option<Message> {
         Some(Message::Hovered(id.clone()))
+    }
+
+    fn unhovered(&self, id: &UiId) -> Option<Message> {
+        Some(Message::Unhovered(id.clone()))
     }
 
     fn context_menu(&self, id: &UiId, by_key: bool) -> Option<Message> {
@@ -1055,6 +1064,11 @@ fn ring_style() -> crate::paint::PanelStyle {
         mark: loom_ui_core::Color::WHITE,
         primary: loom_ui_core::Color::rgb(0.3, 0.6, 1.0),
         track: loom_ui_core::Color::rgb(0.4, 0.4, 0.4),
+        check: crate::paint::CheckLook {
+            edge: loom_ui_core::Color::rgb(0.6, 0.6, 0.6),
+            fill: loom_ui_core::Color::rgb(0.3, 0.5, 0.9),
+            mark: loom_ui_core::Color::rgb(0.1, 0.1, 0.1),
+        },
         ring: crate::focus::RingStyle {
             color: RING,
             width: 2.0,
@@ -1508,7 +1522,7 @@ fn reports(harness: &Harness<Layers, Fake>) -> Vec<Message> {
         .app()
         .heard
         .iter()
-        .filter(|message| matches!(message, Message::Hovered(_) | Message::Menu(..)))
+        .filter(|message| matches!(message, Message::Hovered(_) | Message::Unhovered(_) | Message::Menu(..)))
         .cloned()
         .collect()
 }
@@ -1524,9 +1538,57 @@ fn a_reporting_element_tells_the_app_its_hover_once_per_entry() {
     harness.step(at(62.0, 8.0, PointerEvent::Moved));
     assert_eq!(reports(&harness), [Message::Hovered(b.clone())]);
     harness.step(at(20.0, 8.0, PointerEvent::Moved));
-    assert_eq!(reports(&harness).len(), 1, "the first button does not ask to be heard");
+    assert_eq!(
+        reports(&harness),
+        [Message::Hovered(b.clone()), Message::Unhovered(b.clone())],
+        "the first button does not ask to be heard, and the second's hover ended"
+    );
     harness.step(at(60.0, 8.0, PointerEvent::Moved));
-    assert_eq!(reports(&harness), [Message::Hovered(b.clone()), Message::Hovered(b)]);
+    assert_eq!(
+        reports(&harness),
+        [
+            Message::Hovered(b.clone()),
+            Message::Unhovered(b.clone()),
+            Message::Hovered(b)
+        ]
+    );
+}
+
+/// Section 5, rule 11: a hover the app heard of ends once, whichever way
+/// it ends: the pointer moving off every element, leaving the window, or
+/// the element leaving the layout.
+#[test]
+fn a_reported_hover_ends_once_each_way() {
+    let b = UiId::panel("bar").with("b");
+    let heard = |harness: &Harness<Layers, Fake>| reports(harness);
+    let start_and_end = [Message::Hovered(b.clone()), Message::Unhovered(b.clone())];
+
+    // Off every element, into the room below the bar.
+    let mut off = reporting();
+    off.step(at(60.0, 8.0, PointerEvent::Moved));
+    off.step(at(60.0, 150.0, PointerEvent::Moved));
+    off.step(at(70.0, 150.0, PointerEvent::Moved));
+    assert_eq!(heard(&off), start_and_end, "off every element");
+
+    // Out of the window.
+    let mut out = reporting();
+    out.step(at(60.0, 8.0, PointerEvent::Moved));
+    out.step(DriverEvent::Input {
+        event: Event::Pointer(PointerEvent::LeftWindow),
+        pointer: None,
+    });
+    out.step(DriverEvent::Woken);
+    assert_eq!(heard(&out), start_and_end, "out of the window");
+
+    // The element no longer reports its hover, as one that left the
+    // layout no longer can.
+    let mut gone = reporting();
+    gone.step(at(60.0, 8.0, PointerEvent::Moved));
+    gone.send(Message::Reports(false));
+    gone.lay_out(&mut Mono::default());
+    gone.step(DriverEvent::Woken);
+    gone.step(DriverEvent::Woken);
+    assert_eq!(heard(&gone), start_and_end, "out of the layout");
 }
 
 /// Only the pointer's own move reports: a layout that leaves the hover on

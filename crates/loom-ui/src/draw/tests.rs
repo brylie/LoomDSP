@@ -23,6 +23,11 @@ const PANEL: PanelStyle = PanelStyle {
     mark: Color::rgb(0.9, 0.9, 0.9),
     primary: Color::rgb(0.3, 0.6, 1.0),
     track: Color::rgb(0.4, 0.4, 0.4),
+    check: crate::paint::CheckLook {
+        edge: Color::rgb(0.6, 0.6, 0.6),
+        fill: Color::rgb(0.3, 0.5, 0.9),
+        mark: Color::rgb(0.1, 0.1, 0.1),
+    },
 };
 
 /// A red the tests set on boxes and text.
@@ -725,9 +730,9 @@ fn a_centred_slider_fills_from_the_middle() {
     assert_eq!(painted[1].rect, rect(53.5, 5.0, 46.5, 4.0));
 }
 
-/// Section 5, rule 17: a check box paints a 14 px box with a 1.5 px border
-/// in the mark's colour, and its check mark in the primary colour only
-/// when it is on.
+/// Section 5, rule 17: a check box paints a 14 px box with a 1 px border:
+/// off, in its edge colour and empty; on, filled, with its check mark on
+/// the fill, in the mark's colour.
 #[test]
 fn a_check_box_paints_its_box_and_its_mark_when_on() {
     let segments = |painted: &[Painted]| {
@@ -742,12 +747,20 @@ fn a_check_box_paints_its_box_and_its_mark_when_on() {
     let on = painted(Element::checkbox("Follow", STYLE, true).key("follow"), Point::ORIGIN);
     let boxes = quads(&on);
     assert_eq!(boxes[0].rect.size(), Size::new(14.0, 14.0));
-    assert_eq!((boxes[0].border, boxes[0].border_width), (PANEL.mark, 1.5));
+    assert_eq!(
+        (boxes[0].fill, boxes[0].border, boxes[0].border_width),
+        (PANEL.check.fill, PANEL.check.fill, 1.0)
+    );
     let marks = segments(&on);
     assert_eq!(marks.len(), 2, "a tick of two strokes");
-    assert!(marks.iter().all(|mark| mark.colour == PANEL.primary));
+    assert!(marks.iter().all(|mark| mark.colour == PANEL.check.mark));
     let off = painted(Element::checkbox("Follow", STYLE, false).key("follow"), Point::ORIGIN);
     assert!(segments(&off).is_empty(), "no mark when off");
+    let off = quads(&off);
+    assert_eq!(
+        (off[0].fill, off[0].border, off[0].border_width),
+        (Color::TRANSPARENT, PANEL.check.edge, 1.0)
+    );
 }
 
 /// Section 5, rule 18: a select paints its box from its style, its label,
@@ -772,4 +785,24 @@ fn a_select_paints_its_box_label_and_mark() {
         })
         .collect();
     assert_eq!(marks, [style.mark, style.mark]);
+}
+
+/// Section 5, rule 16: a slider's ghost mark is a hollow 10 px ring in
+/// the text colour, where the thumb would be at its position, over the
+/// thumb; a slider with none paints no ring.
+#[test]
+fn a_slider_paints_its_ghost_mark_where_the_thumb_would_be() {
+    let shown = |ghost| {
+        let element = slider(crate::Slider::new(0.25).ghost(ghost), "level");
+        painted(Element::column([element]).width(Length::FILL), Point::ORIGIN)
+    };
+    let plain = quads(&shown(None));
+    let marked = quads(&shown(Some(0.75)));
+    assert_eq!(marked.len(), plain.len() + 1, "one ring more");
+    let ring = marked.last().expect("the ring is painted last");
+    assert_eq!(ring.fill, Color::TRANSPARENT);
+    assert_eq!((ring.border, ring.border_width), (PANEL.text, 1.5));
+    assert_eq!(ring.rect.size(), Size::new(10.0, 10.0));
+    // The thumb's centre travels from 7 to 193: at 0.75 it is at 146.5.
+    assert!((ring.rect.x + 5.0 - 146.5).abs() < 1e-3, "{:?}", ring.rect);
 }

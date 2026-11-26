@@ -450,6 +450,9 @@ pub(crate) fn tree(
     // panel itself marked as cutting off what it scrolls out of view.
     let outline = snapshot.matrix.tab == Tab::Outline && frames.jump.is_empty();
     let mut panel: Vec<NodeId> = frames.panel.iter().map(|item| frame.panel(item)).collect();
+    // The runtime's inspector, when it draws the column (plan 3.2, row 4d):
+    // its scroll container is the panel's node, as Iced's content was.
+    panel.extend(groups.inspector);
     if outline {
         panel.push(frame.outline(&snapshot.outline, frames.focused_item.as_ref()));
     }
@@ -1137,7 +1140,9 @@ impl Frame<'_> {
         let toolbar = under(&toolbar_id());
         let breadcrumb = under(&crate::breadcrumb::breadcrumb_id());
         let bar = under(&crate::stats_bar::stats_id());
+        let inspector = under(&crate::inspector::panel::inspector_id());
         Ours {
+            inspector,
             // The toolbar is one stop with arrows inside, the WAI-ARIA
             // toolbar pattern (Brylie's decision, 2026-11-19), so its node
             // says so; the breadcrumb is a list of links, a group.
@@ -1195,6 +1200,8 @@ struct Ours {
     breadcrumb: Vec<NodeId>,
     /// The stats bar's group.
     bar: Vec<NodeId>,
+    /// The runtime's inspector's top nodes, while it draws the column.
+    inspector: Vec<NodeId>,
     /// The top nodes of the runtime's overlay that owns the input.
     overlay: Vec<NodeId>,
 }

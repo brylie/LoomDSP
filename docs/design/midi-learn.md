@@ -227,6 +227,8 @@ Controller(
 
 The Low and High fields share a draft. Tab from Low moves to High, and Shift+Tab from High moves to Low, keeping the draft. Tab from High or Shift+Tab from Low returns focus to the canvas. Escape, moving focus outside both fields, changing the mapping's options from another control, and undo or redo discard the draft.
 
+Saving commits the pair's draft first, as Enter does. The unsaved-changes question taking the focus, and a press on a Save or Save As button, are not moving focus outside the pair: the draft stays through the question, its Save commits it, and Cancel gives the pair the focus back with its draft. Otherwise the rule above is unchanged. A range that does not pass stops the save with its reason, the focus on the pair ([files](files.md#asking-before-losing-work), Text still being typed).
+
 ### Acceptance criteria: mapping modes
 
 - [x] Absolute with range 0.2 to 0.8 maps 0 to position 0.2 and 127 to 0.8; with Invert, 0 maps to 0.8 (engine test at block sizes 1, 77, and 512).

@@ -321,13 +321,30 @@ impl loom_ui::App for Hosted {
             .or_else(|| self.0.menu_click(id))
             .or_else(|| self.0.browser_click(id))
             .or_else(|| self.0.patches_click(id))
+            .or_else(|| self.0.inspector_click(id))
             .or_else(|| self.2.clicked(id))
     }
 
     /// The pointer came onto one of the runtime's elements that reports its
     /// hover: a browser's row, which it highlights.
     fn hovered(&self, id: &UiId) -> Option<Message> {
-        self.0.browser_hovered(id).or_else(|| self.0.patches_hovered(id))
+        self.0
+            .browser_hovered(id)
+            .or_else(|| self.0.patches_hovered(id))
+            .or_else(|| self.0.inspector_hovered(id, true))
+    }
+
+    /// The pointer leaving an element it was told it came onto: an
+    /// inspector row that takes a dragged output goes dark (section 5,
+    /// rule 11).
+    fn unhovered(&self, id: &UiId) -> Option<Message> {
+        self.0.inspector_hovered(id, false)
+    }
+
+    /// The runtime's slider moving: the inspector's parameter and depth
+    /// sliders (section 5, rule 16).
+    fn slid(&self, id: &UiId, position: f32, phase: loom_ui::SlidePhase) -> Option<Message> {
+        self.0.inspector_slid(id, position, phase)
     }
 
     /// A right press or a screen reader's ShowContextMenu on an element with
@@ -351,12 +368,15 @@ impl loom_ui::App for Hosted {
             .browser_panel_key(id, key)
             .or_else(|| self.0.patches_panel_key(id, key))
             .or_else(|| self.0.menu_panel_key(id, key))
+            .or_else(|| self.0.inspector_panel_key(id, key))
     }
 
     /// What a choice in one of the runtime's selects means: Preferences'
     /// lists, the first view to use one (plan 3.2, row 8).
     fn chose(&self, id: &UiId, index: usize) -> Option<Message> {
-        self.0.preferences_chose(id, index)
+        self.0
+            .preferences_chose(id, index)
+            .or_else(|| self.0.inspector_chose(id, index))
     }
 
     /// Where Tab goes from one of the runtime's stops: the toolbar and the
@@ -397,6 +417,15 @@ impl loom_ui::App for Hosted {
     /// runtime carries out a screen reader's text actions on its fields.
     fn access_target(&self, node: accesskit::NodeId) -> Option<UiId> {
         self.0.a11y_ui_id(node)
+    }
+
+    /// A SetValue on a field of the inspector's rows is the app's: the
+    /// runtime's would only make a draft of the value, and the app's item
+    /// commits it as one undo step, as Iced's field did (plan 3.2, row
+    /// 4d.2; `App::inspector_commits_set_value`). Its selection and partial
+    /// replacement stay the runtime's (CodeRabbit on #900).
+    fn commits_set_value(&self, field: &UiId) -> bool {
+        self.0.inspector_commits_set_value(field)
     }
 
     /// What a field reports to a screen reader changed: the tree is built

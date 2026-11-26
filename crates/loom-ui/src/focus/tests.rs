@@ -5,7 +5,7 @@
 
 use super::FocusStep;
 use crate::access::{Access, Action, Role, States, Value};
-use crate::app::{App, Context, WindowSpec};
+use crate::app::{App, Context, InputState, WindowSpec};
 use crate::effect::{Effects, FocusTarget, Selection};
 use crate::element::{Element, Length};
 use crate::event::{AccessEvent, DriverEvent, WindowState};
@@ -39,6 +39,16 @@ enum Message {
     Moved(Option<UiId>),
     /// An element was clicked, from the pointer or a key (`App::clicked`).
     Clicked(UiId),
+    /// Notes what the app was told of the focus when this ran.
+    Mark,
+    /// Focus this element, and send `Mark` through the waker in the same
+    /// update, as a watcher thread's message can arrive while a turn runs.
+    FocusAndMark(UiId),
+    /// Set the input layer.
+    Input(Layer),
+    /// Set the input layer, and send `Mark` through the waker in the same
+    /// update, as a dialog's answer can be sent while its question closes.
+    InputAndMark(Layer),
 }
 
 /// An app that shows whatever panels a test gives it, and turns a screen
@@ -59,6 +69,11 @@ struct Panels {
     redirect: Option<(UiId, UiId)>,
     /// Every click the runtime reported, in order.
     clicks: Vec<UiId>,
+    /// For each `Mark`: the last focus the app was told of, and the
+    /// runtime's focus, as it ran.
+    marks: Vec<(Option<UiId>, Option<UiId>)>,
+    /// The input layer, when a test sets one.
+    input: Option<Layer>,
 }
 
 impl App for Panels {
@@ -88,6 +103,24 @@ impl App for Panels {
                 self.clicks.push(id);
                 Effects::none()
             }
+            Message::Input(layer) => {
+                self.input = Some(layer);
+                Effects::none()
+            }
+            Message::InputAndMark(layer) => {
+                self.input = Some(layer);
+                cx.waker().send(Message::Mark);
+                Effects::none()
+            }
+            Message::FocusAndMark(id) => {
+                cx.waker().send(Message::Mark);
+                Effects::focus(id)
+            }
+            Message::Mark => {
+                self.marks
+                    .push((self.moves.last().cloned().flatten(), cx.focused().cloned()));
+                Effects::none()
+            }
             Message::Moved(focus) => {
                 let redirect = self.redirect.clone().filter(|(from, _)| focus.as_ref() == Some(from));
                 self.moves.push(focus);
@@ -115,6 +148,14 @@ impl App for Panels {
 
     fn focus_moved(&self, focus: Option<&UiId>) -> Option<Message> {
         self.reports.then(|| Message::Moved(focus.cloned()))
+    }
+
+    fn input(&self) -> InputState {
+        let mut input = InputState::default();
+        if let Some(layer) = self.input {
+            input.layer = layer;
+        }
+        input
     }
 
     fn accessibility_event(&self, event: &AccessEvent) -> Option<Message> {
@@ -1247,4 +1288,67 @@ fn a_report_runs_between_two_messages_of_one_turn() {
             Heard::Key
         ]
     );
+}
+
+/// A message that waited in the queue while a turn moved the focus runs
+/// after the app hears of the move, never with the app's copy of the
+/// focus behind the runtime's. Found in plan 3.2, row 4d: a file dialog's
+/// answer ran after a question closed and gave a field its focus back,
+/// before the app was told.
+#[test]
+fn a_focus_report_runs_before_a_message_that_waited() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let app = Panels {
+        reports: true,
+        ..Panels::default()
+    };
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
+    harness.send(Message::Show(vec![panel("bar", row(&["a", "b"]))]));
+    harness.lay_out(&mut Mono::default());
+    harness.send(Message::FocusAndMark(id("bar", "a")));
+    harness.step(DriverEvent::Woken);
+    assert_eq!(
+        harness.app().marks,
+        [(Some(id("bar", "a")), Some(id("bar", "a")))],
+        "told before the waiting message ran"
+    );
+
+    // An overlay that closes gives the focus back (section 6, rule 4), and
+    // a message sent as it closes runs after the app hears of it.
+    harness.send(Message::Show(vec![
+        panel("bar", row(&["a", "b"])),
+        (UiId::panel("menu"), Layer::Overlays, row(&["item"])),
+    ]));
+    harness.lay_out(&mut Mono::default());
+    harness.send(Message::Input(Layer::Overlays));
+    harness.send(Message::Focus(id("menu", "item")));
+    harness.step(DriverEvent::Woken);
+    harness.send(Message::InputAndMark(Layer::Canvas));
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "a")), "given back");
+    assert_eq!(
+        harness.app().marks.last(),
+        Some(&(Some(id("bar", "a")), Some(id("bar", "a")))),
+        "told of the focus given back before the waiting message ran"
+    );
+}
+
+/// `Runtime::unfocus` lets go of the focus outside a turn, and the app
+/// hears of it as any move, on the next turn, so its copy stays in step.
+#[test]
+fn unfocus_lets_go_and_the_app_hears_of_it() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let app = Panels {
+        reports: true,
+        ..Panels::default()
+    };
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
+    harness.send(Message::Show(vec![panel("bar", row(&["a", "b"]))]));
+    harness.lay_out(&mut Mono::default());
+    harness.send(Message::Focus(id("bar", "a")));
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "a")));
+    harness.unfocus();
+    assert_eq!(harness.runtime().focused(), None);
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.app().moves.last(), Some(&None), "the app heard of it");
 }

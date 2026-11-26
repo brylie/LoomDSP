@@ -685,18 +685,24 @@ impl Message {
                     | M::ValueDraftClear
                     | M::Choice { .. }
                     | M::Range { .. }
+                    | M::FullRange { .. }
+                    | M::Slid { .. }
+                    | M::DepthSlid { .. }
+                    | M::SpreadSlid { .. }
                     | M::SelectModule(_)
                     | M::DropRow(_)
                     | M::Expose { .. }
-                    | M::Unexpose { .. }
-                    | M::Scrolled => false,
+                    | M::Unexpose { .. } => false,
                 };
                 from(field, InputOwner::Canvas)
             }
             Self::PatchInfo(message) => {
                 use patch_info::Message as M;
                 let field = match message {
-                    M::Authors(_) | M::PartAuthors(..) | M::TagDraft(_) | M::TagSubmit => true,
+                    // A key on a focused part of patch info, as a field's typing is.
+                    M::Authors(_) | M::PartAuthors(..) | M::TagDraft(_) | M::TagSubmit | M::FocusTag(_) | M::Leave => {
+                        true
+                    }
                     M::RemoveTag(_) | M::ChooseLicence => false,
                 };
                 from(field, InputOwner::Canvas)
@@ -1924,6 +1930,11 @@ impl App {
             }
             Message::FocusMoved(focus) => {
                 self.focus_moved(focus);
+                // Focus leaving a field commits its draft (a value, the
+                // MIDI range, a tag, the authors), and `FocusMoved` keeps
+                // the patch as far as `keeps_patch` knows: autosave looks
+                // again (CodeRabbit on #900).
+                self.session.document.may_have_changed();
             }
             Message::Inspector(message) => self.inspector_message(message),
             Message::Located {
@@ -1957,9 +1968,13 @@ impl App {
                 self.handle(message);
             }
         }
-        // A range editor can disappear before the window's focus answer.
-        if self.session.learn.has_range_draft() && !cause.is_live() && self.midi_range_fields().is_none() {
-            self.session.learn.set_range_draft(None);
+        // A range editor can disappear before the window's focus answer:
+        // that is leaving the pair, which commits it (Brylie, 2026-11-25).
+        if !cause.is_live()
+            && self.midi_range_fields().is_none()
+            && let Some(param) = self.session.learn.range_draft_param()
+        {
+            self.leave_midi_range(param);
         }
         // The bridge asks the window where focus is after this turn.
         if ask_focus {

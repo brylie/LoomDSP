@@ -19,12 +19,18 @@
 //! On Linux nothing waits at quit: what was copied stays only if the
 //! desktop's clipboard manager took it. On Wayland the compositor's
 //! data-control protocol is used where it has one, and X11 through XWayland
-//! where it does not.
+//! where it does not. A Wayland read goes through our own code, not
+//! `arboard`'s, so it ends at a deadline (`wayland.rs`, `pipe.rs`).
 
 use crate::effect::ClipboardText;
 use std::sync::OnceLock;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::time::Duration;
+
+#[cfg(target_os = "linux")]
+mod pipe;
+#[cfg(target_os = "linux")]
+mod wayland;
 
 /// How long [`Clipboard::read_now`] waits for the clipboard's thread before
 /// it answers [`ClipboardText::Refused`]. *Why:* it runs on the UI thread,
@@ -37,13 +43,27 @@ pub const READ_NOW_LIMIT: Duration = Duration::from_millis(250);
 
 /// How long the clipboard's thread waits for one read from its backend
 /// before it answers [`ClipboardText::Refused`] and goes on to the next job.
-/// *Why:* an owner that never answers must not hold every later read and
-/// write. On Wayland, `arboard` reads a transfer
-/// with no limit of its own; on X11 it waits 4 seconds, then answers as if
-/// the clipboard were empty. A second is shorter than that, so a clipboard
-/// that does not answer reads as refused, never empty, and is long enough
-/// for one that answers at all.
+/// *Why:* an owner that does not answer must not hold every later read and
+/// write. On X11, `arboard` waits 4 seconds, then answers as if the
+/// clipboard were empty. A second is shorter than that, so a clipboard that
+/// does not answer reads as refused, never empty, and is long enough for
+/// one that answers at all.
 pub const BACKEND_READ_LIMIT: Duration = Duration::from_secs(1);
+
+/// How long a Wayland read waits for the app that copied to send its text,
+/// in all, before it answers [`ClipboardText::Refused`] and closes the
+/// pipe. *Why:* `arboard` reads that pipe with no limit, so an owner that
+/// stopped held the read for good. This is shorter than
+/// [`BACKEND_READ_LIMIT`], so the read ends by itself and hands its handle
+/// back, and the next paste tries again at once.
+pub const WAYLAND_READ_LIMIT: Duration = Duration::from_millis(750);
+
+/// The most a Wayland read takes from the app that copied: 16 MiB. Past it,
+/// the read answers [`ClipboardText::Refused`] and closes the pipe. *Why:*
+/// within its deadline an owner could still send far more than any text,
+/// and the read must not grow without bound. No patch or field text comes
+/// near it.
+pub const MAX_TEXT: usize = 16 * 1024 * 1024;
 
 /// What the clipboard thread reads and writes through: the system's
 /// clipboard, or a fake in a test.
@@ -101,9 +121,7 @@ impl Clipboard {
     /// The system clipboard, one for the process, made on first use.
     pub fn system() -> Self {
         static SYSTEM: OnceLock<Clipboard> = OnceLock::new();
-        SYSTEM
-            .get_or_init(|| Self::new(System::<arboard::Clipboard>::default))
-            .clone()
+        SYSTEM.get_or_init(|| Self::new(System::<Desktop>::default)).clone()
     }
 
     /// Puts `text` on the clipboard, and does not wait.
@@ -134,13 +152,13 @@ impl Clipboard {
     }
 }
 
-/// A native clipboard handle: `arboard`'s, or a fake in a test, so the
+/// A native clipboard handle: the desktop's, or a fake in a test, so the
 /// opening and opening again of [`System`] is tested with no display.
 trait Native: Sized + Send + 'static {
     /// Opens a handle.
     fn open() -> Result<Self, arboard::Error>;
-    /// The clipboard's text.
-    fn get_text(&mut self) -> Result<String, arboard::Error>;
+    /// The clipboard's text, nothing, or a refusal.
+    fn get_text(&mut self) -> ClipboardText;
     /// Puts `text` on the clipboard.
     fn set_text(&mut self, text: String) -> Result<(), arboard::Error>;
 }
@@ -150,8 +168,8 @@ impl Native for arboard::Clipboard {
         Self::new()
     }
 
-    fn get_text(&mut self) -> Result<String, arboard::Error> {
-        Self::get_text(self)
+    fn get_text(&mut self) -> ClipboardText {
+        answer(Self::get_text(self))
     }
 
     fn set_text(&mut self, text: String) -> Result<(), arboard::Error> {
@@ -161,10 +179,44 @@ impl Native for arboard::Clipboard {
     }
 }
 
-/// The system's clipboard through `arboard`, opened on first use and opened
-/// again after a write failed, so a clipboard another app held only refuses
-/// that read or loses that write.
-struct System<N = arboard::Clipboard> {
+/// The desktop's clipboard: `arboard` (or a fake in a test) for every write
+/// and most reads, and on Linux our own read when `arboard` chose Wayland,
+/// so that read has a deadline. The choice is made once, when the handle
+/// opens.
+struct Desktop<A = arboard::Clipboard> {
+    /// The handle every write goes through.
+    arboard: A,
+    /// Whether reads go through our Wayland read (`wayland.rs`).
+    #[cfg(target_os = "linux")]
+    wayland: bool,
+}
+
+impl<A: Native> Native for Desktop<A> {
+    fn open() -> Result<Self, arboard::Error> {
+        Ok(Self {
+            arboard: A::open()?,
+            #[cfg(target_os = "linux")]
+            wayland: wayland::arboard_uses_wayland(),
+        })
+    }
+
+    fn get_text(&mut self) -> ClipboardText {
+        #[cfg(target_os = "linux")]
+        if self.wayland {
+            return wayland::read_text(WAYLAND_READ_LIMIT);
+        }
+        self.arboard.get_text()
+    }
+
+    fn set_text(&mut self, text: String) -> Result<(), arboard::Error> {
+        self.arboard.set_text(text)
+    }
+}
+
+/// The system's clipboard, opened on first use and opened again after a
+/// write failed, so a clipboard another app held only refuses that read or
+/// loses that write.
+struct System<N = Desktop> {
     clipboard: Option<N>,
 }
 
@@ -189,7 +241,7 @@ impl<N: Native> Backend for System<N> {
         let Some(clipboard) = self.open() else {
             return ClipboardText::Refused;
         };
-        answer(clipboard.get_text())
+        clipboard.get_text()
     }
 
     fn set(&mut self, text: String) {
@@ -212,7 +264,9 @@ pub const READS_BEFORE_RETRY: usize = 3;
 /// How many reads may be stuck at once. A stuck read cannot be cancelled,
 /// so each keeps its thread and handle until it ends; past this many, every
 /// read answers `Refused` until one does. *Why:* a clipboard that stays
-/// stuck must not gather one blocked thread per paste.
+/// stuck must not gather one blocked thread per paste. No backend holds a
+/// read for good now (X11 ends at 4 seconds, Wayland at
+/// [`WAYLAND_READ_LIMIT`]), so this is a safety net.
 pub const MAX_STUCK_READS: usize = 2;
 
 /// The handle the clipboard's thread reads through, apart from the one it
@@ -310,6 +364,17 @@ fn answer(read: Result<String, arboard::Error>) -> ClipboardText {
         Ok(text) => ClipboardText::from_text(Some(text)),
         Err(arboard::Error::ContentNotAvailable) => ClipboardText::Empty,
         Err(_) => ClipboardText::Refused,
+    }
+}
+
+/// What a pipe read gave, as a [`ClipboardText`]: bytes are text if they
+/// are UTF-8, and refused if not; no bytes are empty; and a read that could
+/// not finish (`None`) is refused, never empty.
+#[cfg(any(test, target_os = "linux"))]
+fn text_of(read: Option<Vec<u8>>) -> ClipboardText {
+    match read.map(String::from_utf8) {
+        Some(Ok(text)) => ClipboardText::from_text(Some(text)),
+        Some(Err(_)) | None => ClipboardText::Refused,
     }
 }
 

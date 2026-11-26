@@ -32,6 +32,23 @@ impl App {
         if crate::patches::text_fields().contains(id) {
             return crate::patches::field_message(id, event);
         }
+        // Patch info's Tags field: each edit is the text as typed, where a
+        // comma adds a tag, and Enter adds what is left (patch-metadata.md,
+        // Patch info). Its Authors box never commits: each edit is the
+        // text as typed (ui-layer.md, section 8, rule 7).
+        if *id == crate::patch_info::tags_part() {
+            return crate::patch_info::tags_message(event);
+        }
+        if *id == crate::patch_info::authors_part() {
+            return crate::patch_info::authors_message(event);
+        }
+        // The inspector's rows: a typed value, a mapping's range, and an
+        // unknown module's label (plan 3.2, row 4d.2).
+        if id.is_under(&crate::inspector::panel::inspector_id())
+            && let Some(message) = self.inspector_field(id, event)
+        {
+            return Some(message);
+        }
         // Preferences' **Your name**: each edit is the text as typed, and
         // Enter saves it (preferences.md, Keys and focus).
         if *id == crate::settings::author_part() {

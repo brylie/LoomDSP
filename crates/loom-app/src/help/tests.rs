@@ -357,10 +357,12 @@ fn help_wraps_inside_and_closes_from_the_backdrop() {
             );
         }
     }
-    // The title in help's own box, read from the runtime's layout, since
-    // the inspector under help shows the module's name too.
-    let heading = ui.runtime().text_bounds(help.name).expect("help's title");
-    click(&mut ui, heading.center());
+    // An entry in help's own body, by its UI ID, since the inspector
+    // under help is the runtime's too and shows the module's name and
+    // parameters (plan 3.2, row 4d).
+    let entry = body.clone().with("parameters").with(help.params[0].name);
+    let inside = ui.runtime().bounds(&entry).expect("an entry's place");
+    click(&mut ui, inside.center());
     assert!(ui.app().overlays.help.is_some(), "a click inside keeps help open");
     click(&mut ui, Point::new(10.0, crate::WINDOW.height / 2.0));
     assert!(ui.app().overlays.help.is_none(), "a click on the backdrop closes help");
