@@ -10,6 +10,9 @@ authors.workspace = true
 readme.workspace = true
 keywords = ["audio", "synthesizer", "modular", "midi", "dsp"]
 categories = ["multimedia::audio", "command-line-utilities"]
+# The test targets are listed below: the files in `tests/` are modules
+# of `tests/main.rs`, not binaries of their own.
+autotests = false
 
 [[bin]]
 name = "loom"
@@ -27,6 +30,10 @@ jiff.workspace = true
 hound.workspace = true
 loom-analysis.workspace = true
 serde_json.workspace = true
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

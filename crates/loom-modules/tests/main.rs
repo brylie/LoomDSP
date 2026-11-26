@@ -1,10 +1,12 @@
 //! The integration tests of loom-modules, built as one test binary.
 //!
-//! Each file in this folder is a module here. One binary links once,
-//! where one binary per file linked the whole crate graph again for
-//! each file. `no_alloc.rs` and `polyphony.rs` stay binaries of their
-//! own because they install a global allocator that refuses to
-//! allocate, and an allocator applies to its whole binary.
+//! Each file in this folder is a module here, so the crate graph links
+//! once for all of them instead of once per file (CONTRIBUTING.md,
+//! Where tests live).
+//!
+//! `no_alloc.rs` and `polyphony.rs` stay binaries of their own: each
+//! installs a global allocator, and an allocator applies to its whole
+//! binary.
 
 mod common;
 

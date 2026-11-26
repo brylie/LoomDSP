@@ -10,6 +10,9 @@ authors.workspace = true
 readme.workspace = true
 keywords = ["audio", "synthesizer", "modular", "live", "dsp"]
 categories = ["multimedia::audio", "gui"]
+# The test targets are listed below: the files in `tests/` are modules
+# of `tests/main.rs`, not binaries of their own.
+autotests = false
 
 [lib]
 name = "loom_app"
@@ -87,6 +90,10 @@ loom-patch = { workspace = true, features = ["test-follows"] }
 loom-app = { path = ".", features = ["test-ui"] }
 # `testing`: the recording painter, so a test reads what the runtime paints.
 loom-ui = { workspace = true, features = ["shell", "testing"] }
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

@@ -1,7 +1,7 @@
 //! The patch transport and default inputs (ADR-0015).
 //! Spec: `docs/design/clock.md`, acceptance criteria for the engine.
 
-mod common;
+use crate::common;
 
 use common::out::*;
 use common::*;

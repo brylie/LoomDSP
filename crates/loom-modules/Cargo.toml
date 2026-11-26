@@ -10,7 +10,7 @@ authors.workspace = true
 readme.workspace = true
 keywords = ["audio", "dsp", "synthesizer", "filter", "oscillator"]
 categories = ["multimedia::audio"]
-# The test targets are listed below, so files in `tests/` are modules
+# The test targets are listed below: the files in `tests/` are modules
 # of `tests/main.rs`, not binaries of their own.
 autotests = false
 
@@ -39,8 +39,8 @@ criterion.workspace = true
 name = "integration"
 path = "tests/main.rs"
 
-# These two install a global allocator that refuses to allocate, so
-# each keeps a binary of its own.
+# Each of these installs a global allocator, which applies to its whole
+# binary, so it keeps a binary of its own.
 [[test]]
 name = "no_alloc"
 path = "tests/no_alloc.rs"

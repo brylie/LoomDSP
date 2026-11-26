@@ -1,7 +1,7 @@
 //! The engine runs stereo (ADR-0020, `docs/design/stereo.md`): per-channel
 //! copies, downmixes, `Stereo` ports, and per-channel delay state.
 
-mod stereo_modules;
+use crate::stereo_modules;
 
 use loom_core::{EngineParts, ModuleId};
 use stereo_modules::*;

@@ -10,6 +10,9 @@ authors.workspace = true
 readme.workspace = true
 keywords = ["audio", "dsp", "modular", "synthesizer", "realtime"]
 categories = ["multimedia::audio"]
+# The test targets are listed below: the files in `tests/` are modules
+# of `tests/main.rs`, not binaries of their own.
+autotests = false
 
 [dependencies]
 loom-midi.workspace = true
@@ -20,6 +23,24 @@ thiserror.workspace = true
 
 [dev-dependencies]
 assert_no_alloc.workspace = true
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"
+
+# Each of these installs a global allocator, which applies to its whole
+# binary, so it keeps a binary of its own.
+[[test]]
+name = "displays"
+path = "tests/displays.rs"
+
+[[test]]
+name = "stereo_no_alloc"
+path = "tests/stereo_no_alloc.rs"
+
+[[test]]
+name = "transport_no_alloc"
+path = "tests/transport_no_alloc.rs"
 
 [lints]
 workspace = true
