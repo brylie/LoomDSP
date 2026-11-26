@@ -33,6 +33,7 @@ LOOM_UPDATE_REFERENCES=1 cargo test -p loom-modules --test integration reference
 LOOM_UPDATE_REFERENCES=1 cargo test -p loom-modules --test integration patches::     # write example patch reference renders
 mise run help-pages                    # regenerate the module help pages in docs/modules (loom modules --markdown)
 mise run devtel-report                 # development telemetry: where agent and check time goes, re-runs, loops (docs/dev/devtel.md)
+mise run test-health -- --probe        # test suite health: CI per-test times, coverage from CI, cost per test process, load; the review-tests skill reads it
 cargo run --release -p loom-cli -- check examples/patches/fm-feedback.ron
 cargo run --release -p loom-cli -- render examples/patches/subtractive.ron -o /tmp/out.wav --note 60
 cargo run --release -p loom-app -- examples/patches/fm-feedback.ron   # desktop app

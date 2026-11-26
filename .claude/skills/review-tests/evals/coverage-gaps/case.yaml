@@ -1,0 +1,10 @@
+schema_version: "1.1"
+name: coverage-gaps
+expected_outcome: |
+  A review of coverage gaps that reads line coverage from the coverage
+  artifact of a named CI run instead of running coverage locally, reports
+  the lowest crates and files with their percentages, separates code that
+  only runs with a real window or device (deliberate, with the reason)
+  from logic that could be tested, samples at least one spec's ticked
+  acceptance criteria for a matching test, and drafts a snapshot under
+  docs/research without editing source.

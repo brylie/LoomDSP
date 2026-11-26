@@ -193,6 +193,14 @@ description = "Measure the workspace for an architecture review: sizes, complexi
 tools = { "cargo:rust-code-analysis-cli" = "latest" }
 run = ["mkdir -p target", "python3 .claude/skills/review-architecture/scripts/measure.py > target/metrics.md", "sed -n '1,40p' target/metrics.md"]
 
+[tasks.test-health]
+description = "Measure the test suite for a test health review: CI per-test times and coverage, load, sleeps, leaks, devtel trends (add --probe for the cost per test process)"
+# The test health review skill (.claude/skills/review-tests) reads this report.
+# It reads coverage from CI's `coverage` artifact and never runs coverage
+# here. Extra arguments go to the script (`mise run test-health -- --probe`).
+# Informational only: no check or CI job runs it.
+run = "python3 .claude/skills/review-tests/scripts/measure_tests.py"
+
 [tasks.help-pages]
 description = "Regenerate the module help pages in docs/modules from the descriptors"
 # A test (`committed_pages_are_current` in loom-cli) fails while they are

@@ -156,6 +156,10 @@ Tests live in their own files, never inline in a code module. Why: a code file t
 
 Count work in regression tests and use benchmarks to measure speed. Advance a simulated clock by fixed steps at known events. A real timeout can guard against a hang while waiting for an event.
 
+### Test speed and health
+
+nextest runs every test in a process of its own, so setup that runs once per process is paid once per test. CI cannot show every cost: its runners start with an empty temp folder, so a test that gets slower as a machine fills up looks fine there. `mise run test-health` measures the suite: CI's per-test times on each OS, coverage per crate and file from CI's report, sleeps, ignored tests, and how long agents wait on tests each week. Add `-- --probe` to time one test process per binary here, user against kernel time, with the shared temp folder and with an empty one. It prints the load beside each number, because times taken on a busy machine do not compare. The `review-tests` agent skill (`.claude/skills/review-tests`) turns the numbers into a dated research snapshot in `docs/research/`. Run it about once a month, and after a large change to the test setup.
+
 Run the desktop app and the command-line tool:
 
 ```sh
