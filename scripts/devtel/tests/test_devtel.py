@@ -30,7 +30,8 @@ class StoreTestCase(unittest.TestCase):
         self.dir = tempfile.mkdtemp(prefix="devtel-test-")
         self.env = mock.patch.dict(
             os.environ,
-            {"LOOM_DEVTEL_DIR": os.path.join(self.dir, "store"), "LOOM_DEVTEL": "1"},
+            # Git events run inline, so a test can read their span at once.
+            {"LOOM_DEVTEL_DIR": os.path.join(self.dir, "store"), "LOOM_DEVTEL": "1", "LOOM_DEVTEL_NO_FORK": "1"},
         )
         self.env.start()
         for name in ("TRACEPARENT", "LOOM_DEVTEL_SESSION", "CLAUDE_ENV_FILE", "MISE_TASK_NAME"):
@@ -99,6 +100,54 @@ class EncodingTests(unittest.TestCase):
     def test_project_prefix_matches_claude_code_folders(self):
         """Claude Code turns every character but letters and digits into a dash."""
         self.assertEqual(devtel.claude_project_prefix("/Users/a/code/LoomDSP"), "-users-a-code-loomdsp")
+
+
+class GitTraceTests(unittest.TestCase):
+    """One trace per git command, found through the process tree."""
+
+    TREE = {
+        # pid: (ppid, start, command)
+        300: (200, "Thu Nov 26 20:54:27 2026", "sh scripts/devtel/run.sh typos mise exec -- typos"),
+        200: (100, "Thu Nov 26 20:54:26 2026", "/opt/prek hook-impl --hook-type=pre-commit"),
+        100: (50, "Thu Nov 26 20:54:25 2026", "git -C /repo commit -q -m message"),
+        50: (1, "Thu Nov 26 20:00:00 2026", "-zsh"),
+    }
+
+    def fake_ps(self, command, **_kwargs):
+        """Answer `ps -o ppid=,lstart=,command= -p PID` from TREE."""
+        ppid, start, line = self.TREE.get(int(command[-1]), (0, "", ""))
+        out = "%d %s     %s\n" % (ppid, start, line) if line else ""
+        return subprocess.CompletedProcess(command, 0, stdout=out, stderr="")
+
+    def test_finds_the_git_command_above_the_hook(self):
+        """The walk skips the wrapper and prek, and reads the subcommand past -C."""
+        with mock.patch.object(devtel.os, "getppid", return_value=300), \
+                mock.patch.object(devtel.subprocess, "run", side_effect=self.fake_ps):
+            self.assertEqual(devtel.git_ancestor(), (100, "Thu Nov 26 20:54:25 2026", "commit"))
+
+    def test_no_git_above_gives_none(self):
+        """A check run by hand has no git process above it."""
+        self.TREE = {300: (50, "Thu Nov 26 20:54:27 2026", "sh run.sh"), 50: (1, "x x x x x", "-zsh")}
+        with mock.patch.object(devtel.os, "getppid", return_value=300), \
+                mock.patch.object(devtel.subprocess, "run", side_effect=self.fake_ps):
+            self.assertIsNone(devtel.git_ancestor())
+
+    def test_hooks_of_one_git_command_share_a_trace(self):
+        """Two hook processes under the same git process get the same trace and parent."""
+        env = {"PRE_COMMIT": "1", "TRACEPARENT": ""}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(devtel, "git_ancestor", return_value=(100, "Thu Nov 26 20:54:25 2026", "commit")):
+            first, second = devtel.hook_context(), devtel.hook_context()
+        self.assertEqual(first, second)
+        self.assertEqual(first[2]["loom.devtel.git.command"], "commit")
+        self.assertEqual(len(first[0]), 32)
+
+    def test_a_session_trace_wins(self):
+        """Inside an agent session the span nests in the session, not in a git trace."""
+        env = {"PRE_COMMIT": "1", "TRACEPARENT": devtel.traceparent("a" * 32, "b" * 16)}
+        with mock.patch.dict(os.environ, env), mock.patch.object(devtel, "git_ancestor") as ancestor:
+            self.assertEqual(devtel.hook_context(), ("a" * 32, "b" * 16, {}))
+        ancestor.assert_not_called()
 
 
 class SwitchTests(unittest.TestCase):
@@ -318,6 +367,20 @@ class ArchiveTests(StoreTestCase):
             lock.close()
         self.assertEqual(devtel.import_all(quiet=True), 0)
         self.assertEqual(json.loads(devtel.run_duckdb(count, json_output=True, readonly=True))[0]["n"], 1)
+
+    def test_a_git_command_gets_a_root_span(self):
+        """Checks and events of one git command hang under one "git commit" root."""
+        devtel.import_all(quiet=True)
+        trace, root = "9" * 32, "8" * 16
+        marks = {"loom.devtel.git.trace": True, "loom.devtel.git.command": "commit", "vcs.ref.head.name": "demo"}
+        devtel.emit("hooks", "checks", [devtel.span(trace, "7" * 16, root, "typos", 1000, 3000, marks)])
+        devtel.emit("git", "git", [devtel.span(trace, "6" * 16, root, "git post-commit", 4000, 4000, marks)])
+        devtel.import_all(quiet=True)
+        rows = self.query("select span_id, parent_span_id, name, epoch_ns(start_ts) as s, epoch_ns(end_ts) as e "
+                          "from devtel_spans where trace_id = '%s' order by start_ts, name" % trace)
+        self.assertEqual([r["name"] for r in rows], ["git commit", "typos", "git post-commit"])
+        self.assertEqual((rows[0]["span_id"], rows[0]["parent_span_id"], rows[0]["s"], rows[0]["e"]), (root, None, 1000, 4000))
+        self.assertTrue(all(r["parent_span_id"] == root for r in rows[1:]))
 
 
 if __name__ == "__main__":

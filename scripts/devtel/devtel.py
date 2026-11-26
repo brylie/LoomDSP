@@ -283,6 +283,69 @@ def parent_context():
     return new_trace_id(), None
 
 
+# git options that take the next word as their value.
+GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
+
+
+def git_ancestor(max_depth=12):
+    """The git command that is running this hook: (pid, start time, subcommand), or None.
+
+    Walks up the process tree with `ps`. Every hook of one `git commit`
+    finds the same git process, so its PID and start time name the commit
+    in a way all of them agree on, with no shared state.
+    """
+    pid = os.getppid()
+    for _ in range(max_depth):
+        if pid <= 1:
+            return None
+        try:
+            output = subprocess.run(
+                ["ps", "-o", "ppid=,lstart=,command=", "-p", str(pid)], capture_output=True, text=True, timeout=5
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        # ppid, then the start time as five words (Thu Nov 26 20:54:27 2026), then the command.
+        parts = output.split(None, 6)
+        if len(parts) < 7 or not parts[0].isdigit():
+            return None
+        words = parts[6].split()
+        if os.path.basename(words[0]) == "git":
+            subcommand, skip = "", False
+            for word in words[1:]:
+                if skip:
+                    skip = False
+                elif word in GIT_VALUE_OPTIONS:
+                    skip = True
+                elif not word.startswith("-"):
+                    subcommand = word
+                    break
+            return pid, " ".join(parts[1:6]), subcommand
+        pid = int(parts[0])
+    return None
+
+
+def hook_context():
+    """Trace context for a check or git event: (trace ID, parent span ID, extra attributes).
+
+    Inside an agent session TRACEPARENT names the session, and the span nests
+    there. Otherwise, inside a git hook, every span of one git command (its
+    checks and its git events) joins one trace named after that git process,
+    under a root span the views add ("git commit", "git push"). Anywhere else
+    the span starts a trace of its own.
+    """
+    parsed = parse_traceparent(os.environ.get("TRACEPARENT", ""))
+    if parsed:
+        return parsed[0], parsed[1], {}
+    if os.environ.get("PRE_COMMIT") == "1":
+        found = git_ancestor()
+        if found:
+            pid, started, subcommand = found
+            key = "git:%s:%s:%s" % (socket.gethostname(), pid, started)
+            extra = {"loom.devtel.git.trace": True, "loom.devtel.git.command": subcommand}
+            return derived_id(key, 32), derived_id(key + ":root"), extra
+    return new_trace_id(), None, {}
+
+
 # ---------------------------------------------------------------------------
 # Writers
 # ---------------------------------------------------------------------------
@@ -297,12 +360,12 @@ def run_step(name, command):
     it. The working tree's hash is taken first, so two runs of a check on
     the same code can be found (devtel_reruns, "same tree").
     """
-    trace_id, parent_id = parent_context()
     span_id = new_span_id()
     # Nothing that only feeds the span may stop the check from running.
-    attributes = {}
+    trace_id, parent_id, attributes = new_trace_id(), None, {}
     try:
-        attributes = {
+        trace_id, parent_id, attributes = hook_context()
+        attributes.update({
             "cicd.pipeline.task.name": name,
             "loom.devtel.step": name,
             "process.command_line": " ".join(command)[:MAX_COMMAND],
@@ -312,7 +375,7 @@ def run_step(name, command):
             # name only before a push.
             "loom.devtel.in_git_hook": os.environ.get("PRE_COMMIT") == "1",
             "loom.devtel.in_push": bool(os.environ.get("PRE_COMMIT_REMOTE_NAME")),
-        }
+        })
         attributes.update(vcs_attributes())
         attributes.update(agent_attributes())
     except Exception:  # noqa: BLE001 - fail open
@@ -384,9 +447,25 @@ def commit_stats(revision):
 def git_event(stage):
     """Record a git event, called by a prek hook in the given stage."""
     stage = stage or "event"
-    trace_id, parent_id = parent_context()
     now = time.time_ns()
-    attributes = vcs_attributes()
+    trace_id, parent_id, attributes = hook_context()
+    # The trace context needs git still running; the rest does not, so the
+    # hook returns now and git does not wait for it.
+    if hasattr(os, "fork") and not os.environ.get("LOOM_DEVTEL_NO_FORK"):
+        if os.fork():
+            return 0
+        os.setsid()
+        try:
+            record_git_event(stage, now, trace_id, parent_id, attributes)
+        finally:
+            os._exit(0)
+    record_git_event(stage, now, trace_id, parent_id, attributes)
+    return 0
+
+
+def record_git_event(stage, now, trace_id, parent_id, attributes):
+    """Gather what a git event records and write its span."""
+    attributes.update(vcs_attributes())
     attributes.update(agent_attributes())
     attributes["loom.devtel.git.event"] = stage
     env = os.environ.get
