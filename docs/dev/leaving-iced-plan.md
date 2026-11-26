@@ -462,7 +462,7 @@ No view uses an Iced widget. The parity gates pass. The VoiceOver check covers t
 
 ## Phase 4: Remove Iced
 
-Written 2026-11-25 from a read-only breakdown at `323ead6a` (rows 4d and 4e still open). The rules are in [the spec](../design/ui-layer.md): the host contract (section 9), the keys (section 1, Keys in `loom-ui-core`), the key order (section 6, rule 6), the end of the bridge (section 2), the harness (section 10), and the [phase 4 criteria](../design/ui-layer.md#acceptance-criteria). Brylie's decisions of 2026-11-25 are in its decisions table. What is marked Proposed there is settled before P0 merges.
+Written 2026-11-25 from a read-only breakdown at `323ead6a` (rows 4d and 4e still open). The rules are in [the spec](../design/ui-layer.md): the host contract (section 9), the keys (section 1, Keys in `loom-ui-core`), the key order (section 6, rule 6), the end of the bridge (section 2), the harness (section 10), and the [phase 4 criteria](../design/ui-layer.md#acceptance-criteria). Brylie's decisions of 2026-11-25 and 2026-11-26 are in its decisions table.
 
 Phase 4 is more than removing dependencies. The canvas is still an Iced widget at the window's root, and `loom-ui` cannot host it yet. That is the main new work (P1). The canvas's place and camera, the `Places` and `Find` window questions, and the window's root move here, not in row 4e (Brylie, 2026-11-25).
 
@@ -487,7 +487,7 @@ Docs only. The phase 4 criteria, section 9 as a host contract, the key types, se
 ### P1. `loom-ui` hosts a custom element
 
 1. Build the host of spec section 9, in `loom-ui`, with no patch words: layout bounds, pointer routing with capture during a drag and the cases that cancel it, hover out, the wheel, keys in both cases (focused, and the home element while nothing has focus), one Tab stop, the cursor, deadlines and animation frames, both ways to draw (painting with no GPU, and the GPU callback, in paint order), nodes under its UI ID, focus requests into inner parts, and drawing above a layer.
-2. The host gets the app's model through the `App` trait: the element's trait gets `&App` on every call, which needs `App: 'static` (spec section 9, the model path). **Proposed**, for Brylie's sign-off on P0.
+2. The host gets the app's model through the `App` trait: the element's trait gets `&App` on every call, which needs `App: 'static` (spec section 9, the model path; Brylie, 2026-11-26).
 3. It is additive. The routing target, `Routed::Later`, and the canvas's place in the bridge stay as they are until P4, and a test shows that an app with no custom element behaves exactly as before.
 4. It replaces nothing yet. Proof: an example program with no LoomDSP (spec section 1, rule 3) and two custom elements, a level meter and an XY pad, each giving its nodes. The meter and the piano roll stay the design cases the contract is checked against (spec section 9, A contract for every app); the XY pad is the small, buildable example, with no musical types; a table in the pull request of how each host part holds on the desktop, in a plugin window, and on the web; headless tests for routing, capture, focus, and nodes; `loom-ui`'s `tests/purity.rs`.
 5. One pull request, ordered commits (Brylie, 2026-11-26, "One PR, ordered commits"): first everything with no GPU (state by key, layout, routing, capture, the wheel, keys, focus, cursor, ticks, nodes, and the paint path), then the GPU path (the GPU callback, the paint list cut at each element, a lost device, and an offscreen order test). Each commit is tested headless on its own.
@@ -539,7 +539,7 @@ Gates: every parity gate; `--measure-idle` (counts may fall, since the bridge's 
 
 1. Drop `iced`, `iced_wgpu`, `iced_renderer`, `iced_winit`, and `iced_runtime` from the workspace and every crate. #683 names three; all five go (the spec wins).
 2. Set `wgpu`'s and `winit`'s features directly, where Iced turned some on. Check Linux window decorations survive: `cargo tree --target x86_64-unknown-linux-gnu -e features -i winit`.
-3. Purity: the Iced rules in `loom-app`'s and `loom-canvas`'s `tests/purity.rs` give way to one test over every crate (spec section 1, rule 7), and `rfd` gets its own rule.
+3. Purity: the Iced rules in `loom-app`'s and `loom-canvas`'s `tests/purity.rs` go, with no source scan in their place. `deny.toml` bans the `iced*` crates (`[bans] deny`), so `cargo deny check` catches Iced coming back, and `rfd` keeps its own rule (spec section 1, rule 7; Brylie, 2026-11-26).
 4. `deny.toml`: remove each ignored advisory that left with Iced, and reword the OQ-14 comment.
 5. Gates: `cargo deny check`; `cargo tree -d` against the baseline below, on macOS, Linux, and Windows; CI on all three.
 
@@ -571,18 +571,19 @@ Gates: every parity gate; `--measure-idle` (counts may fall, since the bridge's 
 
 The older `harfrust` and `skrifa` should leave with Iced, and likely `read-fonts` and `font-types` (through `cosmic-text`). The `objc2` 0.5 family stays, with `winit` 0.30. P5 records the same list on Linux and Windows before it removes anything.
 
-### Not decided (Proposed)
+### Other phase 4 decisions
 
-- Binary size and build time are recorded before and after P5, and are not a gate.
+- Binary size and build time are recorded before and after P5, on each platform, and are not a gate (Brylie, 2026-11-26). They matter for plugins, since a DAW may load many instances.
 - P1 builds the host for every app on `loom-ui`, not only LoomDSP's window ([spec section 9, A contract for every app](../design/ui-layer.md#a-contract-for-every-app-built-on-loom-ui)): its example has a level meter and an XY pad beside nothing of LoomDSP's (the piano roll stays a design case), and its pull request says how each host part holds for a plugin window and the web.
 
-### After #683 (Proposed)
+### After #683
 
-Recommendations for follow-up issues, filed when Brylie agrees. None is part of phase 4.
+Follow-up issues, filed when P0 merges (Brylie, 2026-11-26). None is part of phase 4.
 
 - **A plugin driver** (CLAP, VST3): the host owns the loop and the parent window; repaint and deadlines come from its idle or timer callback. After the OQ-13 spike.
 - **A web driver** (`wasm32`): a canvas element, DOM events, and the accessibility tree mirrored to the DOM. OQ-23 is decided first.
 - **The `wgpu` upgrade, then Vello** weighed against our glyph atlas, now that Iced no longer fixes the version (rule 7 above held it).
+- **Research: AccessKit in a plugin window.** Whether AccessKit works inside a window a DAW hosts, where the host owns the window and may answer the screen reader itself.
 
 ## Stop points
 
