@@ -31,6 +31,9 @@ hound.workspace = true
 loom-analysis.workspace = true
 serde_json.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [[test]]
 name = "integration"
 path = "tests/main.rs"

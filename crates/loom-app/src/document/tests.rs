@@ -1,28 +1,24 @@
 use super::*;
 
 /// A folder for one test, removed when dropped.
-struct Folder(PathBuf);
+struct Folder(PathBuf, tempfile::TempDir);
 
 impl Folder {
-    /// An empty folder named after the test and the process.
+    /// An empty folder whose name starts with the test's name. `tempfile`
+    /// makes it unique and removes it on drop.
     fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("loom-document-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
+        let dir = tempfile::Builder::new()
+            .prefix(&format!("loom-document-{name}-"))
+            .tempdir()
+            .unwrap();
+        Self(dir.path().to_path_buf(), dir)
     }
 
     /// Writes an empty file `name` in the folder and returns its path.
     fn file(&self, name: &str) -> PathBuf {
-        let path = self.0.join(name);
+        let path = self.1.path().join(name);
         std::fs::write(&path, "").unwrap();
         path
-    }
-}
-
-impl Drop for Folder {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

@@ -10,6 +10,7 @@ use super::*;
 use crate::alerts;
 use crate::devices::fake::{self, Fake};
 use crate::preferences::DeviceChoice;
+use crate::recovery::tests::TempDir;
 use crate::settings::{Change, Message as Prefs};
 use loom_analysis::{max_step, peak};
 use loom_core::EngineConfig;
@@ -30,11 +31,8 @@ fn fade_frames() -> usize {
 }
 
 /// A folder for one test, empty at the start.
-fn folder(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("loom-qa-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn folder(name: &str) -> TempDir {
+    TempDir::new(&format!("qa-{name}"))
 }
 
 /// An example patch from `examples/patches`.
@@ -66,7 +64,9 @@ const CONSTANT_ONE: &str = r#"Patch(version: 1, metadata: Metadata(name: "Consta
 struct Run {
     app: App,
     tape: Tape,
-    dir: PathBuf,
+    /// The test folder. Fields drop in order, so the app is gone before
+    /// the folder is removed.
+    dir: TempDir,
     host: Rc<Fake>,
 }
 
@@ -975,8 +975,7 @@ fn a_lost_output_stays_on_screen_after_opening_another_patch() {
 #[test]
 fn a_later_save_clears_a_failed_save() {
     let mut app = crate::tests::app();
-    let dir = std::env::temp_dir().join(format!("loom-app-failed-save-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = TempDir::new("app-failed-save");
     assert!(!app.write_to(dir.join("no-such-folder").join("patch.ron")));
     assert_eq!(app.alerts.top_kept().unwrap().cause, alerts::Cause::File);
     assert_eq!(app.alerts.severity(), alerts::Severity::Alarm);

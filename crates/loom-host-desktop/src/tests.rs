@@ -377,7 +377,7 @@ fn stepped_tapes_are_repeatable() {
 #[test]
 fn a_recorder_spans_streams_and_keeps_one_rate() {
     let dir = record::TestDir::new("host-recorder");
-    let path = dir.0.join("out.wav");
+    let path = dir.path().join("out.wav");
     let recorder = Recorder::start(&path, 48_000).unwrap();
     let tape = Tape::new();
     for _ in 0..2 {

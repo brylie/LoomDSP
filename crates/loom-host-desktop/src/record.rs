@@ -249,24 +249,27 @@ fn write<W: Write + Seek>(
 }
 
 /// A folder for one test, removed when dropped, even if the test fails.
+///
+/// `tempfile` gives the folder a unique name and removes it on drop, so no
+/// test leaves a folder in the temp folder.
 #[cfg(test)]
-pub(crate) struct TestDir(pub(crate) std::path::PathBuf);
+pub(crate) struct TestDir(tempfile::TempDir);
 
 #[cfg(test)]
 impl TestDir {
-    /// An empty folder named after the test and the process.
+    /// An empty folder whose name starts with the test's name.
     pub(crate) fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("loom-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
+        Self(
+            tempfile::Builder::new()
+                .prefix(&format!("loom-{name}-"))
+                .tempdir()
+                .unwrap(),
+        )
     }
-}
 
-#[cfg(test)]
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+    /// The folder's path.
+    pub(crate) fn path(&self) -> &std::path::Path {
+        self.0.path()
     }
 }
 

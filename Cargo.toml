@@ -63,6 +63,8 @@ clap = { version = "4.6", features = ["derive"] }
 ctrlc = { version = "3.5", features = ["termination"] }
 rfd = "0.17"
 assert_no_alloc = "1.1"
+# Test folders that remove themselves on drop, even when a test panics.
+tempfile = "3"
 # UI (desktop app only; the engine crates never depend on these).
 # Iced and iced_wgpu are upgraded together (OQ-14).
 # Iced's defaults minus linux-theme-detection: the app uses its own fixed

@@ -1,11 +1,11 @@
 use super::*;
+use crate::recovery::tests::TempDir;
 use crate::{App, FileAction, Message as AppMessage};
 
 /// A library folder for one test, with a subfolder, a hidden file, a
 /// file that does not read, and three patches.
-fn library(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("loom-patches-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+fn library(name: &str) -> TempDir {
+    let dir = TempDir::new(&format!("patches-{name}"));
     std::fs::create_dir_all(dir.join("live")).unwrap();
     let write = |file: &str, text: &str| std::fs::write(dir.join(file), text).unwrap();
     write(
@@ -56,7 +56,6 @@ fn the_library_folder_is_listed() {
     let rows = vec![Row::read(&dir.join("pad.ron"))];
     let _ = browser.update(Message::Found { open: 7, rows });
     assert_eq!(names(&browser).len(), 4);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Acceptance: two tags show only patches with both; the author filter
@@ -87,7 +86,6 @@ fn filters_and_search_combine() {
     assert_eq!(names(&browser), ["Low Drone"]);
     let _ = browser.update(Message::Search("nothing like it".into()));
     assert!(names(&browser).is_empty());
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Keys: Down moves the highlight, Enter opens the highlighted patch, a
@@ -110,7 +108,6 @@ fn the_list_opens_the_highlighted_patch() {
         browser.shown().last().map(|r| r.path.clone())
     );
     assert_eq!(browser.update(Message::Close).0, Outcome::Close);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Browse opens the overlay on the library folder from the preferences;
@@ -120,7 +117,7 @@ fn browse_opens_patches_in_the_app() {
     let dir = library("app");
     let mut app = App::new(crate::tests::app_args());
     let mut preferences = app.rig.store.saved().clone();
-    preferences.library = Some(dir.clone());
+    preferences.library = Some(dir.to_path_buf());
     let _ = app.rig.store.save(preferences);
     let _ = app.send(AppMessage::File(FileAction::Browse));
     // The reader ran as the browser opened (work runs inline in a test):
@@ -133,7 +130,6 @@ fn browse_opens_patches_in_the_app() {
     assert!(app.overlays.patches().is_none());
     assert_eq!(app.session.document.name(), "Bass");
     assert_eq!(app.session.document.file(), Some(dir.join("live/bass.ron").as_path()));
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// A new player's library folder does not exist yet. Save As for a patch
@@ -142,12 +138,12 @@ fn browse_opens_patches_in_the_app() {
 #[test]
 fn the_library_folder_is_made_when_first_needed() {
     use crate::files::fake::{self as dialogs, Asked};
-    let root = std::env::temp_dir().join(format!("loom-patches-made-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    let home = TempDir::new("patches-made");
+    let root = home.join("home");
     let dir = root.join("Documents/LoomDSP/Library");
     let mut app = App::new(crate::tests::app_args());
     let mut preferences = app.rig.store.saved().clone();
-    preferences.library = Some(dir.clone());
+    preferences.library = Some(dir.to_path_buf());
     let _ = app.rig.store.save(preferences);
 
     let _ = dialogs::asked();
@@ -163,7 +159,6 @@ fn the_library_folder_is_made_when_first_needed() {
     let _ = app.send(AppMessage::File(FileAction::Browse));
     assert!(dir.is_dir(), "Browse made the library folder");
     assert!(app.overlays.patches().is_some());
-    let _ = std::fs::remove_dir_all(root);
 }
 
 /// The reader stops within one file of the flag being set, wherever in the
@@ -188,7 +183,6 @@ fn the_reader_stops_within_one_file() {
         |_| true,
     );
     assert_eq!(reads, 2, "of {total} files");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// With nobody listening, the reader stops too.
@@ -206,7 +200,6 @@ fn the_reader_stops_when_nobody_listens() {
         |_| false,
     );
     assert_eq!(reads, 1);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// With the flag set, the walk finds nothing, so a closed browser does not go
@@ -216,7 +209,6 @@ fn the_walk_stops_when_the_flag_is_set() {
     let dir = library("walk");
     assert!(patch_files(&dir, &AtomicBool::new(true)).is_empty());
     assert!(!patch_files(&dir, &AtomicBool::new(false)).is_empty());
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// An app with its library at `dir` and the browser open, and the flag that
@@ -240,7 +232,6 @@ fn closing_the_browser_stops_its_reader() {
     let _ = app.send(AppMessage::Patches(Message::Close));
     assert!(app.overlays.patches().is_none());
     assert!(stop.load(Ordering::Relaxed));
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Opening a patch from the browser stops the reader, and so does replacing
@@ -259,7 +250,6 @@ fn opening_a_patch_stops_the_reader() {
     let (mut app, stop) = app_browsing(&dir);
     assert!(app.replace(crate::Source::Empty));
     assert!(stop.load(Ordering::Relaxed));
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Opening the browser again stops the earlier reader and starts a new one.
@@ -271,14 +261,11 @@ fn opening_the_browser_again_stops_the_earlier_reader() {
     let second = app.overlays.patches().expect("the browser is open").stop.clone();
     assert!(first.load(Ordering::Relaxed), "the earlier reader stops");
     assert!(!second.load(Ordering::Relaxed), "the new one keeps reading");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// A folder of `count` generated patches for one test.
-fn generated(name: &str, count: usize) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("loom-patches-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+fn generated(name: &str, count: usize) -> TempDir {
+    let dir = TempDir::new(&format!("patches-{name}"));
     for i in 0..count {
         let text = format!(
             r#"Patch(version: 1, metadata: Metadata(name: "Patch {i}", tags: ["tag-{}"]))"#,
@@ -313,7 +300,7 @@ fn refilters_grow_with_batches_not_files() {
     );
     assert_eq!(batches.len(), FILES.div_ceil(BATCH_ROWS));
 
-    let mut browser = PatchBrowser::new(1, dir.clone());
+    let mut browser = PatchBrowser::new(1, dir.to_path_buf());
     let count = batches.len();
     for rows in batches {
         let _ = browser.update(Message::Found { open: 1, rows });
@@ -321,7 +308,6 @@ fn refilters_grow_with_batches_not_files() {
     assert_eq!(browser.refilters, count);
     assert_eq!(browser.shown().count(), FILES);
     assert_eq!(browser.tags().count(), 7);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// A row that waits long enough goes without filling its batch, so a slow
@@ -338,7 +324,6 @@ fn a_slow_row_is_not_kept_waiting() {
     assert_eq!(sent.len(), 3);
     // The wait starts again with the next row.
     assert_eq!(batch.push(row(), start + BATCH_WAIT * 10), None);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// A row read before a slow one is not held back by it. The next row never
@@ -359,7 +344,6 @@ fn a_stalled_read_does_not_hold_back_earlier_rows() {
     // The reader finishing ends the batcher.
     drop(rows_in);
     batcher.join().unwrap();
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// A row works out what it shows when it is read, including the row for a
@@ -372,7 +356,6 @@ fn a_row_shows_what_it_read() {
         assert!(row.details.contains(part), "{}", row.details);
     }
     assert_eq!(Row::read(&dir.join("broken.ron")).details, "Could not read");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// The list scrolls by the highlighted row's UI ID, just enough, as the

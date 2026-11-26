@@ -3,17 +3,17 @@
 
 use super::super::{Message, PatchBrowser, Row, licence_id, part_id, patch_files, patches_id, tag_id};
 use super::tags_id;
+use crate::recovery::tests::TempDir;
 use crate::ui_test::Ui;
 use iced::keyboard::{Key, Modifiers, key::Named};
 use loom_ui_core::{Point, UiId};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
 /// A library folder with a patch in a subfolder, one at the top, and a
 /// file that does not read.
-fn library(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("loom-patches-panel-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+fn library(name: &str) -> TempDir {
+    let dir = TempDir::new(&format!("patches-panel-{name}"));
     std::fs::create_dir_all(dir.join("live")).unwrap();
     let write = |file: &str, text: &str| std::fs::write(dir.join(file), text).unwrap();
     write(
@@ -106,7 +106,6 @@ fn a_screen_reader_finds_the_dialog_and_its_parts() {
     let option = tree.node_by_id(&bass);
     assert_eq!(option.role(), accesskit::Role::ListBoxOption);
     assert!(option.description().is_some_and(|text| text.contains("Sam Rivera")));
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// A file that does not read says so in its name, stays enabled so a
@@ -126,7 +125,6 @@ fn an_unread_row_says_so_and_opens_nothing() {
     assert!(pad.offers(accesskit::Action::Click), "a row that reads offers Click");
     click_on(&mut ui, &broken);
     assert!(ui.app().overlays.patches().is_some(), "nothing opened");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Tab loops through Close, the search field, the Author field, each
@@ -151,7 +149,6 @@ fn tab_loops_through_the_dialog_with_the_tags_as_one_stop() {
     }
     let _ = ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
     assert_eq!(ui.runtime().focused(), Some(&part_id("close")));
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// On the tags, Left, Right, Home, and End move among them and stop at the
@@ -180,7 +177,6 @@ fn the_tags_are_a_toolbar() {
     assert_eq!(ui.runtime().focused(), Some(&part_id("close")));
     let _ = ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
     assert_eq!(ui.runtime().focused(), Some(&tags[1]), "back on the tag last used");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Up and Down move the highlight from either field, and the highlighted
@@ -211,7 +207,6 @@ fn both_fields_hold_the_list_and_escape_closes_from_anywhere() {
     assert!(ui.runtime().focused().is_some_and(|id| id.is_under(&tags_id())));
     tap(&mut ui, Named::Escape);
     assert!(ui.app().overlays.patches().is_none(), "Escape closed it from a tag");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Typing in a field filters, and the pointer over a row highlights it.
@@ -228,7 +223,6 @@ fn typing_filters_and_hover_highlights() {
     let at = ui.runtime().bounds(&second).expect("the row");
     ui.move_to(Point::new(at.x + 10.0, at.y + 10.0));
     assert_eq!(model(&ui).highlight, Some(1));
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Rows that arrive in batches while the user looks move neither the
@@ -255,7 +249,6 @@ fn a_batch_of_rows_moves_neither_the_focus_nor_the_highlight() {
     assert_eq!(ui.runtime().focused(), Some(&part_id("search")));
     let model = model(&ui);
     assert_eq!(model.highlight.map(|at| &model.rows[at].id), Some(&highlighted));
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// In a window narrower than the box, the box shrinks to fit and nothing
@@ -273,7 +266,6 @@ fn in_a_narrow_window_nothing_is_cut() {
     }
     let list = ui.runtime().bounds(&part_id("list")).unwrap();
     assert!(list.height > 0.0);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// As rows stream in, a row keeps its UI ID, every file read is counted,
@@ -282,7 +274,7 @@ fn in_a_narrow_window_nothing_is_cut() {
 fn streamed_rows_keep_their_ids_and_the_list_grows() {
     let dir = library("stream");
     let paths = patch_files(&dir, &AtomicBool::new(false));
-    let mut browser = PatchBrowser::new(1, dir.clone());
+    let mut browser = PatchBrowser::new(1, dir.to_path_buf());
     let mut seen: Vec<UiId> = Vec::new();
     for path in &paths {
         let highlighted = browser.model().highlight.map(|at| browser.model().rows[at].id.clone());
@@ -301,7 +293,6 @@ fn streamed_rows_keep_their_ids_and_the_list_grows() {
         seen = ids;
     }
     assert_eq!(seen.len(), paths.len());
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// The kept model never drifts from what the browser's state says: after
@@ -312,7 +303,7 @@ fn the_kept_model_matches_a_fresh_one_after_every_message() {
     use loom_patch::metadata::LicenceFilter;
     let dir = library("fresh");
     let paths = patch_files(&dir, &AtomicBool::new(false));
-    let mut browser = PatchBrowser::new(1, dir.clone());
+    let mut browser = PatchBrowser::new(1, dir.to_path_buf());
     let check = |browser: &PatchBrowser, step: &str| {
         assert_eq!(browser.model(), &browser.fresh_model(), "after {step}");
     };
@@ -354,7 +345,6 @@ fn the_kept_model_matches_a_fresh_one_after_every_message() {
         let _ = browser.update(message);
         check(&browser, step);
     }
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Escape closes Your patches from Close and from a check box too, through
@@ -375,5 +365,4 @@ fn escape_closes_from_close_and_a_check_box() {
     assert_eq!(ui.runtime().focused(), Some(&licence_id("lets-me-change")));
     tap(&mut ui, Named::Escape);
     assert!(ui.app().overlays.patches().is_none(), "from a check box");
-    let _ = std::fs::remove_dir_all(dir);
 }

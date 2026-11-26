@@ -6,7 +6,7 @@ use crate::record::TestDir;
 #[test]
 fn the_sink_writes_and_counts_what_the_input_delivers() {
     let dir = TestDir::new("capture-sink");
-    let path = dir.0.join("capture.wav");
+    let path = dir.path().join("capture.wav");
     let sink = Sink::start(&path, 48_000).unwrap();
     let mut input = sink.input(2);
     let mut error = sink.error();
@@ -36,7 +36,7 @@ fn the_sink_writes_and_counts_what_the_input_delivers() {
 fn the_sink_reports_dropped_frames() {
     let dir = TestDir::new("capture-sink-full");
     // 10 Hz: the ring holds 2 seconds, 20 frames.
-    let sink = Sink::start(&dir.0.join("capture.wav"), 10).unwrap();
+    let sink = Sink::start(&dir.path().join("capture.wav"), 10).unwrap();
     let mut input = sink.input(1);
     input(&[0.0; 100]);
     drop(input);
@@ -49,6 +49,6 @@ fn the_sink_reports_dropped_frames() {
 #[test]
 fn an_unwritable_file_is_an_error() {
     let dir = TestDir::new("capture-sink-bad");
-    let path = dir.0.join("no such folder").join("capture.wav");
+    let path = dir.path().join("no such folder").join("capture.wav");
     assert!(matches!(Sink::start(&path, 48_000), Err(HostError::Record(_))));
 }
