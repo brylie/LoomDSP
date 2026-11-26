@@ -43,7 +43,9 @@ pub(crate) fn open_overlay(ui: &mut Ui, owner: InputOwner) {
         InputOwner::Help => ui.send(Message::ShowHelp),
         InputOwner::Chooser => ui.send(Message::PatchInfo(crate::patch_info::Message::ChooseLicence)),
         InputOwner::Patches => {
-            let browser = patches::PatchBrowser::open(1, std::env::temp_dir().join("no-such-folder")).0;
+            // A folder that does not exist, inside one that is removed after.
+            let parent = crate::recovery::tests::TempDir::new("input-owner");
+            let browser = patches::PatchBrowser::open(1, parent.join("no-such-folder")).0;
             ui.app_mut().overlays.open(crate::overlays::Overlay::Patches(browser));
         }
         InputOwner::Preferences => ui.send(Message::Preferences(settings::Message::Open)),

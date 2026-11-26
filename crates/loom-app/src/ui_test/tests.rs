@@ -3299,13 +3299,16 @@ fn copies_live_in_a_folder_of_their_own() {
         std::fs::canonicalize(copies_root()).unwrap(),
         "inside the harness's own folder",
     );
-    let stray = std::env::temp_dir().join(format!("loom-app-ui-{}-stray", std::process::id()));
-    std::fs::create_dir_all(&stray).unwrap();
+    // A copy-shaped name straight in the shared temporary folder, removed
+    // when the guard drops, even if the assertion fails.
+    let stray = tempfile::Builder::new()
+        .prefix(&format!("loom-app-ui-{}-", std::process::id()))
+        .tempdir_in(std::env::temp_dir())
+        .unwrap();
     assert!(
-        !is_copy_folder(&stray),
+        !is_copy_folder(stray.path()),
         "a folder in the shared temporary folder is not a copy"
     );
-    std::fs::remove_dir(&stray).unwrap();
 }
 
 /// A relative name that climbs out and back in (`../patches/...`) still

@@ -120,7 +120,8 @@ fn nested_patches_check_and_render() {
 /// did when `loom-patch` read files (#617).
 #[test]
 fn check_names_a_missing_file() {
-    let path = std::env::temp_dir().join("loom-cli-no-such-patch.ron");
+    let temp = tempfile::Builder::new().prefix("loom-cli-missing-").tempdir().unwrap();
+    let path = temp.path().join("no-such-patch.ron");
     let out = Command::new(env!("CARGO_BIN_EXE_loom"))
         .arg("check")
         .arg(&path)

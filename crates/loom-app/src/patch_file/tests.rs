@@ -48,7 +48,8 @@ fn save_through_a_symlink_updates_the_target() {
 /// from `loom-patch` did before the file code moved here.
 #[test]
 fn a_missing_file_names_its_path() {
-    let path = std::env::temp_dir().join("loom-app-no-such-patch.ron");
+    let dir = TempDir::new("app-missing-patch");
+    let path = dir.join("no-such-patch.ron");
     let error = load(&path).unwrap_err();
     assert!(matches!(error, PatchFileError::Io { .. }));
     assert!(

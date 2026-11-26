@@ -30,6 +30,20 @@ impl std::ops::Deref for TempDir {
     }
 }
 
+/// Removes the folder before `tempfile` tries, retrying for a short while.
+/// A test that drops an app to stand for a crash leaves its recovery writer
+/// thread finishing one last write, and a file it adds while the folder is
+/// being removed makes that removal fail. The writer never makes the folder
+/// again, so a retry after it stops removes everything.
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while fs::remove_dir_all(&self.0).is_err() && self.0.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+}
+
 impl AsRef<Path> for TempDir {
     fn as_ref(&self) -> &Path {
         self.1.path()
