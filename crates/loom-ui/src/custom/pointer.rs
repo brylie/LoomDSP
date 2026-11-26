@@ -58,8 +58,13 @@ impl<A: App> Panels<'_, A> {
                 redraw: false,
             });
         }
+        // The capture holds back the hover, but not where the pointer is:
+        // `None` once it left the window. What it held back is applied
+        // when the capture ends.
+        self.pointer.at = point;
         let Some(moment) = self.custom_moment(&capture.id, point) else {
             self.customs.captured = None;
+            self.settle_hover();
             return None;
         };
         match event {
@@ -75,10 +80,8 @@ impl<A: App> Panels<'_, A> {
             .tell(self.app, &capture.id, &CustomEvent::Pointer(*event), &moment);
         let released = matches!(event, PointerEvent::Released(_)) && capture.held.iter().all(|held| *held == 0);
         self.customs.captured = (!released).then_some(capture);
-        Some(Heard {
-            taken: true,
-            redraw: false,
-        })
+        let redraw = released && self.settle_hover();
+        Some(Heard { taken: true, redraw })
     }
 
     /// Gives `event`, at `point`, to the custom element `id` of `layer`
@@ -150,7 +153,34 @@ impl<A: App> Panels<'_, A> {
                 .customs
                 .tell(self.app, &capture.id, &CustomEvent::CaptureLost, &moment);
         }
+        self.settle_hover();
         true
+    }
+
+    /// Applies the hover a capture held back, once it ended: outside the
+    /// window, the pointer left it; inside, the element now under the
+    /// pointer is hovered, in the layers that take input, and an element
+    /// the pointer is no longer over hears it left, in this same turn.
+    /// Returns true when the hover changed.
+    fn settle_hover(&mut self) -> bool {
+        let changed = match self.pointer.at {
+            None => self.pointer.clear(),
+            Some(point) => {
+                let input = self.app.input().layer;
+                let at = self
+                    .window
+                    .hit_in(point, |layer| layer >= input)
+                    .and_then(|(layer, hit)| match hit {
+                        crate::hit::Hit::Element(id) => Some((layer, id.clone())),
+                        crate::hit::Hit::Blocked => None,
+                    });
+                let changed = self.pointer.set_hover(at);
+                self.report_hover(changed);
+                changed
+            }
+        };
+        self.report_custom_left();
+        changed
     }
 
     /// Cancels the capture when the input layer rose above the layer of

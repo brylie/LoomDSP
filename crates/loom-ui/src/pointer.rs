@@ -694,7 +694,7 @@ impl<A: App> Panels<'_, A> {
     /// moves rows under a still pointer, as typing in a search field does,
     /// moves the hover without telling the app, so the highlight stays
     /// where the keys left it.
-    fn report_hover(&mut self, changed: bool) {
+    pub(crate) fn report_hover(&mut self, changed: bool) {
         if !changed {
             return;
         }

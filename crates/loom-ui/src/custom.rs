@@ -99,7 +99,8 @@ pub enum Used {
     /// It took the event and captures the pointer: it hears every pointer
     /// event first, wherever the pointer is, until every button is up or
     /// the capture is cancelled ([`CustomEvent::CaptureLost`]). Only a
-    /// press can start a capture.
+    /// press can start a capture: to any other event, `Capture` counts as
+    /// [`Used::Yes`].
     Capture,
 }
 

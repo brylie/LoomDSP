@@ -45,6 +45,8 @@ enum Message {
 struct PadState {
     heard: Vec<CustomEvent>,
     seen: Vec<usize>,
+    /// Where its moment put the pointer for each event.
+    at: Vec<Option<Point>>,
     /// Whether it takes the wheel.
     wheel: bool,
 }
@@ -53,6 +55,7 @@ impl Custom<Drags> for PadState {
     fn event(&mut self, app: &Drags, event: &CustomEvent, moment: &Moment, out: &mut Out<'_, Message>) -> Used {
         self.heard.push(*event);
         self.seen.push(app.log.len());
+        self.at.push(moment.pointer);
         let x = moment.pointer.map_or(-1.0, |at| at.x);
         match event {
             CustomEvent::Pointer(PointerEvent::Pressed(PointerButton::Left)) => {
@@ -514,4 +517,57 @@ fn making_the_state_sends_no_message() {
     harness.step(DriverEvent::Woken);
     assert_eq!(harness.runtime().counts().updates, updates);
     assert!(harness.app().log.is_empty());
+}
+
+/// How many times the pad heard the pointer leave.
+fn lefts(harness: &Harness<Drags, NoTarget>) -> usize {
+    heard(harness)
+        .iter()
+        .filter(|event| **event == CustomEvent::PointerLeft)
+        .count()
+}
+
+/// A drag released over another element: the pad hears the pointer leave
+/// once, and the element under the pointer is hovered, in the turn of the
+/// release.
+#[test]
+fn a_release_over_another_element_moves_the_hover_there() {
+    let mut harness = harness();
+    press_pad(&mut harness);
+    step(&mut harness, 60.0, 120.0, PointerEvent::Moved);
+    assert_eq!(lefts(&harness), 0);
+    step(&mut harness, 60.0, 120.0, PointerEvent::Released(PointerButton::Left));
+    assert_eq!(lefts(&harness), 1);
+    assert_eq!(harness.runtime().hovered(), Some(&UiId::panel("main").with("label")));
+    step(&mut harness, 60.0, 125.0, PointerEvent::Moved);
+    assert_eq!(lefts(&harness), 1);
+}
+
+/// A drag that left the window and is released there: the pad hears the
+/// pointer leave, and nothing is hovered.
+#[test]
+fn a_release_outside_the_window_clears_the_hover() {
+    let mut harness = harness();
+    press_pad(&mut harness);
+    unplaced(&mut harness, PointerEvent::LeftWindow);
+    unplaced(&mut harness, PointerEvent::Released(PointerButton::Left));
+    assert_eq!(lefts(&harness), 1);
+    assert_eq!(harness.runtime().hovered(), None);
+}
+
+/// A cancel after a move tells the pad where the pointer is now, not
+/// where the press went down.
+#[test]
+fn a_cancel_tells_where_the_pointer_is_now() {
+    let mut harness = harness();
+    press_pad(&mut harness);
+    step(&mut harness, 300.0, 70.0, PointerEvent::Moved);
+    window(&mut harness, WindowEvent::Focused(false));
+    let pad = harness.runtime().custom::<PadState>(&pad()).unwrap();
+    let lost = pad
+        .heard
+        .iter()
+        .position(|event| *event == CustomEvent::CaptureLost)
+        .unwrap();
+    assert_eq!(pad.at[lost], Some(Point::new(300.0, 70.0)));
 }

@@ -1767,8 +1767,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // before the rebuild (section 9, rule 1): from the event, and from
         // a cancel an update caused, by an effect or by raising the input
         // layer above a held capture, as an overlay that opens mid-drag
-        // does. A cancel's own messages may raise the layer no further
-        // than it is, so this ends.
+        // does. This ends: after one cancel no capture is left to cancel,
+        // and an update cannot make an element send.
         loop {
             let layer = self.app.input().layer;
             self.panels().cancel_capture_below(layer);
