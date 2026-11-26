@@ -117,26 +117,39 @@ class SwitchTests(unittest.TestCase):
 class WriterTests(StoreTestCase):
     """The task wrapper, git events, and the Claude Code hook."""
 
-    def test_task_passes_exit_code_and_records_a_span(self):
-        """A failing step keeps its exit code and is recorded as an error."""
-        os.environ["MISE_TASK_NAME"] = "demo"
-        code = devtel.run_task(["-c", "exit 3"])
+    def test_run_passes_exit_code_and_records_a_span(self):
+        """A failing check keeps its exit code and is recorded as an error."""
+        code = devtel.run_step("demo", ["sh", "-c", "exit 3"])
         self.assertEqual(code, 3)
-        (span,) = self.spool_spans("mise")
-        self.assertEqual(span["name"], "mise run demo")
+        (span,) = self.spool_spans("hooks")
+        self.assertEqual(span["name"], "demo")
         self.assertEqual(span["status"], {"code": 2})
-        self.assertEqual(attributes_of(span)["process.exit.code"], "3")
+        values = attributes_of(span)
+        self.assertEqual(values["process.exit.code"], "3")
+        self.assertEqual(values["loom.devtel.step"], "demo")
 
-    def test_task_children_inherit_its_span(self):
-        """A child process sees TRACEPARENT naming the task's own span."""
+    def test_run_children_inherit_its_span(self):
+        """A child process sees TRACEPARENT naming the check's own span."""
         os.environ["TRACEPARENT"] = devtel.traceparent("a" * 32, "b" * 16)
         out = os.path.join(self.dir, "tp")
-        devtel.run_task(["-c", 'printf "%%s" "$TRACEPARENT" > "%s"' % out])
-        (span,) = self.spool_spans("mise")
+        devtel.run_step("demo", ["sh", "-c", 'printf "%%s" "$TRACEPARENT" > "%s"' % out])
+        (span,) = self.spool_spans("hooks")
         self.assertEqual(span["traceId"], "a" * 32)
         self.assertEqual(span["parentSpanId"], "b" * 16)
         with open(out, encoding="utf-8") as handle:
             self.assertEqual(devtel.parse_traceparent(handle.read()), ("a" * 32, span["spanId"]))
+
+    def test_run_reports_a_missing_command(self):
+        """A command that cannot start fails like a shell would, with 127."""
+        self.assertEqual(devtel.run_step("demo", ["devtel-no-such-command"]), 127)
+
+    def test_run_sh_runs_directly_when_off(self):
+        """With devtel off, run.sh runs the command and records nothing."""
+        script = os.path.join(os.path.dirname(devtel.__file__), "run.sh")
+        env = dict(os.environ, LOOM_DEVTEL="0")
+        result = subprocess.run(["sh", script, "demo", "sh", "-c", "echo hi; exit 4"], env=env, capture_output=True, text=True)
+        self.assertEqual((result.returncode, result.stdout), (4, "hi\n"))
+        self.assertEqual(self.spool_spans("hooks"), [])
 
     def test_git_event_records_stage(self):
         """A git event names its stage and the branch."""
@@ -201,11 +214,15 @@ class ArchiveTests(StoreTestCase):
                 handle.write(json.dumps(record) + "\n")
         with open(os.path.join(folder, SESSION, "subagents", "agent-abc.meta.json"), "w", encoding="utf-8") as handle:
             json.dump({"agentType": "Explore", "toolUseId": "t1", "model": "claude-small"}, handle)
-        # A task step that ran inside the first Bash call, in the session's trace.
+        # A check that ran inside the first Bash call, in the session's
+        # trace, and the same check again later on the same tree.
         os.environ["TRACEPARENT"] = devtel.traceparent(devtel.session_trace_id(SESSION), devtel.session_root_span_id(SESSION))
         start = int((now + 5) * 1e9)
-        devtel.emit("mise", "mise", [devtel.span(devtel.session_trace_id(SESSION), "f" * 16, devtel.session_root_span_id(SESSION),
-                                                 "mise run test", start, start + int(1e9), {"mise.task.name": "test"})])
+        check = {"loom.devtel.step": "clippy", "loom.devtel.tree": "t" * 40, "process.exit.code": 0}
+        devtel.emit("hooks", "checks", [devtel.span(devtel.session_trace_id(SESSION), "f" * 16, devtel.session_root_span_id(SESSION),
+                                                    "clippy", start, start + int(1e9), check)])
+        devtel.emit("hooks", "checks", [devtel.span(devtel.new_trace_id(), "e" * 16, None,
+                                                    "clippy", start + int(40e9), start + int(41e9), check)])
         del os.environ["TRACEPARENT"]
 
     def query(self, sql):
@@ -242,8 +259,8 @@ class ArchiveTests(StoreTestCase):
         self.assertEqual(parent, devtel.derived_id("tool:t1"))
         agent = self.query("select parent_span_id, attributes['gen_ai.agent.name'] as name from devtel_spans where category = 'agent'")
         self.assertEqual(agent, [])  # no records carry the agent's ID, so it has no span
-        reruns = self.query("select kind, command from devtel_reruns")
-        self.assertEqual(reruns, [{"kind": "no edit", "command": "cargo test -p a"}])
+        reruns = self.query("select kind, command from devtel_reruns order by kind")
+        self.assertEqual(reruns, [{"kind": "no change", "command": "cargo test -p a"}, {"kind": "same tree", "command": "clippy"}])
 
     def test_report_and_export_run(self):
         """The report prints, and the export writes valid OTLP lines."""

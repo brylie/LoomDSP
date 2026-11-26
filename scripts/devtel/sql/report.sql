@@ -19,7 +19,7 @@ from recent group by 1 order by minutes desc;
 select kind, count(*) as reruns, round(sum(ms) / 60000.0) as minutes
 from devtel_reruns where start_ts >= now() - to_days($DAYS) group by 1 order by 1;
 
-select kind, left(command, 70) as command, count(*) as reruns, round(sum(ms) / 60000.0) as minutes
+select kind, left(regexp_replace(command, '\s+', ' ', 'g'), 70) as command, count(*) as reruns, round(sum(ms) / 60000.0) as minutes
 from devtel_reruns where start_ts >= now() - to_days($DAYS)
 group by all order by minutes desc limit 10;
 
@@ -29,13 +29,13 @@ select left(command, 70) as command, count(*) as sessions, max(times_in_ten_call
 from devtel_loops where first_ts >= now() - to_days($DAYS)
 group by 1 order by minutes desc limit 10;
 
-.print '== Models (assistant turns and tokens)'
-select model, count(*) as turns,
+.print '== Models (one row per API response; tokens counted once per message)'
+select model, count(*) as turns, count(distinct session_id) as sessions,
   round(sum(output_tokens) / 1e6, 2) as output_mtok,
   round(sum(input_tokens + coalesce(cache_read_tokens, 0) + coalesce(cache_write_tokens, 0)) / 1e6, 1) as input_mtok,
-  round(100.0 * sum(cache_read_tokens) / nullif(sum(input_tokens + cache_read_tokens + coalesce(cache_write_tokens, 0)), 0), 1) as cache_hit_pct
-from claude_records
-where type = 'assistant' and model is not null and model not like '<%' and ts >= now() - to_days($DAYS)
+  round(100.0 * sum(cache_read_tokens) / nullif(sum(input_tokens + cache_read_tokens + coalesce(cache_write_tokens, 0)), 0), 1) as cache_hit_pct,
+  string_agg(distinct effort, ', ') as efforts
+from devtel_turns where ts >= now() - to_days($DAYS)
 group by 1 order by turns desc;
 
 .print '== Work done (from the git hooks; empty until they are installed)'
@@ -47,8 +47,9 @@ select count(*) as commits,
 from spool_spans
 where attributes['loom.devtel.git.event'] = 'post-commit' and to_timestamp(start_ns::double / 1e9) >= now() - to_days($DAYS);
 
-.print '== Largest sessions'
-select left(session_id, 8) as session, left(git_branch, 40) as branch, wall_min, tool_calls, subagents,
-  checking_min, waiting_min, commits, insertions, deletions
+.print '== Largest sessions (cost and lines from Claude Code; commits from the git hooks)'
+select left(session_id, 8) as session, left(coalesce(title, git_branch), 40) as title,
+  len(string_split(prs, ' ')) as prs, tool_calls, subagents,
+  checking_min, waiting_min, round(cost_usd, 2) as cost_usd, lines_added, lines_removed, commits
 from devtel_sessions where start_ts >= now() - to_days($DAYS)
 order by tool_calls desc limit 10;

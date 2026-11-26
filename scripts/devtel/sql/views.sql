@@ -22,12 +22,23 @@ create or replace macro devtel_category(tool, command) as case
   else 'shell'
 end;
 
--- A command with the parts that do not change what it checks removed: a
--- leading `cd`, output redirection, and a trailing head, tail, or grep.
-create or replace macro devtel_normalize(command) as trim(regexp_replace(regexp_replace(
+-- A command with the parts that do not change what it checks removed:
+-- leading `cd`, `git add`, environment assignments, `time`, `nice`, and
+-- `mise exec --`; output redirection; and a trailing head, tail, grep, or wc.
+create or replace macro devtel_normalize(command) as trim(regexp_replace(regexp_replace(regexp_replace(
   coalesce(command, ''),
-  '^\s*cd\s+[^&;]+(&&|;)\s*', ''),
+  '^(\s*(cd\s+[^&;]+|git\s+add\s+[^&;]+)\s*(&&|;)\s*)+', ''),
+  '^(\s*([A-Z_][A-Z0-9_]*=\S*|time|nice(\s+-n\s*-?\d+)?|mise\s+exec\s+--)\s+)+', ''),
   '\s*(\d?>\s*&?\s*\S+|\|\s*(tail|head|grep|wc)\b.*)', '', 'g'));
+
+-- Whether a tool call may have changed the code. Agents edit through Bash
+-- as often as through the Edit tool, so a Bash command counts when it runs
+-- an in-place editor, a script on stdin, a redirect into a file, a git
+-- command that changes the working tree, or a formatter.
+create or replace macro devtel_may_write(tool, command) as
+  tool in ('Edit', 'Write', 'NotebookEdit', 'MultiEdit')
+  or (tool = 'Bash' and regexp_matches(coalesce(command, ''),
+    '(sed\s+(-[a-zA-Z]*\s+)*-i|perl\s+-[a-z]*i|python3?\s+(-\s|-c\s|\S+\.py)|node\s|<<|\btee\s|[^0-9&>]>\s*[^&/\s>]|\b(mv|cp|rm|touch|patch)\s|git\s+(apply|checkout|switch|restore|rebase|merge|pull|reset|stash|cherry-pick|am|revert)\b|cargo\s+(fmt|fix|clippy\s.*--fix)|prek\s+run|mise\s+run\s+help-pages)'));
 
 create or replace macro devtel_span_id(name) as left(md5(name), 16);
 
@@ -38,13 +49,14 @@ with calls as (
   from claude_records r where r.type = 'assistant' and len(r.tool_calls) > 0
 ),
 result_items as (
-  select r.session_id, r.ts, unnest(r.tool_results) as t
+  select r.session_id, r.ts, r.result_interrupted, r.result_git_operation, unnest(r.tool_results) as t
   from claude_records r where r.type = 'user' and len(r.tool_results) > 0
 ),
 -- A forked session can repeat a result, so take the first of each.
 results as (
   select session_id, t.id as tool_use_id, min(ts) as end_ts,
-    bool_or(t.is_error) as error, bool_or(t.interrupted) as interrupted
+    bool_or(t.is_error) as error, bool_or(result_interrupted) as interrupted,
+    max(result_git_operation) as git_operation
   from result_items group by all
 )
 select
@@ -54,10 +66,31 @@ select
   c.subagent_type, c.model as requested_model, calls.model, calls.git_branch, calls.cwd,
   coalesce(results.error, false) as error,
   coalesce(results.interrupted, false) as interrupted,
+  results.git_operation,
   devtel_category(c.name, c.command) as category,
   devtel_normalize(c.command) as normalized
 from calls left join results
   on results.session_id = calls.session_id and results.tool_use_id = c.id;
+
+-- One row per assistant message (an API response). Claude Code writes a
+-- record per content block and repeats the usage on each, so tokens are
+-- taken once per message here.
+create or replace view devtel_turns as
+select session_id, message_id, any_value(request_id) as request_id, any_value(agent_id) as agent_id,
+  min(ts) as ts, any_value(model) as model, any_value(requested_model) as requested_model,
+  any_value(advisor_model) as advisor_model, any_value(effort) as effort, max(thinking_ms) as thinking_ms,
+  max(input_tokens) as input_tokens, max(output_tokens) as output_tokens,
+  max(cache_read_tokens) as cache_read_tokens, max(cache_write_tokens) as cache_write_tokens,
+  any_value(git_branch) as git_branch
+from claude_records
+where type = 'assistant' and message_id is not null and model is not null and model not like '<%'
+group by session_id, message_id;
+
+-- Pull requests a session opened or worked on, from Claude Code's own
+-- pr-link records.
+create or replace view devtel_prs as
+select session_id, pr_repository, pr_number, min(ts) as first_ts
+from claude_records where type = 'pr-link' and pr_number is not null group by all;
 
 -- Every span, from every source, in one OpenTelemetry shape. Claude Code
 -- sessions are traces whose ID is the session UUID; subagents and tool
@@ -109,8 +142,8 @@ spool as (
   select s.trace_id, s.span_id, s.parent_span_id, s.name, s.service,
     to_timestamp(s.start_ns::double / 1e9) as start_ts, to_timestamp(s.end_ns::double / 1e9) as end_ts,
     s.error, nullif(s.attributes['gen_ai.conversation.id'], '') as session_id, null::varchar as agent_id,
-    case when s.service = 'git' then 'git event' when s.attributes['loom.devtel.hook_stage'] <> '' then 'hook'
-      else 'mise task' end as category,
+    case when s.service = 'git' then 'git event' when s.attributes['loom.devtel.in_git_hook'] = 'true' then 'hook'
+      else 'check' end as category,
     s.attributes
   from spool_spans s
 ),
@@ -126,16 +159,26 @@ union all
 select *, epoch_ms(end_ts) - epoch_ms(start_ts) from moved;
 
 -- One row per Claude Code session: size, cost in time and tokens, and what
--- it changed. Commits come from the git hooks, so only sessions after
--- devtel was installed have them.
+-- it changed. Cost and lines come from Claude Code's cost records; commits
+-- come from the git hooks, so only sessions after devtel was installed
+-- have them.
 create or replace view devtel_sessions as
 with records as (
   select session_id, min(ts) as start_ts, max(ts) as end_ts, mode(git_branch) as git_branch,
+    any_value(entrypoint) filter (where entrypoint is not null) as entrypoint,
+    last(title order by ts) filter (where title is not null) as title,
     count(*) filter (where is_prompt) as prompts,
-    sum(input_tokens) as input_tokens, sum(output_tokens) as output_tokens,
-    sum(cache_read_tokens) as cache_read_tokens, sum(cache_write_tokens) as cache_write_tokens,
-    string_agg(distinct model, ', ') filter (where model is not null and model not like '<%') as models
+    count(*) filter (where api_error is not null) as api_errors,
+    count(*) filter (where subtype = 'compact_boundary') as compactions,
+    max(cost_usd) as cost_usd, max(lines_added) as lines_added, max(lines_removed) as lines_removed
   from claude_records group by session_id
+),
+turns as (
+  select session_id, count(*) as turns,
+    string_agg(distinct model, ', ') as models,
+    sum(output_tokens) as output_tokens,
+    sum(input_tokens + coalesce(cache_read_tokens, 0) + coalesce(cache_write_tokens, 0)) as input_tokens
+  from devtel_turns group by session_id
 ),
 tools as (
   select session_id, count(*) as tool_calls,
@@ -144,6 +187,9 @@ tools as (
     round(sum(epoch_ms(end_ts) - epoch_ms(start_ts)) filter (where category in ('test', 'check', 'build', 'git commit', 'git push')) / 60000.0, 1) as checking_min
   from devtel_tools group by session_id
 ),
+prs as (
+  select session_id, string_agg(distinct '#' || pr_number, ' ') as prs from devtel_prs group by session_id
+),
 commits as (
   select attributes['gen_ai.conversation.id'] as session_id, count(*) as commits,
     sum(attributes['loom.devtel.commit.insertions']::bigint) as insertions,
@@ -151,42 +197,62 @@ commits as (
   from spool_spans where attributes['loom.devtel.git.event'] = 'post-commit' group by 1
 )
 select records.*, round((epoch_ms(end_ts) - epoch_ms(start_ts)) / 60000.0, 1) as wall_min,
-  tools.* exclude (session_id), commits.* exclude (session_id)
-from records left join tools using (session_id) left join commits using (session_id);
+  turns.* exclude (session_id), tools.* exclude (session_id), prs.prs, commits.* exclude (session_id)
+from records left join turns using (session_id) left join tools using (session_id)
+  left join prs using (session_id) left join commits using (session_id);
 
 -- Checks run again with nothing changed in between. Two sources:
--- "same tree": a mise task step that ran on the same working tree as an
---   earlier run of the same step (exact, from the task wrapper).
--- "no edit": an agent ran the same check command again with no Edit or
---   Write in between (an estimate: code can also change through git or a
---   shell command, so this is an upper bound).
+-- "same tree": a check that ran on the same working tree, with the same
+--   result, as an earlier run of the same check: in the commit hook and
+--   again before push, for example. Exact, from scripts/devtel/run.sh.
+-- "no change": the same check command ran again in a session with no tool
+--   call in between that may have changed the code (devtel_may_write).
+--   An estimate from the transcripts, for history before the task wrapper.
+-- "hook after check": a git commit or push whose hooks ran right after the
+--   session ran a test or check, with no change in between. The hooks run
+--   only some checks, so this is time spent re-checking, not all waste.
 create or replace view devtel_reruns as
-with task_runs as (
-  select attributes['mise.task.name'] as task, attributes['process.command_line'] as step,
-    attributes['loom.devtel.tree'] as tree, nullif(attributes['gen_ai.conversation.id'], '') as session_id,
+with step_runs as (
+  select attributes['loom.devtel.step'] as step, attributes['loom.devtel.tree'] as tree,
+    nullif(attributes['gen_ai.conversation.id'], '') as session_id,
     to_timestamp(start_ns::double / 1e9) as start_ts, (end_ns - start_ns) / 1e6 as ms,
     attributes['process.exit.code'] as exit_code
-  from spool_spans where service = 'mise' and coalesce(attributes['loom.devtel.tree'], '') <> ''
+  from spool_spans where service = 'checks' and coalesce(attributes['loom.devtel.tree'], '') <> ''
 ),
 same_tree as (
-  select 'same tree' as kind, session_id, task || ': ' || step as command, start_ts, ms,
-    row_number() over (partition by task, step, tree, exit_code order by start_ts) as run
-  from task_runs
+  select 'same tree' as kind, session_id, step as command, start_ts, ms,
+    row_number() over (partition by step, tree, exit_code order by start_ts) as run
+  from step_runs
 ),
 ordered as (
-  select *, sum(case when category = 'edit' then 1 else 0 end)
-      over (partition by session_id, agent_id order by start_ts rows unbounded preceding) as edits
+  -- A commit or push does not change the working tree, though its message
+  -- may be written with a heredoc.
+  select *, sum(case when devtel_may_write(tool, command) and category not in ('git commit', 'git push') then 1 else 0 end)
+      over (partition by session_id order by start_ts rows unbounded preceding) as changes
   from devtel_tools
 ),
 no_edit as (
-  select 'no edit' as kind, session_id, normalized as command, start_ts,
+  select 'no change' as kind, session_id, normalized as command, start_ts,
     epoch_ms(end_ts) - epoch_ms(start_ts) as ms,
-    row_number() over (partition by session_id, agent_id, edits, normalized order by start_ts) as run
-  from ordered where category in ('test', 'check', 'build') and not interrupted
+    row_number() over (partition by session_id, changes, normalized order by start_ts) as run
+  from ordered
+  where category in ('test', 'check', 'build') and not interrupted and not devtel_may_write(tool, command)
+),
+hook_after_check as (
+  select 'hook after check' as kind, o.session_id, regexp_replace(regexp_replace(o.command, '^\s*cd\s+[^&;]+(&&|;)\s*', ''), '\s+', ' ', 'g') as command, o.start_ts,
+    epoch_ms(o.end_ts) - epoch_ms(o.start_ts) as ms, 2 as run
+  from ordered o
+  where o.category in ('git commit', 'git push')
+    -- A call that also runs a check itself would count that check as hook time.
+    and not regexp_matches(o.command, '\b(cargo\s+(test|nextest|llvm-cov|clippy|build)|mise\s+run\s+(check|test|coverage|clippy)|prek\s+run)\b')
+    and exists (select 1 from ordered c where c.session_id = o.session_id and c.changes = o.changes
+      and c.category in ('test', 'check') and c.start_ts < o.start_ts)
 )
 select * from same_tree where run > 1
 union all
-select * from no_edit where run > 1;
+select * from no_edit where run > 1
+union all
+select * from hook_after_check;
 
 -- Possible loops: the same command three or more times within ten tool
 -- calls of one agent.

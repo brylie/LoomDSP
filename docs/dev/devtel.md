@@ -25,7 +25,7 @@ To stop recording, set `LOOM_DEVTEL=0` in your shell. Recording is off in CI unl
 ```text
 Claude Code session ──── SessionStart hook ── exports TRACEPARENT, LOOM_DEVTEL_SESSION
    │ Bash tool call
-   └─ git commit ── prek ── mise run fmt ── devtel-sh ── span ─┐
+   └─ git commit ── prek ── mise run clippy ── devtel-sh ── span ─┐
    └─ mise run check ────────────────────── devtel-sh ── span ─┤
    └─ git push ── prek ── devtel git pre-push ────────── span ─┤
                                                                ▼

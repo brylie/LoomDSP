@@ -49,14 +49,6 @@ LOOM_COVERAGE_MIN = "80"
 # entry in older mise versions does not match DuckDB 2's file names.
 LOOM_DEVTEL_DUCKDB = "github:duckdb/duckdb@2.0.1"
 LOOM_DEVTEL_VIEWER = "github:CtrlSpice/otel-desktop-viewer@0.8.0"
-# The task wrapper below (devtel-sh) lives here.
-_.path = ["scripts/devtel/bin"]
-
-[settings]
-# Every inline task step runs through devtel-sh, which records it as a span
-# and then runs it with sh, exactly as mise would ("sh -c -o errexit" is
-# mise's default). It does nothing extra in CI or with LOOM_DEVTEL=0.
-unix_default_inline_shell_args = "devtel-sh -c -o errexit"
 
 [tasks.fmt]
 description = "Check formatting (cargo fmt --all fixes it)"

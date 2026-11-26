@@ -6,7 +6,7 @@ OpenTelemetry spans in plain files, with no daemon. See docs/dev/devtel.md
 for the design and ADR-0048 for the decision.
 
 Writers (fast, append only, never fail the caller):
-  task       wraps one step of a mise task (called by bin/devtel-sh)
+  run        runs a check and records it (called by run.sh from prek.toml)
   git        records a git event (called by prek post-* and pre-push hooks)
   claude     handles a Claude Code hook event (called by hook.sh)
 
@@ -289,42 +289,79 @@ def parent_context():
 # ---------------------------------------------------------------------------
 
 
-def run_task(shell_args):
-    """Run one step of a mise task under sh, and record it as a span.
+def run_step(name, command):
+    """Run one check and record it as a span named after it.
 
-    mise calls bin/devtel-sh with the arguments it would give sh. Child
-    processes get TRACEPARENT pointing at this span, so a nested mise run,
-    git commit, or prek hook becomes its child.
+    prek.toml wraps each check with run.sh, which calls this. The command's
+    output and exit code are passed through unchanged. Child processes get
+    TRACEPARENT pointing at this span, so anything they record nests under
+    it. The working tree's hash is taken first, so two runs of a check on
+    the same code can be found (devtel_reruns, "same tree").
     """
     trace_id, parent_id = parent_context()
     span_id = new_span_id()
-    task = os.environ.get("MISE_TASK_NAME", "")
-    script = shell_args[-1] if shell_args else ""
-    tree = tree_hash()
-    vcs = vcs_attributes()
+    # Nothing that only feeds the span may stop the check from running.
+    attributes = {}
+    try:
+        attributes = {
+            "cicd.pipeline.task.name": name,
+            "loom.devtel.step": name,
+            "process.command_line": " ".join(command)[:MAX_COMMAND],
+            "process.working_directory": os.getcwd(),
+            "loom.devtel.tree": tree_hash(),
+            # prek sets PRE_COMMIT=1 for every hook it runs.
+            "loom.devtel.in_git_hook": os.environ.get("PRE_COMMIT") == "1",
+        }
+        attributes.update(vcs_attributes())
+        attributes.update(agent_attributes())
+    except Exception:  # noqa: BLE001 - fail open
+        pass
     env = dict(os.environ, TRACEPARENT=traceparent(trace_id, span_id))
     start = time.time_ns()
     try:
-        code = subprocess.call(["sh"] + list(shell_args), env=env)
-    except KeyboardInterrupt:
-        code = 130
+        code = run_forwarding_signals(list(command), env)
+    except OSError as error:
+        print("devtel: cannot run %s: %s" % (command[0] if command else "", error), file=sys.stderr)
+        code = 127
     end = time.time_ns()
-    if code < 0:
-        code = 128 - code
-    attributes = {
-        "cicd.pipeline.task.name": task,
-        "mise.task.name": task,
-        "process.command_line": script[:MAX_COMMAND],
-        "process.exit.code": code,
-        "process.working_directory": os.getcwd(),
-        "loom.devtel.tree": tree,
-        "loom.devtel.hook_stage": os.environ.get("PREK_HOOK_STAGE", ""),
-    }
-    attributes.update(vcs)
-    attributes.update(agent_attributes())
-    name = "mise run %s" % task if task else "mise run"
-    emit("mise", "mise", [span(trace_id, span_id, parent_id, name, start, end, attributes, code != 0)])
+    attributes["process.exit.code"] = code
+    emit("hooks", "checks", [span(trace_id, span_id, parent_id, name, start, end, attributes, code != 0)])
     return code
+
+
+def run_forwarding_signals(command, env):
+    """Run a command, pass on the signals that stop it, and return its exit code.
+
+    The wrapper sits between mise and the step, so a SIGTERM or SIGHUP sent
+    to it (when mise cancels a task, or a terminal closes) must reach the
+    step, or cargo would keep running after the task was stopped. A signal
+    exit is returned as 128 plus the signal number, as a shell does.
+    """
+    import signal
+
+    child = subprocess.Popen(command, env=env)
+    forwarded = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+    previous = {}
+
+    def forward(number, _frame):
+        try:
+            child.send_signal(number)
+        except OSError:
+            pass
+
+    for number in forwarded:
+        previous[number] = signal.signal(number, forward)
+    try:
+        while True:
+            try:
+                code = child.wait()
+                break
+            except InterruptedError:
+                continue
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+    return 128 - code if code < 0 else code
 
 
 def commit_stats(revision):
@@ -345,7 +382,7 @@ def commit_stats(revision):
 
 def git_event(stage):
     """Record a git event, called by a prek hook in the given stage."""
-    stage = stage or os.environ.get("PREK_HOOK_STAGE", "")
+    stage = stage or "event"
     trace_id, parent_id = parent_context()
     now = time.time_ns()
     attributes = vcs_attributes()
@@ -691,8 +728,9 @@ def main(argv):
     """Command-line entry point."""
     parser = argparse.ArgumentParser(prog="devtel", description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
-    task = commands.add_parser("task", help="run a mise task step under sh and record it")
-    task.add_argument("shell_args", nargs=argparse.REMAINDER)
+    run = commands.add_parser("run", help="run a check and record it (used by run.sh)")
+    run.add_argument("name")
+    run.add_argument("argv", nargs=argparse.REMAINDER, metavar="command")
     git_parser = commands.add_parser("git", help="record a git event")
     git_parser.add_argument("stage", nargs="?", default="")
     claude = commands.add_parser("claude", help="handle a Claude Code hook event (JSON on stdin)")
@@ -710,11 +748,13 @@ def main(argv):
     export.add_argument("--days", type=int, default=3650)
     args = parser.parse_args(argv)
 
-    if args.command == "task":
-        shell_args = args.shell_args[1:] if args.shell_args[:1] == ["--"] else args.shell_args
+    if args.command == "run":
+        command = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
+        if not command:
+            return 2
         if not enabled():
-            os.execvp("sh", ["sh"] + shell_args)
-        return run_task(shell_args)
+            os.execvp(command[0], command)
+        return run_step(args.name, command)
     if args.command == "git":
         return git_event(args.stage) if enabled() else 0
     if args.command == "claude":
