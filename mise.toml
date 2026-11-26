@@ -222,13 +222,14 @@ description = "The quick checks as the git hooks run them (prek run --all-files)
 # `test-placement`, but through prek, so each pass is recorded for reuse
 # (docs/dev/check-reuse.md). cargo fmt and the file fixers change files in
 # place and then fail: look at the change and run it again. The branch rule
-# is skipped, so the check also runs on main. The last two commands test
-# the citation and test-placement scripts themselves, as their own tasks
-# do. CI runs those tasks one by one, never this one.
+# is skipped, so the check also runs on main. The last three commands test
+# the citation, test-placement, and test-targets scripts themselves, as
+# their own tasks do. CI runs those tasks one by one, never this one.
 run = [
   "prek run --all-files --skip no-commit-to-branch",
   "sh scripts/test-check-adr-citations.sh",
   "sh scripts/test-check-test-placement.sh",
+  "sh scripts/test-check-test-targets.sh",
 ]
 
 [tasks.check-reuse-clear]
