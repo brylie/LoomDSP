@@ -304,6 +304,21 @@ class ArchiveTests(StoreTestCase):
         # Once the other window closes, the next import brings the new span in.
         self.assertEqual(devtel.import_all(quiet=True), 0)
         self.assertEqual(json.loads(devtel.run_duckdb(count, json_output=True, readonly=True))[0]["n"], 1)
+    def test_import_skips_while_the_ui_holds_the_import_lock(self):
+        """While the UI is starting it holds import.lock, so no import can take the archive."""
+        devtel.import_all(quiet=True)
+        devtel.emit("hooks", "checks", [devtel.span("a" * 32, "c" * 16, None, "late", 1, 2, {})])
+        count = "select count(*) as n from spool_spans where span_id = '%s'" % ("c" * 16)
+        lock = devtel.take_import_lock(wait=5)
+        self.assertIsNotNone(lock)
+        try:
+            self.assertEqual(devtel.import_all(quiet=True), 1)
+            self.assertEqual(json.loads(devtel.run_duckdb(count, json_output=True, readonly=True))[0]["n"], 0)
+        finally:
+            lock.close()
+        self.assertEqual(devtel.import_all(quiet=True), 0)
+        self.assertEqual(json.loads(devtel.run_duckdb(count, json_output=True, readonly=True))[0]["n"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

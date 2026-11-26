@@ -601,23 +601,42 @@ def record_files(kind, entries):
     return "insert or replace into imported_files values %s;\n" % values
 
 
+def take_import_lock(wait=0.0):
+    """Take import.lock, waiting up to `wait` seconds, and return its file, or None.
+
+    Every writer of the archive holds this lock first, so whoever holds it
+    knows no import can start. The lock is released when the file closes.
+    """
+    os.makedirs(store_dir(), exist_ok=True)
+    lock = open(os.path.join(store_dir(), "import.lock"), "w")
+    deadline = time.time() + wait
+    while True:
+        try:
+            import fcntl
+
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return lock
+        except ImportError:
+            return lock
+        except OSError:
+            if time.time() >= deadline:
+                lock.close()
+                return None
+            time.sleep(0.25)
+
+
 def import_all(quiet=False):
     """Copy new Claude Code records and spool spans into the archive.
 
     Idempotent: every row has a natural key and the import only inserts,
     so running it twice changes nothing, and a transcript Claude Code has
-    deleted keeps every row it already gave.
+    deleted keeps every row it already gave. When another import is
+    running, or the DuckDB UI is starting, it is skipped.
     """
-    os.makedirs(store_dir(), exist_ok=True)
-    lock_path = os.path.join(store_dir(), "import.lock")
-    lock = open(lock_path, "w")
-    try:
-        import fcntl
-
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except (ImportError, OSError):
+    lock = take_import_lock()
+    if lock is None:
         if not quiet:
-            print("devtel: another import is running; try again shortly", file=sys.stderr)
+            print("devtel: another import is running, or the DuckDB UI is starting; import skipped", file=sys.stderr)
         return 1
     try:
         return import_locked(quiet)
@@ -676,17 +695,34 @@ def report(days):
     return 0
 
 
-def open_ui():
-    """Open the DuckDB UI over the archive, after an import."""
+def open_ui(port=4213):
+    """Open the DuckDB UI over the archive, after an import.
+
+    The DuckDB shell gives up at once when it meets a lock. So the UI starts
+    while holding import.lock, which every import takes before it writes,
+    and keeps it until the UI's server answers, by which time DuckDB has the
+    archive open read-only. An import after that skips on DuckDB's own lock.
+    """
     import_all()
     print("devtel: opening the DuckDB UI. The page loads its assets from ui.duckdb.org; your data stays local.")
-    print("devtel: start with `from devtel_sessions` or `from devtel_reruns`. Quit with Ctrl-D.")
-    # The DuckDB shell gives up at once on a lock, so first wait, as other
-    # readers do, for an import that may still be running.
-    run_duckdb("select 1;", readonly=True, wait=30)
-    # Read-only, so reports, imports of other windows, and the trace viewer
-    # can still read the archive while the UI is open.
-    return subprocess.call(duckdb_cmd() + ["-readonly", "-ui", archive_path()])
+    print("devtel: start with `from devtel_sessions` or `from devtel_reruns`. Quit with Ctrl-D.", flush=True)
+    lock = take_import_lock(wait=30)
+    if lock is None:
+        print("devtel: an import is still running after 30 seconds; try again shortly", file=sys.stderr)
+        return 1
+    try:
+        # Read-only, so reports, imports of other windows, and the trace
+        # viewer can still read the archive while the UI is open.
+        ui = subprocess.Popen(duckdb_cmd() + ["-readonly", "-cmd", "set ui_local_port=%d" % port, "-ui", archive_path()])
+        wait_for_port(port, 60)
+    finally:
+        lock.close()
+    while True:
+        try:
+            return ui.wait()
+        except KeyboardInterrupt:
+            # Ctrl-C belongs to the DuckDB shell, which keeps running.
+            continue
 
 
 def export_otlp(path, days):
@@ -723,7 +759,8 @@ def wait_for_port(port, seconds):
     deadline = time.time() + seconds
     while time.time() < deadline:
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            # "localhost" tries IPv6 and IPv4: the DuckDB UI listens on ::1 only.
+            with socket.create_connection(("localhost", port), timeout=0.5):
                 return True
         except OSError:
             time.sleep(0.25)
