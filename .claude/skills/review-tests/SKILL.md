@@ -55,7 +55,7 @@ mise run test-health -- --probe
 | Acceptance criteria | Ticked, open, and manual criteria per spec | `docs/design/*.md` |
 | CI timings | Per OS: build time, run time, test and binary counts, the slowest tests, binaries by total time; failed and re-run runs on `main` | The nextest lines in the latest green `main` run's job logs, through `gh` |
 | Coverage | Per crate, the lowest files, public functions no test runs | That run's `coverage` artifact (`lcov.info`) |
-| Probe | Per binary: its fastest, median, and 90th-percentile test by CI time, each run alone; wall, user, and kernel time and their ratio, with the shared temp folder and an empty one, and what each left behind. The fastest shows the binary's floor; the others show the setup most tests share, which is where a harness's cost hides | `--probe`; needs the built tests |
+| Probe | Per binary: its fastest, median, and 90th-percentile test by CI time (also the 25th, 75th, and 97th in a binary of 200 tests or more), each run alone; wall, user, and kernel time and their ratio, with the shared temp folder and an empty one, and what each left behind. The fastest shows the binary's floor; the others sample the setup tests share. A harness used by only part of a binary can still slip between the points (in November 2026 only the 90th-percentile pick of `loom-app` caught the UI harness), so probe a suspect test by name too | `--probe`; needs the built tests |
 | Local full run | Per-test times here | `--local`; refused above 1.5 load per core unless `--force` |
 | Devtel | Agents' test, check, and build tool time per week: calls, minutes, median, p90, errors | The devtel archive, read-only |
 

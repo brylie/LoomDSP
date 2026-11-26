@@ -320,6 +320,11 @@ def ci(run_id: str | None) -> dict:
             missing.append(job["name"])
             continue
         parsed = parse_nextest(log)
+        if not parsed["tests"]:
+            # A log that parses to nothing is a failed read, not a run with
+            # no tests: the format changed, or the output was refused.
+            missing.append(f"{job['name']} (log read, no test lines found)")
+            continue
         parsed["slowest"] = sorted(parsed["tests"], key=lambda t: -t["seconds"])[:TOP]
         parsed["binaries"] = by_binary(parsed["tests"])
         jobs[job["name"]] = parsed
@@ -398,10 +403,14 @@ def coverage(root: Path, run_id: str | None, lcov: Path | None) -> dict:
     if lcov is None:
         if run_id is None:
             return {"available": False, "why": "no CI run to read the coverage artifact from"}
-        folder = Path(tempfile.mkdtemp(prefix="loom-test-review-"))
-        if gh("run", "download", run_id, "-n", "coverage", "-D", str(folder)) is None:
-            return {"available": False, "why": f"run {run_id} has no `coverage` artifact (expired, or the job failed)"}
-        lcov = folder / "lcov.info"
+        # The artifact is about 24 MB. It goes in a folder that is removed
+        # afterwards, so this review does not add to the temp folder it checks.
+        with tempfile.TemporaryDirectory(prefix="loom-test-review-") as folder:
+            if gh("run", "download", run_id, "-n", "coverage", "-D", folder) is None:
+                return {"available": False, "why": f"run {run_id} has no `coverage` artifact (expired, or the job failed)"}
+            report = coverage(root, run_id, Path(folder) / "lcov.info")
+            report["source"] = f"the `coverage` artifact of run {run_id}"
+            return report
     files: dict[str, dict] = {}
     current = None
     for line in lcov.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -539,11 +548,12 @@ def probe(root: Path, ci_tests: dict[str, float], repeat: int, timeout: float, o
     """The cost of one test process at a few points of each binary.
 
     Each binary runs a few of its tests alone: the fastest, the median, and
-    the 90th percentile by CI time (fewer when it has fewer tests). The
-    fastest shows the binary's floor; the median shows the setup most of its
-    tests share, which is where a harness's cost hides (the temp-folder
-    sweep of 2026-11 ran only in tests that opened the UI harness, so the
-    fastest test never paid it). Each runs `repeat` times with the shared
+    the 90th percentile by CI time, and in a binary of 200 tests or more also
+    the 25th, 75th, and 97th (fewer when tests repeat). The fastest shows the
+    binary's floor; the others sample the setup its tests share, which is
+    where a harness's cost hides. The temp-folder sweep of 2026-11 ran only
+    in tests that opened the UI harness: the fastest and the median test of
+    `loom-app` missed it, and only the 90th-percentile pick caught it. Each runs `repeat` times with the shared
     temp folder and `repeat` times with an empty one. Wall time depends on
     the load; user and kernel CPU time much less, and kernel time far above
     user time points at file-system work such as walking a folder.
@@ -562,7 +572,11 @@ def probe(root: Path, ci_tests: dict[str, float], repeat: int, timeout: float, o
         timed = sorted((ci_tests[f"{binary['id']} {name}"], name) for name in binary["tests"]
                        if f"{binary['id']} {name}" in ci_tests)
         if timed:
+            # More points in a large binary: a harness used by only part of
+            # its tests (as the UI harness was) may miss the median.
             points = {"fastest": 0.0, "median": 0.5, "p90": 0.9}
+            if len(timed) >= 200:
+                points.update({"p25": 0.25, "p75": 0.75, "p97": 0.97})
             picks = {label: timed[min(int(q * len(timed)), len(timed) - 1)][1] for label, q in points.items()}
         else:
             picks = {"first": binary["tests"][0]}
@@ -763,7 +777,8 @@ def markdown(report: dict) -> str:
         if not p["available"]:
             out.append(f"Not measured: {p['why']}.")
         else:
-            out.append(f"Per binary, its fastest, median, and 90th-percentile test by CI time, each run alone "
+            out.append(f"Per binary, its fastest, median, and 90th-percentile test by CI time (and the 25th, 75th, "
+                       f"and 97th in a binary of 200 tests or more), each run alone "
                        f"{p['repeat']} times; medians shown. "
                        f"`shared` uses the system temp folder ({p['shared_tmp_entries']} entries at start); "
                        "`empty` uses a new empty one. A large gap means the test depends on the machine's state. "
