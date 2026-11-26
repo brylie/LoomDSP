@@ -71,7 +71,7 @@ Work outside an agent session (your own terminal) gets a new trace for each top-
 The store holds the spool and the archive. It lives in `$LOOM_DEVTEL_DIR`, or by default `$XDG_DATA_HOME/loomdsp/devtel` (`~/.local/share/loomdsp/devtel`). It is outside the repository, so every worktree shares it and it outlives them all.
 
 - `spool/<day>/<source>.jsonl` holds OTLP JSON, one `TracesData` object per line. Writers append with a single write call, so lines written at the same time do not mix.
-- `devtel.duckdb` is the archive. Only the import writes to it.
+- `devtel.duckdb` is the archive. Only the import writes to it. The readers (the report, the DuckDB UI, and the export for the trace viewer) open it read-only, so any number of them can be open at once. DuckDB allows many readers or one writer, so an import that finds a reader open is skipped with a note, and its data comes in at the next import. A reader that finds an import running waits up to 30 seconds for it.
 - `import.lock` lets only one import run at a time.
 
 ### Import

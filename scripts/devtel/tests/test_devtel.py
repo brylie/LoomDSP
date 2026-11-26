@@ -276,6 +276,25 @@ class ArchiveTests(StoreTestCase):
             for line in handle:
                 self.assertIn("resourceSpans", json.loads(line))
 
+    def test_readers_share_the_archive_with_an_open_ui(self):
+        """While another window reads the archive, the import skips and readers still work."""
+        devtel.import_all(quiet=True)
+        holder = subprocess.Popen(
+            devtel.duckdb_cmd() + ["-readonly", devtel.archive_path()],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True,
+        )
+        try:
+            holder.stdin.write("select 1;\n")
+            holder.stdin.flush()
+            time.sleep(2)
+            self.assertEqual(devtel.import_all(quiet=True), 0)
+            self.assertGreater(devtel.export_otlp(os.path.join(self.dir, "out.jsonl"), 30), 0)
+            rows = json.loads(devtel.run_duckdb("select count(*) as n from devtel_tools", json_output=True, readonly=True))
+            self.assertEqual(rows[0]["n"], 2)
+        finally:
+            holder.stdin.close()
+            holder.wait(timeout=30)
+
 
 if __name__ == "__main__":
     unittest.main()

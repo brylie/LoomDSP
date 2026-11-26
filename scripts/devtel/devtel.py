@@ -537,13 +537,31 @@ def sql_list(paths):
     return "[" + ", ".join(sql_literal(path) for path in paths) + "]"
 
 
-def run_duckdb(sql, json_output=False, database=None):
-    """Run SQL in DuckDB against the archive and return stdout."""
-    command = duckdb_cmd() + (["-json"] if json_output else []) + [database or archive_path()]
-    result = subprocess.run(command, input=".bail on\n" + sql, capture_output=True, text=True)
-    if result.returncode != 0 or "Error:" in result.stderr:
-        raise RuntimeError(result.stderr.strip() or "duckdb failed")
-    return result.stdout
+class ArchiveBusy(RuntimeError):
+    """Another process holds the archive in a way this call cannot share."""
+
+
+def run_duckdb(sql, json_output=False, database=None, readonly=False, wait=0.0):
+    """Run SQL in DuckDB against the archive and return stdout.
+
+    DuckDB lets many read-only connections share a file, or one writer have
+    it alone. Readers open it read-only, so the DuckDB UI, a report, and the
+    trace viewer can all be open at once. A call that meets a lock held by
+    another process tries again for up to `wait` seconds (an import takes a
+    few), then raises ArchiveBusy.
+    """
+    command = duckdb_cmd() + (["-json"] if json_output else []) + (["-readonly"] if readonly else [])
+    command.append(database or archive_path())
+    deadline = time.time() + wait
+    while True:
+        result = subprocess.run(command, input=".bail on\n" + sql, capture_output=True, text=True)
+        if result.returncode == 0 and "Error:" not in result.stderr:
+            return result.stdout
+        if "Could not set lock" not in result.stderr:
+            raise RuntimeError(result.stderr.strip() or "duckdb failed")
+        if time.time() >= deadline:
+            raise ArchiveBusy(result.stderr.strip())
+        time.sleep(0.5)
 
 
 def read_sql(name):
@@ -602,34 +620,47 @@ def import_all(quiet=False):
             print("devtel: another import is running; try again shortly", file=sys.stderr)
         return 1
     try:
-        run_duckdb(read_sql("schema.sql"))
-        claude = claude_files()
-        transcripts = [path for path in claude if path.endswith(".jsonl")]
-        metas = [path for path in claude if path.endswith(".meta.json")]
-        sql = []
-        counts = {}
-        for kind, paths, template in (
-            ("claude", transcripts, "import_claude.sql"),
-            ("claude-meta", metas, "import_agents.sql"),
-            ("spool", spool_files(), "import_spool.sql"),
-        ):
-            changed, _all = changed_files(kind, paths)
-            counts[kind] = len(changed)
-            # Batches keep each statement's file list to a reasonable size.
-            for start in range(0, len(changed), 200):
-                batch = changed[start : start + 200]
-                sql.append(read_sql(template).replace("$FILES", sql_list([entry[0] for entry in batch])))
-                sql.append(record_files(kind, batch))
-        sql.append(read_sql("views.sql"))
-        run_duckdb("begin;\n" + "\n".join(sql) + "\ncommit;\n")
+        return import_locked(quiet)
+    except ArchiveBusy:
         if not quiet:
             print(
-                "devtel: imported %d transcripts, %d agent files, %d spool files into %s"
-                % (counts["claude"], counts["claude-meta"], counts["spool"], archive_path())
+                "devtel: the archive is open elsewhere (the DuckDB UI or the trace viewer), so the import was "
+                "skipped; showing the data of the last import. Close the other window to import new data.",
+                file=sys.stderr,
             )
         return 0
     finally:
         lock.close()
+
+
+def import_locked(quiet):
+    """The import itself, run while holding import.lock."""
+    run_duckdb(read_sql("schema.sql"))
+    claude = claude_files()
+    transcripts = [path for path in claude if path.endswith(".jsonl")]
+    metas = [path for path in claude if path.endswith(".meta.json")]
+    sql = []
+    counts = {}
+    for kind, paths, template in (
+        ("claude", transcripts, "import_claude.sql"),
+        ("claude-meta", metas, "import_agents.sql"),
+        ("spool", spool_files(), "import_spool.sql"),
+    ):
+        changed, _all = changed_files(kind, paths)
+        counts[kind] = len(changed)
+        # Batches keep each statement's file list to a reasonable size.
+        for start in range(0, len(changed), 200):
+            batch = changed[start : start + 200]
+            sql.append(read_sql(template).replace("$FILES", sql_list([entry[0] for entry in batch])))
+            sql.append(record_files(kind, batch))
+    sql.append(read_sql("views.sql"))
+    run_duckdb("begin;\n" + "\n".join(sql) + "\ncommit;\n")
+    if not quiet:
+        print(
+            "devtel: imported %d transcripts, %d agent files, %d spool files into %s"
+            % (counts["claude"], counts["claude-meta"], counts["spool"], archive_path())
+        )
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -641,7 +672,7 @@ def report(days):
     """Print the efficiency report for the last given days."""
     import_all(quiet=True)
     sql = read_sql("report.sql").replace("$DAYS", str(int(days)))
-    sys.stdout.write(run_duckdb(".mode box\n" + sql))
+    sys.stdout.write(run_duckdb(".mode box\n" + sql, readonly=True, wait=30))
     return 0
 
 
@@ -650,14 +681,16 @@ def open_ui():
     import_all()
     print("devtel: opening the DuckDB UI. The page loads its assets from ui.duckdb.org; your data stays local.")
     print("devtel: start with `from devtel_sessions` or `from devtel_reruns`. Quit with Ctrl-D.")
-    return subprocess.call(duckdb_cmd() + ["-ui", archive_path()])
+    # Read-only, so reports, imports of other windows, and the trace viewer
+    # can still read the archive while the UI is open.
+    return subprocess.call(duckdb_cmd() + ["-readonly", "-ui", archive_path()])
 
 
 def export_otlp(path, days):
     """Write the archive's spans as OTLP JSON lines, one trace per line."""
     import_all(quiet=True)
     sql = read_sql("export.sql").replace("$DAYS", str(int(days)))
-    rows = json.loads(run_duckdb(sql, json_output=True) or "[]")
+    rows = json.loads(run_duckdb(sql, json_output=True, readonly=True, wait=30) or "[]")
     by_trace = {}
     for row in rows:
         by_trace.setdefault((row["service"], row["trace_id"]), []).append(row)
