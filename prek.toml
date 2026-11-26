@@ -215,8 +215,10 @@ stages = ["manual"]
 # ---------------------------------------------------------------------------
 # Development telemetry (docs/dev/devtel.md). Records commits, checkouts,
 # merges, rewrites, and pushes as spans in a local folder outside the
-# repository. Off in CI and with LOOM_DEVTEL=0. Always passes, so it never
-# stops a commit or a push.
+# repository. Each runs in the background, so git does not wait for it, and
+# always passes, so it never stops a commit or a push. Off in CI and with
+# LOOM_DEVTEL=0. prek does not tell a hook which stage runs it, so each
+# stage has its own entry.
 # ---------------------------------------------------------------------------
 
 [[repos]]
@@ -225,7 +227,7 @@ repo = "local"
 [[repos.hooks]]
 id = "devtel-post-commit"
 name = "devtel: record post-commit"
-entry = "sh -c 'mise exec -- python3 scripts/devtel/devtel.py git post-commit >/dev/null 2>&1; exit 0'"
+entry = "sh -c '(mise exec -- python3 scripts/devtel/devtel.py git post-commit >/dev/null 2>&1 &); exit 0'"
 language = "system"
 always_run = true
 pass_filenames = false
@@ -234,7 +236,7 @@ stages = ["post-commit"]
 [[repos.hooks]]
 id = "devtel-post-checkout"
 name = "devtel: record post-checkout"
-entry = "sh -c 'mise exec -- python3 scripts/devtel/devtel.py git post-checkout >/dev/null 2>&1; exit 0'"
+entry = "sh -c '(mise exec -- python3 scripts/devtel/devtel.py git post-checkout >/dev/null 2>&1 &); exit 0'"
 language = "system"
 always_run = true
 pass_filenames = false
@@ -243,7 +245,7 @@ stages = ["post-checkout"]
 [[repos.hooks]]
 id = "devtel-post-merge"
 name = "devtel: record post-merge"
-entry = "sh -c 'mise exec -- python3 scripts/devtel/devtel.py git post-merge >/dev/null 2>&1; exit 0'"
+entry = "sh -c '(mise exec -- python3 scripts/devtel/devtel.py git post-merge >/dev/null 2>&1 &); exit 0'"
 language = "system"
 always_run = true
 pass_filenames = false
@@ -252,7 +254,7 @@ stages = ["post-merge"]
 [[repos.hooks]]
 id = "devtel-post-rewrite"
 name = "devtel: record post-rewrite"
-entry = "sh -c 'mise exec -- python3 scripts/devtel/devtel.py git post-rewrite >/dev/null 2>&1; exit 0'"
+entry = "sh -c '(mise exec -- python3 scripts/devtel/devtel.py git post-rewrite >/dev/null 2>&1 &); exit 0'"
 language = "system"
 always_run = true
 pass_filenames = false
@@ -261,7 +263,7 @@ stages = ["post-rewrite"]
 [[repos.hooks]]
 id = "devtel-pre-push"
 name = "devtel: record pre-push"
-entry = "sh -c 'mise exec -- python3 scripts/devtel/devtel.py git pre-push >/dev/null 2>&1; exit 0'"
+entry = "sh -c '(mise exec -- python3 scripts/devtel/devtel.py git pre-push >/dev/null 2>&1 &); exit 0'"
 language = "system"
 always_run = true
 pass_filenames = false

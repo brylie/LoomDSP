@@ -309,8 +309,10 @@ def run_step(name, command):
             "process.command_line": " ".join(command)[:MAX_COMMAND],
             "process.working_directory": os.getcwd(),
             "loom.devtel.tree": tree_hash(),
-            # prek sets PRE_COMMIT=1 for every hook it runs.
+            # prek sets PRE_COMMIT=1 for every hook it runs, and the remote
+            # name only before a push.
             "loom.devtel.in_git_hook": os.environ.get("PRE_COMMIT") == "1",
+            "loom.devtel.in_push": bool(os.environ.get("PRE_COMMIT_REMOTE_NAME")),
         }
         attributes.update(vcs_attributes())
         attributes.update(agent_attributes())
@@ -692,7 +694,7 @@ def wait_for_port(port, seconds):
     return False
 
 
-def open_traces(days, port):
+def open_traces(days, port, open_browser=True):
     """Open otel-desktop-viewer with the archive's spans loaded.
 
     The viewer keeps data in memory and is filled again on every start,
@@ -701,27 +703,43 @@ def open_traces(days, port):
     export = os.path.join(store_dir(), "export", "traces.jsonl")
     os.makedirs(os.path.dirname(export), exist_ok=True)
     count = export_otlp(export, days)
-    print("devtel: %d spans from the last %d days" % (count, days))
+    print("devtel: %d spans from the last %d days" % (count, days), flush=True)
     # Its OTLP receivers get ports next to the page, so they do not clash
     # with a collector already on the standard ports 4317 and 4318.
+    import signal
+
     viewer = subprocess.Popen(
         viewer_cmd()
         + ["--browser-port", str(port), "--grpc", str(port + 1), "--http", str(port + 2), "--open-browser=false"]
     )
+
+    def stop(_number, _frame):
+        raise KeyboardInterrupt
+
+    # Stopped by Ctrl-C, a closed terminal, or mise cancelling the task, the
+    # viewer must stop too, or it keeps the port.
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGHUP, stop)
     try:
         if not wait_for_port(port, 60):
             print("devtel: the viewer did not start on port %d" % port, file=sys.stderr)
-            viewer.terminate()
             return 1
         subprocess.call(viewer_cmd() + ["import", export, "--endpoint", "http://localhost:%d" % port])
         url = "http://localhost:%d" % port
-        print("devtel: traces at %s (pick a wide time range). Stop with Ctrl-C." % url)
-        opener = "open" if sys.platform == "darwin" else "xdg-open"
-        subprocess.call([opener, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print("devtel: traces at %s (pick a wide time range). Stop with Ctrl-C." % url, flush=True)
+        if open_browser:
+            opener = "open" if sys.platform == "darwin" else "xdg-open"
+            subprocess.call([opener, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return viewer.wait()
     except KeyboardInterrupt:
-        viewer.terminate()
         return 0
+    finally:
+        if viewer.poll() is None:
+            viewer.terminate()
+            try:
+                viewer.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                viewer.kill()
 
 
 def main(argv):
@@ -743,6 +761,7 @@ def main(argv):
     traces = commands.add_parser("traces", help="open otel-desktop-viewer with the spans loaded")
     traces.add_argument("--days", type=int, default=14)
     traces.add_argument("--port", type=int, default=8000)
+    traces.add_argument("--no-open", action="store_true", help="do not open a browser")
     export = commands.add_parser("export", help="write the spans as OTLP JSON lines")
     export.add_argument("path")
     export.add_argument("--days", type=int, default=3650)
@@ -780,7 +799,7 @@ def readers(args):
     if args.command == "ui":
         return open_ui()
     if args.command == "traces":
-        return open_traces(args.days, args.port)
+        return open_traces(args.days, args.port, not args.no_open)
     if args.command == "export":
         print("devtel: wrote %d spans to %s" % (export_otlp(args.path, args.days), args.path))
         return 0

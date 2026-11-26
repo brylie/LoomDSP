@@ -202,9 +202,9 @@ from records left join turns using (session_id) left join tools using (session_i
   left join prs using (session_id) left join commits using (session_id);
 
 -- Checks run again with nothing changed in between. Two sources:
--- "same tree": a check that ran on the same working tree, with the same
---   result, as an earlier run of the same check: in the commit hook and
---   again before push, for example. Exact, from scripts/devtel/run.sh.
+-- "same tree": a check that ran on the same working tree as an earlier run
+--   of the same check: by hand, then in the commit hook, then again before
+--   push, for example. Exact, from scripts/devtel/run.sh.
 -- "no change": the same check command ran again in a session with no tool
 --   call in between that may have changed the code (devtel_may_write).
 --   An estimate from the transcripts, for history before the task wrapper.
@@ -212,16 +212,29 @@ from records left join turns using (session_id) left join tools using (session_i
 --   session ran a test or check, with no change in between. The hooks run
 --   only some checks, so this is time spent re-checking, not all waste.
 create or replace view devtel_reruns as
-with step_runs as (
+with step_spans as (
   select attributes['loom.devtel.step'] as step, attributes['loom.devtel.tree'] as tree,
     nullif(attributes['gen_ai.conversation.id'], '') as session_id,
-    to_timestamp(start_ns::double / 1e9) as start_ts, (end_ns - start_ns) / 1e6 as ms,
-    attributes['process.exit.code'] as exit_code
+    to_timestamp(start_ns::double / 1e9) as start_ts, to_timestamp(end_ns::double / 1e9) as end_ts
   from spool_spans where service = 'checks' and coalesce(attributes['loom.devtel.tree'], '') <> ''
+),
+-- prek splits a hook's files into batches, run at the same time or one
+-- after another. A span that starts before the earlier spans of the same
+-- check have ended, or within a second of that, belongs to the same run.
+step_groups as (
+  select *, sum(case when start_ts <= prev_end + interval 1 second then 0 else 1 end)
+      over (partition by step, tree order by start_ts rows unbounded preceding) as run_group
+  from (select *, max(end_ts) over (partition by step, tree order by start_ts
+      rows between unbounded preceding and 1 preceding) as prev_end from step_spans)
+),
+step_runs as (
+  select step, tree, any_value(session_id) as session_id, min(start_ts) as start_ts,
+    epoch_ms(max(end_ts)) - epoch_ms(min(start_ts)) as ms, run_group
+  from step_groups group by step, tree, run_group
 ),
 same_tree as (
   select 'same tree' as kind, session_id, step as command, start_ts, ms,
-    row_number() over (partition by step, tree, exit_code order by start_ts) as run
+    row_number() over (partition by step, tree order by start_ts) as run
   from step_runs
 ),
 ordered as (

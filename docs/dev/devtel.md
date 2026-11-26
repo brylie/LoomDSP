@@ -2,7 +2,7 @@
 
 **Status: Agreed.** Decision: [ADR-0048](../adr/0048-local-development-telemetry-in-files.md). Code: [`scripts/devtel`](../../scripts/devtel).
 
-Devtel records what happens while people and agents work on LoomDSP: Claude Code sessions and their tool calls, mise tasks, prek hooks, and git events. It stores them as OpenTelemetry spans in local files, with no service running, and lets you query them. The goal is to see where development time goes, find waste such as re-running a check on unchanged code, and set targets that later changes can be measured against.
+Devtel records what happens while people and agents work on LoomDSP: Claude Code sessions and their tool calls, the checks that git hooks run, and git events. It stores them as OpenTelemetry spans in local files, with no service running, and lets you query them. The goal is to see where development time goes, find waste such as re-running a check on unchanged code, and set targets that later changes can be measured against.
 
 Everything stays on your machine. Nothing is sent anywhere.
 
@@ -16,7 +16,7 @@ mise run devtel              # the DuckDB UI over the archive, for your own quer
 mise run devtel-traces       # every session as a trace waterfall in otel-desktop-viewer
 ```
 
-The report reads Claude Code's own transcripts too, so it shows months of history before any hook has run.
+The report also reads Claude Code's own transcripts, so it shows months of history before any hook has run.
 
 To stop recording, set `LOOM_DEVTEL=0` in your shell. Recording is off in CI unless `LOOM_DEVTEL=1` is set.
 
@@ -24,37 +24,43 @@ To stop recording, set `LOOM_DEVTEL=0` in your shell. Recording is off in CI unl
 
 ```text
 Claude Code session ──── SessionStart hook ── exports TRACEPARENT, LOOM_DEVTEL_SESSION
-   │ Bash tool call
-   └─ git commit ── prek ── mise run clippy ── devtel-sh ── span ─┐
-   └─ mise run check ────────────────────── devtel-sh ── span ─┤
-   └─ git push ── prek ── devtel git pre-push ────────── span ─┤
-                                                               ▼
-        ~/.local/share/loomdsp/devtel/spool/<day>/<source>.jsonl  (OTLP JSON lines)
-                                                               │
- ~/.claude/projects/<repo>*/…/*.jsonl  (Claude transcripts) ───┤  mise run devtel-import
-                                                               ▼  (also at every session start)
-                     ~/.local/share/loomdsp/devtel/devtel.duckdb  (archive + views)
-                                                               │
-                        devtel-report · devtel (DuckDB UI) · devtel-traces (waterfall)
+   │ Bash tool call (timed in the transcript)
+   ├─ git commit ── prek ── run.sh clippy ─── mise run clippy ──── span ─┐
+   │                     └─ git post-commit ─────────────────────── span ─┤
+   ├─ git push ──── prek ── run.sh typos ──── mise exec -- typos ── span ─┤
+   │                     └─ git pre-push ────────────────────────── span ─┤
+   └─ sh scripts/devtel/run.sh NAME CMD (a check run by hand) ───── span ─┤
+                                                                          ▼
+              ~/.local/share/loomdsp/devtel/spool/<day>/<source>.jsonl  (OTLP JSON lines)
+                                                                          │
+ ~/.claude/projects/<repo>*/…/*.jsonl  (Claude Code transcripts) ─────────┤  mise run devtel-import
+                                                                          ▼  (also at each session start)
+                           ~/.local/share/loomdsp/devtel/devtel.duckdb  (archive and views)
+                                                                          │
+                              devtel-report · devtel (DuckDB UI) · devtel-traces (waterfall)
 ```
 
 ### Writers
 
-Writers append spans to the spool. Each one takes a few milliseconds, prints nothing, and never changes the exit code of the command it watches.
+Writers append spans to the spool. They print nothing and never change the exit code of the command they watch.
 
-| Writer | Where it hooks in | What it records |
-|---|---|---|
-| Task wrapper (`bin/devtel-sh`) | mise runs every inline task step with it (`unix_default_inline_shell_args` in `mise.toml`) | Task name, command, exit code, duration, working directory, branch, commit, and a hash of the working tree |
-| Git hooks (`devtel.py git`) | prek, in the `post-commit`, `post-checkout`, `post-merge`, `post-rewrite`, and `pre-push` stages | Commit size (files, insertions, deletions), parent count, whether Claude co-authored it, branch switches, rewrites, and the remote name and branch of a push |
-| Claude Code hook (`hook.sh`) | `SessionStart` in `.claude/settings.json` | The session's start, model, and source; sets the trace context for the session; starts an import in the background |
+| Writer | Where it hooks in | What it records | Cost |
+|---|---|---|---|
+| Check runner (`run.sh`) | Each check's `entry` in `prek.toml`, in the commit, push, and manual stages | Check name, command, exit code, duration, branch, commit, a hash of the working tree, and whether it ran in a git hook or before a push | About 150 ms per check: 90 ms for the tree hash, 45 ms for git, and the rest to start Python |
+| Git hooks (`devtel.py git`) | prek, in the `post-commit`, `post-checkout`, `post-merge`, `post-rewrite`, and `pre-push` stages | Commit size (files, insertions, deletions), parent count, whether Claude co-authored it, branch switches, rewrites, and the remote name and branch of a push | Runs in the background, so git does not wait (about 0.4 s of work) |
+| Claude Code hook (`hook.sh`) | `SessionStart` in `.claude/settings.json` | The session's start, model, and source. Sets the trace context for the session and starts an import in the background | About 0.35 s, once per session |
 
-The Claude Code transcripts are the fourth source. They hold every tool call with its timing, the model and tokens of each turn, and the subagents. The import reads them, so no hook per tool call is needed.
+The Claude Code transcripts are the fourth source. They hold every tool call with its timing, the model, effort, and tokens of each response, the subagents, the pull requests a session opened, and Claude Code's own totals for cost and lines changed. The import reads them, so no hook per tool call is needed.
+
+Checks are wrapped in `prek.toml` and not through mise, for two reasons. mise 2026 ignores a project's `unix_default_inline_shell_args` for security reasons. A `shell` on each task would also run a `sh` script as the shell on Windows, where CI runs `mise run test`. A `mise run` started outside a git hook and outside an agent session is therefore not recorded. mise's own OpenTelemetry export, available from mise 2026.9.13, is the likely route to cover it, but it needs a receiver to be running.
+
+The prek hooks that run a builtin check (whitespace, line endings, merge conflicts) have no entry to wrap, so they are not recorded one by one. The time of the `git commit` or `git push` Bash call covers them.
 
 ### Trace context
 
 A Claude Code session is one trace, and its ID is the session UUID. That UUID is 128 bits, like a trace ID, so the hook, the import, and the views all derive the same IDs with no shared state. The SessionStart hook writes `TRACEPARENT` (pointing at the session's root span) and `LOOM_DEVTEL_SESSION` into `CLAUDE_ENV_FILE`. Claude Code then runs every Bash command of the session with them set.
 
-Each writer reads `TRACEPARENT`, records its span as a child of it, and passes its own span on to the processes it starts. That follows the OpenTelemetry environment carrier specification, which mise also follows. So a `mise run` inside a prek hook inside a `git commit` nests correctly at any depth.
+Each writer reads `TRACEPARENT`, records its span as a child of it, and passes its own span on to the processes it starts. That follows the OpenTelemetry environment carrier specification, which mise also follows. So a check inside a prek hook inside a `git commit` nests correctly at any depth.
 
 The trace context set by the hook names the session, not the single tool call, because a hook cannot change a command's environment per call without rewriting it. The `devtel_spans` view therefore moves a span whose parent is the session root under the Bash call it ran inside, found by time. Two Bash calls running at once can make that placement wrong.
 
@@ -72,12 +78,15 @@ The store holds the spool and the archive. It lives in `$LOOM_DEVTEL_DIR`, or by
 
 `mise run devtel-import` runs the import. Every reader runs it first, and so does the SessionStart hook, in the background.
 
-- **It is idempotent.** Every row has a natural key: a transcript record's session and UUID, a subagent's session and agent ID, or a span's trace and span ID. The import only inserts rows whose key is new, so a second run changes nothing.
+- **It is idempotent.** Every row has a natural key: a transcript record's session and UUID (or a hash of the record, for records without a UUID), a subagent's session and agent ID, or a span's trace and span ID. The import only inserts rows whose key is new, so a second run changes nothing.
 - **It only adds.** A transcript that Claude Code deleted keeps every row it already gave. Run any devtel command at least once a month, so nothing expires before it is imported.
 - **It is incremental.** A file is read again only when its size or time changed.
-- **It keeps metadata and commands only.** It keeps tool names, command lines (up to 2000 characters), file paths, search patterns, subagent types and models, timestamps, errors, models, and token counts. It does not keep prompt text, replies, or tool output. A person's prompt is kept only as "a prompt of N characters".
+- **It keeps metadata and commands only.** It keeps tool names, command lines (up to 2000 characters), file paths, search patterns, subagent types and models, timestamps, errors, models, effort, token counts, pull request numbers, session titles, and cost totals. It does not keep prompt text, replies, or tool output. A person's prompt is kept only as "a prompt of N characters". Claude Code's own bookkeeping records (request bodies, file snapshots, attachments) are skipped.
+- **Columns are only added.** The archive outlives the transcripts it came from, so a field the import drops is lost for good. A new column goes into `schema.sql` as an `alter table ... add column`, never by changing a table, so an existing archive gains it.
 
 The views are created again on every import, so improving a view changes how all of history reads.
+
+Claude Code writes one transcript record per content block of a response, and each one repeats the response's token usage. Count tokens per message (`devtel_turns`), never per record, or they come out about twice too high.
 
 ### Readers
 
@@ -85,16 +94,18 @@ The views are created again on every import, so improving a view changes how all
 |---|---|
 | `mise run devtel-report` | Time by kind of work, re-runs, possible loops, models and tokens, commits, and the largest sessions |
 | `mise run devtel` | The DuckDB UI, a notebook for your own SQL. The page loads its code from `ui.duckdb.org`, but queries and data stay local. Not on Intel Macs. |
-| `mise run devtel-traces` | otel-desktop-viewer, with each session as a waterfall. It runs only while open and holds the spans in memory. On the first run, pick a wide time range: the page starts on the last hour. No Intel Mac build. |
+| `mise run devtel-traces` | otel-desktop-viewer, with each session as a waterfall. It runs only while open, holds the spans in memory, and stops when you stop the task. Pick a wide time range: the page starts on the last hour. No Intel Mac build. |
 | `python3 scripts/devtel/devtel.py export FILE` | Every span as OTLP JSON lines, for any other OpenTelemetry tool |
 
 ## Views
 
 | View | One row per | Use it for |
 |---|---|---|
-| `devtel_tools` | Tool call | Timing, kind of work, errors, and the command, normalised |
-| `devtel_spans` | Span, from every source | Traces: sessions, subagents, tool calls, tasks, and git events, in one OpenTelemetry shape |
-| `devtel_sessions` | Claude Code session | Size and cost: time, tool calls, subagents, tokens, waiting, checking, commits, and lines changed |
+| `devtel_tools` | Tool call | Timing, kind of work, errors, the command (normalised), and the git operation |
+| `devtel_turns` | Response from the model | Model, effort, thinking time, and tokens, counted once |
+| `devtel_prs` | Pull request a session opened or worked on | Linking sessions to pull requests, from Claude Code's own records |
+| `devtel_spans` | Span, from every source | Traces: sessions, subagents, tool calls, checks, and git events, in one OpenTelemetry shape |
+| `devtel_sessions` | Claude Code session | Size and cost: time, tool calls, subagents, tokens, cost, lines changed, pull requests, waiting, checking, and commits |
 | `devtel_reruns` | Check run again with nothing changed | Waste (see below) |
 | `devtel_loops` | Command run 3 or more times within 10 calls of one agent | Agents stuck in a loop |
 
@@ -113,30 +124,32 @@ A command that does several things counts as the first match in the order `views
 
 ### Re-runs and loops
 
-A re-run is a check that ran again when nothing had changed, so it could not tell anything new. There are two measures:
+A re-run is a check that ran again when nothing had changed, so it could not tell anything new. `devtel_reruns` has three measures:
 
-- **same tree** is exact. The task wrapper hashes the working tree before each step, with `git add -A` into a temporary index and `git write-tree`. That takes about 80 ms and leaves your index alone. Two runs of the same step on the same tree, with the same result, count as one run and one re-run.
-- **no edit** is an estimate from the transcripts: an agent ran the same check command again with no Edit or Write call in between. Code can also change through git or a shell command, so it is an upper bound. It covers history from before the task wrapper existed.
+- **same tree** is exact. `run.sh` hashes the working tree before each check, with `git add -A` into a temporary index and `git write-tree`. That leaves your index alone. It writes each new file version into `.git/objects` once, and `git gc` prunes them. Two runs of a check on the same tree count as one run and one re-run, whether by hand, in the commit hook, or before push. prek splits a check's files into batches. Batches that overlap in time, or follow each other within a second, count as one run, so two separate runs less than a second apart also count as one.
+- **no change** is an estimate from the transcripts: the same check command ran again in a session with no tool call in between that may have changed the code. Agents change code through Bash as often as through the Edit tool, so `devtel_may_write` also counts in-place editors, scripts on stdin, heredocs, redirects into files, git commands that change the tree, and formatters. That rule is broad, so this measure is a lower bound.
+- **hook after check** is an estimate from the transcripts: a `git commit` or `git push` that came right after the session ran a test or check, with no change in between, and that did not itself run a check. Its hooks re-checked code that had just been checked. The hooks run only some of the checks, so this is time spent re-checking, not all waste.
 
-A loop is the same normalised command run 3 or more times within 10 tool calls of one agent. Normalising removes a leading `cd`, output redirection, and a trailing `head`, `tail`, `grep`, or `wc`.
+A loop is the same normalised command run 3 or more times within 10 tool calls of one agent. Normalising removes a leading `cd` or `git add`, environment assignments, `time`, `nice`, and `mise exec --`, output redirection, and a trailing `head`, `tail`, `grep`, or `wc`.
 
 ## Measuring efficiency
 
 Raw counts invite gaming, so compare like with like:
 
-- **Size:** a session's commits, insertions, and deletions, and later the issue's Size field.
+- **Size:** a session's commits, lines changed, and pull requests, and later the issue's Size field.
 - **Rate:** re-run minutes, loop minutes, and waiting minutes per session or per 100 lines changed.
+- **Cost:** tokens and cost per pull request or per 100 lines changed, by model.
 - **Trend:** the same report over two periods, such as before and after a change to a skill or a hook.
 
 The first targets will come from the first weeks of data. They are not set yet.
 
 ## Out of scope for now
 
-- GitHub: pull requests, reviews, and CI runs. Trace context could reach CI through a pull request label or a commit trailer later.
+- GitHub: reviews and CI runs. Trace context could reach CI through a pull request label or a commit trailer later.
 - A collector service or a hosted backend.
-- Commands typed in your own terminal outside mise and git.
-- A hook per Claude Code tool call. The transcripts already hold the timing. A `PostToolUse` hook would add `duration_ms` without permission waits, so it is a possible later step.
+- Commands typed in your own terminal outside git hooks, and `mise run` outside a git hook or an agent session (see [Writers](#writers)).
+- A hook per Claude Code tool call. The transcripts already hold the timing. A `PostToolUse` hook would add `duration_ms` without permission waits, and the working tree's hash for checks an agent runs by hand, which would make "by hand, then in the hook" exact. It waits until the SessionStart hook has run in real sessions for a while.
 
 ## Testing
 
-`mise run devtel-test` runs the unit tests (encoding, trace context, the writers) and, when mise is available, an import into a temporary store from a made-up transcript. The import tests check that importing is idempotent, that deleted transcripts keep their rows, and that no prompt or output text is stored.
+`mise run devtel-test` runs the unit tests (encoding, trace context, the writers, `run.sh`) and, when mise is available, an import into a temporary store from a made-up transcript. The import tests check that importing is idempotent, that deleted transcripts keep their rows, that no prompt or output text is stored, that a check under a Bash call nests under it, and that a check on the same tree is a re-run.
