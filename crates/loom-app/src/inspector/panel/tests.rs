@@ -611,10 +611,7 @@ fn a_screen_readers_slider_steps_end_with_time_alone() {
     ui.a11y_action(&slider, accesskit::Action::Increment);
     assert_eq!(ui.app().session.edits.history.len(), steps, "the group is still open");
     let heard = ui.wake_after(std::time::Duration::from_millis(600));
-    let ends = heard
-        .iter()
-        .filter(|m| matches!(m, Message::Inspector(crate::inspector::Message::Slid { end: true, .. })))
-        .count();
+    let ends = heard.iter().filter(|m| matches!(m, Message::SliderReleased)).count();
     assert_eq!(ends, 1, "one End: {heard:?}");
     assert_eq!(ui.app().session.edits.history.len(), steps + 1, "one undo step");
 }
@@ -1043,7 +1040,7 @@ fn an_exposed_slider_stores_the_value_over_its_surface_range() {
         .app()
         // Off the middle: on a log scale, 0.5 is the same frequency over
         // 20 to 20000 Hz as over 200 to 2000 Hz.
-        .inspector_slid(&slider, 0.25, loom_ui::SlidePhase::End)
+        .inspector_slid(&slider, 0.25, loom_ui::SlidePhase::Move)
         .expect("the exposed slider routes");
     ui.send(message);
     let stored = ui.app().session.controller.graph().node(svf).unwrap().params[cutoff];
@@ -1160,4 +1157,49 @@ fn a_covered_rows_field_takes_no_screen_readers_value() {
         let _ = ui.redraw();
         assert_eq!(cutoff(&ui), before, "under {name}, the covered field changed nothing");
     }
+}
+
+/// The end of a slider's gesture writes nothing: after two steps, a value
+/// set some other way before the group of steps closes, as a MIDI control
+/// sets it, is the value left once it closes (CodeRabbit on #900).
+#[test]
+fn a_sliders_end_keeps_a_value_set_after_its_last_step() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.app_mut().a11y_event(crate::a11y::Event::Activated);
+    let _ = ui.redraw();
+    let slider = ids::part(&ids::row(4, ids::Kind::Param, "cutoff"), "value");
+    ui.a11y_action(&slider, accesskit::Action::Increment);
+    ui.a11y_action(&slider, accesskit::Action::Increment);
+    let module = loom_core::ModuleId(4);
+    ui.app_mut()
+        .session
+        .controller
+        .set_param(module, 0, 1234.0)
+        .expect("set as MIDI would");
+    let heard = ui.wake_after(std::time::Duration::from_millis(600));
+    let cutoff = ui.app().session.controller.graph().node(module).unwrap().params[0];
+    assert_eq!(cutoff, 1234.0, "the end wrote no older position");
+    assert!(
+        heard.iter().any(|m| matches!(m, Message::SliderReleased)),
+        "the group closed"
+    );
+}
+
+/// A screen reader edits a row's value field as it edits any of the
+/// runtime's fields: ReplaceSelectedText on the text the focus selected
+/// makes the draft. Only SetValue is the app's, which commits it as one
+/// step (section 7, rule 10; CodeRabbit on #900).
+#[test]
+fn a_readers_replace_selection_on_a_value_field_makes_the_draft() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.app_mut().a11y_event(crate::a11y::Event::Activated);
+    let _ = ui.redraw();
+    let field = ids::part(&ids::row(4, ids::Kind::Param, "cutoff"), "field");
+    ui.a11y_action(&field, accesskit::Action::Focus);
+    assert_eq!(focused(&ui), Some(field.clone()), "the field has the focus");
+    ui.a11y_replace_selection(&field, "777");
+    let draft = ui.app().session.value_draft.as_ref().map(|d| d.draft.text.clone());
+    assert_eq!(draft.as_deref(), Some("777"), "the selected value is replaced");
 }

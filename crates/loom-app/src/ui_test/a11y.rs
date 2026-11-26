@@ -404,6 +404,16 @@ impl Ui {
         self.a11y_request(target, Action::SetValue, Some(data));
     }
 
+    /// Replaces the selected text of the field `target` names with `text`,
+    /// as a screen reader's ReplaceSelectedText does.
+    pub fn a11y_replace_selection(&mut self, target: impl A11yTarget, text: &str) {
+        self.a11y_request(
+            target,
+            Action::ReplaceSelectedText,
+            Some(ActionData::Value(text.into())),
+        );
+    }
+
     /// Sends a request for `action` on `target`, with `data`.
     fn a11y_request(&mut self, target: impl A11yTarget, action: Action, data: Option<ActionData>) {
         let tree = self.a11y_tree();

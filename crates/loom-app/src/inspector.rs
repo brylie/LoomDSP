@@ -57,26 +57,15 @@ pub(crate) enum Message {
     SubPatchNameApply { module: u32 },
     /// The runtime's slider for a parameter moved to `value`, taken from
     /// its position over the range the row shows (an exposed row's
-    /// surface range, which can be narrower than the parameter's), and
-    /// `end` when its gesture ended, which closes the undo step as a
-    /// release does (ui-layer.md, section 5, rule 16).
-    Slid {
-        module: u32,
-        index: usize,
-        value: f32,
-        end: bool,
-    },
+    /// surface range, which can be narrower than the parameter's). The end
+    /// of its gesture is `SliderReleased` (ui-layer.md, section 5, rule 16).
+    Slid { module: u32, index: usize, value: f32 },
     /// The runtime's depth slider on a modulation's card moved, from -1 to
-    /// 1, and `end` when its gesture ended.
-    DepthSlid { id: AssignmentId, depth: f32, end: bool },
-    /// The runtime's slider for a stack's spread moved, from 0 to 1, and
-    /// `end` when its gesture ended (sub-patches.md, The editor for modes).
-    SpreadSlid {
-        tile: u32,
-        name: String,
-        amount: f32,
-        end: bool,
-    },
+    /// 1.
+    DepthSlid { id: AssignmentId, depth: f32 },
+    /// The runtime's slider for a stack's spread moved, from 0 to 1
+    /// (sub-patches.md, The editor for modes).
+    SpreadSlid { tile: u32, name: String, amount: f32 },
     /// **Full** was picked in a parameter's **Range** select: the
     /// parameter's whole range (control-ranges.md; Brylie, 2026-11-25).
     FullRange { module: u32, index: usize },
@@ -669,36 +658,17 @@ impl App {
             Message::ValueDraftClear => self.clear_value_draft(),
             Message::Range { module, index, range } => self.set_range(module, index, range),
             Message::FullRange { module, index } => self.set_full_range(module, index),
-            Message::Slid {
-                module,
-                index,
-                value,
-                end,
-            } => {
+            Message::Slid { module, index, value } => {
                 self.inspector_message(Message::ParamValue { module, index, value });
-                if end {
-                    self.close_slider_gesture();
-                }
             }
-            Message::SpreadSlid {
-                tile,
-                name,
-                amount,
-                end,
-            } => {
+            Message::SpreadSlid { tile, name, amount } => {
                 self.mode_message(crate::modes::Message::SetSpread { tile, name, amount });
-                if end {
-                    self.close_slider_gesture();
-                }
             }
-            Message::DepthSlid { id, depth, end } => {
+            Message::DepthSlid { id, depth } => {
                 // On the percent grid, as the card says the depth and as
                 // Iced's slider stepped it, by drag and by key alike.
                 let depth = (depth * 100.0).round() / 100.0;
                 self.modulation_message(crate::modulation::Message::Depth { id, depth });
-                if end {
-                    self.close_slider_gesture();
-                }
             }
             Message::SelectModule(id) => {
                 if self.session.controller.graph().node(ModuleId(id)).is_some() {

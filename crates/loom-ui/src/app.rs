@@ -231,6 +231,17 @@ pub trait App {
         None
     }
 
+    /// Whether a screen reader's SetValue on the field `field` is the
+    /// app's to carry out, through [`App::accessibility_event`], rather
+    /// than the runtime's: a field whose value the app commits whole, as
+    /// one step, where the runtime would only make a draft of it. The
+    /// field's ReplaceSelectedText and SetTextSelection stay the
+    /// runtime's (section 7, rule 10). False by default.
+    fn commits_set_value(&self, field: &UiId) -> bool {
+        let _ = field;
+        false
+    }
+
     /// The message for "what a field reports to a screen reader changed":
     /// its text, its caret, its selection, or its scroll (section 7, rule
     /// 7), or a scroll container's offset (rule 28). An edit gives both: [`FieldEvent::Edited`](crate::FieldEvent::Edited)

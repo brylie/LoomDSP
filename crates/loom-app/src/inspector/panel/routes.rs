@@ -140,16 +140,28 @@ impl App {
         None
     }
 
-    /// The message for a slider of the rows moving to `position`, in
-    /// `phase` of its gesture: a parameter's value, or a modulation's
-    /// depth. The end of a gesture closes its undo step, as Iced's slider's
-    /// release did.
+    /// The message for a slider of the rows in `phase` of its gesture. Only
+    /// a move writes: every change of position comes as one. The start
+    /// writes nothing, so a depth off the percent grid is not rounded
+    /// before the slider moves, and the end only closes the undo step, as
+    /// Iced's slider's release did, so it never writes the last position
+    /// over a value MIDI set since (CodeRabbit on #900).
     pub(crate) fn inspector_slid(&self, id: &UiId, position: f32, phase: SlidePhase) -> Option<crate::Message> {
+        let moved = self.inspector_slid_to(id, position)?;
+        match phase {
+            SlidePhase::Start => None,
+            SlidePhase::Move => Some(moved),
+            SlidePhase::End => Some(crate::Message::SliderReleased),
+        }
+    }
+
+    /// The message for a slider of the rows moving to `position`: a
+    /// parameter's value, a stack's spread, or a modulation's depth.
+    fn inspector_slid_to(&self, id: &UiId, position: f32) -> Option<crate::Message> {
         use crate::Message;
         if !self.inspector_owns() {
             return None;
         }
-        let end = phase == SlidePhase::End;
         let model = self.inspector_model();
         if let Inspector::SubPatch(sub) = &model {
             let spreads = ids::part(&ids::panel(sub.id), "spread");
@@ -162,7 +174,6 @@ impl App {
                     tile: sub.id,
                     name: spread.name.clone(),
                     amount: position,
-                    end,
                 }));
             }
         }
@@ -175,7 +186,6 @@ impl App {
                     module,
                     index: p.index,
                     value: p.spec.denormalize(position),
-                    end,
                 }));
             }
             if let ParamMode::Edit { assignments, .. } = &p.mode {
@@ -184,7 +194,6 @@ impl App {
                         return Some(Message::Inspector(super::super::Message::DepthSlid {
                             id: a.id,
                             depth: position.mul_add(2.0, -1.0),
-                            end,
                         }));
                     }
                 }

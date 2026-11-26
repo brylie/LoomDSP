@@ -834,6 +834,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
         let target = self.app.access_target(request.target_node)?;
         let field = self.panels.fields.owner_of(&target)?.clone();
+        // A SetValue the app commits whole is the app's; the field's
+        // selection and partial replacement stay the runtime's.
+        if request.action == KitAction::SetValue && self.app.commits_set_value(&field) {
+            return None;
+        }
         // A field below the layer taking input, or turned off, takes no
         // screen reader action (section 5, rule 3; rule 22): the action is
         // used up and changes nothing, so nothing is reported.

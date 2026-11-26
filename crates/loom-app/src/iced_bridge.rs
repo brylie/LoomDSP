@@ -416,13 +416,16 @@ impl loom_ui::App for Hosted {
     /// The UI ID the node `node` names, from the tree's own table, so the
     /// runtime carries out a screen reader's text actions on its fields.
     fn access_target(&self, node: accesskit::NodeId) -> Option<UiId> {
-        // A field of the inspector's rows is left out: the runtime's own
-        // SetValue would only make a draft of the value, and the app's
-        // item commits it as one undo step, as Iced's field did (plan 3.2,
-        // row 4d.2; `App::inspector_commits_set_value`).
-        self.0
-            .a11y_ui_id(node)
-            .filter(|id| !self.0.inspector_commits_set_value(id))
+        self.0.a11y_ui_id(node)
+    }
+
+    /// A SetValue on a field of the inspector's rows is the app's: the
+    /// runtime's would only make a draft of the value, and the app's item
+    /// commits it as one undo step, as Iced's field did (plan 3.2, row
+    /// 4d.2; `App::inspector_commits_set_value`). Its selection and partial
+    /// replacement stay the runtime's (CodeRabbit on #900).
+    fn commits_set_value(&self, field: &UiId) -> bool {
+        self.0.inspector_commits_set_value(field)
     }
 
     /// What a field reports to a screen reader changed: the tree is built
