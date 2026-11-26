@@ -114,7 +114,7 @@ A reused check still writes its devtel span, with `loom.devtel.reused = true` an
 
 ## Cost
 
-Per wrapped check, reuse adds about 150 ms to a run that devtel already slows by about 150 ms: 45 ms for the tool versions, a few ms to read the Cargo configuration, and about 90 ms to hash the tree a second time after a pass. A reused check takes about 250 ms in all. A clippy run that rebuilds a crate takes several seconds to minutes.
+Per wrapped check, reuse adds about 150 ms to a run that devtel already slows by about 150 ms: 45 ms for the tool versions, a few ms to read the Cargo configuration, and about 90 ms to hash the tree a second time after a pass. Measured on 2026-11-26 (prek 0.4.8, macOS, this repository), a reused check takes 0.3 to 0.7 s in prek's report, most of it starting Python and git, against 1 to 3 s for the scripts and fmt, and 109 s for a clippy run that rebuilt the workspace.
 
 ## Decisions
 
