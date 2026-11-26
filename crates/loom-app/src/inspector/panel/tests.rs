@@ -1094,3 +1094,70 @@ fn a_commit_by_leaving_a_field_wakes_autosave() {
         "autosave looks again after a value"
     );
 }
+
+/// A whole-number parameter steps one value by key however wide its
+/// range, as Iced's slider did on main: a noise seed spans 1 to 65535,
+/// so a step of 1% would skip about 655 seeds (CodeRabbit on #900).
+#[test]
+fn a_wide_whole_number_slider_steps_one_value_by_key() {
+    let mut ui = Ui::open("plucked-string.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.redraw();
+    let seed = |ui: &Ui| {
+        let node = ui
+            .app()
+            .session
+            .controller
+            .graph()
+            .node(loom_core::ModuleId(4))
+            .unwrap();
+        let index = loom_core::ModuleNames::parameter_index(node, "seed").expect("a seed");
+        node.params[index]
+    };
+    let slider = ids::part(&ids::row(4, ids::Kind::Param, "seed"), "value");
+    ui.focus(&slider);
+    assert_eq!(focused(&ui), Some(slider), "the seed's slider has the focus");
+    let before = seed(&ui);
+    let _ = ui.tap(Key::Named(Named::ArrowRight), Modifiers::empty());
+    assert_eq!(seed(&ui), before + 1.0, "one arrow, one seed");
+}
+
+/// Under an open overlay the inspector's rows are covered and act on
+/// nothing (ui-layer.md, section 5, rule 24): a screen reader's SetValue
+/// on a stale node of a row's field changes no value, under help and
+/// under Preferences. A MIDI range field takes the same path, the guard
+/// in `App::a11y_panel_action` (CodeRabbit on #900).
+#[test]
+fn a_covered_rows_field_takes_no_screen_readers_value() {
+    /// An overlay's name, and how to open it over a selected module.
+    type Open = (&'static str, fn(&mut Ui));
+    let opens: [Open; 2] = [
+        ("help", |ui| ui.send(Message::ShowHelp)),
+        ("Preferences", |ui| {
+            let _ = ui.tap(Key::Character(",".into()), Modifiers::COMMAND);
+        }),
+    ];
+    let cutoff = |ui: &Ui| {
+        ui.app()
+            .session
+            .controller
+            .graph()
+            .node(loom_core::ModuleId(4))
+            .unwrap()
+            .params[0]
+    };
+    for (name, open) in opens {
+        let mut ui = Ui::open("subtractive.ron");
+        ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+        ui.app_mut().a11y_event(crate::a11y::Event::Activated);
+        let _ = ui.redraw();
+        let field = ids::part(&ids::row(4, ids::Kind::Param, "cutoff"), "field");
+        let before = cutoff(&ui);
+        open(&mut ui);
+        let _ = ui.redraw();
+        assert!(!ui.app().no_overlay(), "{name} covers the column");
+        ui.a11y_set_value(&field, "500");
+        let _ = ui.redraw();
+        assert_eq!(cutoff(&ui), before, "under {name}, the covered field changed nothing");
+    }
+}

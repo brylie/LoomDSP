@@ -366,7 +366,10 @@ fn value_control(
             // A whole-number parameter steps one value by key and by drag;
             // a continuous one 1% of the travel by key, 0.1% with Shift, and
             // drags freely (the decisions row of 2026-11-11).
-            let whole = step > 0.001 + f32::EPSILON;
+            // By the parameter's kind, as `param::slider_step` decides
+            // the step: a seed spans 1 to 65535, so its step is far under
+            // 0.001 and still one value (CodeRabbit on #900).
+            let whole = p.spec.options.integer && p.spec.max > p.spec.min;
             let slider = Slider::new(position).ghost(ghost);
             let slider = if whole {
                 slider.key_step(step).fine_key_step(step).drag(Drag::Step(step))
