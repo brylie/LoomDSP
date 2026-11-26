@@ -38,6 +38,24 @@ select model, count(*) as turns, count(distinct session_id) as sessions,
 from devtel_turns where ts >= now() - to_days($DAYS)
 group by 1 order by turns desc;
 
+.print '== Cost and model by subagent type (token shares; the archive has cost per session only)'
+-- A model change for an agent type shows as a new row with its own first
+-- and last day, so a later report can compare the two.
+with turns as (
+  select tu.*, coalesce(a.agent_type, case when tu.agent_id is null then '(main thread)' else '?' end) as agent_type
+  from devtel_turns tu left join claude_agents a using (session_id, agent_id)
+  where tu.ts >= now() - to_days($DAYS)
+),
+sized as (
+  select *, input_tokens + coalesce(cache_read_tokens, 0) + coalesce(cache_write_tokens, 0) as all_input from turns
+)
+select agent_type, model, count(distinct coalesce(agent_id, session_id)) as agents, count(*) as turns,
+  round(sum(output_tokens) / 1e6, 2) as output_mtok, round(sum(all_input) / 1e6, 1) as input_mtok,
+  round(100.0 * sum(all_input) / sum(sum(all_input)) over (), 1) as input_share_pct,
+  round(sum(all_input) / count(*) / 1000) as input_k_per_turn,
+  min(ts)::date as first_day, max(ts)::date as last_day
+from sized group by all order by input_mtok desc limit 15;
+
 .print '== Work done (from the git hooks; empty until they are installed)'
 select count(*) as commits,
   count(*) filter (where attributes['loom.devtel.commit.agent_coauthored'] = 'true') as agent_commits,

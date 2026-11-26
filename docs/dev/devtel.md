@@ -91,7 +91,7 @@ Claude Code writes one transcript record per content block of a response, and ea
 
 | Command | What it shows |
 |---|---|
-| `mise run devtel-report` | Time by kind of work, re-runs, possible loops, models and tokens, commits, and the largest sessions |
+| `mise run devtel-report` | Time by kind of work, re-runs, possible loops, models and tokens, tokens and model by subagent type (a model change shows as a new row with its own dates), commits, and the largest sessions |
 | `mise run devtel` | otel-desktop-viewer, with each session as a waterfall. It runs only while open, holds the spans in memory, and stops when you stop the task. Pick a wide time range: the page starts on the last hour. No Intel Mac build. |
 | `python3 scripts/devtel/devtel.py export FILE` | Every span as OTLP JSON lines, for any other OpenTelemetry tool |
 
