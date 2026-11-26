@@ -9,11 +9,10 @@ Everything stays on your machine. Nothing is sent anywhere.
 ## Quick start
 
 ```sh
-mise install                 # Python for the scripts (DuckDB and the viewer come on first use)
+mise install                 # Python for the scripts (DuckDB, the storage, and the viewer come on first use)
 prek install                 # once more after pulling this change: it adds the post-commit and other git hooks
 mise run devtel-report       # the efficiency report for the last 14 days (--days N to change)
-mise run devtel              # the DuckDB UI over the archive, for your own queries
-mise run devtel-traces       # every session as a trace waterfall in otel-desktop-viewer
+mise run devtel              # every session as a trace waterfall in otel-desktop-viewer (--days N, default 14)
 ```
 
 The report also reads Claude Code's own transcripts, so it shows months of history before any hook has run.
@@ -37,7 +36,7 @@ Claude Code session ──── SessionStart hook ── exports TRACEPARENT, L
                                                                           ▼  (also at each session start)
                            ~/.local/share/loomdsp/devtel/devtel.duckdb  (archive and views)
                                                                           │
-                              devtel-report · devtel (DuckDB UI) · devtel-traces (waterfall)
+                              devtel-report (text) · devtel (otel-desktop-viewer waterfall)
 ```
 
 ### Writers
@@ -71,7 +70,7 @@ Work outside an agent session (your own terminal) gets a new trace for each top-
 The store holds the spool and the archive. It lives in `$LOOM_DEVTEL_DIR`, or by default `$XDG_DATA_HOME/loomdsp/devtel` (`~/.local/share/loomdsp/devtel`). It is outside the repository, so every worktree shares it and it outlives them all.
 
 - `spool/<day>/<source>.jsonl` holds OTLP JSON, one `TracesData` object per line. Writers append with a single write call, so lines written at the same time do not mix.
-- `devtel.duckdb` is the archive. Only the import writes to it. The readers (the report, the DuckDB UI, and the export for the trace viewer) open it read-only, so any number of them can be open at once. DuckDB allows many readers or one writer, so an import that finds a reader open is skipped with a note, and its data comes in at the next import. A reader that finds an import running waits up to 30 seconds for it.
+- `devtel.duckdb` is the archive. Only the import writes to it. The readers (the report and the export for the trace viewer) open it read-only, so they can run at once. DuckDB allows many readers or one writer, so an import that finds a reader open is skipped with a note, and its data comes in at the next import. A reader that finds an import running waits up to 30 seconds for it.
 - `import.lock` lets only one import run at a time.
 
 ### Import
@@ -93,9 +92,10 @@ Claude Code writes one transcript record per content block of a response, and ea
 | Command | What it shows |
 |---|---|
 | `mise run devtel-report` | Time by kind of work, re-runs, possible loops, models and tokens, commits, and the largest sessions |
-| `mise run devtel` | The DuckDB UI, a notebook for your own SQL. The page loads its code from `ui.duckdb.org`, but queries and data stay local. Not on Intel Macs. |
-| `mise run devtel-traces` | otel-desktop-viewer, with each session as a waterfall. It runs only while open, holds the spans in memory, and stops when you stop the task. Pick a wide time range: the page starts on the last hour. No Intel Mac build. |
+| `mise run devtel` | otel-desktop-viewer, with each session as a waterfall. It runs only while open, holds the spans in memory, and stops when you stop the task. Pick a wide time range: the page starts on the last hour. No Intel Mac build. |
 | `python3 scripts/devtel/devtel.py export FILE` | Every span as OTLP JSON lines, for any other OpenTelemetry tool |
+
+DuckDB is only the storage. To query the archive with SQL yourself, open it read-only, for example `mise exec $LOOM_DEVTEL_DUCKDB -- duckdb -readonly ~/.local/share/loomdsp/devtel/devtel.duckdb`.
 
 ## Views
 

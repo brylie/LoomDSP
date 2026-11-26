@@ -219,18 +219,13 @@ description = "Run everything CI runs (all but msrv and the macOS and Windows te
 # `doctest` covers the rest.
 depends = ["fmt", "clippy", "typos", "adr-status", "test-placement", "portable", "ui-no-toolkit", "worktree-targets", "deny", "docs", "wasm", "coverage", "doctest"]
 
-[tasks.devtel]
-description = "Open the DuckDB UI over the development telemetry archive (docs/dev/devtel.md)"
-run = "python3 scripts/devtel/devtel.py ui"
-raw = true
-
 [tasks.devtel-report]
 description = "Print the development efficiency report: time by kind of work, re-runs, loops, models, commits"
 usage = 'flag "--days <days>" default="14" help="How many days back"'
 run = "python3 scripts/devtel/devtel.py report --days ${usage_days}"
 
-[tasks.devtel-traces]
-description = "Open every session as a trace waterfall in otel-desktop-viewer"
+[tasks.devtel]
+description = "Open every session as a trace waterfall in otel-desktop-viewer (docs/dev/devtel.md)"
 usage = 'flag "--days <days>" default="14" help="How many days back"'
 run = "python3 scripts/devtel/devtel.py traces --days ${usage_days}"
 raw = true

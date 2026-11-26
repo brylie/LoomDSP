@@ -13,8 +13,7 @@ Writers (fast, append only, never fail the caller):
 Readers (run on demand):
   import     copies Claude Code transcripts and the spool into the archive
   report     prints the efficiency report
-  ui         opens the DuckDB UI over the archive
-  traces     opens otel-desktop-viewer with every span loaded
+  traces     opens otel-desktop-viewer with every span loaded (mise run devtel)
   export     writes the archive as OTLP JSON lines
 
 Standard library only, and Python 3.9 compatible, so a hook still works
@@ -545,8 +544,8 @@ def run_duckdb(sql, json_output=False, database=None, readonly=False, wait=0.0):
     """Run SQL in DuckDB against the archive and return stdout.
 
     DuckDB lets many read-only connections share a file, or one writer have
-    it alone. Readers open it read-only, so the DuckDB UI, a report, and the
-    trace viewer can all be open at once. A call that meets a lock held by
+    it alone. Readers open it read-only, so a report and the trace viewer
+    can be open at once. A call that meets a lock held by
     another process tries again for up to `wait` seconds (an import takes a
     few), then raises ArchiveBusy.
     """
@@ -631,19 +630,19 @@ def import_all(quiet=False):
     Idempotent: every row has a natural key and the import only inserts,
     so running it twice changes nothing, and a transcript Claude Code has
     deleted keeps every row it already gave. When another import is
-    running, or the DuckDB UI is starting, it is skipped.
+    running, it is skipped.
     """
     lock = take_import_lock()
     if lock is None:
         if not quiet:
-            print("devtel: another import is running, or the DuckDB UI is starting; import skipped", file=sys.stderr)
+            print("devtel: another import is running; import skipped", file=sys.stderr)
         return 1
     try:
         return import_locked(quiet)
     except ArchiveBusy:
         if not quiet:
             print(
-                "devtel: the archive is open elsewhere (the DuckDB UI or the trace viewer), so the import was "
+                "devtel: the archive is being read by another devtel command, so the import was "
                 "skipped; showing the data of the last import. Close the other window to import new data.",
                 file=sys.stderr,
             )
@@ -695,36 +694,6 @@ def report(days):
     return 0
 
 
-def open_ui(port=4213):
-    """Open the DuckDB UI over the archive, after an import.
-
-    The DuckDB shell gives up at once when it meets a lock. So the UI starts
-    while holding import.lock, which every import takes before it writes,
-    and keeps it until the UI's server answers, by which time DuckDB has the
-    archive open read-only. An import after that skips on DuckDB's own lock.
-    """
-    import_all()
-    print("devtel: opening the DuckDB UI. The page loads its assets from ui.duckdb.org; your data stays local.")
-    print("devtel: start with `from devtel_sessions` or `from devtel_reruns`. Quit with Ctrl-D.", flush=True)
-    lock = take_import_lock(wait=30)
-    if lock is None:
-        print("devtel: an import is still running after 30 seconds; try again shortly", file=sys.stderr)
-        return 1
-    try:
-        # Read-only, so reports, imports of other windows, and the trace
-        # viewer can still read the archive while the UI is open.
-        ui = subprocess.Popen(duckdb_cmd() + ["-readonly", "-cmd", "set ui_local_port=%d" % port, "-ui", archive_path()])
-        wait_for_port(port, 60)
-    finally:
-        lock.close()
-    while True:
-        try:
-            return ui.wait()
-        except KeyboardInterrupt:
-            # Ctrl-C belongs to the DuckDB shell, which keeps running.
-            continue
-
-
 def export_otlp(path, days):
     """Write the archive's spans as OTLP JSON lines, one trace per line."""
     import_all(quiet=True)
@@ -755,16 +724,17 @@ def export_otlp(path, days):
 
 
 def wait_for_port(port, seconds):
-    """Wait until something listens on a local port."""
+    """Wait until something listens on a local port. Tries at least once."""
     deadline = time.time() + seconds
-    while time.time() < deadline:
+    while True:
         try:
-            # "localhost" tries IPv6 and IPv4: the DuckDB UI listens on ::1 only.
+            # "localhost" tries IPv6 and IPv4, whichever the server listens on.
             with socket.create_connection(("localhost", port), timeout=0.5):
                 return True
         except OSError:
+            if time.time() >= deadline:
+                return False
             time.sleep(0.25)
-    return False
 
 
 def open_traces(days, port, open_browser=True):
@@ -830,7 +800,6 @@ def main(argv):
     importer.add_argument("--quiet", action="store_true")
     report_parser = commands.add_parser("report", help="print the efficiency report")
     report_parser.add_argument("--days", type=int, default=14)
-    commands.add_parser("ui", help="open the DuckDB UI over the archive")
     traces = commands.add_parser("traces", help="open otel-desktop-viewer with the spans loaded")
     traces.add_argument("--days", type=int, default=14)
     traces.add_argument("--port", type=int, default=8000)
@@ -869,8 +838,6 @@ def readers(args):
         return import_all(args.quiet)
     if args.command == "report":
         return report(args.days)
-    if args.command == "ui":
-        return open_ui()
     if args.command == "traces":
         return open_traces(args.days, args.port, not args.no_open)
     if args.command == "export":

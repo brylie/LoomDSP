@@ -276,8 +276,8 @@ class ArchiveTests(StoreTestCase):
             for line in handle:
                 self.assertIn("resourceSpans", json.loads(line))
 
-    def test_readers_share_the_archive_with_an_open_ui(self):
-        """While another window reads the archive, the import skips and readers still work."""
+    def test_readers_share_the_archive_and_an_import_waits_its_turn(self):
+        """While another command reads the archive, the import skips and readers still work."""
         import select
 
         devtel.import_all(quiet=True)
@@ -301,11 +301,11 @@ class ArchiveTests(StoreTestCase):
         finally:
             holder.stdin.close()
             holder.wait(timeout=30)
-        # Once the other window closes, the next import brings the new span in.
+        # Once the other reader closes, the next import brings the new span in.
         self.assertEqual(devtel.import_all(quiet=True), 0)
         self.assertEqual(json.loads(devtel.run_duckdb(count, json_output=True, readonly=True))[0]["n"], 1)
-    def test_import_skips_while_the_ui_holds_the_import_lock(self):
-        """While the UI is starting it holds import.lock, so no import can take the archive."""
+    def test_import_skips_while_another_import_holds_the_lock(self):
+        """Only one import writes at a time; another one skips and adds nothing."""
         devtel.import_all(quiet=True)
         devtel.emit("hooks", "checks", [devtel.span("a" * 32, "c" * 16, None, "late", 1, 2, {})])
         count = "select count(*) as n from spool_spans where span_id = '%s'" % ("c" * 16)
