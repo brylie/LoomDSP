@@ -277,6 +277,20 @@ impl Document {
         self.settled = false;
     }
 
+    /// Marks the document as autosave leaves it once nothing is due, for
+    /// tests.
+    #[cfg(test)]
+    pub fn settle(&mut self) {
+        self.settled = true;
+    }
+
+    /// True once autosave has nothing due, until something may have
+    /// changed the patch, for tests.
+    #[cfg(test)]
+    pub fn is_settled(&self) -> bool {
+        self.settled
+    }
+
     /// Where Save As starts with no current file, for tests.
     #[cfg(test)]
     pub fn save_hint(&self) -> Option<&Path> {

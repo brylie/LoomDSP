@@ -1930,6 +1930,11 @@ impl App {
             }
             Message::FocusMoved(focus) => {
                 self.focus_moved(focus);
+                // Focus leaving a field commits its draft (a value, the
+                // MIDI range, a tag, the authors), and `FocusMoved` keeps
+                // the patch as far as `keeps_patch` knows: autosave looks
+                // again (CodeRabbit on #900).
+                self.session.document.may_have_changed();
             }
             Message::Inspector(message) => self.inspector_message(message),
             Message::Located {

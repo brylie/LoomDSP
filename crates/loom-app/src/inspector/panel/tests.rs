@@ -1050,3 +1050,47 @@ fn an_exposed_slider_stores_the_value_over_its_surface_range() {
     let shown = surface.denormalize(0.25);
     assert!((stored - shown).abs() < 1e-3, "stored {stored}, the row shows {shown}");
 }
+
+/// A draft that focus leaving commits tells autosave to look again, as
+/// Enter does: a tag, and a module's typed value, each committed by a
+/// press elsewhere (autosave.md; CodeRabbit on #900).
+#[test]
+fn a_commit_by_leaving_a_field_wakes_autosave() {
+    let mut ui = patch_info();
+    ui.focus(&tags_part());
+    let _ = ui.typewrite("dark");
+    ui.app_mut().session.document.settle();
+    let at = centre(&mut ui, &authors_part());
+    click(&mut ui, at);
+    assert_eq!(ui.app().session.document.info().tags, ["dark"], "the tag is added");
+    assert!(
+        !ui.app().session.document.is_settled(),
+        "autosave looks again after a tag"
+    );
+
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.redraw();
+    let field = ids::part(&ids::row(4, ids::Kind::Param, "cutoff"), "field");
+    let at = centre(&mut ui, &field);
+    click(&mut ui, at);
+    let _ = ui.typewrite("500");
+    ui.app_mut().session.document.settle();
+    let other = ids::part(&ids::row(4, ids::Kind::Param, "resonance"), "field");
+    let at = centre(&mut ui, &other);
+    click(&mut ui, at);
+    let (_, cutoff) = (4, 0);
+    let stored = ui
+        .app()
+        .session
+        .controller
+        .graph()
+        .node(loom_core::ModuleId(4))
+        .unwrap()
+        .params[cutoff];
+    assert!((stored - 500.0).abs() < 1e-3, "the value is committed: {stored}");
+    assert!(
+        !ui.app().session.document.is_settled(),
+        "autosave looks again after a value"
+    );
+}
