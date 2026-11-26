@@ -60,6 +60,28 @@ scripts/worktree-targets.sh /path/to/target-root --prune  # delete marked target
 
 The first command is a dry-run and changes nothing. The prune command checks the ownership marker and worktree status again before each deletion. It never deletes active, unmarked, or unrelated directories. Targets created before the marker was added are adopted when setup runs again in their live worktree. Old targets whose worktree is already gone show as `unknown`; review those paths manually before removing them. Do not assume a hash-shaped folder belongs to this tool.
 
+A live target also grows over time. Cargo never deletes the output of an old configuration: each toolchain update (`mise.toml` asks for the latest Rust), `Cargo.lock` change, feature set, or flag change leaves a full copy beside the new one. To find and remove that stale output:
+
+```sh
+scripts/worktree-targets.sh /path/to/target-root --sweep            # list stale folders in live targets, with sizes
+scripts/worktree-targets.sh /path/to/target-root --sweep --delete   # remove exactly those
+scripts/worktree-targets.sh /path/to/target-root --sweep --days 30  # count as stale only after 30 days (default 14)
+```
+
+In every profile folder of a live target (`debug`, `release`, `llvm-cov-target/debug`, `wasm32-unknown-unknown/debug`, and so on), the sweep looks at three kinds of folder and lists one when nothing inside it changed for the given number of days:
+
+- `unit`: `build/<crate>/<hash>/`, one unit of the build folder layout of Cargo 1.100 and later.
+- `incremental`: `incremental/<crate>-<id>/`, rustc's incremental state.
+- `old-layout`: `deps/`, `.fingerprint/`, and `build/<crate>-<hash>/` from the layout before Cargo 1.100. These are listed only when the same profile folder already holds units of the new layout, since an older Cargo would still read them.
+
+It judges age by the files inside a folder, never by the folder alone, because Cargo rewrites files in a unit without touching its folder. Sizes are upper bounds: units of one build share object files through hard links. The sweep never touches orphan or unknown targets (prune those as above), symlinks, lock files, or the ownership marker.
+
+The sweep is safe to run while other worktrees build. Before it reads or removes anything in a target, it takes Cargo's own lock files there (`.cargo-lock`, `.cargo-build-lock`, `.cargo-artifact-lock`) with `flock`, without waiting, and holds them until it is done. If a build holds one, the target shows as `busy` and is skipped. A build that starts during the sweep waits for it, with Cargo's "Blocking waiting for file lock" message. The lock needs `perl`, which macOS and the common Linux systems ship.
+
+The age rule has one cost. A dependency that has not changed for the given number of days, but is still used, can be swept too, and the next build compiles it again, mostly from the sccache cache. A longer `--days` makes that rarer.
+
+`mise run worktree-targets` tests the prune and the sweep on fake target folders (`scripts/test-worktree-targets.sh`, `scripts/test-sweep-targets.sh`).
+
 Then build and run the checks:
 
 ```sh

@@ -161,8 +161,8 @@ description = "Build and test loom-ui without its window shell, to prove the run
 run = "cargo test -p loom-ui --no-default-features"
 
 [tasks.worktree-targets]
-description = "Test worktree target ownership and orphan pruning"
-run = "sh scripts/test-worktree-targets.sh"
+description = "Test worktree target ownership, orphan pruning, and the sweep of stale build output"
+run = ["sh scripts/test-worktree-targets.sh", "sh scripts/test-sweep-targets.sh"]
 
 [tasks.metrics]
 description = "Measure the workspace for an architecture review: sizes, complexity, churn, rule checks, seams; writes target/metrics.md"
