@@ -80,6 +80,49 @@ The sweep is safe to run while other worktrees build. Before it reads or removes
 
 The age rule has one cost. A dependency that has not changed for the given number of days, but is still used, can be swept too, and the next build compiles it again, mostly from the sccache cache. A longer `--days` makes that rarer.
 
+To sweep every week without thinking about it, schedule the delete run. It is safe unattended, because it skips busy targets and removes only old folders. Run it from a checkout that stays on `main`, since the script must run inside the repository. On macOS, save this as `~/Library/LaunchAgents/local.loomdsp.sweep-targets.plist`, with your own paths, and load it with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.loomdsp.sweep-targets.plist`. Create the log folder first.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.loomdsp.sweep-targets</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>date; exec sh scripts/worktree-targets.sh /path/to/target-root --sweep --delete</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/path/to/LoomDSP</string>
+    <!-- Sundays at 03:00. A Mac asleep then runs it when it wakes. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>Nice</key>
+    <integer>10</integer>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>/path/to/logs/sweep-targets.log</string>
+    <key>StandardErrorPath</key>
+    <string>/path/to/logs/sweep-targets.log</string>
+</dict>
+</plist>
+```
+
+`launchctl kickstart gui/$(id -u)/local.loomdsp.sweep-targets` runs it once now. On Linux, a weekly cron line does the same: `0 3 * * 0 cd /path/to/LoomDSP && nice -n 10 sh scripts/worktree-targets.sh /path/to/target-root --sweep --delete >> /path/to/logs/sweep-targets.log 2>&1`. If the drive is not mounted, the run stops with "Target root does not exist" and changes nothing.
+
 `mise run worktree-targets` tests the prune and the sweep on fake target folders (`scripts/test-worktree-targets.sh`, `scripts/test-sweep-targets.sh`).
 
 Then build and run the checks:
