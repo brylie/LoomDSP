@@ -28,7 +28,7 @@ pub(crate) struct Refused {
 }
 
 impl Refused {
-    /// What the status line says: "Not saved: <field>: <reason>".
+    /// What the status line says: `Not saved: <field>: <reason>`.
     pub(crate) fn status(&self) -> String {
         format!("Not saved: {}: {}", self.label, self.reason)
     }
