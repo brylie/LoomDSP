@@ -489,7 +489,7 @@ Docs only. The phase 4 criteria, section 9 as a host contract, the key types, se
 1. Build the host of spec section 9, in `loom-ui`, with no patch words: layout bounds, pointer routing with capture during a drag and the cases that cancel it, hover out, the wheel, keys in both cases (focused, and the home element while nothing has focus), one Tab stop, the cursor, deadlines and animation frames, both ways to draw (painting with no GPU, and the GPU callback, in paint order), nodes under its UI ID, focus requests into inner parts, and drawing above a layer.
 2. The host gets the app's model through the `App` trait: the element's trait gets `&App` on every call, which needs `App: 'static` (spec section 9, the model path). **Proposed**, for Brylie's sign-off on P0.
 3. It is additive. The routing target, `Routed::Later`, and the canvas's place in the bridge stay as they are until P4, and a test shows that an app with no custom element behaves exactly as before.
-4. It replaces nothing yet. Proof: an example program with no LoomDSP (spec section 1, rule 3) and two custom elements, a level meter and a piano roll, each giving its nodes (spec section 9, A contract for every app); a table in the pull request of how each host part holds on the desktop, in a plugin window, and on the web; headless tests for routing, capture, focus, and nodes; `loom-ui`'s `tests/purity.rs`.
+4. It replaces nothing yet. Proof: an example program with no LoomDSP (spec section 1, rule 3) and two custom elements, a level meter and an XY pad, each giving its nodes. The meter and the piano roll stay the design cases the contract is checked against (spec section 9, A contract for every app); the XY pad is the small, buildable example, with no musical types; a table in the pull request of how each host part holds on the desktop, in a plugin window, and on the web; headless tests for routing, capture, focus, and nodes; `loom-ui`'s `tests/purity.rs`.
 5. One pull request, ordered commits (Brylie, 2026-11-26, "One PR, ordered commits"): first everything with no GPU (state by key, layout, routing, capture, the wheel, keys, focus, cursor, ticks, nodes, and the paint path), then the GPU path (the GPU callback, the paint list cut at each element, a lost device, and an offscreen order test). Each commit is tested headless on its own.
 6. Risks: the order of render passes, and who owns the element's state across a level change (spec section 9, rule 1).
 
@@ -574,7 +574,7 @@ The older `harfrust` and `skrifa` should leave with Iced, and likely `read-fonts
 ### Not decided (Proposed)
 
 - Binary size and build time are recorded before and after P5, and are not a gate.
-- P1 builds the host for every app on `loom-ui`, not only LoomDSP's window ([spec section 9, A contract for every app](../design/ui-layer.md#a-contract-for-every-app-built-on-loom-ui)): its example has a level meter and a piano roll beside nothing of LoomDSP's, and its pull request says how each host part holds for a plugin window and the web.
+- P1 builds the host for every app on `loom-ui`, not only LoomDSP's window ([spec section 9, A contract for every app](../design/ui-layer.md#a-contract-for-every-app-built-on-loom-ui)): its example has a level meter and an XY pad beside nothing of LoomDSP's (the piano roll stays a design case), and its pull request says how each host part holds for a plugin window and the web.
 
 ### After #683 (Proposed)
 
