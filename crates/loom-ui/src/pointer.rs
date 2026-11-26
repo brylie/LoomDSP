@@ -162,6 +162,7 @@ impl<A: App> Panels<'_, A> {
     pub fn over_target(&self, event: &Event, point: Point) -> bool {
         let input = self.app.input().layer;
         self.pointer.thumb.is_some()
+            || self.customs.captured().is_some()
             || (self.window.select.is_some() && matches!(event, Event::Pointer(PointerEvent::Pressed(_))))
             || self.keeps_hint(event, point)
             || !self.pressed_outside(input, event, point).is_empty()
@@ -219,6 +220,15 @@ impl<A: App> Panels<'_, A> {
     /// pressed itself, in [`Heard::redraw`]: the turn's own comparison
     /// never sees it.
     pub fn pointer_below(&mut self, event: &Event, point: Point) -> Heard {
+        let heard = self.pointer_below_in_turn(event, point);
+        self.report_custom_left();
+        self.send_custom_later();
+        heard
+    }
+
+    /// [`Panels::pointer_below`] inside a turn, where what custom elements
+    /// send runs in the turn itself.
+    pub(crate) fn pointer_below_in_turn(&mut self, event: &Event, point: Point) -> Heard {
         let input = self.app.input();
         let pressed = self.shown_pressed();
         let mut heard = self.offer(input, event, point, Side::Below);
@@ -312,6 +322,8 @@ impl<A: App> Panels<'_, A> {
         let heard = self.pointer_above(input, event, point);
         self.report_focus();
         self.nudge_for_select();
+        self.report_custom_left();
+        self.send_custom_later();
         heard
     }
 
@@ -397,6 +409,15 @@ impl<A: App> Panels<'_, A> {
         if matches!(pointer, PointerEvent::Moved | PointerEvent::Pressed(_)) {
             self.pointer.at = Some(point);
         }
+        // A custom element that holds the capture hears every pointer event
+        // first, but the wheel (section 9, rule 1).
+        if let Some(heard) = self.offer_captured(pointer, Some(point)) {
+            return heard;
+        }
+        // With no capture, a lost pointer has nothing to end.
+        if matches!(pointer, PointerEvent::Lost) {
+            return Heard::default();
+        }
         let keep = |layer: Layer| Side::of(layer) == side && layer >= input.layer;
         // A held press on a bar has the pointer until it is let go, at the
         // first step that hears it, wherever the pointer is.
@@ -438,6 +459,20 @@ impl<A: App> Panels<'_, A> {
                 taken: true,
                 redraw: false,
             };
+        }
+        // The wheel goes to a custom element under the pointer first, as the
+        // innermost element, then to the scroll containers around it.
+        if let PointerEvent::Scrolled(_) = pointer
+            && let Some((layer, Hit::Element(id))) = self.window.hit_in(point, keep)
+            && self.customs.is_custom(id)
+        {
+            let id = id.clone();
+            if self.offer_custom(layer, &id, pointer, point) != crate::Used::No {
+                return Heard {
+                    taken: true,
+                    redraw: false,
+                };
+            }
         }
         if let PointerEvent::Scrolled(delta) = pointer
             && let Some(heard) = self.wheel(*delta, point, keep)
@@ -528,6 +563,10 @@ impl<A: App> Panels<'_, A> {
             return Heard { taken: false, redraw };
         };
         let at = id.map(|id| (layer, id));
+        // A custom element hears the event itself, after the hover and the
+        // focus move as for any element, and takes no click.
+        let custom = at.as_ref().filter(|(_, id)| self.customs.is_custom(id)).cloned();
+        let mut used = crate::Used::No;
         let mut redraw = false;
         match pointer {
             PointerEvent::Moved => {
@@ -537,6 +576,9 @@ impl<A: App> Panels<'_, A> {
                 // The pointer over an option of an open list highlights it.
                 if let Some(index) = at.as_ref().and_then(|(_, id)| crate::select::option_index(id)) {
                     self.highlight_option(index);
+                }
+                if let Some((layer, id)) = &custom {
+                    used = self.offer_custom(*layer, id, pointer, point);
                 }
                 // Section 6, rule 8: the pointer moving over a menu item
                 // focuses it, with no ring, as native menus move their
@@ -576,8 +618,11 @@ impl<A: App> Panels<'_, A> {
                 let modal = input.layer > Layer::Panels;
                 self.focus_in(point, modal, |layer| Side::of(layer) == side && layer >= input.layer);
                 redraw |= self.focus.id() != before.as_ref();
-                // A press on a slider drags it or resets it, and is no click.
-                if *button == PointerButton::Left {
+                if let Some((layer, id)) = &custom {
+                    used = self.offer_custom(*layer, id, pointer, point);
+                } else if *button == PointerButton::Left {
+                    // A press on a slider drags it or resets it, and is no
+                    // click.
                     let slider = at.as_ref().is_some_and(|(_, id)| {
                         let id = id.clone();
                         self.press_slider(&id, point) || self.press_select(&id)
@@ -585,6 +630,13 @@ impl<A: App> Panels<'_, A> {
                     if !slider {
                         self.pointer.pressed = at;
                     }
+                }
+            }
+            PointerEvent::Released(PointerButton::Left) if custom.is_some() => {
+                // A press elsewhere let go here is no click.
+                self.pointer.pressed = None;
+                if let Some((layer, id)) = &custom {
+                    used = self.offer_custom(*layer, id, pointer, point);
                 }
             }
             PointerEvent::Released(PointerButton::Left) => {
@@ -603,9 +655,17 @@ impl<A: App> Panels<'_, A> {
                     }
                 }
             }
-            _ => {}
+            // The wheel was offered before the scroll containers.
+            PointerEvent::Scrolled(_) => {}
+            _ => {
+                if let Some((layer, id)) = &custom {
+                    used = self.offer_custom(*layer, id, pointer, point);
+                }
+            }
         }
-        Heard { taken: true, redraw }
+        // A custom element that left the event lets it go on.
+        let taken = custom.is_none() || used != crate::Used::No;
+        Heard { taken, redraw }
     }
 
     /// A wheel or a touch pad's scroll at `point`, in the layers `keep`

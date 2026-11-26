@@ -263,6 +263,12 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.customs.bounds(id)
     }
 
+    /// The custom elements' state, to change for a test.
+    #[cfg(test)]
+    pub(crate) fn customs_mut(&mut self) -> &mut crate::custom::Customs<A> {
+        &mut self.customs
+    }
+
     /// The routing target, to read.
     pub fn target(&self) -> &T {
         &self.target
@@ -1756,22 +1762,21 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // runs (`update`), so focus that leaves and comes back in one turn
         // still ends the field's undo.
         let mut updates = 0;
-        for message in batch {
-            if self.exited {
+        redraw |= self.run_batch(batch, now, driver, &mut updates);
+        // What custom elements sent runs in this turn too, after the batch,
+        // before the rebuild (section 9, rule 1): from the event, and from
+        // a cancel an update caused, by an effect or by raising the input
+        // layer above a held capture, as an overlay that opens mid-drag
+        // does. A cancel's own messages may raise the layer no further
+        // than it is, so this ends.
+        loop {
+            let layer = self.app.input().layer;
+            self.panels().cancel_capture_below(layer);
+            let sent = self.customs.take_sent();
+            if sent.is_empty() || self.exited {
                 break;
             }
-            updates += 1;
-            redraw |= self.update(message, now, driver);
-            // A focus an update's effects moved is the next thing the app
-            // hears, before the turn's other messages, as a focus an event
-            // moved is the first (`App::focus_moved`): the app's copy of the
-            // focus is then never behind while it handles one.
-            if !self.exited
-                && let Some(report) = self.panels().focus_report()
-            {
-                updates += 1;
-                redraw |= self.update(report, now, driver);
-            }
+            redraw |= self.run_batch(sent, now, driver, &mut updates);
         }
         // An overlay an update opened closes a select's list under it, and
         // a list that opened, closed, or moved its highlight changes what
@@ -1820,8 +1825,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // a dialog's answer sent as its question closed and gave a field
         // its focus back, for one (plan 3.2, row 4d).
         self.panels().report_unhover();
+        // A custom element a rebuild moved from under the pointer hears it
+        // left; what it sends runs on the next turn.
+        self.panels().report_custom_left();
         let report = self.panels().focus_report();
         self.drain_queue();
+        let sent = self.customs.take_sent();
+        self.pending.extend(sent);
         if let Some(report) = report {
             self.pending.push_front(report);
         }
@@ -1843,6 +1853,36 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
     }
 
+    /// Runs one update for each message of `batch`, in order, counting
+    /// them in `updates`. Returns true when one asked for a draw.
+    fn run_batch(
+        &mut self,
+        batch: Vec<A::Message>,
+        now: Instant,
+        driver: &mut impl Driver<A::Message>,
+        updates: &mut usize,
+    ) -> bool {
+        let mut redraw = false;
+        for message in batch {
+            if self.exited {
+                break;
+            }
+            *updates += 1;
+            redraw |= self.update(message, now, driver);
+            // A focus an update's effects moved is the next thing the app
+            // hears, before the turn's other messages, as a focus an event
+            // moved is the first (`App::focus_moved`): the app's copy of the
+            // focus is then never behind while it handles one.
+            if !self.exited
+                && let Some(report) = self.panels().focus_report()
+            {
+                *updates += 1;
+                redraw |= self.update(report, now, driver);
+            }
+        }
+        redraw
+    }
+
     /// Routes one input event that Tab did not take (section 5, rule 10).
     /// A pointer event goes to the runtime's layers above the target, then
     /// to the target, then to the layers below it; whatever else, to the
@@ -1856,6 +1896,19 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             // (section 5, rule 16).
             let closed = self.pointer.slide.close_keys();
             self.panels().report_slid(closed);
+        }
+        // A custom element that holds the capture hears the event first,
+        // outside the window too, and the pointer leaving the window does
+        // not end it (section 9, rule 1).
+        if let Event::Pointer(pointer_event) = event
+            && let Some(heard) = self.panels().offer_captured(pointer_event, pointer)
+        {
+            return heard.redraw;
+        }
+        // With no capture, a lost pointer has nothing to end: it reaches
+        // no element and no target.
+        if let Event::Pointer(PointerEvent::Lost) = event {
+            return false;
         }
         let point = match (event, pointer) {
             (Event::Pointer(PointerEvent::LeftWindow), _) => {
@@ -1876,10 +1929,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if !above.taken {
             redraw |= match target.input(event, pointer, now, batch) {
                 Routed::Taken => panels.pointer_taken(event).redraw,
-                Routed::Passed => panels.pointer_below(event, point).redraw,
+                Routed::Passed => panels.pointer_below_in_turn(event, point).redraw,
                 Routed::Later => false,
             };
         }
+        // A custom element the pointer moved off hears it now, so what it
+        // sends runs in this turn.
+        self.panels().report_custom_left();
         self.release_if_owed();
         redraw
     }
@@ -1963,9 +2019,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 self.window.focused = *focused;
                 if !focused {
                     self.target.input(&Event::WindowUnfocused, None, now, batch);
+                    // A drag held when the window loses the keys is
+                    // cancelled, as a plugin host's DAW may take them at
+                    // any time (section 9, rule 1).
+                    self.panels().cancel_capture();
                 }
             }
-            WindowEvent::CloseRequested | WindowEvent::FileDropped(_) => {}
+            WindowEvent::Hidden(true) => {
+                self.panels().cancel_capture();
+            }
+            WindowEvent::Hidden(false) | WindowEvent::CloseRequested | WindowEvent::FileDropped(_) => {}
         }
         batch.extend(self.app.window_event(&event));
     }
@@ -2040,6 +2103,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     self.pending.extend(messages);
                 }
                 Effect::Redraw => redraw = true,
+                Effect::ReleasePointer => {
+                    self.panels().cancel_capture();
+                }
                 Effect::Accessibility { whole, changes } => driver.accessibility(whole, changes),
                 Effect::Quit => {
                     self.exited = true;

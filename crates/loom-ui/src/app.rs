@@ -272,7 +272,12 @@ pub trait App: 'static {
     /// the first time a layout finds it (ui-layer.md, section 9, rule 1).
     /// The runtime keeps it by `id` until a layout no longer finds that UI
     /// ID. `None` for a kind the app does not know, which panics in a debug
-    /// build and leaves an empty box in a release build.
+    /// build and, in a release build, leaves an element that hears, draws,
+    /// and sends nothing.
+    ///
+    /// It runs at layout, which a driver calls outside a turn, so it must
+    /// not expect one: with only `&self` it changes no app state, and it
+    /// can send no message.
     fn make_custom(&self, id: &UiId, kind: crate::CustomKind) -> Option<Box<dyn crate::Custom<Self>>> {
         let _ = (id, kind);
         None

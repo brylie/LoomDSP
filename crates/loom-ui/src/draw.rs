@@ -128,6 +128,10 @@ impl<A: App> Panels<'_, A> {
         self.place_hint(text);
         self.report_focus();
         self.report_hidden_anchors();
+        // A custom element the layout moved from under the pointer hears
+        // it left, on the next turn, since a layout runs outside one.
+        self.report_custom_left();
+        self.send_custom_later();
     }
 
     /// Tells the app of each root placed under an element that stopped

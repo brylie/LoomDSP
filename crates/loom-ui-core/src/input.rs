@@ -85,6 +85,21 @@ pub enum PointerEvent {
     LeftWindow,
     /// The pointer came back into the window.
     EnteredWindow,
+    /// The system ended the pointer's buttons with no release the driver
+    /// could report: a held drag is over, and nothing finished it. A web
+    /// driver sends it on `lostpointercapture`, or when the pointer comes
+    /// back into the page with no button down (`buttons == 0`); a plugin
+    /// driver when its platform says the same. The runtime cannot see the
+    /// buttons itself, which is why the driver reports it, and a held
+    /// capture ends with a cancel (ui-layer.md, section 9, rule 1).
+    ///
+    /// The `winit` shell never sends it, because each desktop system it
+    /// runs on delivers the release of a drag that left the window: macOS
+    /// keeps sending moves and the release to the window the press went
+    /// down in, Windows captures the mouse on a press (`SetCapture`), and
+    /// on X11 and Wayland the press gives the window an implicit grab, so
+    /// the release comes to it wherever the pointer is.
+    Lost,
 }
 
 /// A button on the pointing device.

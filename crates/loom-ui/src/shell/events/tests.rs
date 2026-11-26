@@ -130,6 +130,8 @@ fn window_events_go_as_window_events() {
         ),
         (W::Focused(true), WindowEvent::Focused(true)),
         (W::CloseRequested, WindowEvent::CloseRequested),
+        (W::Occluded(true), WindowEvent::Hidden(true)),
+        (W::Occluded(false), WindowEvent::Hidden(false)),
         (
             W::DroppedFile("patch.ron".into()),
             WindowEvent::FileDropped("patch.ron".into()),
