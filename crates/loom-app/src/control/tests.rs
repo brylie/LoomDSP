@@ -3388,3 +3388,44 @@ fn a_scripted_tab_after_a_click_stays_in_the_column() {
         }
     }
 }
+
+/// The control channel's `save` commits a draft first, as Save does, and
+/// stops with the reason in its reply on one that cannot commit (files.md,
+/// Text still being typed).
+#[test]
+fn save_commits_a_draft_or_says_why_not() {
+    let dir = crate::recovery::tests::TempDir::new("control-save-draft");
+    let mut app = crate::tests::app();
+    let filter = app.session.controller.add_module("loom.filter.svf").unwrap();
+    app.commit();
+    let index = {
+        let node = app.session.controller.graph().node(filter).unwrap();
+        loom_core::ModuleNames::parameter_index(node, "cutoff").unwrap()
+    };
+    let cutoff = |path: &std::path::Path| {
+        crate::patch_file::load(path)
+            .unwrap()
+            .modules
+            .iter()
+            .find(|module| module.id == filter.0)
+            .and_then(|module| module.params.get("cutoff").copied())
+    };
+
+    app.type_value_draft(filter.0, index, "1234".into());
+    let saved = dir.0.join("saved.ron");
+    let line = serde_json::json!({ "cmd": "save", "path": saved }).to_string();
+    run(&mut app, &line).unwrap();
+    assert!(
+        cutoff(&saved).is_some_and(|hz| (hz - 1234.0).abs() < 1.0),
+        "the draft is in the file"
+    );
+    assert!(app.session.value_draft.is_none(), "it committed");
+
+    app.type_value_draft(filter.0, index, "abc".into());
+    let refused = dir.0.join("refused.ron");
+    let line = serde_json::json!({ "cmd": "save", "path": refused }).to_string();
+    let error = run(&mut app, &line).unwrap_err();
+    assert!(error.starts_with("Not saved: "), "{error}");
+    assert!(!refused.exists(), "nothing written");
+    assert!(app.session.value_draft.is_some(), "the draft is kept");
+}

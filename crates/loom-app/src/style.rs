@@ -73,6 +73,11 @@ pub const BUTTON_SPACING: f32 = 6.0;
 /// The width of a rule between parts of the window.
 pub const RULE: f32 = 1.0;
 
+/// The width of the danger outline on a field whose text is refused: a
+/// value field, the MIDI range pair, and the Tags field (panel-widgets.md,
+/// Typing a value). Twice a rule, so it reads without colour.
+pub const INVALID_BORDER: f32 = 2.0;
+
 /// The line height of the app's text, as a multiple of its size: Iced's
 /// default, kept for text `loom-ui` draws.
 const LINE_HEIGHT: f32 = 1.3;

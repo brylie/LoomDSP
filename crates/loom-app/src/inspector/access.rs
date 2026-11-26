@@ -188,6 +188,7 @@ fn patch(rows: &crate::patch_info::PatchRows) -> Item {
     }
     parts.push(Item {
         focus: Some(crate::places::field_widget_id(&crate::patch_info::tags_part())),
+        description: rows.tag_note.clone(),
         ..field(ids::part(&panel, "tags"), "Tags", &rows.tag_draft, SetText::Tag)
     });
     if let Some(note) = &rows.tag_note {

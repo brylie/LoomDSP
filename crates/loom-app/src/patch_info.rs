@@ -433,14 +433,27 @@ impl App {
     /// Adds typed text as a tag, or notes why it was refused. Blank text
     /// between commas is skipped quietly.
     fn add_tag(&mut self, text: &str) {
+        if let Err(reason) = self.try_add_tag(text) {
+            self.session.patch_info.tag_note = Some(reason);
+        }
+    }
+
+    /// Adds typed text as a tag, or says why the tag rules refuse it.
+    /// Blank text and a tag the patch has already add nothing. The draft
+    /// and the note are the caller's, so a save can keep a refused tag in
+    /// its field (`drafts.rs`).
+    pub(crate) fn try_add_tag(&mut self, text: &str) -> Result<(), String> {
         if text.trim().is_empty() {
-            return;
+            return Ok(());
         }
         let mut tags = self.session.document.info().tags.clone();
         match metadata::add_tag(&mut tags, text) {
-            Ok(Some(_)) => self.session.document.edit_info(|info| info.tags = tags),
-            Ok(None) => {}
-            Err(e) => self.session.patch_info.tag_note = Some(e.to_string()),
+            Ok(Some(_)) => {
+                self.session.document.edit_info(|info| info.tags = tags);
+                Ok(())
+            }
+            Ok(None) => Ok(()),
+            Err(e) => Err(e.to_string()),
         }
     }
 }

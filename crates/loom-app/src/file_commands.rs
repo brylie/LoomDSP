@@ -31,11 +31,16 @@ impl App {
     }
 
     /// True when the patch differs from the file (`docs/design/files.md`).
-    /// An edit in patch info counts too (patch-metadata.md).
+    /// An edit in patch info counts too (patch-metadata.md), and so does a
+    /// draft still being typed, though it is not in the history yet, so the
+    /// title's mark and the unsaved-changes question agree (files.md, Text
+    /// still being typed). Autosave does not read this: a draft alone
+    /// starts no timer (autosave.md).
     pub(crate) fn unsaved(&self) -> bool {
         !self.session.edits.history.is_saved()
             || self.session.document.info_unsaved()
             || self.session.patch_info.part_authors_dirty()
+            || self.has_draft()
     }
 
     /// Writes the patch to `path`. On success the path becomes the current
@@ -179,8 +184,13 @@ impl App {
     /// `next` never runs, so nothing is lost. A Replace question waits for
     /// its answer and carries `next` with it (files.md, Asking before losing
     /// work).
+    ///
+    /// Each draft commits first, and one that cannot commit stops the save
+    /// (files.md, Text still being typed).
     pub(crate) fn save_then(&mut self, next: Option<AfterDiscard>) -> bool {
-        self.finish_edits();
+        if !self.ready_to_save() {
+            return false;
+        }
         match self.session.document.file().map(Path::to_path_buf) {
             Some(path) => self.write_then(path, next),
             None => self.save_as_then(next),
@@ -194,8 +204,11 @@ impl App {
     /// Asks where to save, saves there, then runs `next`. With the control
     /// channel on it stops, because a native picker would stop the app with
     /// nobody to close it (control-channel.md, rule 9).
+    /// Each draft commits first, as for Save.
     pub(crate) fn save_as_then(&mut self, next: Option<AfterDiscard>) -> bool {
-        self.finish_edits();
+        if !self.ready_to_save() {
+            return false;
+        }
         if !self.control.is_empty() {
             self.alerts
                 .warn("Save As opens a file dialog; use the `save` command instead.".to_string());

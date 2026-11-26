@@ -184,9 +184,14 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
     dialogs::answer_add_author(Some(true));
     app.session.patch_info.tag_draft = "half-typ".into();
     save(&mut app);
+    // Saving adds a tag still being typed (files.md, Text still being typed).
+    assert!(
+        app.session.patch_info.tag_draft.is_empty(),
+        "the tag being typed is added"
+    );
     assert_eq!(
-        app.session.patch_info.tag_draft, "half-typ",
-        "a tag being typed is kept"
+        crate::patch_file::load(&patch).unwrap().metadata.tags,
+        ["drone", "half-typ"]
     );
     assert_eq!(dialogs::asked(), [Asked::AddAuthor("Sam Rivera".into())]);
     assert_eq!(

@@ -397,8 +397,9 @@ impl App {
                 }
             }
             Command::Save { path, .. } => {
-                self.finish_edits();
-                if self.write_to(path) {
+                // A draft commits first, and one that cannot stops the save,
+                // with the reason in the reply (files.md, Text still being typed).
+                if self.ready_to_save() && self.write_to(path) {
                     Ok(Map::new())
                 } else {
                     Err(self.alerts.status().to_string())

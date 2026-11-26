@@ -327,7 +327,7 @@ fn expose(exposure: &ExposureRow, own: bool, looks: Looks) -> Element {
 /// a value).
 fn value_field(label: &str, field: &ValueField, value: &str, looks: Looks) -> Element {
     let (border, width) = match &field.error {
-        Some(_) => (looks.danger, 2.0),
+        Some(_) => (looks.danger, style::INVALID_BORDER),
         None => (looks.field.border, style::RULE),
     };
     let mut access = Access::new(Role::TextInput, format!("{label} value"));
@@ -545,7 +545,7 @@ fn settings(row: &MappingRow, looks: Looks) -> Element {
         let bad = row.range_error.is_some();
         let field = |text: &str, key: &'static str, name: &'static str| {
             let (border, width) = if bad {
-                (looks.danger, 2.0)
+                (looks.danger, style::INVALID_BORDER)
             } else {
                 (looks.field.border, style::RULE)
             };

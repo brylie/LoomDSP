@@ -30,6 +30,7 @@ mod devices;
 mod dialogs;
 mod document;
 mod documents;
+mod drafts;
 mod editing;
 mod edits;
 #[cfg(test)]

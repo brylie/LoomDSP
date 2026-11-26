@@ -65,6 +65,8 @@ struct Looks {
     rule: Color,
     chip: style::DialogLook,
     field: style::FieldLook,
+    /// The warning outline of a field whose text is refused.
+    danger: Color,
 }
 
 impl App {
@@ -98,6 +100,7 @@ impl App {
             rule: palette.background.strong.color.to_core(),
             chip: style::dialog(&theme),
             field: style::field(&theme),
+            danger: palette.danger.strong.color.to_core(),
         };
         let mut small_select = style::select(&theme);
         small_select.text = style::SMALL_TEXT;
@@ -386,15 +389,19 @@ fn patch(rows: &PatchRows, authors: &str, looks: Looks) -> Element {
                 .access(Access::new(Role::Toolbar, "Tags")),
         );
     }
-    parts.push(
-        field(
-            Element::field(rows.tag_draft.clone(), style::CONTROL_TEXT)
-                .placeholder("Type a tag, then Enter or comma", looks.quiet),
-        )
-        .key("tags")
-        .takes_first(ESCAPE)
-        .access(Access::new(Role::TextInput, "Tags")),
+    // A refused tag gives the field the warning outline and its reason as
+    // the description, as a range that does not pass does (ui-layer.md,
+    // section 7, rule 23).
+    let mut tags_access = Access::new(Role::TextInput, "Tags");
+    let mut tags_field = field(
+        Element::field(rows.tag_draft.clone(), style::CONTROL_TEXT)
+            .placeholder("Type a tag, then Enter or comma", looks.quiet),
     );
+    if let Some(note) = &rows.tag_note {
+        tags_access = tags_access.description(note.clone());
+        tags_field = tags_field.border(style::INVALID_BORDER, looks.danger);
+    }
+    parts.push(tags_field.key("tags").takes_first(ESCAPE).access(tags_access));
     if let Some(note) = &rows.tag_note {
         parts.push(
             small(note, looks.text)

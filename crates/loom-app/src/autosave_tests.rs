@@ -625,3 +625,42 @@ fn the_recovery_question_waits_for_the_window() {
     );
     assert!(crashed.join("patch.ron").exists(), "the copy is kept");
 }
+
+/// A draft being typed is not a change autosave sees: alone, it starts no
+/// copy (autosave.md; files.md, Text still being typed).
+#[test]
+fn a_draft_alone_makes_no_copy() {
+    let setup = Setup::new("draft-alone");
+    let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
+    let dir = folder(&app);
+    app.type_value_draft(4, 0, "1234".into());
+    assert!(app.unsaved(), "the draft marks the title");
+    let t0 = Instant::now();
+    for i in 0..40 {
+        app.autosave(t0 + recovery::TICK * i);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(!dir.join("patch.ron").exists(), "no copy for a draft");
+    assert!(app.session.value_draft.is_some(), "autosave committed nothing");
+}
+
+/// A copy written for another change while a draft is open holds the
+/// committed patch only: the draft is not in it, and is still open.
+#[test]
+fn a_copy_leaves_an_open_draft_out() {
+    let setup = Setup::new("draft-copy");
+    let mut app = setup.boot(Some(setup.file()), &mut Answer::new(Choice::NotNow));
+    // The cutoff's value field is the inspector's for the selected module.
+    let _ = app.send(Message::Inspector(crate::inspector::Message::SelectModule(4)));
+    app.type_value_draft(4, 1, "0.5".into());
+    let dir = edit_and_keep_at(&mut app, 0.8);
+    let copy = crate::patch_file::load(dir.join("patch.ron")).unwrap();
+    assert_eq!(copy, app.current_patch(), "the copy holds the committed patch");
+    let resonance = copy
+        .modules
+        .iter()
+        .find(|m| m.id == 4)
+        .and_then(|m| m.params.get("resonance").copied());
+    assert_eq!(resonance, Some(0.6), "not the 0.5 being typed");
+    assert!(app.session.value_draft.is_some(), "the draft is still open");
+}
