@@ -47,6 +47,8 @@ A **change** is anything that sets the unsaved mark ([files.md](files.md#what-co
 
 Not changes: selection, pan, zoom, transport start or stop, playing notes, and Hold note. They are not in the patch file, so they do not start the timer.
 
+A draft, text typed in a field but not yet committed, is not a change here, though it sets the unsaved mark: it does not start the timer, it is not in the copy, and autosave commits nothing. A patch whose only unsaved work is a draft has no copy. So a recovery copy may lack text that was being typed: when the copy is written for other unsaved changes while a draft is open, it holds the committed patch only. *Why that is acceptable:* a crash that loses an uncommitted draft loses no more than it did before drafts were saved. *Why:* committing would change the patch under the user's typing. Saving commits drafts ([files](files.md#asking-before-losing-work)).
+
 **Only unsaved work is copied.** When the patch has no unsaved changes (just saved, just opened, or undone back to the saved state), the app deletes the session's recovery copy instead of writing one. *Why:* the file on disk already holds that patch. A copy of it would only cause a pointless question after a crash.
 
 ### Where the recovery copy lives

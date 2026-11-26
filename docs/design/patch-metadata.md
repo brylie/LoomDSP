@@ -59,7 +59,7 @@ Patch info is shown in the inspector when no module is selected, under the patch
 | Field | Shown as | Edited with |
 |---|---|---|
 | Authors | One name per line, in credit order | A text box with one author per line. Empty lines are dropped. |
-| Tags | Small chips | A text field: type a tag and press Enter or comma to add it. Leaving the field by any means adds what is typed too, and Escape drops it, as the inspector's value fields commit (Brylie's decision, 2026-11-25; [panel widgets](panel-widgets.md), Typing a value). Each chip has a remove button. |
+| Tags | Small chips | A text field: type a tag and press Enter or comma to add it. Leaving the field by any means adds what is typed too, and Escape drops it, as the inspector's value fields commit (Brylie's decision, 2026-11-25; [panel widgets](panel-widgets.md), Typing a value). Saving adds a tag still being typed, and a tag the rules refuse stops the save ([files](files.md#asking-before-losing-work)). Each chip has a remove button. |
 | Licence | The licence's short name and a one-line summary, with a link to the full text. "No licence stated" when empty. | A **Choose** button opens the licence chooser. An **Other** choice takes any SPDX expression. |
 
 ### Licence chooser
