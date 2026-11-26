@@ -54,7 +54,7 @@ struct PadState {
 
 impl Custom<Drags> for PadState {
     fn event(&mut self, app: &Drags, event: &CustomEvent, moment: &Moment, out: &mut Out<'_, Message>) -> Used {
-        self.heard.push(*event);
+        self.heard.push(event.clone());
         self.seen.push(app.log.len());
         self.at.push(moment.pointer);
         let x = moment.pointer.map_or(-1.0, |at| at.x);

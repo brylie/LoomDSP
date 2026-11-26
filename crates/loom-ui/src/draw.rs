@@ -265,11 +265,14 @@ impl<A: App> Panels<'_, A> {
     /// The app's message for a focus move it has not been told of yet,
     /// marking it told. `None` when nothing moved, or the app does not ask.
     pub(crate) fn focus_report(&mut self) -> Option<A::Message> {
-        if self.focus.id() == self.focus.reported.as_ref() {
+        // On a custom element, a move between the parts inside it is a
+        // move too.
+        let focused = self.focused_part();
+        if focused == self.focus.reported {
             return None;
         }
-        self.focus.reported = self.focus.id().cloned();
-        self.app.focus_moved(self.focus.id())
+        self.focus.reported.clone_from(&focused);
+        self.app.focus_moved(focused.as_ref())
     }
 
     /// Paints the panels of `layer`, as

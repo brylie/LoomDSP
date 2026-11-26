@@ -651,6 +651,20 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// end leaves it for the target. Everything else is the target's, as
     /// before. Returns true when the runtime's focus changed.
     fn focus_effect(&mut self, target: &FocusTarget, select: Selection) -> bool {
+        // A part inside a custom element is the element's to focus: the
+        // runtime's focus goes to the element when it found the part, and
+        // the effect is dropped when it did not (section 9, rule 6).
+        if let FocusTarget::Element(id) = target
+            && let Some(found) = self.panels().focus_inner(id)
+        {
+            if !found {
+                return false;
+            }
+            let owner = self.customs.owner_of(id).cloned();
+            self.release_target();
+            self.focus_to(owner);
+            return true;
+        }
         match target {
             FocusTarget::Element(id) if self.panels.stops().contains(id) => {
                 self.release_target();
@@ -699,6 +713,20 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// runtime took the key, and whether its focus changed, which needs a
     /// redraw even when the key goes on.
     fn tab(&mut self, event: &Event) -> (bool, bool) {
+        let before = self.focus.id().cloned();
+        let result = self.tab_step_from(event);
+        // Tab or Shift+Tab that lands on a custom element tells it which
+        // way it came in (section 9, rule 2).
+        if let Event::Key(KeyEvent::Pressed { modifiers, .. }) = event
+            && self.focus.id() != before.as_ref()
+        {
+            self.panels().tell_entered(modifiers.shift);
+        }
+        result
+    }
+
+    /// [`Runtime::tab`], before it tells a custom element it was entered.
+    fn tab_step_from(&mut self, event: &Event) -> (bool, bool) {
         let Event::Key(KeyEvent::Pressed {
             key: Key::Tab,
             modifiers,
@@ -1683,12 +1711,20 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     self.select_key(&event, now)
                 };
                 redraw |= changed;
+                // A focused custom element is step 3's focused element: the
+                // keys an element around it takes first (step 2b) come
+                // before it, and it comes before Tab, so Tab moves inside
+                // it until it lets Tab go (section 9, rule 2).
+                let custom = !composing && self.panels().focused_custom().is_some();
+                if !taken && custom {
+                    taken = self.panel_key(&event, &mut batch) || self.panels().key_to_focused(&event);
+                }
                 if !taken {
                     let (tabbed, moved) = if composing { (false, false) } else { self.tab(&event) };
                     taken = tabbed;
                     redraw |= moved;
                 }
-                if !taken && !composing {
+                if !taken && !composing && !custom {
                     taken = self.panel_key(&event, &mut batch);
                 }
                 if !taken && !composing {
@@ -1947,7 +1983,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             }
             (Event::Pointer(_), Some(point)) => point,
             _ => {
-                self.target.input(event, pointer, now, batch);
+                let routed = self.target.input(event, pointer, now, batch);
+                // Step 5: a key the target left goes to the window's home
+                // element while nothing has focus (section 9, rule 2).
+                if routed != Routed::Taken && matches!(event, Event::Key(_)) {
+                    let target_focus = self.target.focused().is_some();
+                    self.panels().key_to_home(event, target_focus);
+                }
                 return false;
             }
         };
@@ -2065,10 +2107,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// Runs one update and its effects. Returns true when an effect asked
     /// for a draw.
     fn update(&mut self, message: A::Message, now: Instant, driver: &mut impl Driver<A::Message>) -> bool {
+        let focused = self.panels().focused_part().or_else(|| self.target.focused());
         let cx = Context {
             now,
             waker: &self.waker,
-            focused: self.focus.id().cloned().or_else(|| self.target.focused()),
+            focused,
             window: self.window,
             panels: Some(&self.panels),
             customs: Some(&self.customs),

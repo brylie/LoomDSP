@@ -31,7 +31,7 @@ impl<A: App> Panels<'_, A> {
     /// `None` when no custom element has that UI ID or no turn has run yet
     /// to give the time. A layout runs only after a turn, so an element
     /// that exists always has one.
-    fn custom_moment(&self, id: &UiId, pointer: Option<Point>) -> Option<Moment> {
+    pub(super) fn custom_moment(&self, id: &UiId, pointer: Option<Point>) -> Option<Moment> {
         Some(Moment {
             pointer,
             bounds: self.customs.bounds(id)?,

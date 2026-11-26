@@ -268,6 +268,14 @@ pub trait App: 'static {
         false
     }
 
+    /// The window's home element: the custom element that hears the keys
+    /// while nothing has focus, at section 6, rule 6, step 5, after the
+    /// open overlay's keys (section 9, rule 2). The patch canvas is
+    /// LoomDSP's. `None`, the default, when the window has none.
+    fn home(&self) -> Option<UiId> {
+        None
+    }
+
     /// Makes the state of the custom element with UI ID `id`, of `kind`,
     /// the first time a layout finds it (ui-layer.md, section 9, rule 1).
     /// The runtime keeps it by `id` until a layout no longer finds that UI

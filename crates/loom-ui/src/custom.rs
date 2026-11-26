@@ -17,12 +17,13 @@
 
 use crate::app::App;
 use crate::view::Layer;
-use loom_ui_core::{Cursor, Modifiers, Point, PointerEvent, Rect, UiId};
+use loom_ui_core::{Cursor, IdKey, KeyEvent, Modifiers, Point, PointerEvent, Rect, UiId};
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Instant;
 
+mod keys;
 mod pointer;
 
 /// Which kind of custom element a view placed, so the app knows which
@@ -75,12 +76,41 @@ pub trait Custom<A: App>: Any {
         let _ = (app, moment);
         Cursor::Default
     }
+
+    /// Focuses the part inside it at `rest`, the path under its UI ID, for
+    /// a focus effect that named that part. Returns false when it has no
+    /// such part, and the effect is dropped (section 9, rule 6). By default
+    /// it has none.
+    fn focus_inner(&mut self, app: &A, rest: &[IdKey]) -> bool {
+        let _ = (app, rest);
+        false
+    }
+
+    /// The path under its UI ID of the part inside it with the focus, while
+    /// the runtime's focus is on it. The focused part's UI ID is the
+    /// element's followed by this path, and that is what the app hears
+    /// ([`App::focus_moved`]) and reads in its context. `None` when the
+    /// element itself is focused, as by default.
+    fn focused_inner(&self, app: &A) -> Option<Vec<IdKey>> {
+        let _ = app;
+        None
+    }
 }
 
 /// What a custom element hears.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum CustomEvent {
+    /// A key, while the runtime's focus is on it or inside it, or while
+    /// nothing has focus and it is the window's home element
+    /// ([`App::home`]). It hears presses and releases.
+    Key(KeyEvent),
+    /// Tab (`back` false) or Shift+Tab (`back` true) moved the focus onto
+    /// it, so it can start at its first or its last part.
+    Entered {
+        /// True for Shift+Tab.
+        back: bool,
+    },
     /// A pointer event: inside its bounds, or anywhere while it holds the
     /// capture. Where the pointer is comes in the [`Moment`].
     Pointer(PointerEvent),
@@ -235,6 +265,30 @@ impl<A: App> Customs<A> {
         };
         let mut out = Out { sent: &mut self.sent };
         state.event(app, event, moment, &mut out)
+    }
+
+    /// The custom element `id` is inside, other than itself: the one whose
+    /// part it names.
+    pub(crate) fn owner_of(&self, id: &UiId) -> Option<&UiId> {
+        self.elements
+            .keys()
+            .find(|element| id.is_under(element) && id.keys().len() > element.keys().len())
+    }
+
+    /// Asks the element `id` to focus its part at `rest`. False when it has
+    /// no state or no such part.
+    pub(crate) fn focus_inner(&mut self, app: &A, id: &UiId, rest: &[IdKey]) -> bool {
+        self.elements
+            .get_mut(id)
+            .and_then(|hosted| hosted.state.as_deref_mut())
+            .is_some_and(|state| state.focus_inner(app, rest))
+    }
+
+    /// The focused part's UI ID, when the runtime's focus is on the element
+    /// `id`: the element's own, followed by the path it gives.
+    pub(crate) fn focused_part(&self, app: &A, id: &UiId) -> UiId {
+        let rest = self.state(id).and_then(|state| state.focused_inner(app));
+        rest.into_iter().flatten().fold(id.clone(), UiId::with)
     }
 
     /// The pointer shape the element `id` wants at `moment`, or `None`
