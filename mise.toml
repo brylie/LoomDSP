@@ -202,8 +202,10 @@ description = "The local check: fmt, clippy, typos, the file rules, and every te
 # coverage gate. `check-full` runs everything CI runs, coverage included.
 # The tests use half the cores, rounded up (LOOM_TEST_THREADS overrides
 # it), as the worktree's `[build] jobs` does (setup-worktree-target.sh),
-# so agents on one machine leave each other room.
-depends = ["fmt", "clippy", "typos", "adr-status", "test-placement", "portable"]
+# so agents on one machine leave each other room. `devtel-test` runs here
+# only: it tests local development tooling (docs/dev/devtel.md), and CI
+# never runs this task.
+depends = ["fmt", "clippy", "typos", "adr-status", "test-placement", "portable", "devtel-test"]
 run = """cargo nextest run --workspace --test-threads "${LOOM_TEST_THREADS:-$(( ($(getconf _NPROCESSORS_ONLN) + 1) / 2 ))}""""
 
 [tasks.check-full]
