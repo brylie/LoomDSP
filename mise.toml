@@ -143,9 +143,14 @@ description = "Check that every ADR has one allowed status, matching the index (
 run = ["sh scripts/check-adr-status.sh", "sh scripts/test-check-adr-citations.sh", "sh scripts/check-adr-citations.sh"]
 
 [tasks.test-placement]
-description = "Check that tests live in their own files, not inline in code modules"
-# The first command tests the check itself on small example crates.
-run = ["sh scripts/test-check-test-placement.sh", "sh scripts/check-test-placement.sh"]
+description = "Check that tests live in their own files, not inline in code modules, and that every integration test file is built, in as few binaries as it can be"
+# Each check is tested on small example crates before it runs.
+run = [
+  "sh scripts/test-check-test-placement.sh",
+  "sh scripts/check-test-placement.sh",
+  "sh scripts/test-check-test-targets.sh",
+  "sh scripts/check-test-targets.sh",
+]
 
 [tasks.portable]
 description = "Check that the portable crates use no files, processes, threads, or clocks (hard rule 6)"

@@ -9,7 +9,8 @@
 //! The render is also played in several host buffer sizes, which must give
 //! bit-identical output (AGENTS.md hard rule 2). After an intended change,
 //! update the files with `LOOM_UPDATE_REFERENCES=1 cargo test -p
-//! loom-modules --test patches`, listen to them, and commit them.
+//! loom-modules --test integration patches::`, listen to them, and commit
+//! them.
 
 use crate::common;
 

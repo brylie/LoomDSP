@@ -148,6 +148,16 @@ language = "system"
 files = "^crates/.*\\.rs$"
 pass_filenames = false
 
+[[repos.hooks]]
+id = "test-targets"
+name = "Every integration test file is built"
+# Checks every crate, because a test file is declared in another file
+# (tests/main.rs) or in the crate's manifest.
+entry = "sh scripts/check-test-targets.sh"
+language = "system"
+files = "^crates/[^/]+/(tests/.*\\.rs|Cargo\\.toml)$"
+pass_filenames = false
+
 # ---------------------------------------------------------------------------
 # Slow checks, run by hand (`prek run --hook-stage manual --all-files`), by
 # `mise run check-full`, and by CI on every pull request.
