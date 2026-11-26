@@ -18,6 +18,25 @@
 
 set -eu
 
+# Prints the `path` of each `[[test]]` target in a manifest, one per line.
+# Only active lines count: a commented-out target builds nothing, so a
+# plain text search would let its tests vanish unnoticed.
+test_paths() {
+    awk '
+        { sub(/#.*$/, "") }
+        /^[[:space:]]*\[/ {
+            in_test = ($0 ~ /^[[:space:]]*\[\[test\]\][[:space:]]*$/)
+            next
+        }
+        in_test && /^[[:space:]]*path[[:space:]]*=/ {
+            path = $0
+            sub(/^[^"]*"/, "", path)
+            sub(/".*$/, "", path)
+            print path
+        }
+    ' "$1"
+}
+
 fail=0
 for dir in crates/*/; do
     crate=${dir%/}
@@ -30,11 +49,12 @@ for dir in crates/*/; do
         autotests=1
     fi
     main=$tests/main.rs
+    targets=$(test_paths "$manifest")
     if [ -f "$main" ] && [ "$autotests" = 1 ]; then
         echo "$manifest: has tests/main.rs, so it needs \`autotests = false\` and a [[test]] target for it."
         fail=1
     fi
-    if [ -f "$main" ] && ! grep -Fq 'path = "tests/main.rs"' "$manifest"; then
+    if [ -f "$main" ] && ! printf '%s\n' "$targets" | grep -Fxq 'tests/main.rs'; then
         echo "$manifest: tests/main.rs is not a [[test]] target, so its tests never run."
         fail=1
     fi
@@ -48,7 +68,7 @@ for dir in crates/*/; do
         if [ -f "$main" ] && grep -Eq "^(pub )?mod $name;" "$main"; then
             declared=1
         fi
-        if [ "$autotests" = 1 ] || grep -Fq "path = \"tests/$name.rs\"" "$manifest"; then
+        if [ "$autotests" = 1 ] || printf '%s\n' "$targets" | grep -Fxq "tests/$name.rs"; then
             listed=1
         fi
         if [ "$declared" = 1 ] && [ "$listed" = 1 ]; then

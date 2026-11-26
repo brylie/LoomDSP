@@ -67,4 +67,16 @@ fails "tests/main.rs that is not a target never runs"
 case_dir "$plain" main.rs 'mod one;\n' one.rs ''
 fails "tests/main.rs with autotests on builds one.rs twice"
 
+case_dir '[package]\nname = "a"\nautotests = false\n\n# [[test]]\n# name = "integration"\n# path = "tests/main.rs"\n' main.rs 'mod one;\n' one.rs ''
+fails "a commented-out tests/main.rs target builds nothing"
+
+case_dir "$merged"'\n# [[test]]\n# name = "no_alloc"\n# path = "tests/no_alloc.rs"\n' main.rs 'mod one;\n' one.rs '' no_alloc.rs "$alloc"
+fails "a commented-out target for a file with a global allocator builds nothing"
+
+case_dir '[package]\nname = "a"\nautotests = false\n\n[[bench]]\nname = "b"\npath = "tests/main.rs"\n' main.rs 'mod one;\n' one.rs ''
+fails "a path under another section is not a test target"
+
+case_dir '[package]\nname = "a"\nautotests = false\n\n[[test]]  # the merged binary\nname = "integration"\npath = "tests/main.rs"  # every module\n' main.rs 'mod one;\n' one.rs ''
+passes "a target with comments at the ends of its lines"
+
 echo "check-test-targets.sh behaves as expected."

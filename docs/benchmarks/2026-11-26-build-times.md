@@ -4,7 +4,7 @@ On 2026-11-26, building the integration tests of a crate as one binary cut the r
 
 ## What was measured
 
-The debug build ran on macOS 27.0.1, an Apple M1 Pro with 10 cores and 32 GB of memory, with Cargo 1.100 and `jobs = 5` from the worktree's Cargo config. Other agents were building on the same machine, so the load average was 5 to 13 during the runs. Each run used the same script, with the compile cache's wrapper variable set to empty (`RUSTC_WRAPPER=`), so every build compiled for real:
+The debug build ran on macOS 27.0.1, an Apple M1 Pro with 10 cores and 32 GB of memory, with Cargo 1.100 and `jobs = 5` from the worktree's Cargo config. Other agents were building on the same machine, so the load average was 5 to 19 during the runs. Each run used the same script, with the compile cache's wrapper variable set to empty (`RUSTC_WRAPPER=`), so every build compiled for real:
 
 1. `cargo clean`, then build every test binary: `cargo nextest run --workspace --no-run`.
 2. Three times: add one statement to the body of `loom_modules::registry`, then build every test binary of the workspace again.
@@ -21,7 +21,7 @@ The first run of steps 2 and 3 is left out as a warm-up. The first `-p loom-modu
 | C. B, with the tests of `loom-modules` in one binary | 127 s | 16.3, 16.5 s | 2.6, 2.1 s | 5.7 GB | 42 |
 | D. C, with the tests of `loom-core`, `loom-app`, `loom-cli`, and `loom-ui` in one binary each | 134 s | 24.1, 23.0 s | 2.3, 2.7 s | 5.7 GB | 29 |
 
-Load averages over one minute: A 5 to 8, B 6 to 11, C 9 to 11, D 10 to 19.
+Load averages over one minute: A 5 to 8, B 6 to 11, C 9 to 14, D 10 to 19.
 
 ## Reading the results
 
