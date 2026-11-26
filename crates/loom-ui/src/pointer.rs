@@ -316,8 +316,14 @@ impl<A: App> Panels<'_, A> {
     }
 
     /// Sends the app's message for each of `reports` from a slider, for
-    /// the next turn ([`App::slid`]).
-    pub(crate) fn report_slid(&self, reports: impl IntoIterator<Item = crate::slider::Slid>) {
+    /// the next turn ([`App::slid`]). A focus move not yet told goes
+    /// first: a press on a slider both focuses it and moves it, and the
+    /// app handles the move with its copy of the focus current.
+    pub(crate) fn report_slid(&mut self, reports: impl IntoIterator<Item = crate::slider::Slid>) {
+        let mut reports = reports.into_iter().peekable();
+        if reports.peek().is_some() {
+            self.report_focus();
+        }
         for (id, position, phase) in reports {
             if let Some(message) = self.app.slid(&id, position, phase) {
                 self.waker.send(message);

@@ -915,3 +915,62 @@ fn every_inspector_node_is_named_placed_and_acts() {
         assert!(seen.contains(kind), "no example showed the {kind} inspector: {seen:?}");
     }
 }
+
+/// The selection now, as text, to compare before and after a key.
+fn selection(ui: &Ui) -> String {
+    format!("{:?}", ui.app().session.selection)
+}
+
+/// Tab and Shift+Tab from a control that a click focused step within the
+/// column and never select a tile (WAI-ARIA APG, keyboard navigation
+/// within a page; UX review of #900, finding 1): from Authors in patch
+/// info, and from a module row's value field and slider.
+#[test]
+fn tab_after_a_click_stays_in_the_column() {
+    let mut ui = patch_info();
+    let at = centre(&mut ui, &authors_part());
+    click(&mut ui, at);
+    assert_eq!(focused(&ui), Some(authors_part()), "the click focuses Authors");
+    let before = selection(&ui);
+    tab(&mut ui, false);
+    assert_eq!(focused(&ui), Some(tags_part()), "Tab goes on to Tags");
+    assert_eq!(selection(&ui), before, "Tab selects no tile");
+
+    for part in ["field", "value"] {
+        let mut ui = Ui::open("subtractive.ron");
+        ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+        let _ = ui.redraw();
+        let id = ids::part(&ids::row(4, ids::Kind::Param, "cutoff"), part);
+        let at = centre(&mut ui, &id);
+        click(&mut ui, at);
+        assert_eq!(focused(&ui), Some(id.clone()), "the click focuses {id}");
+        let before = selection(&ui);
+        for back in [false, true] {
+            tab(&mut ui, back);
+            let now = focused(&ui).unwrap_or_else(|| panic!("Tab from {id} (back: {back}) dropped the focus"));
+            assert!(
+                now.is_under(&ids::panel(4)),
+                "Tab from {id} (back: {back}) left the column for {now}"
+            );
+            assert_eq!(selection(&ui), before, "Tab from {id} (back: {back}) selects no tile");
+        }
+    }
+}
+
+/// Ctrl+Tab into the column's Authors field, then Tab, goes on to Tags
+/// and selects no tile, as from a click (UX review of #900, finding 1).
+#[test]
+fn tab_after_ctrl_tab_into_the_column_stays_in_it() {
+    let mut ui = patch_info();
+    for _ in 0..8 {
+        if focused(&ui) == Some(authors_part()) {
+            break;
+        }
+        let _ = ui.tap(Key::Named(Named::Tab), Modifiers::CTRL);
+    }
+    assert_eq!(focused(&ui), Some(authors_part()), "Ctrl+Tab reaches Authors");
+    let before = selection(&ui);
+    tab(&mut ui, false);
+    assert_eq!(focused(&ui), Some(tags_part()), "Tab goes on to Tags");
+    assert_eq!(selection(&ui), before, "Tab selects no tile");
+}

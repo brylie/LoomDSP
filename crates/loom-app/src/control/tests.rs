@@ -3317,3 +3317,74 @@ fn a_scripted_tab_moves_the_focus_as_a_real_one_in_help_and_the_chooser() {
         }
     }
 }
+
+/// A script's Tab from a control a click focused steps within the
+/// inspector's column, as a real Tab does, and selects no tile: from
+/// Authors in patch info, and from a module row's value field and slider
+/// (UX review of #900, finding 1; control-channel.md). Shift+Tab from
+/// Authors, the column's first stop, goes to the top run, as designed.
+/// The harness has its own bridge, so it never meets the live window's
+/// scripted-key race (a key Iced heard before the runtime's turn), which
+/// has its own fix: this test is no proof of that one.
+#[test]
+fn a_scripted_tab_after_a_click_stays_in_the_column() {
+    use crate::inspector::ids;
+    let click = |ui: &mut crate::ui_test::Ui, id: &loom_ui_core::UiId| {
+        ui.lay_out_panels();
+        let at = ui.runtime().bounds(id).unwrap_or_else(|| panic!("no part {id}"));
+        let _ = ui.move_to(loom_ui_core::Point::new(at.x + at.width / 2.0, at.y + at.height / 2.0));
+        let _ = ui.press();
+        let _ = ui.release();
+        assert_eq!(ui.runtime().focused(), Some(id), "the click focuses {id}");
+    };
+    let selection = |ui: &crate::ui_test::Ui| format!("{:?}", ui.app().session.selection);
+    let cases: [(Vec<u32>, loom_ui_core::UiId, loom_ui_core::UiId); 3] = [
+        (Vec::new(), crate::patch_info::authors_part(), ids::patch()),
+        (
+            vec![4],
+            ids::part(&ids::row(4, ids::Kind::Param, "cutoff"), "field"),
+            ids::panel(4),
+        ),
+        (
+            vec![4],
+            ids::part(&ids::row(4, ids::Kind::Param, "cutoff"), "value"),
+            ids::panel(4),
+        ),
+    ];
+    for (select, id, column) in cases {
+        for back in [false, true] {
+            let mut ui = typing_ui();
+            ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(select.clone())));
+            let _ = ui.redraw();
+            click(&mut ui, &id);
+            let before = selection(&ui);
+            let line = if back {
+                r#"{"cmd": "key", "key": "tab", "modifiers": ["shift"]}"#
+            } else {
+                r#"{"cmd": "key", "key": "tab"}"#
+            };
+            run_ui(&mut ui, line).unwrap();
+            let now = ui.runtime().focused().cloned();
+            // Back from Authors, patch info's first stop, is the top run's
+            // last, as a real Shift+Tab goes (`tab_walks_patch_info_top_to_bottom`).
+            if back && id == crate::patch_info::authors_part() {
+                assert_eq!(now.as_ref(), ui.app().top_stops().last(), "back from Authors");
+                assert_eq!(
+                    selection(&ui),
+                    before,
+                    "a scripted Shift+Tab from Authors selects no tile"
+                );
+                continue;
+            }
+            assert!(
+                now.as_ref().is_some_and(|now| now.is_under(&column) && *now != id),
+                "a scripted Tab from {id} (back: {back}) went to {now:?}"
+            );
+            assert_eq!(
+                selection(&ui),
+                before,
+                "a scripted Tab from {id} (back: {back}) selects no tile"
+            );
+        }
+    }
+}
