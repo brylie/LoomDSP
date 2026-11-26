@@ -27,6 +27,13 @@ prek = "latest"
 "aqua:crate-ci/typos" = "latest"
 "aqua:EmbarkStudios/cargo-deny" = "latest"
 gh = "latest"
+# Local development telemetry (scripts/devtel, docs/dev/devtel.md). Its
+# scripts use only the standard library; DuckDB and the trace viewer are
+# fetched by `mise exec` when a devtel task first needs them (pinned in
+# [env] below), so other tasks and CI never download them.
+# An exact version: mise 2025.9 cannot install 3.13.18 and later (it picks
+# the free-threaded build and fails), so a range would break older mise.
+python = "3.13.11"
 # A shared compile cache, so worktrees reuse each other's builds of the
 # same dependencies (scripts/rustc-wrapper.sh). A command-line tool only,
 # never linked into the crates (Apache-2.0).
@@ -37,6 +44,19 @@ gh = "latest"
 # coverage" rule of the main branch ruleset on GitHub, so the local check
 # fails exactly when the pull request would be blocked.
 LOOM_COVERAGE_MIN = "80"
+# Local development telemetry (docs/dev/devtel.md). The tools it runs with
+# `mise exec`. DuckDB comes from GitHub releases, because the aqua registry
+# entry in older mise versions does not match DuckDB 2's file names.
+LOOM_DEVTEL_DUCKDB = "github:duckdb/duckdb@2.0.1"
+LOOM_DEVTEL_VIEWER = "github:CtrlSpice/otel-desktop-viewer@0.8.0"
+# The task wrapper below (devtel-sh) lives here.
+_.path = ["scripts/devtel/bin"]
+
+[settings]
+# Every inline task step runs through devtel-sh, which records it as a span
+# and then runs it with sh, exactly as mise would ("sh -c -o errexit" is
+# mise's default). It does nothing extra in CI or with LOOM_DEVTEL=0.
+unix_default_inline_shell_args = "devtel-sh -c -o errexit"
 
 [tasks.fmt]
 description = "Check formatting (cargo fmt --all fixes it)"
@@ -199,3 +219,27 @@ description = "Run everything CI runs (all but msrv and the macOS and Windows te
 # coverage runs every test except doc tests, so `test` is not listed again;
 # `doctest` covers the rest.
 depends = ["fmt", "clippy", "typos", "adr-status", "test-placement", "portable", "ui-no-toolkit", "worktree-targets", "deny", "docs", "wasm", "coverage", "doctest"]
+
+[tasks.devtel]
+description = "Open the DuckDB UI over the development telemetry archive (docs/dev/devtel.md)"
+run = "python3 scripts/devtel/devtel.py ui"
+raw = true
+
+[tasks.devtel-report]
+description = "Print the development efficiency report: time by kind of work, re-runs, loops, models, commits"
+usage = 'flag "--days <days>" default="14" help="How many days back"'
+run = "python3 scripts/devtel/devtel.py report --days ${usage_days}"
+
+[tasks.devtel-traces]
+description = "Open every session as a trace waterfall in otel-desktop-viewer"
+usage = 'flag "--days <days>" default="14" help="How many days back"'
+run = "python3 scripts/devtel/devtel.py traces --days ${usage_days}"
+raw = true
+
+[tasks.devtel-import]
+description = "Copy new Claude Code transcripts and spool files into the devtel archive"
+run = "python3 scripts/devtel/devtel.py import"
+
+[tasks.devtel-test]
+description = "Test the development telemetry scripts"
+run = "python3 -m unittest discover -s scripts/devtel/tests -v"

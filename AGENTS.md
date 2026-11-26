@@ -32,6 +32,7 @@ cargo bench -p loom-modules
 LOOM_UPDATE_REFERENCES=1 cargo test -p loom-modules --test reference   # write module reference renders
 LOOM_UPDATE_REFERENCES=1 cargo test -p loom-modules --test patches     # write example patch reference renders
 mise run help-pages                    # regenerate the module help pages in docs/modules (loom modules --markdown)
+mise run devtel-report                 # development telemetry: where agent and check time goes, re-runs, loops (docs/dev/devtel.md)
 cargo run --release -p loom-cli -- check examples/patches/fm-feedback.ron
 cargo run --release -p loom-cli -- render examples/patches/subtractive.ron -o /tmp/out.wav --note 60
 cargo run --release -p loom-app -- examples/patches/fm-feedback.ron   # desktop app
