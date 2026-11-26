@@ -2,16 +2,17 @@
 //! its capture through a drag, the cancels, and the leave (ui-layer.md,
 //! section 9, rule 1).
 
+use crate::access::{Access, Role};
 use crate::app::{App, Context, InputState, WindowSpec};
 use crate::custom::{Custom, CustomEvent, CustomKind, Moment, Out, Used};
 use crate::effect::Effects;
 use crate::element::{Element, Length};
 use crate::event::{DriverEvent, WindowEvent, WindowState};
 use crate::headless::Harness;
-use crate::layout::tests::Mono;
+use crate::layout::tests::{Mono, STYLE};
 use crate::routing::NoTarget;
 use crate::view::{Layer, View};
-use loom_ui_core::{Event, Point, PointerButton, PointerEvent, ScrollDelta, Size, UiId};
+use loom_ui_core::{Cursor, Event, Point, PointerButton, PointerEvent, ScrollDelta, Size, UiId};
 use std::time::Instant;
 
 /// The pad's kind.
@@ -82,6 +83,10 @@ impl Custom<Drags> for PadState {
             _ => Used::Yes,
         }
     }
+
+    fn cursor(&self, app: &Drags, _moment: &Moment) -> Cursor {
+        if app.dragging() { Cursor::Grabbing } else { Cursor::Grab }
+    }
 }
 
 /// An app with the pad above a label, in one panel, and an overlay over
@@ -138,6 +143,12 @@ impl App for Drags {
                 );
             }
             children.push(Element::space(Length::Fixed(200.0), Length::Fixed(50.0)).key("label"));
+            children.push(
+                Element::field("", STYLE)
+                    .key("name")
+                    .width(Length::Fixed(200.0))
+                    .access(Access::new(Role::TextInput, "Name")),
+            );
             Element::column(children)
         });
         if self.overlay {
@@ -570,4 +581,34 @@ fn a_cancel_tells_where_the_pointer_is_now() {
         .position(|event| *event == CustomEvent::CaptureLost)
         .unwrap();
     assert_eq!(pad.at[lost], Some(Point::new(300.0, 70.0)));
+}
+
+/// The pad's shape shows over it, and none over a plain part of a panel;
+/// over a field, the text beam.
+#[test]
+fn the_cursor_follows_the_hover() {
+    let mut harness = harness();
+    step(&mut harness, 50.0, 50.0, PointerEvent::Moved);
+    assert_eq!(harness.runtime().cursor(), Some(Cursor::Grab));
+    step(&mut harness, 50.0, 120.0, PointerEvent::Moved);
+    assert_eq!(harness.runtime().cursor(), None);
+    step(&mut harness, 50.0, 155.0, PointerEvent::Moved);
+    assert_eq!(harness.runtime().hovered(), Some(&UiId::panel("main").with("name")));
+    assert_eq!(harness.runtime().cursor(), Some(Cursor::Text));
+}
+
+/// While the pad holds the capture its shape wins wherever the pointer
+/// is: over the label, over the field, and outside the window, as a
+/// native drag keeps its shape. The release gives the shape back.
+#[test]
+fn a_drag_keeps_its_cursor_wherever_the_pointer_goes() {
+    let mut harness = harness();
+    press_pad(&mut harness);
+    assert_eq!(harness.runtime().cursor(), Some(Cursor::Grabbing));
+    for (x, y) in [(50.0, 120.0), (50.0, 155.0), (500.0, 300.0)] {
+        step(&mut harness, x, y, PointerEvent::Moved);
+        assert_eq!(harness.runtime().cursor(), Some(Cursor::Grabbing), "at ({x}, {y})");
+    }
+    step(&mut harness, 50.0, 155.0, PointerEvent::Released(PointerButton::Left));
+    assert_eq!(harness.runtime().cursor(), Some(Cursor::Text));
 }

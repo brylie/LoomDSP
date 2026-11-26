@@ -45,7 +45,9 @@ use crate::view::{Layer, View};
 use crate::waker::{Wake, Waker};
 use crate::window::Window;
 use accesskit::{Action as KitAction, ActionData, ScrollUnit};
-use loom_ui_core::{Event, Key, KeyEvent, Modifiers, Platform, Point, PointerEvent, Rect, Size, TextMeasure, UiId};
+use loom_ui_core::{
+    Cursor, Event, Key, KeyEvent, Modifiers, Platform, Point, PointerEvent, Rect, Size, TextMeasure, UiId,
+};
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
@@ -261,6 +263,33 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// the window, in logical pixels.
     pub fn custom_bounds(&self, id: &UiId) -> Option<Rect> {
         self.customs.bounds(id)
+    }
+
+    /// The pointer shape the runtime asks for (section 9, rule 1, "the
+    /// cursor"): the shape of the custom element that holds the capture,
+    /// wherever the pointer is; else that of the custom element under the
+    /// pointer; else the text beam over one of the runtime's fields.
+    /// `None` when it asks for none, as over a toolkit's part or a plain
+    /// part of a panel: a driver then shows what the toolkit asked for, or
+    /// the plain arrow. A driver reads it after each turn and frame.
+    pub fn cursor(&self) -> Option<Cursor> {
+        let ask = |id: &UiId| {
+            let moment = crate::Moment {
+                pointer: self.pointer.at,
+                bounds: self.customs.bounds(id)?,
+                now: self.pointer.now?,
+                modifiers: self.pointer.modifiers,
+            };
+            Some(self.customs.cursor(&self.app, id, &moment).unwrap_or_default())
+        };
+        if let Some(id) = self.customs.captured() {
+            return ask(id);
+        }
+        let (_, id) = self.pointer.hovered.as_ref()?;
+        if self.customs.is_custom(id) {
+            return ask(id);
+        }
+        self.panels.fields.has(id).then_some(Cursor::Text)
     }
 
     /// The custom elements' state, to change for a test.

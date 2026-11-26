@@ -17,7 +17,7 @@
 
 use crate::app::App;
 use crate::view::Layer;
-use loom_ui_core::{Modifiers, Point, PointerEvent, Rect, UiId};
+use loom_ui_core::{Cursor, Modifiers, Point, PointerEvent, Rect, UiId};
 use std::any::Any;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -65,6 +65,15 @@ pub trait Custom<A: App>: Any {
     fn event(&mut self, app: &A, event: &CustomEvent, moment: &Moment, out: &mut Out<'_, A::Message>) -> Used {
         let _ = (app, event, moment, out);
         Used::No
+    }
+
+    /// The pointer shape it wants with the pointer at `moment.pointer`:
+    /// over it, or anywhere while it holds the capture, so a drag that
+    /// leaves it keeps its shape (section 9, rule 1, "the cursor"). By
+    /// default the plain arrow.
+    fn cursor(&self, app: &A, moment: &Moment) -> Cursor {
+        let _ = (app, moment);
+        Cursor::Default
     }
 }
 
@@ -226,6 +235,12 @@ impl<A: App> Customs<A> {
         };
         let mut out = Out { sent: &mut self.sent };
         state.event(app, event, moment, &mut out)
+    }
+
+    /// The pointer shape the element `id` wants at `moment`, or `None`
+    /// when it has no state to ask.
+    pub(crate) fn cursor(&self, app: &A, id: &UiId, moment: &Moment) -> Option<Cursor> {
+        Some(self.state(id)?.cursor(app, moment))
     }
 
     /// The messages elements sent since the last call, in order.
