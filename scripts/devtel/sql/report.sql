@@ -29,6 +29,21 @@ select left(command, 70) as command, count(*) as sessions, max(times_in_ten_call
 from devtel_loops where first_ts >= now() - to_days($DAYS)
 group by 1 order by minutes desc limit 10;
 
+.print '== Test runs and the test queue (docs/dev/test-runs.md)'
+select coalesce(attributes['loom.test.selection'], 'queued command') as selection, count(*) as runs,
+  round(sum(end_ns - start_ns) / 6e10) as run_minutes,
+  round(median(end_ns - start_ns) / 1e9) as median_s
+from spool_spans
+where service = 'tests' and name = 'test run' and to_timestamp(start_ns::double / 1e9) >= now() - to_days($DAYS)
+group by 1 order by runs desc;
+
+select count(*) as waits, count(*) filter (where attributes['loom.test.wait_ms']::bigint > 2000) as waited_over_2s,
+  round(sum(coalesce(attributes['loom.test.wait_ms']::bigint, 0)) / 60000.0, 1) as wait_minutes,
+  round(max(coalesce(attributes['loom.test.wait_ms']::bigint, 0)) / 60000.0, 1) as longest_wait_min,
+  count(*) filter (where attributes['loom.test.cancelled'] = 'true') as cancelled
+from spool_spans
+where service = 'tests' and name = 'test queue wait' and to_timestamp(start_ns::double / 1e9) >= now() - to_days($DAYS);
+
 .print '== Models (one row per API response; tokens counted once per message)'
 select model, count(*) as turns, count(distinct session_id) as sessions,
   round(sum(output_tokens) / 1e6, 2) as output_mtok,

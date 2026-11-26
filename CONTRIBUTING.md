@@ -129,7 +129,7 @@ Then build and run the checks:
 
 ```sh
 cargo build --workspace
-mise run check        # the local check: fmt, clippy, typos, the file rules, and every test, with no coverage build
+mise run check        # the local check: fmt, clippy, typos, the file rules, and the tests the change can reach, with no coverage build
 mise run check-full   # every check CI runs, coverage included, except the minimum Rust version and the tests on the other systems
 mise run test         # just the tests
 mise run coverage     # tests with line coverage; fails under the minimum
@@ -138,6 +138,17 @@ cargo bench -p loom-modules          # optional, takes a few minutes
 ```
 
 `mise tasks` lists every check.
+
+### Test runs on a shared machine
+
+Several agents often work at once, each in its own worktree on one machine. Two full test runs at once take longer than the same runs one after the other, so test runs share a machine-wide queue ([spec](docs/dev/test-runs.md), ADR-0050):
+
+- The test runs of `mise run check`, `mise run test`, and `mise run coverage` wait for a slot. There is one slot by default (`LOOM_TEST_SLOTS`). The run that holds it uses every core.
+- A waiting run prints which worktree and branch hold the slot, and since when. It builds its tests before it waits (coverage excepted), so only the run itself waits.
+- The slot is a `flock` on a file in `~/.local/share/loomdsp/test-queue` (`LOOM_TEST_QUEUE_DIR`). The system frees it when the run ends, however it ends, Ctrl-C and crashes included.
+- `LOOM_TEST_QUEUE=0` skips the queue. It is off in CI, and on systems without `flock` (Windows).
+
+`mise run check` also runs only the tests a change can reach (ADR-0051): the crates with files changed since the merge base with `origin/main` (committed or not), and every crate that depends on them. A change to docs or scripts only runs no Rust tests. A change to `Cargo.lock`, the root `Cargo.toml`, `mise.toml`, `.config/`, `examples/`, `docs/modules/`, or any file the spec does not list runs every test. The check prints what it runs and skips, and why. `mise run check -- --all` or `LOOM_TEST_ALL=1` runs every test, and `python3 scripts/test_run.py --explain` prints the choice without running anything. CI always runs every test.
 
 ### Where tests live
 

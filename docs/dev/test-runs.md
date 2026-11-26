@@ -24,7 +24,7 @@ The script does this, in order:
 1. **Select** the crates to test (see [Selection](#selection)). If none, print why and exit 0.
 2. **Build** the test binaries, outside the queue: `cargo nextest run --workspace --no-run`. Building uses the worktree's `[build] jobs` (half the cores, from `scripts/setup-worktree-target.sh`), and sccache shares the work between worktrees, so building beside another run is fair. Only the run waits.
 3. **Take a slot** (see [The queue](#the-queue)). Print who holds it while waiting.
-4. **Run** the selected tests: `cargo nextest run --workspace --test-threads N -E FILTER`. The binaries are already built, so this builds nothing. `N` is every core while the run holds a slot, and half the cores when the queue is off.
+4. **Run** the selected tests: `cargo nextest run --workspace --test-threads N -E FILTER`. The binaries are already built, so this builds nothing. `N` is every core while the run holds a slot, and half the cores when the queue is off. In CI the script passes no thread count, so nextest uses its own default, as before. With the queue off, step 2 is skipped: the run builds what it needs, as a plain `cargo nextest run` does.
 5. **Free the slot**, record the wait and the run as devtel spans, and exit with nextest's exit code.
 
 The build and the run both pass `--workspace`, as CI does, so cargo resolves features the same way for every selection and nothing is rebuilt between a selected run and a full one. The filter only picks which built tests run.
@@ -36,7 +36,7 @@ The build and the run both pass `--workspace`, as CI does, so cargo resolves fea
 | `LOOM_TEST_QUEUE` | on | `0` turns the queue off. Off in CI (`CI` set) unless `LOOM_TEST_QUEUE=1`. |
 | `LOOM_TEST_SLOTS` | `1` | How many test runs may run at once on the machine. |
 | `LOOM_TEST_QUEUE_DIR` | `$XDG_DATA_HOME/loomdsp/test-queue`, else `~/.local/share/loomdsp/test-queue` | The shared folder for the lock files. |
-| `LOOM_TEST_THREADS` | every core with a slot, half without | nextest's `--test-threads`. |
+| `LOOM_TEST_THREADS` | every core with a slot, half without, nextest's own in CI | nextest's `--test-threads`. |
 | `LOOM_TEST_ALL` | off | `1` runs every test, with no selection. The same as `mise run check -- --all`. |
 | `LOOM_TEST_BASE` | `origin/main` | The branch the change is compared with. |
 
@@ -98,6 +98,8 @@ Any other file runs everything. The list of files that select nothing is an allo
 A test that reads another crate's files by path, not through a dependency, would be missed. Today none does: tests outside their own crate read only `examples/` and `docs/modules/`, which are in class 1. A new test that reads across crates must add the folder it reads to class 1.
 
 ### What the output says
+
+`python3 scripts/test_run.py --explain` prints the choice below and exits, with nothing built or run.
 
 Before the build, the script prints what it chose and why:
 
