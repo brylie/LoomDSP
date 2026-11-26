@@ -362,9 +362,18 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
         // One scripted key at a time, as the keyboard gives them: Iced keeps
         // its copy now, as `window_event` keeps a real key's, the shell runs
         // the runtime's turn for it, and the next report lets Iced hear it
-        // unless the runtime took it.
+        // unless the runtime took it. Not while a message waits to run
+        // alone: the shell reports again after it, before the key's turn,
+        // and Iced would hear the key with nothing yet saying the runtime
+        // took it (a Tab from a field a script's click focused selected a
+        // tile; UX review of #900). The key cannot wait forever: every
+        // answer this report adds is added above, so the first report that
+        // finds none takes the key and ends the shell's loop of turns that
+        // run alone, and the key's turn comes next.
         let mut input = Vec::new();
-        if let Some(key) = app.pointer.take_scripted_key() {
+        if self.answers.is_empty()
+            && let Some(key) = app.pointer.take_scripted_key()
+        {
             let _ = self.pointers.before(&parts.panels, key.clone(), &mut self.events);
             input.extend(loom_canvas::iced_convert::event_to_core(&key));
             self.redraw = Redraw::NextFrame;
