@@ -281,7 +281,7 @@ class ArchiveTests(StoreTestCase):
                                                     "clippy", start + int(40e9), start + int(41e9), check)])
         # A third run on the same tree that reused the pass: not a re-run.
         reused = dict(check, **{"loom.devtel.reused": True, "loom.devtel.reused_ms": 60000})
-        devtel.emit("hooks", "checks", [devtel.span(devtel.new_trace_id(), "d" * 16, None,
+        devtel.emit("hooks", "checks", [devtel.span(devtel.new_trace_id(), "9" * 16, None,
                                                     "clippy", start + int(80e9), start + int(80.2e9), reused)])
         del os.environ["TRACEPARENT"]
 
