@@ -24,7 +24,7 @@ The script does this, in order:
 1. **Select** the crates to test (see [Selection](#selection)). If none, print why and exit 0.
 2. **Build** the test binaries, outside the queue: `cargo nextest run --workspace --no-run`. Building uses the worktree's `[build] jobs` (half the cores, from `scripts/setup-worktree-target.sh`), and sccache shares the work between worktrees, so building beside another run is fair. Only the run waits.
 3. **Take a slot** (see [The queue](#the-queue)). Print who holds it while waiting.
-4. **Run** the selected tests: `cargo nextest run --workspace --test-threads N -E FILTER`. The binaries are already built, so this builds nothing. `N` is every core while the run holds a slot, and half the cores when the queue is off. In CI the script passes no thread count, so nextest uses its own default, as before. With the queue off, step 2 is skipped: the run builds what it needs, as a plain `cargo nextest run` does.
+4. **Run** the selected tests: `cargo nextest run --workspace --test-threads N -E FILTER`. The binaries are already built, so this builds nothing. A selected run adds `--no-tests=warn`, since a selected crate may have no tests of its own. `N` is every core while the run holds a slot, and half the cores when the queue is off. In CI the script passes no thread count, so nextest uses its own default, as before. With the queue off, step 2 is skipped: the run builds what it needs, as a plain `cargo nextest run` does.
 5. **Free the slot**, record the wait and the run as devtel spans, and exit with nextest's exit code.
 
 The build and the run both pass `--workspace`, as CI does, so cargo resolves features the same way for every selection and nothing is rebuilt between a selected run and a full one. The filter only picks which built tests run.
@@ -46,19 +46,19 @@ The build and the run both pass `--workspace`, as CI does, so cargo resolves fea
 
 The queue folder holds one lock file per slot, `slot-0.lock` up to `slot-(N-1).lock`. A run takes a slot with `fcntl.flock(LOCK_EX | LOCK_NB)` on one of them, trying each in turn, and tries again every second until one is free.
 
-`flock` is held by the open file, not by a process ID. The kernel frees it when the last process that holds the file closes it or dies, even after `kill -9` or a crash. So there is no stale lock to detect and no PID to check. The script passes the lock file to nextest as an inherited file descriptor, so the slot stays held as long as nextest or any test process lives, even if the script itself is killed first. Ctrl-C reaches nextest (the script forwards SIGINT, SIGTERM, and SIGHUP, as devtel's wrapper does), nextest stops its tests, and the slot frees when the last of them exits.
+`flock` is held by the open file, not by a process ID. The kernel frees it when the last process that holds the file closes it or dies, even after `kill -9` or a crash. So there is no stale lock to detect and no PID to check. The lock file is not passed to the command the script runs. A long-lived process started under the run, such as the sccache server that a build starts, would otherwise keep the lock after the run and block the queue for good. The cost: when the script itself is killed with `kill -9`, the slot frees at once while its tests may still run for a while, so two runs overlap briefly. Ctrl-C reaches nextest (the script forwards SIGINT, SIGTERM, and SIGHUP, as devtel's wrapper does), nextest stops its tests, and the script frees the slot when nextest exits.
 
 `flock` works on macOS and Linux. On Windows, or when the folder cannot be written, the script prints one line saying the queue is off and why, and runs without it. A test run is never blocked by the queue failing.
 
 ### Who holds the slot
 
-Next to each lock file, the holder writes `slot-K.json`: worktree path, branch, process ID, start time, and how many tests it runs. This file only informs. The lock is the truth: a JSON file whose lock is free is ignored.
+Next to each lock file, the holder writes `slot-K.json`: worktree path, branch, process ID, start time, and what it runs (every test, or the tests of how many crates). This file only informs. The lock is the truth: a JSON file whose lock is free is ignored.
 
 A waiting run prints, once at the start and then every 60 seconds:
 
 ```text
 test queue: waiting for a test slot (1 of 1 in use)
-  slot 0: gifted-khorana-ee8ad6 on claude/gifted-khorana-ee8ad6, 1206 tests, since 14:02:11 (3m 40s)
+  slot 0: gifted-khorana-ee8ad6 on claude/gifted-khorana-ee8ad6, the tests of 4 crates, since 14:02:11 (3m 40s)
   LOOM_TEST_QUEUE=0 skips the queue.
 ```
 
@@ -71,8 +71,8 @@ While the script holds a slot, it sets `LOOM_TEST_SLOT_HELD=1` for its children.
 ### Which tasks queue
 
 - `mise run check`: its test step, as above.
-- `mise run test`: its nextest run, through `python3 scripts/test_run.py --all`. It builds first and selects nothing, so it runs every test, with every core while it holds the slot. Its doc tests (`mise run doctest`) run after it, outside the queue, because they are few and light.
-- `mise run coverage`: its `cargo llvm-cov nextest` line, through `python3 scripts/test_run.py queue -- COMMAND`. The instrumented build cannot be split from the run there, so this one waits before it builds. Agents do not run coverage locally (CI is the coverage gate), so this costs little.
+- `mise run test`: its nextest run, through `python scripts/test_run.py --all` (`python`, because CI runs this task on Windows, where mise's Python may have no `python3` command). It builds first and selects nothing, so it runs every test, with every core while it holds the slot. Its doc tests (`mise run doctest`) run after it, outside the queue, because they are few and light.
+- `mise run coverage`: its `cargo llvm-cov nextest` line, through `python scripts/test_run.py queue -- COMMAND`. The instrumented build cannot be split from the run there, so this one waits before it builds. Agents do not run coverage locally (CI is the coverage gate), so this costs little.
 - `mise run check-full` runs `coverage`, so it queues through it.
 
 `queue -- COMMAND` is the general form: it takes a slot, runs the command with the slot held, and frees it. Every task line stays a plain command, so it runs in cmd on Windows too, where the queue turns itself off.
@@ -89,7 +89,7 @@ If the base branch is missing or has no merge base with `HEAD`, every test runs.
 
 Each changed file falls in one of three classes. The first rule that matches wins.
 
-1. **Everything.** Files that any crate's build or tests may read, or that change how every crate builds: `Cargo.lock`, the root `Cargo.toml`, `mise.toml`, `rust-toolchain` and `rust-toolchain.toml`, `.config/`, `.cargo/`, `examples/`, and `docs/modules/`. These run every test.
+1. **Everything.** Files that any crate's build or tests may read, or that change how every crate builds: `Cargo.lock`, the root `Cargo.toml`, each crate's `Cargo.toml` (it can change the features of shared dependencies), `mise.toml`, `rust-toolchain` and `rust-toolchain.toml`, `.config/`, `.cargo/`, `examples/`, and `docs/modules/`. These run every test.
 2. **One crate.** A file under `crates/NAME/` belongs to that workspace member. It selects that crate and every crate that depends on it, through normal, dev, or build dependencies, as `cargo metadata` lists them.
 3. **Nothing.** Files no Rust test reads: `docs/` (but not `docs/modules/`), `scripts/`, `site/`, `.github/`, `.claude/`, `fuzz/`, the Markdown files at the root, `prek.toml`, `_typos.toml`, `rustfmt.toml`, `deny.toml`, `codecov.yml`, `skills-lock.json`, `.gitignore`, `LICENSE`, and `AI_POLICY.md`. Their own checks (typos, the script tests, the ADR checks) still run in `mise run check`.
 
@@ -136,7 +136,7 @@ When devtel is on ([devtel](devtel.md)), the script records two spans as childre
 - The classes: each rule in [What a file reaches](#what-a-file-reaches), with a made-up package graph.
 - The reverse closure follows dev and build dependencies.
 - The changed set from a temporary git repository: committed, staged, untracked, renamed, and a missing base.
-- Two processes and one slot: the second waits and prints the holder; it gets the slot when the first exits, when it is killed with SIGKILL, and when a child that inherited the lock exits last.
+- Two processes and one slot: the second waits and prints the holder; it gets the slot when the first exits, and at once when the first is killed with SIGKILL, though its child still runs.
 - `LOOM_TEST_SLOT_HELD`, `LOOM_TEST_QUEUE=0`, and `CI` skip the queue.
 - An unwritable folder runs without the queue.
 - The devtel spans, written to a temporary store.

@@ -66,7 +66,7 @@ description = "Run every test (debug build, so the no-allocation test is active)
 # Nextest gives each test a process of its own. Cargo runs the doc tests.
 # The nextest run waits in the machine-wide test queue (docs/dev/test-runs.md);
 # the queue is off in CI. It builds first, then runs every test. `python`,
-# not `python3`: CI runs this task on Windows, where mise's Python has no
+# not `python3`: CI runs this task on Windows, where mise's Python may have no
 # python3 command.
 run = ["python scripts/test_run.py --all", "mise run doctest"]
 
@@ -97,7 +97,7 @@ run = [
   '''cargo llvm-cov clean{% if get_env(name="LOOM_COVERAGE_CLEAN", default="all") == "workspace" %} --workspace{% endif %}''',
   # The test run waits in the machine-wide test queue (docs/dev/test-runs.md),
   # build included, since llvm-cov builds and runs in one command. Off in CI.
-  '''python3 scripts/test_run.py queue -- cargo llvm-cov nextest --workspace --profile ci --ignore-filename-regex 'device_tests\.rs$' --lcov --output-path target/lcov.info''',
+  '''python scripts/test_run.py queue -- cargo llvm-cov nextest --workspace --profile ci --ignore-filename-regex 'device_tests\.rs$' --lcov --output-path target/lcov.info''',
   '''cargo llvm-cov report --ignore-filename-regex 'device_tests\.rs$' --cobertura --output-path target/cobertura.xml''',
   '''cargo llvm-cov report --ignore-filename-regex 'device_tests\.rs$' --fail-under-lines {{env.LOOM_COVERAGE_MIN}}''',
 ]
