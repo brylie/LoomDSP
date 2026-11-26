@@ -946,6 +946,12 @@ impl crate::App {
                     if self.our_stops().contains(&id)
                         || (self.inspector_owns() && id.is_under(&crate::inspector::panel::inspector_id())) =>
                 {
+                    // The inspector sits beside the canvas, not over it: a
+                    // knob that had the keys lets go, as on the canvas's
+                    // own Focus path, so only the field has them.
+                    if id.is_under(&crate::inspector::panel::inspector_id()) {
+                        self.a11y.release_canvas_focus();
+                    }
                     self.effect(loom_ui::Effects::focus(id));
                     Vec::new()
                 }

@@ -55,13 +55,15 @@ pub(crate) enum Message {
     SubPatchNameDraft { module: u32, value: String },
     /// Apply the sub-patch's name as one undo step.
     SubPatchNameApply { module: u32 },
-    /// The runtime's slider for a parameter moved to a position from 0 to
-    /// 1, and `end` when its gesture ended, which closes the undo step as
-    /// a release does (ui-layer.md, section 5, rule 16).
+    /// The runtime's slider for a parameter moved to `value`, taken from
+    /// its position over the range the row shows (an exposed row's
+    /// surface range, which can be narrower than the parameter's), and
+    /// `end` when its gesture ended, which closes the undo step as a
+    /// release does (ui-layer.md, section 5, rule 16).
     Slid {
         module: u32,
         index: usize,
-        position: f32,
+        value: f32,
         end: bool,
     },
     /// The runtime's depth slider on a modulation's card moved, from -1 to
@@ -670,14 +672,10 @@ impl App {
             Message::Slid {
                 module,
                 index,
-                position,
+                value,
                 end,
             } => {
-                self.inspector_message(Message::Param {
-                    module,
-                    index,
-                    position,
-                });
+                self.inspector_message(Message::ParamValue { module, index, value });
                 if end {
                     self.close_slider_gesture();
                 }

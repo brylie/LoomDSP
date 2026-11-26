@@ -168,10 +168,13 @@ impl App {
         }
         for (module, p) in rows(&model) {
             if *id == ids::part(&p.ui, "value") {
+                // Back to a value over the range that placed the slider:
+                // an exposed row's is its surface range, so a position
+                // stores the value the row shows (CodeRabbit on #900).
                 return Some(Message::Inspector(super::super::Message::Slid {
                     module,
                     index: p.index,
-                    position,
+                    value: p.spec.denormalize(position),
                     end,
                 }));
             }

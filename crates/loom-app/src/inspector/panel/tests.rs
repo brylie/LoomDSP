@@ -974,3 +974,79 @@ fn tab_after_ctrl_tab_into_the_column_stays_in_it() {
     assert_eq!(focused(&ui), Some(tags_part()), "Tab goes on to Tags");
     assert_eq!(selection(&ui), before, "Tab selects no tile");
 }
+
+/// A screen reader's Focus on an inspector field, while a canvas knob has
+/// the keys, gives the field the keys: the knob lets go, so the canvas no
+/// longer reports a focus or takes the keys (CodeRabbit on #900).
+#[test]
+fn a_readers_focus_on_a_field_takes_the_keys_from_a_knob() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.redraw();
+    let knob: UiId = "canvas/4/param/cutoff".parse().unwrap();
+    ui.a11y_action(&knob, accesskit::Action::Focus);
+    let _ = ui.redraw();
+    assert!(ui.app().a11y.focus().is_some(), "the knob has the keys");
+    let field = ids::part(&ids::row(4, ids::Kind::Param, "cutoff"), "field");
+    ui.a11y_action(&field, accesskit::Action::Focus);
+    let _ = ui.redraw();
+    assert_eq!(focused(&ui), Some(field), "the field has the focus");
+    assert_eq!(ui.app().a11y.focus(), None, "the knob let go");
+    assert!(!ui.app().canvas_has_keys(), "the canvas has no keys");
+}
+
+/// A slider on an exposed row stores the value the row shows: its
+/// position is over the surface's range, here 200 to 2000 Hz, not the
+/// filter's whole range (sub-patches.md; CodeRabbit on #900).
+#[test]
+fn an_exposed_slider_stores_the_value_over_its_surface_range() {
+    let patch = include_str!("../../../../../examples/patches/nested-subtractive.ron")
+        .replace("range: Some((20.0, 20000.0))", "range: Some((200.0, 2000.0))");
+    let mut ui = Ui::with_app(crate::tests::app_with_text(&patch));
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![2])));
+    let _ = ui.redraw();
+    let (svf, cutoff) = {
+        let graph = ui.app().session.controller.graph();
+        let (svf, node) = graph
+            .nodes()
+            .find(|(_, n)| n.descriptor.id == "loom.filter.svf")
+            .expect("the nested filter");
+        (
+            svf,
+            loom_core::ModuleNames::parameter_index(node, "cutoff").expect("cutoff"),
+        )
+    };
+    let surface = {
+        let app = ui.app();
+        crate::surface::control_target(
+            app.session.controller.graph(),
+            &app.session.hierarchy,
+            2,
+            0,
+            loom_canvas::ControlPart::Main,
+        )
+        .expect("the exposed cutoff")
+        .spec
+    };
+    let whole = ui
+        .app()
+        .session
+        .controller
+        .graph()
+        .node(svf)
+        .unwrap()
+        .spec(cutoff)
+        .unwrap();
+    assert!(surface.max < whole.max, "the surface range is narrower");
+    let slider = ids::part(&ids::row(2, ids::Kind::Exposed, "cutoff"), "value");
+    let message = ui
+        .app()
+        // Off the middle: on a log scale, 0.5 is the same frequency over
+        // 20 to 20000 Hz as over 200 to 2000 Hz.
+        .inspector_slid(&slider, 0.25, loom_ui::SlidePhase::End)
+        .expect("the exposed slider routes");
+    ui.send(message);
+    let stored = ui.app().session.controller.graph().node(svf).unwrap().params[cutoff];
+    let shown = surface.denormalize(0.25);
+    assert!((stored - shown).abs() < 1e-3, "stored {stored}, the row shows {shown}");
+}
