@@ -1,7 +1,7 @@
 //! Panic in the engine. Each test is an acceptance criterion of
 //! `docs/design/panic.md`.
 
-mod common;
+use crate::common;
 
 use common::*;
 use loom_analysis::{max_step, peak};

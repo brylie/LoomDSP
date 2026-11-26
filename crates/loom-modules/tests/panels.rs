@@ -8,7 +8,7 @@
 //! as the module harness does, because display values and meter readings
 //! are published once per block.
 
-mod common;
+use crate::common;
 
 use common::*;
 use loom_core::{EngineParts, ModuleId, ProbeId, ProbeKind};

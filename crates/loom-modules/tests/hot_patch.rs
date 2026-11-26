@@ -13,7 +13,7 @@
 //! which rule 6 replaces once copies are built (#23). Background:
 //! `docs/learn/hot-patching.md`.
 
-mod common;
+use crate::common;
 
 use common::*;
 use loom_core::{EngineConfig, InputRef, ModuleId, OutputSafety, create_engine};

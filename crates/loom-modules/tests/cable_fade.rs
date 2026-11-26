@@ -7,7 +7,7 @@
 //! 0 is an exact pass-through, so its output shows what its input reads.
 //! Spec: `docs/design/live-patching.md`, rule 9.
 
-mod common;
+use crate::common;
 
 use common::*;
 use loom_core::cable_fade::CABLE_FADE_SECONDS;

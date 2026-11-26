@@ -11,7 +11,7 @@
 //! update the files with `LOOM_UPDATE_REFERENCES=1 cargo test -p
 //! loom-modules --test patches`, listen to them, and commit them.
 
-mod common;
+use crate::common;
 
 use common::{Note, SAMPLE_RATE, patch_path, render};
 use loom_core::{EngineConfig, OutputSafety, create_engine};

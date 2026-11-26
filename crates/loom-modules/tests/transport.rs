@@ -1,7 +1,7 @@
 //! The Transport module in the engine (`docs/design/clock.md`, Controls
 //! live on the Transport module, Starting and stopping, rules 8, 10, 11).
 
-mod common;
+use crate::common;
 
 use common::*;
 use loom_core::{EngineConfig, EngineParts, InputRef, LoomError, ModuleId, OutputSafety, TRANSPORT_GRID};

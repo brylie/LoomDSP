@@ -4,7 +4,7 @@
 //! state would stay broken after its input is sane again, until the patch is
 //! reloaded. See `Harness::check_non_finite_recovery`.
 
-mod common;
+use crate::common;
 
 use common::{WRAP_FRAME, choice_failures, dsp_modules, playing_short_bar};
 use loom_core::ModuleDescriptor;
@@ -70,7 +70,6 @@ fn every_module_recovers_on_the_bar_wrap() {
     check_all(on_wrap);
 }
 
-#[path = "non_finite/wrap.rs"]
 mod wrap;
 
 /// Every DSP module, with each input on its port default.

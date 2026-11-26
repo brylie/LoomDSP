@@ -1,6 +1,6 @@
 //! Engine behaviour tests using the example patches.
 
-mod common;
+use crate::common;
 
 use common::*;
 use loom_core::{EngineConfig, EngineParts, LoomError, ModuleId, OutputRef, ProbeKind};

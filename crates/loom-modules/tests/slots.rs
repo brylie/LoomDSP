@@ -6,7 +6,7 @@
 //! new, so what the render shows is the parts' own output through the
 //! fade's equal-power law.
 
-mod common;
+use crate::common;
 
 use common::SAMPLE_RATE;
 use loom_core::{EngineConfig, EngineParts, ModuleId, OutputSafety, create_engine};

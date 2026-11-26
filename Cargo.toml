@@ -159,6 +159,13 @@ multiple_crate_versions = "allow"
 # Every `unsafe` block needs a `// SAFETY:` comment (AGENTS.md rule 7).
 undocumented_unsafe_blocks = "warn"
 
+# Third-party crates build without debug info in dev and test builds. Our
+# own crates keep it, so a debugger still shows their variables, and a
+# backtrace still names every frame. Less debug info means less to write,
+# to link, and to keep on disk in every worktree's target folder.
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 debug = 1
 

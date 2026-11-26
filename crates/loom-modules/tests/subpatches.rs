@@ -4,7 +4,7 @@
 //! (FR-ENCAP-07), and a feedback loop across a boundary is found like any
 //! other.
 
-mod common;
+use crate::common;
 
 use common::{Note, SAMPLE_RATE, load_patch, patch_path, render, render_with};
 use loom_core::{EngineConfig, EngineParts, ModuleId, ModuleNames, OutputSafety, create_engine};

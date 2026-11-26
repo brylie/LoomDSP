@@ -1,7 +1,7 @@
 //! Held notes belong to a MIDI input (`docs/design/device-changes.md`,
 //! MIDI inputs): the engine releases what an input held when it goes away.
 
-mod common;
+use crate::common;
 
 use common::*;
 use loom_core::{EngineConfig, EngineParts, MidiEvent, MidiInputId, OutputSafety, create_engine};

@@ -10,6 +10,9 @@ authors.workspace = true
 readme.workspace = true
 keywords = ["audio", "dsp", "synthesizer", "filter", "oscillator"]
 categories = ["multimedia::audio"]
+# The test targets are listed below, so files in `tests/` are modules
+# of `tests/main.rs`, not binaries of their own.
+autotests = false
 
 [dependencies]
 loom-core.workspace = true
@@ -31,6 +34,20 @@ loom-patch.workspace = true
 loom-test.workspace = true
 assert_no_alloc.workspace = true
 criterion.workspace = true
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"
+
+# These two install a global allocator that refuses to allocate, so
+# each keeps a binary of its own.
+[[test]]
+name = "no_alloc"
+path = "tests/no_alloc.rs"
+
+[[test]]
+name = "polyphony"
+path = "tests/polyphony.rs"
 
 [[bench]]
 name = "engine"

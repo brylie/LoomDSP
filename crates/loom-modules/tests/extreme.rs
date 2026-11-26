@@ -4,7 +4,7 @@
 //! can send very large values into a module. See
 //! `Harness::check_extreme_recovery`.
 
-mod common;
+use crate::common;
 
 use common::{choice_options, dsp_modules, failure};
 use loom_core::{ModuleDescriptor, TransportSettings};

@@ -1,7 +1,7 @@
 //! The safety stage on the final output (ADR-0019). Each test is an
 //! acceptance criterion of `docs/design/output-safety.md`.
 
-mod common;
+use crate::common;
 
 use common::*;
 use loom_core::safety::{CEILING, FADE_SECONDS, LOOKAHEAD_SECONDS, samples};

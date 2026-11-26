@@ -3,7 +3,7 @@
 //! module turns stereo, its new right-side copy takes the running left
 //! copy's state, so both sides continue together.
 
-mod common;
+use crate::common;
 
 use common::{
     SEEDED_SIDES_TOGETHER, WRAP_FRAME, busy_each, busy_without_reset, changed, choice_failures, dsp_modules,
@@ -297,5 +297,4 @@ fn a_copy_refuses_another_type() {
     assert!(other.copy_state_from(&*delay));
 }
 
-#[path = "copy_state/reset_hides.rs"]
 mod reset_hides;

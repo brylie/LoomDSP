@@ -5,7 +5,7 @@
 //! stereo output. Every render is the same at host buffers of 1, 77, and
 //! 512 frames.
 
-mod common;
+use crate::common;
 
 use common::{SAMPLE_RATE, render, render_with};
 use loom_core::{EngineConfig, EngineParts, ModuleId, ModuleNames, OutputSafety, create_engine};

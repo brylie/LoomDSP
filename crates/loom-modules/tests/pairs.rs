@@ -2,7 +2,7 @@
 //! probes): both values of a frame come from the same engine frame, whether
 //! the queue is drained or full.
 
-mod common;
+use crate::common;
 
 use common::*;
 use loom_core::{EngineConfig, EngineParts, LoomError, ModuleId, OutputRef, PairChunk, ProbeKind, Telemetry};

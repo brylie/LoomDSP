@@ -2,7 +2,7 @@
 //! every block size (module test harness, Changes during a render). A module that
 //! follows a change by the block, not by the frame, breaks hard rule 2.
 
-mod common;
+use crate::common;
 
 use common::{busy_each, changed, dsp_modules};
 use loom_core::{ModuleDescriptor, TimeSignature, TransportSettings};

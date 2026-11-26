@@ -4,7 +4,7 @@
 //! are set, so a module made with values other than its built-in ones does not
 //! glide to them (live patching spec, rule 7).
 
-mod common;
+use crate::common;
 
 use common::{busy_each, changed, choice_failures, dsp_modules, pulses, selector};
 use loom_core::{MidiEvent, ModuleDescriptor, TransportSettings};

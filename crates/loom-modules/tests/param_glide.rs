@@ -4,7 +4,7 @@
 //! value, so a module that forgets `Module::param_glide` steps. These tests
 //! run over the whole registry, so a new module cannot miss it.
 
-mod common;
+use crate::common;
 
 use common::{SAMPLE_RATE, changed};
 use loom_core::testing::run;

@@ -4,7 +4,7 @@
 //! (ADR-0043). The voice is the one in `examples/patches/synth-voice.ron`,
 //! which a test in `loom-app` keeps equal to the built-in file.
 
-mod common;
+use crate::common;
 
 use common::{Note, SAMPLE_RATE, patch_path, render};
 use loom_core::{EngineConfig, OutputSafety, create_engine};
