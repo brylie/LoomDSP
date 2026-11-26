@@ -1,6 +1,6 @@
 # Reusing a check that passed on the same tree
 
-**Status: Proposed.** Open questions are listed in [Questions to settle](#questions-to-settle), each with a recommended answer. Decision: [ADR-0049](../adr/0049-git-hooks-reuse-a-pass-on-the-same-tree.md) (draft). Builds on [development telemetry](devtel.md) (ADR-0048). Code: `scripts/devtel/run.sh` and `scripts/devtel/devtel.py` (not written yet).
+**Status: Agreed.** Decision: [ADR-0049](../adr/0049-git-hooks-reuse-a-pass-on-the-same-tree.md). Builds on [development telemetry](devtel.md) (ADR-0048). Code: [`scripts/devtel/reuse.py`](../../scripts/devtel/reuse.py), called from `run_step` in [`devtel.py`](../../scripts/devtel/devtel.py) through [`run.sh`](../../scripts/devtel/run.sh).
 
 When a quick check has already passed on exactly the code a git hook is about to check, with the same tools and settings, the hook reuses that pass instead of running the check again. The goal is to stop agents paying for the same check two or three times: once by hand, once in the commit hook, once in the push hook.
 
@@ -28,7 +28,7 @@ Only the wrapped quick checks in the commit and push stages, which depend on not
 | `cargo-fmt` | Yes | Output depends on the files, rustfmt's version, and `rustfmt.toml` (in the tree) |
 | `cargo-clippy` | Yes | Depends on the files, `Cargo.lock`, the toolchain, and the flags in the environment (see [The key](#the-key)) |
 | `adr-citations`, `test-placement` | Yes | Scripts that read only the tree |
-| `typos`, `adr-status` | Only an exact match | prek passes them the changed files, in batches, so the commit hook's file list rarely matches an earlier run's (question 3) |
+| `typos`, `adr-status` | Only an exact match | prek passes them the changed files, in batches, so the commit hook's file list rarely matches an earlier run's (decision 3) |
 | Builtin prek checks (whitespace, line endings, merge markers) | No | prek runs them itself, so there is no entry to wrap. They take milliseconds |
 | Manual stage: coverage, doc tests, docs, wasm, cargo-deny | No | Not run by the commit or push hooks, so nothing to save. Tests also depend on the machine, the GPU, and timing |
 
@@ -71,13 +71,13 @@ Settings that only change speed, such as the target folder, `[build] jobs`, and 
 
 ### The record
 
-One small file per key, in `$(git rev-parse --git-common-dir)/loom-check-passes/` (question 4). The git common folder is shared by every worktree of a clone and deleted with it, and is never in a commit. A record is written to a temporary file and renamed into place, so agents running at once never read half a record.
+One small file per key, in `$(git rev-parse --git-common-dir)/loom-check-passes/` (decision 4). The git common folder is shared by every worktree of a clone and deleted with it, and is never in a commit. A record is written to a temporary file and renamed into place, so agents running at once never read half a record.
 
 The file holds what the skip line shows: the check name, the tree hash, when it passed, how long it took, and the branch and commit. A record older than 7 days is not reused, and run.sh deletes records older than that when it writes a new one, so the folder stays small.
 
 ### The skip line
 
-prek hides a passing hook's output unless the hook sets `verbose = true`. A reused pass would then read as an ordinary `Passed`, which would mislead. So each reusable hook gets `verbose = true`, and run.sh prints one line when it reuses (question 5):
+prek hides a passing hook's output unless the hook sets `verbose = true`. A reused pass would then read as an ordinary `Passed`, which would mislead. So each reusable hook gets `verbose = true`, and run.sh prints one line when it reuses (decision 5):
 
 ```text
 cargo clippy.............................................................Passed
@@ -87,12 +87,18 @@ cargo clippy.............................................................Passed
   reused: passed on this tree 4 min ago (31.2 s); LOOM_CHECK_REUSE=0 runs it
 ```
 
-When the check does run, its own output shows, as with any verbose hook. fmt, typos, and the scripts print nothing when they pass. clippy prints its `Finished` line.
+When the check does run, its own output shows, as with any verbose hook. fmt and typos print nothing when they pass, and the scripts print one line. clippy prints its `Finished` line. prek prints the hook ID and duration of a verbose hook even when it printed nothing.
+
+### Where the passes come from
+
+`mise run check` runs the quick checks as `prek run --all-files` (its `quick-checks` task, decision 6), so they go through run.sh and record their passes. A commit made right after it with `git add -A` or `git commit -a` then reuses fmt, clippy, adr-citations, and test-placement, and the push hook reuses them again if nothing changed. AGENTS.md asks for `mise run check` alone, no longer for a separate `prek run --all-files` first, so each quick check runs once before the hooks.
+
+CI runs the mise tasks one by one (`mise run clippy` and so on), never `check` or `quick-checks`, so CI does not change.
 
 ### Forcing a full run
 
 - `LOOM_CHECK_REUSE=0` in the environment turns reuse off for that command (for example `LOOM_CHECK_REUSE=0 git commit`) or for a whole shell. Checks still write pass records, so the next run can reuse them.
-- `mise run check-reuse-clear` deletes every pass record of the clone.
+- `mise run check-reuse-clear` (`devtel.py reuse-clear`) deletes every pass record of the clone.
 - Reuse is never on in CI. run.sh already runs the command directly when `CI` is set, and `LOOM_CHECK_REUSE=1` does not change that.
 - Reuse is separate from `LOOM_DEVTEL`: turning telemetry off does not turn reuse off, and the other way round.
 
@@ -110,18 +116,18 @@ A reused check still writes its devtel span, with `loom.devtel.reused = true` an
 
 Per wrapped check, reuse adds about 150 ms to a run that devtel already slows by about 150 ms: 45 ms for the tool versions, a few ms to read the Cargo configuration, and about 90 ms to hash the tree a second time after a pass. A reused check takes about 250 ms in all. A clippy run that rebuilds a crate takes several seconds to minutes.
 
-## Questions to settle
+## Decisions
 
-Each has a recommended answer. The ADR records the decision once Brylie has answered.
+Brylie settled these on 2026-11-26, taking the recommended answer each time. ADR-0049 records the decision.
 
-1. **Which checks.** Recommended: the wrapped quick checks in the table above, never tests. The commit and push hooks run no tests today, so there is nothing to save there.
-2. **What goes into the key.** Recommended: the list in [The key](#the-key). Open: is any other environment variable or file outside the tree read by one of these checks?
-3. **Checks that receive file names (typos, adr-status).** Options: (a) reuse only an exact match of the file list, which rarely happens; (b) record a pass per file and tree, and reuse when every file asked for has one. Recommended: (a) for now. Both checks take about a second, and (b) is more code.
-4. **Where the record lives.** Options: (a) the git common folder of the clone; (b) the devtel store, `~/.local/share/loomdsp/devtel/passes/`; (c) the devtel archive or spool. Recommended: (a). The archive is written only by the import and is slow to open, and the spool would have to be scanned. (a) keeps reuse working with telemetry off and goes away with the clone.
-5. **How a skip shows.** Options: (a) `verbose = true` on each reusable hook, so the skip line shows, at the cost of a hook id and duration header for each hook in every commit; (b) one summary hook at the end that lists what was reused, which needs the hooks of one prek run to share state; (c) only say it in each hook's name, such as "cargo clippy (reuses a pass on the same tree)". Recommended: (a). It is simple and nothing can read as a fresh pass.
-6. **Make `mise run check` record passes.** Today only `prek.toml` entries go through run.sh. A hand-run `mise run check` records nothing, so the hooks after it cannot reuse anything. AGENTS.md asks agents to run both `prek run --all-files` and `mise run check`, so fmt and clippy already run twice before any hook. Options: (a) `check` runs the quick checks as `prek run --all-files`, and AGENTS.md drops its separate `prek run --all-files` step; (b) wrap each quick task in mise with run.sh as well; (c) leave it, and rely on the `prek run --all-files` step. Recommended: (a). One command then feeds the hooks and runs each quick check once. CI runs the mise tasks one by one, never `check`, so CI is unchanged.
-7. **CI.** Recommended: never, and not switchable.
-8. **The no-code option.** Instead of reuse, stop asking agents to run the quick checks by hand before committing, and let the commit hook be the check. This saves the same time with no code. But an agent then learns about a clippy error only while committing, the push hook still repeats the commit hook, and the loop of `prek run --all-files` stays. Recommended: build reuse, and also do 6 (a).
+1. **Which checks.** The wrapped quick checks in [the table above](#what-is-reused), never tests. The commit and push hooks run no tests, so there is nothing to save there.
+2. **What goes into the key.** The list in [The key](#the-key). A new input found later is added to the key and the format version goes up, so older records stop matching.
+3. **Checks that receive file names (typos, adr-status).** Reuse only an exact match of the file list. Both take about a second. Recording a pass per file and tree, and reusing when every file asked for has one, was left for later: it is more code for little time.
+4. **Where the record lives.** The git common folder of the clone, not the devtel store, spool, or archive. The archive is written only by the import and is slow to open, and the spool would have to be scanned. This also keeps reuse working with telemetry off, and the records go away with the clone.
+5. **How a skip shows.** `verbose = true` on each reusable hook, so the `reused:` line shows. The cost is a hook ID and duration line for each of those hooks in every commit. A summary hook at the end (it would need the hooks of one prek run to share state) and a note only in each hook's name were the other options.
+6. **`mise run check` records passes.** `check` runs the quick checks as `prek run --all-files`, and AGENTS.md drops its separate `prek run --all-files` step. The other options were to wrap each quick mise task with run.sh too, or to rely on the `prek run --all-files` step.
+7. **CI.** Never reuses, and no switch turns it on there.
+8. **The no-code option** (no checks by hand before committing, so the commit hook is the check) was not taken alone: an agent would find a lint error only while committing, the push hook would still repeat the commit hook, and loops of `prek run --all-files` would stay. Decision 6 takes its useful part: one check by hand, not two.
 
 ## Out of scope
 
@@ -131,4 +137,4 @@ Each has a recommended answer. The ADR records the decision once Brylie has answ
 
 ## Testing
 
-`mise run devtel-test` gains tests for: a pass is reused on the same key; any change to the tree, tool versions, a listed variable, or a Cargo configuration file runs the check; a failure is never recorded; a check that changes the tree (a formatter) is not recorded; `LOOM_CHECK_REUSE=0` and `CI` always run the check; a damaged record runs the check; old records are not reused and are pruned; and the skip line names the time and the way to force a run.
+`mise run devtel-test` runs `scripts/devtel/tests/test_reuse.py`, which works in a temporary git repository and tests: a pass is reused on the same key; any change to the tree, tool versions, a listed variable, or a Cargo configuration file runs the check; a failure is never recorded; a check that changes the tree (a formatter) is not recorded; `LOOM_CHECK_REUSE=0` and `CI` always run the check; a damaged record runs the check; old records are not reused and are pruned; and the skip line names the time and the way to force a run.

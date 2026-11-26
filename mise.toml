@@ -200,8 +200,11 @@ description = "Regenerate the module help pages in docs/modules from the descrip
 run = "cargo run -p loom-cli -- modules --markdown docs/modules"
 
 [tasks.check]
-description = "The local check: fmt, clippy, typos, the file rules, and every test, with no coverage build"
-# The quick checks first, then every test once with nextest. No coverage:
+description = "The local check: the quick checks through prek (fmt, clippy, typos, the file rules), and every test, with no coverage build"
+# The quick checks first, through prek (`quick-checks`), then every test
+# once with nextest. Running them through prek records each pass, so the
+# commit and push hooks reuse it on the same tree instead of checking again
+# (docs/dev/check-reuse.md). No coverage:
 # an instrumented build of the workspace costs far more CPU than a plain
 # test run, and CI measures coverage on every pull request, so CI is the
 # coverage gate. `check-full` runs everything CI runs, coverage included.
@@ -210,8 +213,27 @@ description = "The local check: fmt, clippy, typos, the file rules, and every te
 # so agents on one machine leave each other room. `devtel-test` runs here
 # only: it tests local development tooling (docs/dev/devtel.md), and CI
 # never runs this task.
-depends = ["fmt", "clippy", "typos", "adr-status", "test-placement", "portable", "devtel-test"]
+depends = ["quick-checks", "portable", "devtel-test"]
 run = """cargo nextest run --workspace --test-threads "${LOOM_TEST_THREADS:-$(( ($(getconf _NPROCESSORS_ONLN) + 1) / 2 ))}""""
+
+[tasks.quick-checks]
+description = "The quick checks as the git hooks run them (prek run --all-files), so their passes are reused by the hooks"
+# The same checks as `fmt`, `clippy`, `typos`, `adr-status`, and
+# `test-placement`, but through prek, so each pass is recorded for reuse
+# (docs/dev/check-reuse.md). cargo fmt and the file fixers change files in
+# place and then fail: look at the change and run it again. The branch rule
+# is skipped, so the check also runs on main. The last two commands test
+# the citation and test-placement scripts themselves, as their own tasks
+# do. CI runs those tasks one by one, never this one.
+run = [
+  "prek run --all-files --skip no-commit-to-branch",
+  "sh scripts/test-check-adr-citations.sh",
+  "sh scripts/test-check-test-placement.sh",
+]
+
+[tasks.check-reuse-clear]
+description = "Forget every check pass recorded in this clone, so the hooks run every check again"
+run = "python3 scripts/devtel/devtel.py reuse-clear"
 
 [tasks.check-full]
 description = "Run everything CI runs (all but msrv and the macOS and Windows test jobs), coverage included"

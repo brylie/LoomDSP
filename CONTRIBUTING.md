@@ -129,7 +129,7 @@ Then build and run the checks:
 
 ```sh
 cargo build --workspace
-mise run check        # the local check: fmt, clippy, typos, the file rules, and every test, with no coverage build
+mise run check        # the local check: the quick checks through prek, and every test, with no coverage build
 mise run check-full   # every check CI runs, coverage included, except the minimum Rust version and the tests on the other systems
 mise run test         # just the tests
 mise run coverage     # tests with line coverage; fails under the minimum
@@ -178,7 +178,9 @@ prek install    # installs the pre-commit, pre-push, and post-* hooks
 
 The quick checks run again before push, because commits made by a rebase or a merge never ran the commit hooks. The slow checks (coverage, doc tests, docs, the WebAssembly build, and cargo-deny) do not run on push: CI checks every one of them on the pull request, and `mise run check-full` runs them all locally. Why: several agent sessions on one machine each ran the full check and then ran it again in the push hook, and parallel full checks starve the CPU.
 
-The `post-commit`, `post-checkout`, `post-merge`, and `post-rewrite` hooks, and one hook before push, only record git events for the [development telemetry](docs/dev/devtel.md), in the background. They never fail. Each check runs through `scripts/devtel/run.sh`, which records how long it took and otherwise runs it unchanged. Run `prek install` again when `default_install_hook_types` in `prek.toml` changes.
+The `post-commit`, `post-checkout`, `post-merge`, and `post-rewrite` hooks, and one hook before push, only record git events for the [development telemetry](docs/dev/devtel.md), in the background. They never fail. Each check runs through `scripts/devtel/run.sh`, which records how long it took and otherwise runs it unchanged.
+
+A quick check that already passed on exactly the same tree, tool versions, and settings is not run again: the hook prints `reused: passed on this tree 4 min ago` instead ([check reuse](docs/dev/check-reuse.md), ADR-0049). `mise run check` runs the quick checks through prek, so a commit right after it reuses them. Set `LOOM_CHECK_REUSE=0` to run every check, or run `mise run check-reuse-clear` to forget every recorded pass. CI never reuses a pass. Run `prek install` again when `default_install_hook_types` in `prek.toml` changes.
 
 `cargo fmt` and the whitespace hooks fix files for you. When they do, the commit stops: review the changes, stage them, and commit again. Run the quick checks by hand with `prek run --all-files`, and the slow ones with `prek run --hook-stage manual --all-files`. The configuration is in `prek.toml`.
 

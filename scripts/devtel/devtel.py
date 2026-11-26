@@ -6,7 +6,8 @@ OpenTelemetry spans in plain files, with no daemon. See docs/dev/devtel.md
 for the design and ADR-0048 for the decision.
 
 Writers (fast, append only, never fail the caller):
-  run        runs a check and records it (called by run.sh from prek.toml)
+  run        runs a check, or reuses its pass on the same tree, and records
+             it (called by run.sh from prek.toml; reuse is in reuse.py)
   git        records a git event (called by prek post-* and pre-push hooks)
   claude     handles a Claude Code hook event (called by hook.sh)
 
@@ -15,6 +16,7 @@ Readers (run on demand):
   report     prints the efficiency report
   traces     opens otel-desktop-viewer with every span loaded (mise run devtel)
   export     writes the archive as OTLP JSON lines
+  reuse-clear  deletes the pass records of this clone
 
 Standard library only, and Python 3.9 compatible, so a hook still works
 when it runs outside mise.
@@ -31,6 +33,9 @@ import subprocess
 import sys
 import tempfile
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import reuse  # noqa: E402 - the module next to this one
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SQL_DIR = os.path.join(HERE, "sql")
@@ -352,44 +357,87 @@ def hook_context():
 
 
 def run_step(name, command):
-    """Run one check and record it as a span named after it.
+    """Run one check, or reuse its pass on the same tree, and record it as a span.
 
     prek.toml wraps each check with run.sh, which calls this. The command's
     output and exit code are passed through unchanged. Child processes get
     TRACEPARENT pointing at this span, so anything they record nests under
     it. The working tree's hash is taken first, so two runs of a check on
     the same code can be found (devtel_reruns, "same tree").
+
+    When the check already passed on the same key (reuse.py,
+    docs/dev/check-reuse.md), it is not run: one line says so and the exit
+    code is 0. A pass is recorded only when the check exits 0 and the tree
+    is the same after it as before, because a formatter exits 0 after it
+    rewrote files.
     """
+    recording = enabled()
+    reusing = reuse.enabled()
     span_id = new_span_id()
     # Nothing that only feeds the span may stop the check from running.
     trace_id, parent_id, attributes = new_trace_id(), None, {}
+    tree = ""
     try:
-        trace_id, parent_id, attributes = hook_context()
+        if recording:
+            trace_id, parent_id, attributes = hook_context()
+        tree = tree_hash()
         attributes.update({
             "cicd.pipeline.task.name": name,
             "loom.devtel.step": name,
             "process.command_line": " ".join(command)[:MAX_COMMAND],
             "process.working_directory": os.getcwd(),
-            "loom.devtel.tree": tree_hash(),
+            "loom.devtel.tree": tree,
             # prek sets PRE_COMMIT=1 for every hook it runs, and the remote
             # name only before a push.
             "loom.devtel.in_git_hook": os.environ.get("PRE_COMMIT") == "1",
             "loom.devtel.in_push": bool(os.environ.get("PRE_COMMIT_REMOTE_NAME")),
         })
-        attributes.update(vcs_attributes())
-        attributes.update(agent_attributes())
+        if recording:
+            attributes.update(vcs_attributes())
+            attributes.update(agent_attributes())
     except Exception:  # noqa: BLE001 - fail open
         pass
-    env = dict(os.environ, TRACEPARENT=traceparent(trace_id, span_id))
     start = time.time_ns()
+    record_key = None
+    if reusing and tree:
+        try:
+            record_key = reuse.key(name, command, tree)
+            found = reuse.lookup(record_key)
+        except Exception:  # noqa: BLE001 - fail open: run the check
+            record_key, found = None, None
+        if found:
+            print(reuse.skip_line(found), flush=True)
+            attributes["loom.devtel.reused"] = True
+            attributes["loom.devtel.reused_ms"] = int(found.get("duration_ms", 0))
+            attributes["process.exit.code"] = 0
+            if recording:
+                emit("hooks", "checks", [span(trace_id, span_id, parent_id, name, start, time.time_ns(), attributes)])
+            return 0
+    env = dict(os.environ, TRACEPARENT=traceparent(trace_id, span_id))
     try:
         code = run_forwarding_signals(list(command), env)
     except OSError as error:
         print("devtel: cannot run %s: %s" % (command[0] if command else "", error), file=sys.stderr)
         code = 127
     end = time.time_ns()
+    if code == 0 and record_key:
+        try:
+            if tree_hash() == tree:
+                reuse.store(
+                    record_key,
+                    {
+                        "check": name,
+                        "tree": tree,
+                        "duration_ms": (end - start) // 1_000_000,
+                        "branch": attributes.get("vcs.ref.head.name", ""),
+                        "commit": attributes.get("vcs.ref.head.revision", ""),
+                    },
+                )
+        except Exception:  # noqa: BLE001 - a record is never worth failing a check
+            pass
     attributes["process.exit.code"] = code
-    emit("hooks", "checks", [span(trace_id, span_id, parent_id, name, start, end, attributes, code != 0)])
+    if recording:
+        emit("hooks", "checks", [span(trace_id, span_id, parent_id, name, start, end, attributes, code != 0)])
     return code
 
 
@@ -871,6 +919,7 @@ def main(argv):
     run = commands.add_parser("run", help="run a check and record it (used by run.sh)")
     run.add_argument("name")
     run.add_argument("argv", nargs=argparse.REMAINDER, metavar="command")
+    commands.add_parser("reuse-clear", help="delete every pass record of this clone (check-reuse.md)")
     git_parser = commands.add_parser("git", help="record a git event")
     git_parser.add_argument("stage", nargs="?", default="")
     claude = commands.add_parser("claude", help="handle a Claude Code hook event (JSON on stdin)")
@@ -892,9 +941,12 @@ def main(argv):
         command = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
         if not command:
             return 2
-        if not enabled():
+        if not enabled() and not reuse.enabled():
             os.execvp(command[0], command)
         return run_step(args.name, command)
+    if args.command == "reuse-clear":
+        print("devtel: deleted %d pass records" % reuse.clear())
+        return 0
     if args.command == "git":
         return git_event(args.stage) if enabled() else 0
     if args.command == "claude":

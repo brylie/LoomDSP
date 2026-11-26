@@ -26,12 +26,19 @@ class StoreTestCase(unittest.TestCase):
     """Gives each test its own store folder and a clean devtel environment."""
 
     def setUp(self):
-        """Point devtel at a temporary store, with recording on."""
+        """Point devtel at a temporary store, with recording on and reuse off."""
         self.dir = tempfile.mkdtemp(prefix="devtel-test-")
         self.env = mock.patch.dict(
             os.environ,
             # Git events run inline, so a test can read their span at once.
-            {"LOOM_DEVTEL_DIR": os.path.join(self.dir, "store"), "LOOM_DEVTEL": "1", "LOOM_DEVTEL_NO_FORK": "1"},
+            # Reuse is off here, so these tests never write pass records into
+            # the repository they run in (test_reuse.py tests it).
+            {
+                "LOOM_DEVTEL_DIR": os.path.join(self.dir, "store"),
+                "LOOM_DEVTEL": "1",
+                "LOOM_DEVTEL_NO_FORK": "1",
+                "LOOM_CHECK_REUSE": "0",
+            },
         )
         self.env.start()
         for name in ("TRACEPARENT", "LOOM_DEVTEL_SESSION", "CLAUDE_ENV_FILE", "MISE_TASK_NAME"):
@@ -272,6 +279,10 @@ class ArchiveTests(StoreTestCase):
                                                     "clippy", start, start + int(1e9), check)])
         devtel.emit("hooks", "checks", [devtel.span(devtel.new_trace_id(), "e" * 16, None,
                                                     "clippy", start + int(40e9), start + int(41e9), check)])
+        # A third run on the same tree that reused the pass: not a re-run.
+        reused = dict(check, **{"loom.devtel.reused": True, "loom.devtel.reused_ms": 60000})
+        devtel.emit("hooks", "checks", [devtel.span(devtel.new_trace_id(), "d" * 16, None,
+                                                    "clippy", start + int(80e9), start + int(80.2e9), reused)])
         del os.environ["TRACEPARENT"]
 
     def query(self, sql):
@@ -298,7 +309,7 @@ class ArchiveTests(StoreTestCase):
         self.assertIn("cargo test -p a", dump)
 
     def test_views_join_the_sources(self):
-        """Tool calls get times and kinds; spans nest; a repeated check is a re-run."""
+        """Tool calls get times and kinds; spans nest; a repeated check is a re-run, a reused pass is not."""
         devtel.import_all(quiet=True)
         tools = self.query("select tool_use_id, category, normalized, epoch_ms(end_ts) - epoch_ms(start_ts) as ms from devtel_tools order by 1")
         self.assertEqual([row["category"] for row in tools], ["test", "test"])
@@ -319,6 +330,8 @@ class ArchiveTests(StoreTestCase):
         )
         self.assertEqual(output.returncode, 0, output.stderr)
         self.assertIn("Where the time goes", output.stdout)
+        self.assertIn("reused a pass", output.stdout)
+        self.assertRegex(output.stdout, r"clippy\s*\S*\s*1\s*\S*\s*1\.0")
         path = os.path.join(self.dir, "out.jsonl")
         self.assertGreater(devtel.export_otlp(path, 30), 0)
         with open(path, encoding="utf-8") as handle:
