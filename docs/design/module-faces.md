@@ -67,7 +67,7 @@ Module names are the built modules' labels, or the catalogue's working names for
 The design canvas's "Arrange" is a Curve module (MT-MOD-02): breakpoint curves read by a phase, each lane one Modulation output. There is no timeline (ADR-0011). Its face is the transfer curve in compact form, with all lanes stacked and the playhead in white. Its full editor docks below the canvas:
 
 - **Where.** Full width, in a bottom dock region. One docked editor at a time; opening another replaces it. It is resizable by its top edge, and the height is remembered per patch. It never covers the right column.
-- **Opening.** The Edit button on its face, by pointer, or Enter or Space while it has focus. The header stays the module's select-and-move handle, so a click or Enter on it only selects. The canvas does not move, and the module keeps its selection outline while its editor is open. Focus moves to the editor's first lane.
+- **Opening** (Brylie's decision, 2026-11-28). The Edit button on its face, by pointer, or Enter or Space while it has focus. The header stays the module's select-and-move handle, so a click or Enter on it only selects. The canvas does not move, and the module keeps its selection outline while its editor is open. Focus moves to the editor's first lane.
 - **Focus.** The dock is a region, not a modal. It joins the region cycle of [ui-layer.md](ui-layer.md), section 6, rule 7: Ctrl+Tab and Ctrl+Shift+Tab, or F6 and Shift+F6 as an alias, move through the canvas, the dock, the right column, and the toolbar.
 - **Panel model.** The dock is a panel of its own in the window's root panel, in a slot below the canvas, built from the Curve module's model only (ui-layer.md, section 3, rule 3). It is not an overlay: it takes no input from the canvas, and the canvas keeps its keys while the dock does not have focus. Inside, Tab moves between lanes, the arrows move between breakpoints, and a handle has the same keys as any handle (rule 1).
 - **Closing.** Escape, or Close in its title bar, closes it and returns focus to the Curve module that opened it. Deleting that module closes the editor.
@@ -84,6 +84,12 @@ None is ticked: the work starts after #683.
 - [ ] No face draws a white outline (test on the paint list).
 - [ ] With 300 modules on screen and every face moving, face drawing stays within its slice, and faces step down in the order of rule 5 (`--measure` bench).
 - [ ] The Curve module's docked editor joins the Ctrl+Tab cycle in the order of the Curve section, returns focus to its module on Escape, and closes when the module is deleted (headless `Ui` test).
+
+## Decisions made for this spec
+
+| Decision | Choice | Where |
+|---|---|---|
+| How the Curve module's docked editor opens (Brylie, 2026-11-28) | The Edit button on its face, by pointer, Enter, or Space. The header stays the select-and-move handle, because a click and Enter on it both select (ui-layer.md, `App::clicked`) | The Curve module's docked editor |
 
 ## Out of scope
 
