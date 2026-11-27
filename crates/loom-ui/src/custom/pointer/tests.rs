@@ -42,6 +42,8 @@ enum Message {
     Hide,
     /// Show a knob under the pad's UI ID instead.
     Knob,
+    /// The label was clicked.
+    Clicked,
 }
 
 /// The pad's state: what it heard, and how many messages the app had
@@ -196,6 +198,10 @@ impl App for Drags {
             layer: if self.overlay { Layer::Overlays } else { Layer::Canvas },
             ..InputState::default()
         }
+    }
+
+    fn clicked(&self, id: &UiId) -> Option<Message> {
+        (*id == UiId::panel("main").with("label")).then_some(Message::Clicked)
     }
 
     fn make_custom(&self, _id: &UiId, kind: CustomKind) -> Option<Box<dyn Custom<Self>>> {
@@ -521,6 +527,26 @@ fn a_capture_leaves_the_wheel_to_the_target() {
     );
     let wheel = Event::Pointer(PointerEvent::Scrolled(ScrollDelta::Lines { x: 0.0, y: 1.0 }));
     assert!(!panels.over_target(&wheel, away), "the wheel goes to the target");
+}
+
+/// A left press on a custom element that takes it without a capture
+/// ends a click pressed before it: letting go back on the first element
+/// then clicks nothing, as a press and release must be on one element.
+#[test]
+fn a_press_on_a_custom_element_ends_an_earlier_click() {
+    let mut harness = harness();
+    send(&mut harness, Message::Knob);
+    let press = PointerEvent::Pressed(PointerButton::Left);
+    let release = PointerEvent::Released(PointerButton::Left);
+    // A press and release on the label clicks it.
+    step(&mut harness, 50.0, 125.0, press);
+    step(&mut harness, 50.0, 125.0, release);
+    assert_eq!(log(&harness), [Message::Knob, Message::Clicked]);
+    // Pressed on the label, then on the knob, then let go on the label.
+    step(&mut harness, 50.0, 125.0, press);
+    step(&mut harness, 50.0, 50.0, press);
+    step(&mut harness, 50.0, 125.0, release);
+    assert_eq!(log(&harness), [Message::Knob, Message::Clicked], "no second click");
 }
 
 /// The driver reporting the pointer lost cancels the drag, and the

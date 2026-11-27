@@ -622,6 +622,12 @@ impl<A: App> Panels<'_, A> {
                 let modal = input.layer > Layer::Panels;
                 self.focus_in(point, modal, |layer| Side::of(layer) == side && layer >= input.layer);
                 redraw |= self.focus.id() != before.as_ref();
+                // A new left press starts a new click: one pressed before,
+                // with no release yet, is no longer pending, wherever this
+                // press lands.
+                if *button == PointerButton::Left {
+                    self.pointer.pressed = None;
+                }
                 if let Some((layer, id)) = &custom {
                     used = self.offer_custom(*layer, id, pointer, point);
                 } else if *button == PointerButton::Left {
