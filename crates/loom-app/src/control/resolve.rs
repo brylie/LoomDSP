@@ -332,6 +332,7 @@ pub(super) fn key(name: &str) -> Result<Key, String> {
         "pageup" => Key::PageUp,
         "pagedown" => Key::PageDown,
         "f2" => Key::F2,
+        "f6" => Key::F6,
         _ if name.chars().count() == 1 => {
             let mut lower = name.chars().flat_map(char::to_lowercase);
             match (lower.next(), lower.next()) {

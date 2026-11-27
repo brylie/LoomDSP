@@ -119,6 +119,7 @@ fn each_named_key_the_canvas_uses_has_its_own_key() {
         (Named::ContextMenu, Key::ContextMenu),
         (Named::F1, Key::F1),
         (Named::F2, Key::F2),
+        (Named::F6, Key::F6),
         (Named::F10, Key::F10),
     ];
     for (named, key) in pairs {
@@ -446,6 +447,7 @@ fn every_key_survives_the_trip_to_iced_and_back() {
         Key::ContextMenu,
         Key::F1,
         Key::F2,
+        Key::F6,
         Key::F10,
         Key::Modifier,
         Key::Character('['),

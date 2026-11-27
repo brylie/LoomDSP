@@ -211,6 +211,10 @@ pub enum Key {
     /// F2: in a grid, edits the cell that has focus (the WAI-ARIA data
     /// grid pattern).
     F2,
+    /// F6: moves the focus to the next region of the window, and with
+    /// Shift to the one before, as Ctrl+Tab does (the usual pane key on
+    /// Windows and in browsers).
+    F6,
     /// F10. With Shift, it opens a menu as the menu key does.
     F10,
     /// Shift, Control, Alt, or the system key, on either side. One variant
