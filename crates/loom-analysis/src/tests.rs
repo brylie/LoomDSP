@@ -36,22 +36,107 @@ fn finds_one_step() {
     assert!((max_step(&samples) - 0.3).abs() < 1e-6);
 }
 
-/// A DC offset shows in the whole mean and in the window mean. The
-/// window finds an offset that the whole mean dilutes.
+/// Mono audio at 48 kHz, for tones.
+fn mono_48k(samples: Vec<f32>) -> Audio {
+    Audio {
+        sample_rate: 48_000,
+        channels: vec![samples],
+    }
+}
+
+/// `seconds` of a sine at `hz` with peak `peak`, plus `offset`, at 48 kHz.
+fn sine(hz: f64, peak: f64, offset: f64, seconds: f64) -> Vec<f32> {
+    let frames = (seconds * 48_000.0) as usize;
+    (0..frames)
+        .map(|n| (peak * (std::f64::consts::TAU * hz * n as f64 / 48_000.0).sin() + offset) as f32)
+        .collect()
+}
+
+/// The low-pass DC of the first channel, which must be measured.
+fn low_pass_dc(audio: &Audio) -> f64 {
+    analyze(audio, None, None).channels[0]
+        .dc_low_pass
+        .expect("the part is long enough to measure DC")
+}
+
+/// A DC offset shows in the whole mean and in the low-pass DC.
 #[test]
 fn measures_dc() {
-    let c = &analyze(&mono(vec![0.25; 1000]), None, None).channels[0];
+    let c = &analyze(&mono(vec![0.25; 2000]), None, None).channels[0];
     assert!((c.dc - 0.25).abs() < 1e-9);
-    assert!((c.dc_window - 0.25).abs() < 1e-9);
+    // Both stages start at 0 and rise toward 0.25. The largest reading is
+    // the last, at 2 s, when they are within 1e-4 of it.
+    let dc = c.dc_low_pass.unwrap();
+    assert!((dc - 0.25).abs() < 1e-4, "{dc}");
     assert!((c.rms - 0.25).abs() < 1e-6);
+}
 
-    let mut samples = vec![0.0; 1000];
-    for s in &mut samples[500..600] {
-        *s = -0.5;
+/// A short DC fault reads smaller than its size: a 100 ms burst of 0.5
+/// reads about 0.11, the figure in the spec's known limits.
+#[test]
+fn a_short_burst_reads_smaller() {
+    let mut samples = vec![0.0f32; 3 * 48_000];
+    for s in &mut samples[72_000..76_800] {
+        *s = 0.5;
     }
-    let c = &analyze(&mono(samples), None, None).channels[0];
-    assert!((c.dc - (-0.05)).abs() < 1e-9);
-    assert!((c.dc_window - (-0.5)).abs() < 1e-9, "{}", c.dc_window);
+    let dc = low_pass_dc(&mono_48k(samples));
+    assert!((0.10..0.12).contains(&dc), "{dc}");
+}
+
+/// Tones with no DC are not DC (#789): 40 Hz, middle C, and 1 kHz at peak
+/// 0.5 pass a 0.001 limit, where a mean over 100 ms read middle C as about
+/// 0.003. The figures are those in the spec's table, Measuring DC.
+#[test]
+fn tones_are_not_dc() {
+    for (hz, most) in [(40.0, 0.0005), (261.6, 0.00004), (1000.0, 0.00001)] {
+        let dc = low_pass_dc(&mono_48k(sine(hz, 0.5, 0.0, 3.0)));
+        assert!(dc.abs() < most, "{hz} Hz: {dc}");
+        assert!(dc.abs() < 0.001, "{hz} Hz: {dc}");
+    }
+}
+
+/// A small offset under a tone is read as that offset, and its sign kept.
+#[test]
+fn an_offset_under_a_tone_is_dc() {
+    for offset in [0.01, -0.002] {
+        let dc = low_pass_dc(&mono_48k(sine(261.6, 0.5, offset, 3.0)));
+        assert!((dc - offset).abs() < 1e-4, "{offset}: {dc}");
+    }
+}
+
+/// A part no longer than the settling time has no low-pass DC; one sample
+/// more has.
+#[test]
+fn a_short_part_has_no_low_pass_dc() {
+    assert_eq!(
+        analyze(&mono(vec![0.5; 1000]), None, None).channels[0].dc_low_pass,
+        None
+    );
+    assert!(
+        analyze(&mono(vec![0.5; 1001]), None, None).channels[0]
+            .dc_low_pass
+            .is_some()
+    );
+    let audio = mono(vec![0.5; 1500]);
+    assert_eq!(analyze(&audio, Some(0.5), None).channels[0].dc_low_pass, None);
+    assert_eq!(analyze(&mono(Vec::new()), None, None).channels[0].dc_low_pass, None);
+}
+
+/// A NaN in the part is read as 0 by the low-pass, so the reading after it
+/// is still a number.
+#[test]
+fn a_nan_does_not_stay_in_the_low_pass() {
+    let mut samples = vec![0.25; 3000];
+    samples[100] = f32::NAN;
+    let dc = analyze(&mono(samples), None, None).channels[0].dc_low_pass.unwrap();
+    assert!(dc.is_finite() && (dc - 0.25).abs() < 1e-3, "{dc}");
+}
+
+/// The reading is the same on every run.
+#[test]
+fn the_low_pass_dc_is_repeatable() {
+    let audio = mono_48k(sine(40.0, 0.5, 0.001, 2.0));
+    assert_eq!(low_pass_dc(&audio).to_bits(), low_pass_dc(&audio).to_bits());
 }
 
 /// NaN and infinity are counted and left out of the other measurements.

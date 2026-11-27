@@ -2,14 +2,21 @@
 //!
 //! The same functions serve the app tests (on the stepped output's tape)
 //! and `loom analyze` (on a WAV file), so both measure in the same way.
-//! Every measurement is plain arithmetic on the samples: no oversampling,
-//! no filtering. Spec: `docs/design/audio-qa.md`, `loom analyze`.
+//! Every measurement is plain arithmetic on the samples, with no
+//! oversampling. The only filter is the 1 Hz low-pass of the DC
+//! measurement, two one-pole stages that can be checked by hand. Spec:
+//! `docs/design/audio-qa.md`, `loom analyze` and Measuring DC.
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-/// Length of the windows the DC measurement averages over, in seconds.
-pub const DC_WINDOW_SECONDS: f64 = 0.1;
+/// Cut-off of each stage of the DC low-pass, in Hz. Far below any musical
+/// tone, which the two stages cut by about (cut-off / f) squared.
+pub const DC_CUTOFF_HZ: f64 = 1.0;
+
+/// How long the DC low-pass settles before it is read, in seconds: about
+/// six time constants of one stage, 1 / (2 pi [`DC_CUTOFF_HZ`]).
+pub const DC_SETTLE_SECONDS: f64 = 1.0;
 
 /// Audio split into channels, at one sample rate.
 #[derive(Debug, Clone, PartialEq)]
@@ -151,9 +158,11 @@ pub struct ChannelAnalysis {
     pub max_step_at: f64,
     /// The mean of all finite samples.
     pub dc: f64,
-    /// The largest mean, in size, of any whole window of
-    /// [`DC_WINDOW_SECONDS`]. The whole-part mean when it is shorter.
-    pub dc_window: f64,
+    /// The low-pass DC: the largest size of the signal after two one-pole
+    /// low-pass stages at [`DC_CUTOFF_HZ`], kept with its sign, from
+    /// [`DC_SETTLE_SECONDS`] into the part. `None` when the part is no
+    /// longer than that, so there is nothing settled to read.
+    pub dc_low_pass: Option<f64>,
     /// Root mean square of the finite samples.
     pub rms: f64,
     /// The RMS in dBFS.
@@ -167,11 +176,10 @@ pub fn analyze(audio: &Audio, from: Option<f64>, to: Option<f64>) -> Analysis {
     let frames = audio.frames();
     let start = from.map_or(0, |s| ((s.max(0.0) * rate).round() as usize).min(frames));
     let end = to.map_or(frames, |s| ((s.max(0.0) * rate).round() as usize).clamp(start, frames));
-    let window = ((DC_WINDOW_SECONDS * rate).round() as usize).max(1);
     let channels = audio
         .channels
         .iter()
-        .map(|samples| channel(&samples[start..end], start, rate, window))
+        .map(|samples| channel(&samples[start..end], start, rate))
         .collect();
     Analysis {
         sample_rate: audio.sample_rate,
@@ -185,7 +193,7 @@ pub fn analyze(audio: &Audio, from: Option<f64>, to: Option<f64>) -> Analysis {
 
 /// Measures one channel's samples. `offset` is the frame index of the first
 /// sample in the file, for the times.
-fn channel(samples: &[f32], offset: usize, rate: f64, window: usize) -> ChannelAnalysis {
+fn channel(samples: &[f32], offset: usize, rate: f64) -> ChannelAnalysis {
     let ceiling = loom_core::safety::CEILING;
     let at = |i: usize| (offset + i) as f64 / rate;
     let (mut peak, mut peak_index) = (0.0f32, 0);
@@ -235,29 +243,47 @@ fn channel(samples: &[f32], offset: usize, rate: f64, window: usize) -> ChannelA
         max_step,
         max_step_at: at(step_index),
         dc,
-        dc_window: window_dc(samples, window).unwrap_or(dc),
+        dc_low_pass: low_pass_dc(samples, rate),
         rms,
         rms_dbfs: loom_dsp::decibels::gain_to_db_f64(rms),
     }
 }
 
-/// The largest mean, in size, of any `window` neighbouring samples, kept
-/// with its sign. Non-finite samples count as 0. `None` when the samples
-/// are fewer than one window.
-fn window_dc(samples: &[f32], window: usize) -> Option<f64> {
-    if samples.len() < window {
+/// The low-pass DC of `samples` at `rate`: two one-pole low-pass stages at
+/// [`DC_CUTOFF_HZ`], each `y += a (x - y)` with `a = 1 - exp(-2 pi fc / fs)`,
+/// starting at 0. Returns the largest size of the second stage's output,
+/// kept with its sign, from [`DC_SETTLE_SECONDS`] on. Non-finite samples
+/// are read as 0, so one NaN cannot stay in the state. `None` when there
+/// are no samples past the settling time.
+///
+/// Sources: J. O. Smith III, *Introduction to Digital Filters with Audio
+/// Applications* (W3K, 2007), the one-pole low-pass `y += a (x - y)`; and
+/// A. V. Oppenheim and R. W. Schafer, *Discrete-Time Signal Processing*,
+/// impulse invariance, which gives the pole `exp(-2 pi fc / fs)` of an RC
+/// low-pass with the same cut-off.
+///
+/// *Why not `loom_dsp::filter::one_pole`:* that is a trapezoidal (TPT)
+/// filter in `f32`, a different form with a prewarped cut-off. This one is
+/// the form the spec gives, so the reading can be checked by hand, and it
+/// keeps its state in `f64`: `a` is about 1.3e-4 at 48 kHz, and an `f32`
+/// state would lose the small steps it adds each sample.
+fn low_pass_dc(samples: &[f32], rate: f64) -> Option<f64> {
+    let settle = (DC_SETTLE_SECONDS * rate).round() as usize;
+    if samples.len() <= settle {
         return None;
     }
-    let value = |x: f32| if x.is_finite() { f64::from(x) } else { 0.0 };
-    let mut sum: f64 = samples[..window].iter().map(|&x| value(x)).sum();
-    let mut best = sum;
-    for i in window..samples.len() {
-        sum += value(samples[i]) - value(samples[i - window]);
-        if sum.abs() > best.abs() {
-            best = sum;
+    let a = 1.0 - (-2.0 * std::f64::consts::PI * DC_CUTOFF_HZ / rate).exp();
+    let (mut first, mut second) = (0.0f64, 0.0f64);
+    let mut largest = 0.0f64;
+    for (i, &x) in samples.iter().enumerate() {
+        let x = if x.is_finite() { f64::from(x) } else { 0.0 };
+        first += a * (x - first);
+        second += a * (first - second);
+        if i >= settle && second.abs() > largest.abs() {
+            largest = second;
         }
     }
-    Some(best / window as f64)
+    Some(largest)
 }
 
 /// The largest step between neighbouring samples in `samples`, or 0 when
