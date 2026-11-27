@@ -271,12 +271,14 @@ impl Custom<XyApp> for PadState {
                 self.drag_from = Some((app.x, app.y));
                 if let Some(at) = moment.pointer {
                     out.send(Self::place(at, moment.bounds));
+                    out.redraw();
                 }
                 Used::Capture
             }
             CustomEvent::Pointer(PointerEvent::Moved) if self.drag_from.is_some() => {
                 if let Some(at) = moment.pointer {
                     out.send(Self::place(at, moment.bounds));
+                    out.redraw();
                 }
                 Used::Yes
             }
@@ -289,6 +291,7 @@ impl Custom<XyApp> for PadState {
             CustomEvent::CaptureLost => {
                 if let Some((x, y)) = self.drag_from.take() {
                     out.send(Message::Set(x, y));
+                    out.redraw();
                 }
                 Used::Yes
             }
@@ -311,6 +314,7 @@ impl Custom<XyApp> for PadState {
                     _ => return Used::No,
                 };
                 out.send(Message::Set(x, y));
+                out.redraw();
                 Used::Yes
             }
             _ => Used::No,
@@ -370,6 +374,7 @@ impl Custom<XyApp> for PadState {
         } else {
             Message::Set(app.x, to)
         });
+        out.redraw();
         true
     }
 
