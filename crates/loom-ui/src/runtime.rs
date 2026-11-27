@@ -292,6 +292,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.panels.fields.has(id).then_some(Cursor::Text)
     }
 
+    /// Turns off the panics on mistakes, as in a release build, so a test
+    /// sees what a release build reports.
+    #[cfg(test)]
+    pub(crate) fn allow_mistakes(&mut self) {
+        self.panels.allow_mistakes();
+    }
+
     /// The custom elements' state, to change for a test.
     #[cfg(test)]
     pub(crate) fn customs_mut(&mut self) -> &mut crate::custom::Customs<A> {
@@ -505,7 +512,21 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// from `ids`, as [`Context::access_nodes`](crate::Context::access_nodes)
     /// gives them inside a turn.
     pub fn access_nodes(&self, ids: &mut loom_ui_core::IdTable) -> crate::AccessNodes {
-        self.panels.access_nodes(ids, self.window.scale, self.focus.id())
+        let focused = self.focus.id().map(|id| {
+            if self.customs.is_custom(id) {
+                self.customs.focused_part(&self.app, id)
+            } else {
+                id.clone()
+            }
+        });
+        self.panels.access_nodes(ids, self.window.scale, focused.as_ref())
+    }
+
+    /// The nodes of custom elements that break section 7, rule 2, as a
+    /// release build reports them: each node's UI ID and its problem. A
+    /// debug build panics on the first instead.
+    pub fn custom_access_problems(&self) -> &[(UiId, crate::access::Problem)] {
+        &self.panels.custom_problems
     }
 
     /// The hover text showing, as last laid out: the element it belongs to
@@ -903,6 +924,18 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// which goes to the app. A request with the wrong data, or naming a
     /// place past the text, does nothing. It never moves focus: only Focus
     /// does (rule 9).
+    /// Gives a screen reader's action on a custom element's node to that
+    /// element (section 9, rule 3). `None` when it is not one, or the
+    /// element leaves it, so it goes on; Focus always goes on, to the app.
+    fn custom_action(&mut self, event: &AccessEvent) -> Option<bool> {
+        let AccessEvent::Action(request) = event else {
+            return None;
+        };
+        let request_of = crate::custom::AccessRequest::from_kit(request)?;
+        let target = self.app.access_target(request.target_node)?;
+        self.panels().custom_action(&target, &request_of)
+    }
+
     fn field_action(&mut self, event: &AccessEvent, now: Instant, batch: &mut Vec<A::Message>) -> Option<bool> {
         let AccessEvent::Action(request) = event else {
             return None;
@@ -1693,7 +1726,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.field_left(&mut batch, now);
         // A scroll since the last turn, by the pointer between turns or by
         // a layout's reveal, changed what the tree reports too.
-        let mut reported = self.panels.fields.take_changed() | self.panels.take_scrolled();
+        // So did a custom element's nodes, built again at a layout.
+        let mut reported =
+            self.panels.fields.take_changed() | self.panels.take_scrolled() | self.customs.take_nodes_reported();
         // Paste answers that came since the last turn.
         let changed = self.take_pastes(now, &mut batch);
         redraw |= changed;
@@ -1791,7 +1826,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     reported |= changed;
                 }
                 None => match self
-                    .select_action(&event)
+                    .custom_action(&event)
+                    .or_else(|| self.select_action(&event))
                     .or_else(|| self.slider_action(&event, now))
                     .or_else(|| self.context_action(&event))
                 {
@@ -1854,6 +1890,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // An element that asked for a frame gets one, once, whatever else
         // the turn did.
         redraw |= self.customs.take_redraw();
+        // A custom element whose nodes changed builds them again, before
+        // the app is asked for its tree (section 9, rule 3).
+        reported |= self.panels().build_custom_nodes();
         // An overlay an update opened closes a select's list under it, and
         // a list that opened, closed, or moved its highlight changes what
         // the tree reports: its expanded state and active descendant.

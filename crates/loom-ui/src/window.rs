@@ -94,6 +94,15 @@ pub(crate) struct Window {
     /// closes the list builds the view at once but the app hears of it in
     /// the next turn (`App::access_changed`).
     pub(crate) select_reported: bool,
+    /// The custom elements' nodes, by the element's UI ID, as each last
+    /// built them (section 9, rule 3). Built outside `update`, which holds
+    /// the app mutably, and kept until the next build, so the tree read
+    /// inside `update` is this copy.
+    pub(crate) custom_nodes: std::collections::BTreeMap<UiId, Vec<crate::custom::CustomNode>>,
+    /// The custom elements' nodes that break section 7, rule 2, as a
+    /// release build reports them: the element's UI ID with the node's
+    /// path, and the problem.
+    pub(crate) custom_problems: Vec<(UiId, crate::access::Problem)>,
 }
 
 /// One panel, as the window keeps it.
@@ -222,6 +231,8 @@ impl Default for Window {
             groups: Vec::new(),
             reveal: None,
             caret_reveal: None,
+            custom_nodes: std::collections::BTreeMap::new(),
+            custom_problems: Vec::new(),
         }
     }
 }
@@ -911,6 +922,18 @@ impl Window {
     #[cfg(test)]
     pub(crate) fn computes(&self, key: &UiId) -> u64 {
         self.records.get(key).map_or(0, |record| record.computes)
+    }
+
+    /// True when a mistake panics, as in a debug build, rather than being
+    /// reported.
+    pub(crate) fn panics_on_mistakes(&self) -> bool {
+        self.panic_on_mistake
+    }
+
+    /// The panel that holds the element with UI ID `id`, when that panel
+    /// is drawn: hidden panels give no nodes.
+    pub(crate) fn drawn_holds(&self, id: &UiId) -> bool {
+        self.panel_of(id).is_some_and(|panel| self.drawn.contains(panel))
     }
 
     /// Turns off the panics on slot mistakes and duplicate keys, as in a

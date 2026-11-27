@@ -176,6 +176,21 @@ pub enum Action {
 }
 
 impl Action {
+    /// Our action for AccessKit's `action`, or `None` for one that is not
+    /// an element's own to carry out, as Focus, a scroll, or a text edit.
+    pub(crate) fn from_kit(action: KitAction) -> Option<Self> {
+        Some(match action {
+            KitAction::Click => Self::Click,
+            KitAction::Increment => Self::Increment,
+            KitAction::Decrement => Self::Decrement,
+            KitAction::SetValue => Self::SetValue,
+            KitAction::ShowContextMenu => Self::ShowContextMenu,
+            KitAction::Expand => Self::Expand,
+            KitAction::Collapse => Self::Collapse,
+            _ => return None,
+        })
+    }
+
     /// AccessKit's action for it.
     fn kit(self) -> KitAction {
         match self {
@@ -324,6 +339,16 @@ impl Access {
     #[must_use]
     pub fn active_descendant(mut self, id: UiId) -> Self {
         self.active = Some(id);
+        self
+    }
+
+    /// Names the element it controls, by its UI ID, as a button that shows
+    /// a part of the canvas names that part (section 7, rule 13). The
+    /// runtime gives the node the other's node ID when the tree is sent,
+    /// and leaves it out while the tree holds no node for that UI ID.
+    #[must_use]
+    pub fn controlling(mut self, id: UiId) -> Self {
+        self.controls = Some(id);
         self
     }
 

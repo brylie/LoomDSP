@@ -471,11 +471,17 @@ impl<'a, M> Context<'a, M> {
     /// any other does, through [`App::accessibility_event`]. The app turns
     /// it into a message by the UI ID its table gives (section 7, rule 6),
     /// and a Focus action into [`Effects::focus`](crate::Effects::focus).
-    /// The one exception is a text field's: when [`App::access_target`]
+    /// There are two exceptions. A text field's: when [`App::access_target`]
     /// names a field or its run, the runtime carries out SetValue,
     /// ReplaceSelectedText, and SetTextSelection itself, and an edit reaches
-    /// the app through [`App::field_event`] (rule 10). Focus on a field
-    /// still comes through `accessibility_event`. Empty outside a runtime.
+    /// the app through [`App::field_event`] (rule 10). And a custom
+    /// element's: when it names the element or a part inside it, the
+    /// runtime gives the request to the element
+    /// ([`Custom::access_action`](crate::Custom::access_action)), whose
+    /// messages run in the same turn (section 9, rule 3). Focus on either
+    /// still comes through `accessibility_event`. A custom element's parts
+    /// are the nodes it last built, outside `update`. Empty outside a
+    /// runtime.
     pub fn access_nodes(&self, ids: &mut IdTable) -> AccessNodes {
         self.panels.map_or_else(AccessNodes::default, |panels| {
             panels.access_nodes(ids, self.window.scale, self.focused.as_ref())

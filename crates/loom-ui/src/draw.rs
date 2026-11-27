@@ -122,6 +122,9 @@ impl<A: App> Panels<'_, A> {
         self.counts.panels_laid_out += laid.panels;
         self.counts.elements_laid_out += laid.elements;
         self.customs.settle(self.window.customs(), self.app);
+        // An element the layout made or moved builds its nodes again; the
+        // app hears of a change on the next turn (section 9, rule 3).
+        self.build_custom_nodes_later();
         self.focus.settle(self.window);
         self.reveal();
         self.reveal_caret();

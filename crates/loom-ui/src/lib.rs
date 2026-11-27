@@ -86,7 +86,9 @@ mod waker;
 mod window;
 
 pub use app::{App, Context, Deadline, InputState, TabStep, WindowSpec};
-pub use custom::{Custom, CustomEvent, CustomKind, Moment, Out, Used};
+pub use custom::{
+    AccessRequest, AccessValue, Custom, CustomEvent, CustomKind, CustomNode, CustomNodes, Moment, Out, Used,
+};
 pub use draw::Panels;
 pub use driver::{Driver, Paste};
 pub use effect::{ClipboardText, Effect, Effects};

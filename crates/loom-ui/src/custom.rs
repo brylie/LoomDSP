@@ -24,8 +24,11 @@ use std::fmt;
 use std::time::Instant;
 
 mod keys;
+mod nodes;
 mod pointer;
 mod ticks;
+
+pub use nodes::{AccessRequest, AccessValue, CustomNode, CustomNodes};
 
 /// Which kind of custom element a view placed, so the app knows which
 /// state to make for it ([`App::make_custom`]). An app with a meter and a
@@ -120,6 +123,48 @@ pub trait Custom<A: App>: Any {
         let _ = app;
         false
     }
+
+    /// Adds a node for each part inside it a user can reach, in its own
+    /// focus order, with `bounds` where it is in the window (section 9,
+    /// rule 3). Its own node comes from the [`Access`](crate::Access) the
+    /// view gave it; these go under that one. The runtime asks after a
+    /// layout that made it or moved it, after an event or tick that said
+    /// its nodes changed ([`Out::nodes_changed`]), and after a turn in
+    /// which [`Custom::access_version`] changed, and keeps them until it
+    /// next asks. By default it has no inner parts.
+    fn access(&self, app: &A, bounds: Rect, nodes: &mut CustomNodes) {
+        let _ = (app, bounds, nodes);
+    }
+
+    /// A number that changes when what its nodes show changed with no
+    /// event of its own, as when the app's model moves a meter's level:
+    /// the runtime asks after each turn and builds its nodes again when it
+    /// differs from the last build's. It must be cheap, since it is asked
+    /// every turn, and change no faster than a screen reader should hear
+    /// (section 7, rule 7). By default 0, so only events and layouts
+    /// rebuild them.
+    fn access_version(&self, app: &A) -> u64 {
+        let _ = app;
+        0
+    }
+
+    /// Carries out a screen reader's `request` on its own node (`rest`
+    /// empty) or on the part at `rest`, sending its messages through
+    /// `out`: they run in this turn. The runtime asks only while the
+    /// element takes input and the node offers the action and is not off.
+    /// Returns false when it does not carry it out, and the request goes
+    /// on to [`App::accessibility_event`]. Focus never comes here: it
+    /// reaches the app, whose focus effect reaches [`Custom::focus_inner`].
+    fn access_action(
+        &mut self,
+        app: &A,
+        rest: &[IdKey],
+        request: &AccessRequest,
+        out: &mut Out<'_, A::Message>,
+    ) -> bool {
+        let _ = (app, rest, request, out);
+        false
+    }
 }
 
 /// What a custom element hears.
@@ -199,6 +244,7 @@ pub struct Moment {
 pub struct Out<'a, M> {
     sent: &'a mut Vec<M>,
     redraw: &'a mut bool,
+    nodes_changed: &'a mut bool,
 }
 
 impl<M> Out<'_, M> {
@@ -214,6 +260,14 @@ impl<M> Out<'_, M> {
     /// rule 4).
     pub fn redraw(&mut self) {
         *self.redraw = true;
+    }
+
+    /// Says what its nodes show changed, so the runtime builds them again
+    /// after this turn ([`Custom::access`]). A frame's redraw does not, so
+    /// an element that animates rebuilds nothing for a screen reader until
+    /// it says so.
+    pub fn nodes_changed(&mut self) {
+        *self.nodes_changed = true;
     }
 }
 
@@ -243,6 +297,12 @@ pub(crate) struct Customs<A: App> {
     /// The schedule the last turn gave the driver, so a call outside a
     /// turn that changes it wakes the loop for a turn that gives it again.
     planned: Schedule,
+    /// True when an element said its nodes changed ([`Out::nodes_changed`])
+    /// and they were not built again yet.
+    nodes_changed: bool,
+    /// True when a build outside a turn changed the nodes, so the next
+    /// turn tells the app ([`App::access_changed`]).
+    nodes_reported: bool,
 }
 
 /// A held capture of the pointer.
@@ -264,6 +324,9 @@ struct Hosted<A: App> {
     bounds: Rect,
     /// Its state, or `None` when the app made none for its kind.
     state: Option<Box<dyn Custom<A>>>,
+    /// The access version and the bounds of its last node build, so the
+    /// next is skipped while neither moved. `None` before the first.
+    built: Option<(u64, Rect)>,
     /// A deadline it gave that did not move past its tick, which the
     /// schedule leaves out until it gives a later one.
     stuck: Option<Instant>,
@@ -278,6 +341,8 @@ impl<A: App> Default for Customs<A> {
             hovered: None,
             redraw: false,
             planned: Schedule::default(),
+            nodes_changed: false,
+            nodes_reported: false,
         }
     }
 }
@@ -305,6 +370,7 @@ impl<A: App> Customs<A> {
                         bounds,
                         state,
                         stuck: None,
+                        built: None,
                     }
                 }
             };
@@ -337,6 +403,7 @@ impl<A: App> Customs<A> {
         let mut out = Out {
             sent: &mut self.sent,
             redraw: &mut self.redraw,
+            nodes_changed: &mut self.nodes_changed,
         };
         state.event(app, event, moment, &mut out)
     }

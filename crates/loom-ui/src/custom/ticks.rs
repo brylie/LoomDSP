@@ -87,13 +87,14 @@ impl<A: App> Panels<'_, A> {
     }
 
     /// Wakes the loop for a turn when a call outside a turn changed what
-    /// only a turn tells the driver: an element asked for a frame, or the
+    /// only a turn tells the driver or the app: an element asked for a
+    /// frame, its nodes changed, or the
     /// elements' deadline or frames changed, as a state a layout made
     /// does. Transitional, as [`Panels::send_custom_later`] is: from P4
     /// every event reaches an element inside a turn.
     pub(crate) fn wake_if_rescheduled(&mut self) {
         let schedule: Schedule = self.customs.schedule(self.app);
-        if self.customs.redraw_asked() || schedule != self.customs.planned {
+        if self.customs.redraw_asked() || self.customs.nodes_reported() || schedule != self.customs.planned {
             self.waker.nudge();
         }
     }
