@@ -296,6 +296,11 @@ struct Dragging {
     position: f32,
 }
 
+/// How close a shown position must be to one the open group knows to be
+/// that one: an app stores a report in its own units and shows it back,
+/// which can change the last bits, far less than the finest key step.
+const SAME_POSITION: f32 = 1e-5;
+
 /// A group of keys on one slider, until it closes.
 #[derive(Debug, Clone, PartialEq)]
 struct KeyRun {
@@ -439,8 +444,11 @@ impl Sliding {
             let run = self.keys.as_mut().expect("the group it joins");
             run.last = now;
             run.known.extend([shown, to]);
-            if to != run.position {
-                run.position = to;
+            run.position = to;
+            // Whether this key moved the slider is from where it stepped,
+            // which is the value the app set when it moved it meanwhile,
+            // not the group's last report.
+            if to != from {
                 out.push((id.clone(), to, SlidePhase::Move));
             }
             return out;
@@ -469,7 +477,7 @@ impl Sliding {
     /// next step goes on from there.
     pub(crate) fn key_base(&self, id: &UiId, shown: f32) -> f32 {
         self.keys.as_ref().filter(|run| &run.id == id).map_or(shown, |run| {
-            let moved_by_app = !run.known.contains(&shown);
+            let moved_by_app = !run.known.iter().any(|known| (known - shown).abs() <= SAME_POSITION);
             if moved_by_app { shown } else { run.position }
         })
     }
@@ -490,10 +498,11 @@ impl Sliding {
             let run = self.keys.as_mut().expect("the group it joins");
             run.last = now;
             run.known.extend([shown, to]);
-            if to == run.position {
+            run.position = to;
+            // As for a key: whether it moved is from where it stepped.
+            if to == from {
                 return Vec::new();
             }
-            run.position = to;
             return vec![(id.clone(), to, SlidePhase::Move)];
         }
         let mut out = self.close_keys();

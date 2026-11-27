@@ -140,6 +140,42 @@ fn a_step_goes_on_from_a_value_the_app_set_meanwhile() {
     assert!(near(sliding.key_base(&other, 0.9), 0.9), "keys: the app moved it");
 }
 
+/// A step from a value the app set meanwhile is reported even when it
+/// lands where the group's last report was: with a step of 0.5, keys take
+/// the slider to 1.0, the app moves it to 0.75, and the next key goes from
+/// 0.75 back to 1.0, which the app must hear. A key that moves nothing
+/// stays silent.
+#[test]
+fn a_step_from_an_app_move_to_the_last_report_is_reported() {
+    let now = Instant::now();
+    let mut sliding = Sliding::default();
+    let _ = sliding.key(&level(), 0.5, 1.0, 0.5, now);
+    let base = sliding.key_base(&level(), 0.75);
+    assert!(near(base, 0.75), "the app moved it");
+    let reports = sliding.key(&level(), base, 1.0, 0.75, now);
+    assert_reports(&reports, &[(1.0, SlidePhase::Move)]);
+    assert!(sliding.key(&level(), 1.0, 1.0, 1.0, now).is_empty(), "nothing moved");
+    let _ = sliding.close_keys();
+    let _ = sliding.step(&level(), 0.5, 1.0, 0.5, now);
+    let base = sliding.key_base(&level(), 0.75);
+    let reports = sliding.step(&level(), base, 1.0, 0.75, now);
+    assert_reports(&reports, &[(1.0, SlidePhase::Move)]);
+}
+
+/// A shown value that is an earlier report after the app's round trip
+/// through its own units, a few bits off, is layout lag too, not an app
+/// move.
+#[test]
+fn a_report_back_from_the_app_a_few_bits_off_is_no_app_move() {
+    let now = Instant::now();
+    let mut sliding = Sliding::default();
+    let _ = sliding.key(&level(), 0.5, 0.625, 0.5, now);
+    let base = sliding.key_base(&level(), 0.5);
+    let _ = sliding.key(&level(), base, 0.75, 0.5, now);
+    let echoed = 0.625_f32 + 2.0 * f32::EPSILON;
+    assert!(near(sliding.key_base(&level(), echoed), 0.75), "the group's own report");
+}
+
 /// A layout that shows an earlier report of the open group, one or more
 /// behind, is the app lagging, not the app moving the slider: the next
 /// step still goes on from the last report, so no step is lost.
