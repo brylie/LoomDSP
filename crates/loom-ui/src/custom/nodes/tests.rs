@@ -15,7 +15,7 @@ use crate::routing::NoTarget;
 use crate::view::{Layer, View};
 use accesskit::{ActionRequest, NodeId};
 use loom_ui_core::{Event, IdKey, IdTable, Point, PointerButton, PointerEvent, Rect, Size, UiId};
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::time::Instant;
 
 /// The grid's kind.
@@ -40,12 +40,10 @@ enum Message {
     Changed,
 }
 
-/// The grid's state: which part has its focus, and how many times it built
-/// its nodes.
+/// The grid's state: which part has its focus.
 #[derive(Default)]
 struct GridState {
     part: Option<IdKey>,
-    builds: Cell<u32>,
 }
 
 impl Custom<Grids> for GridState {
@@ -73,7 +71,6 @@ impl Custom<Grids> for GridState {
     }
 
     fn access(&self, app: &Grids, bounds: Rect, nodes: &mut CustomNodes) {
-        self.builds.set(self.builds.get() + 1);
         for (at, cell) in app.cells.iter().enumerate() {
             let place = Rect::new(Point::new(bounds.x + 50.0 * at as f32, bounds.y), Size::new(50.0, 50.0));
             let mut access = Access::new(Role::Button, format!("Cell {cell}")).action(Action::Click);
@@ -130,6 +127,11 @@ struct Grids {
     overlay: bool,
     /// True when the grid adds a node that breaks section 7, rule 2.
     broken: bool,
+    /// True when the cells change with no new access version, as an
+    /// element that forgot to say so would.
+    stale: bool,
+    /// True when the grid has no Access of its own and is no focus stop.
+    plain: bool,
     /// The app's one node table, which maps a screen reader's node back.
     ids: RefCell<IdTable>,
     log: Vec<Message>,
@@ -142,7 +144,9 @@ impl App for Grids {
         let effects = match &message {
             Message::Cells(cells) => {
                 self.cells = cells.clone();
-                self.version += 1;
+                if !self.stale {
+                    self.version += 1;
+                }
                 Effects::none()
             }
             Message::FocusPart(part) => Effects::focus(grid().with(*part)),
@@ -157,14 +161,20 @@ impl App for Grids {
     }
 
     fn view(&self, view: &mut View) {
-        view.panel_with(UiId::panel("main"), Layer::Panels, &(), |_| {
-            Element::column([
-                Element::custom(GRID)
-                    .key("grid")
-                    .width(Length::Fixed(200.0))
-                    .height(Length::Fixed(100.0))
+        view.panel_with(UiId::panel("main"), Layer::Panels, &self.plain, |&plain| {
+            let element = Element::custom(GRID)
+                .key("grid")
+                .width(Length::Fixed(200.0))
+                .height(Length::Fixed(100.0));
+            let element = if plain {
+                element
+            } else {
+                element
                     .focusable()
-                    .access(Access::new(Role::Group, "Grid").action(Action::Click)),
+                    .access(Access::new(Role::Group, "Grid").action(Action::Click))
+            };
+            Element::column([
+                element,
                 Element::text("inspector", STYLE)
                     .key("inspector")
                     .focusable()
@@ -222,6 +232,8 @@ fn grids() -> Grids {
         animate: false,
         overlay: false,
         broken: false,
+        stale: false,
+        plain: false,
         ids: RefCell::new(IdTable::default()),
         log: Vec::new(),
     }
@@ -265,14 +277,9 @@ fn node(nodes: &AccessNodes, node: NodeId) -> &accesskit::Node {
         .1
 }
 
-/// How many times the grid built its nodes.
-fn builds(harness: &Harness<Grids, NoTarget>) -> u32 {
-    harness
-        .runtime()
-        .custom::<GridState>(&grid())
-        .expect("the grid's state")
-        .builds
-        .get()
+/// How many times the runtime built the grid's nodes.
+fn builds(harness: &Harness<Grids, NoTarget>) -> u64 {
+    harness.runtime().counts().custom_node_builds
 }
 
 /// A screen reader's `action` on the node of `id`.
@@ -480,4 +487,51 @@ fn a_broken_node_is_reported() {
         harness.runtime().custom_access_problems(),
         [(grid().with("broken"), Problem::NotOperable)]
     );
+}
+
+/// An element whose nodes follow the app's model but whose access version
+/// does not move would give a screen reader stale nodes: a debug build
+/// checks each turn, and panics naming the fix.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "a custom element's nodes changed but access_version did not")]
+fn nodes_that_change_with_no_new_version_panic() {
+    let mut app = grids();
+    app.stale = true;
+    let mut harness = harness(app);
+    send(&mut harness, Message::Cells(vec!["a", "b", "c"]));
+}
+
+/// A custom element with parts and no Access of its own breaks section 9,
+/// rule 2: a release build reports it. One with neither, purely for show,
+/// is allowed.
+#[test]
+fn parts_need_an_access_of_their_own() {
+    let mut app = grids();
+    app.plain = true;
+    let window = WindowState::new(Size::new(400.0, 300.0));
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
+    harness.runtime_mut().allow_mistakes();
+    harness.lay_out(&mut Mono::default());
+    assert_eq!(
+        harness.runtime().custom_access_problems(),
+        [(grid(), Problem::PartsWithoutAccess)]
+    );
+    let mut app = grids();
+    app.plain = true;
+    app.cells = Vec::new();
+    let window = WindowState::new(Size::new(400.0, 300.0));
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
+    harness.lay_out(&mut Mono::default());
+    assert!(harness.runtime().custom_access_problems().is_empty());
+}
+
+/// In a debug build, the same element panics.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "a custom element main/grid breaks a rule: it is a custom element with parts and no Access")]
+fn parts_without_an_access_panic() {
+    let mut app = grids();
+    app.plain = true;
+    let _ = harness(app);
 }

@@ -172,12 +172,35 @@ impl<A: App> Panels<'_, A> {
             };
             let version = state.access_version(self.app);
             if !force && hosted.built == Some((version, hosted.bounds)) {
+                // A debug build checks the element told the truth: nodes
+                // that follow the app's model, with a version that does
+                // not, would give a screen reader stale names and values.
+                if panics {
+                    let mut nodes = CustomNodes::default();
+                    state.access(self.app, hosted.bounds, &mut nodes);
+                    assert!(
+                        self.window
+                            .custom_nodes
+                            .get(id)
+                            .is_some_and(|built| *built == nodes.nodes),
+                        "a custom element's nodes changed but access_version did not: return a new version \
+                         when the model they read changes, or call out.nodes_changed()"
+                    );
+                }
                 continue;
             }
             hosted.built = Some((version, hosted.bounds));
+            self.counts.custom_node_builds += 1;
             let mut nodes = CustomNodes::default();
             state.access(self.app, hosted.bounds, &mut nodes);
             self.window.custom_problems.retain(|(part, _)| !part.is_under(id));
+            // An element with parts says what it is, so its parts sit in a
+            // node a screen reader can name (section 9, rule 2).
+            if !nodes.nodes.is_empty() && self.window.access_of(id).is_none() {
+                let problem = crate::access::Problem::PartsWithoutAccess;
+                assert!(!panics, "a custom element {id} breaks a rule: {problem}");
+                self.window.custom_problems.push((id.clone(), problem));
+            }
             for node in &nodes.nodes {
                 let part = node.path.iter().cloned().fold(id.clone(), UiId::with);
                 let problem = if node.path.is_empty() {

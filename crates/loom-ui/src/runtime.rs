@@ -105,6 +105,10 @@ pub struct Counts {
     pub panels_laid_out: u64,
     /// Elements in the panels laid out.
     pub elements_laid_out: u64,
+    /// Custom elements' node builds ([`Custom::access`](crate::Custom::access)),
+    /// not counting a debug build's check that a skipped build would have
+    /// given the same nodes.
+    pub custom_node_builds: u64,
     /// Keys dropped from rebuilt panels because an earlier element had the
     /// same UI ID (ui-layer.md, section 4, rule 7).
     pub duplicate_keys: u64,

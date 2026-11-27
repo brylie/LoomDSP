@@ -266,6 +266,10 @@ pub enum Problem {
     /// ([`Element::keys_from`](crate::Element::keys_from)) that is no focus
     /// stop of its panel (ui-layer.md, section 5, rule 12).
     KeysFromNoStop,
+    /// It is a custom element that gives nodes for its parts and has no
+    /// [`Access`] of its own, so its parts have no named node to sit in
+    /// (ui-layer.md, section 9, rule 2).
+    PartsWithoutAccess,
 }
 
 impl fmt::Display for Problem {
@@ -278,6 +282,7 @@ impl fmt::Display for Problem {
             Self::NoValue => "it has no value of the kind its role needs",
             Self::NotOperable => "a user acts on it, and it offers no action",
             Self::KeysFromNoStop => "it takes its keys from an element that is no focus stop of its panel",
+            Self::PartsWithoutAccess => "it is a custom element with parts and no Access of its own",
         })
     }
 }
