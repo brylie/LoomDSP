@@ -64,6 +64,8 @@ mod outline;
 mod overlays;
 mod panic;
 mod param;
+#[cfg(test)]
+mod parity_tests;
 mod patch_file;
 mod patch_info;
 mod patch_map;
