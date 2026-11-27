@@ -518,6 +518,25 @@ fn a_lost_pointer_cancels_the_drag_in_its_turn() {
     assert_eq!(log(&harness), [Message::Began, Message::Undone]);
 }
 
+/// A lost pointer that ends a drag outside a turn asks for a frame when
+/// the hover the capture held back moves: here onto the label the drag
+/// ended over, so its look shows at once.
+#[test]
+fn a_lost_pointer_redraws_the_hover_it_settles() {
+    let mut harness = harness();
+    let label = Point::new(50.0, 125.0);
+    let (_, _, mut panels) = harness.parts();
+    let _ = panels.pointer_below(
+        &Event::Pointer(PointerEvent::Pressed(PointerButton::Left)),
+        Point::new(50.0, 50.0),
+    );
+    let _ = panels.pointer_below(&Event::Pointer(PointerEvent::Moved), label);
+    let heard = panels.pointer_below(&Event::Pointer(PointerEvent::Lost), label);
+    assert!(heard.taken);
+    assert!(heard.redraw, "the hover moved to the label");
+    assert_eq!(harness.runtime().hovered(), Some(&UiId::panel("main").with("label")));
+}
+
 /// A lost pointer with no capture does nothing: no element hears it.
 #[test]
 fn a_lost_pointer_with_no_capture_does_nothing() {

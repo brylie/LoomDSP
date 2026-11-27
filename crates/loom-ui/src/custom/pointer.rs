@@ -51,11 +51,13 @@ impl<A: App> Panels<'_, A> {
             return None;
         }
         // The driver reports the buttons ended with no release: a cancel.
+        // The hover the capture held back settles now, and a frame shows
+        // it.
         if matches!(event, PointerEvent::Lost) {
-            self.cancel_capture();
+            let hover_changed = self.cancel_and_settle().unwrap_or(false);
             return Some(Heard {
                 taken: true,
-                redraw: false,
+                redraw: hover_changed,
             });
         }
         // The capture holds back the hover, but not where the pointer is:
@@ -145,16 +147,19 @@ impl<A: App> Panels<'_, A> {
     /// [`CustomEvent::CaptureLost`] and no release. Returns true when an
     /// element held it.
     pub(crate) fn cancel_capture(&mut self) -> bool {
-        let Some(capture) = self.customs.captured.take() else {
-            return false;
-        };
+        self.cancel_and_settle().is_some()
+    }
+
+    /// [`Panels::cancel_capture`], saying what it settled: `None` when no
+    /// element held the capture, or whether the hover it held back changed.
+    fn cancel_and_settle(&mut self) -> Option<bool> {
+        let capture = self.customs.captured.take()?;
         if let Some(moment) = self.custom_moment(&capture.id, self.pointer.at) {
             let _ = self
                 .customs
                 .tell(self.app, &capture.id, &CustomEvent::CaptureLost, &moment);
         }
-        self.settle_hover();
-        true
+        Some(self.settle_hover())
     }
 
     /// Applies the hover a capture held back, once it ended: outside the
