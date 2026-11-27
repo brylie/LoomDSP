@@ -57,7 +57,9 @@ impl Custom<Meters> for MeterState {
             }
             CustomEvent::Pointer(PointerEvent::Pressed(PointerButton::Right)) => self.frames = 2,
             CustomEvent::Deadline => {
-                self.deadline = None;
+                if !app.keep_deadline {
+                    self.deadline = None;
+                }
                 out.send(Message::Ticked);
             }
             CustomEvent::Frame => {
@@ -89,6 +91,9 @@ struct Meters {
     /// True when the meter sends a message from its frame's tick, which a
     /// debug build refuses.
     send_from_frames: bool,
+    /// True when the meter's tick forgets to move its deadline on, which a
+    /// debug build refuses.
+    keep_deadline: bool,
     /// Every message, in order.
     log: Vec<Message>,
 }
@@ -146,6 +151,7 @@ fn meters(start_frames: u32) -> Meters {
         overlay: false,
         start_frames,
         send_from_frames: false,
+        keep_deadline: false,
         log: Vec::new(),
     }
 }
@@ -303,6 +309,7 @@ fn a_state_made_at_layout_wakes_the_loop() {
 
 /// A frame's tick sends no message, since a frame runs no update: a debug
 /// build panics, and names what to do instead.
+#[cfg(debug_assertions)]
 #[test]
 #[should_panic(expected = "a custom element sent a message from a frame's tick: ask for a deadline instead")]
 fn a_message_from_a_frame_tick_panics() {
@@ -310,4 +317,35 @@ fn a_message_from_a_frame_tick_panics() {
     app.send_from_frames = true;
     let mut harness = harness(app);
     harness.step(DriverEvent::Frame);
+}
+
+/// A tick that leaves its deadline due would wake the loop at once, every
+/// turn: a debug build panics, and names what to do instead.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "a custom element's deadline did not move past its tick: clear it or move it on in event")]
+fn a_deadline_that_does_not_move_panics() {
+    let mut app = meters(0);
+    app.keep_deadline = true;
+    let mut harness = harness(app);
+    step(&mut harness, 50.0, 50.0, PointerEvent::Pressed(PointerButton::Left));
+    harness.advance(WAIT);
+}
+
+/// In a release build, a deadline that did not move gets one tick, and the
+/// schedule leaves it out, so the loop sleeps; a turn some other cause
+/// brings ticks it again.
+#[cfg(not(debug_assertions))]
+#[test]
+fn a_deadline_that_does_not_move_does_not_spin() {
+    let mut app = meters(0);
+    app.keep_deadline = true;
+    let mut harness = harness(app);
+    step(&mut harness, 50.0, 50.0, PointerEvent::Pressed(PointerButton::Left));
+    harness.advance(WAIT);
+    assert_eq!(ticks(&harness), [CustomEvent::Deadline]);
+    assert_eq!(harness.next().deadline, None);
+    harness.send(Message::Overlay(false));
+    assert_eq!(ticks(&harness), [CustomEvent::Deadline, CustomEvent::Deadline]);
+    assert_eq!(harness.next().deadline, None);
 }

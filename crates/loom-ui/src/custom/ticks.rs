@@ -31,7 +31,28 @@ impl<A: App> Panels<'_, A> {
             .collect();
         for id in due {
             self.tick(&id, &CustomEvent::Deadline);
+            self.check_moved_on(&id, now);
         }
+    }
+
+    /// Checks that the element `id` moved its deadline past `now` in its
+    /// tick. One still due would wake the loop at once, every turn: a
+    /// debug build panics, and a release build marks it stuck, so the
+    /// schedule leaves it out until it gives a later one.
+    fn check_moved_on(&mut self, id: &UiId, now: Instant) {
+        let Some(hosted) = self.customs.elements.get_mut(id) else {
+            return;
+        };
+        let still = hosted
+            .state
+            .as_deref()
+            .and_then(|state| state.next_deadline(self.app))
+            .filter(|at| *at <= now);
+        debug_assert!(
+            still.is_none(),
+            "a custom element's deadline did not move past its tick: clear it or move it on in event"
+        );
+        hosted.stuck = still;
     }
 
     /// Gives a frame tick to each element that animates. A frame runs no

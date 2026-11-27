@@ -101,8 +101,12 @@ pub trait Custom<A: App>: Any {
     /// from the moments it was given, as a caret's next blink or a held
     /// key's next repeat. The runtime asks after each turn and wakes at the
     /// soonest deadline any element or the app gives (section 9, rule 4).
-    /// The tick must move the deadline on, or it is due again at once and
-    /// the loop never sleeps. `None`, the default, when it needs none.
+    /// After its tick it must give a later instant, or `None`: a deadline
+    /// still due would wake the loop at once, every turn. A debug build
+    /// panics on one; a release build leaves that element's deadline out
+    /// of the schedule until it gives a later one, and still ticks it in
+    /// a turn some other cause brings. `None`, the default, when it needs
+    /// none.
     fn next_deadline(&self, app: &A) -> Option<Instant> {
         let _ = app;
         None
@@ -260,6 +264,9 @@ struct Hosted<A: App> {
     bounds: Rect,
     /// Its state, or `None` when the app made none for its kind.
     state: Option<Box<dyn Custom<A>>>,
+    /// A deadline it gave that did not move past its tick, which the
+    /// schedule leaves out until it gives a later one.
+    stuck: Option<Instant>,
 }
 
 impl<A: App> Default for Customs<A> {
@@ -293,7 +300,12 @@ impl<A: App> Customs<A> {
                         state.is_some(),
                         "the app made no state for the custom element {id:?} of {kind:?}"
                     );
-                    Hosted { kind, bounds, state }
+                    Hosted {
+                        kind,
+                        bounds,
+                        state,
+                        stuck: None,
+                    }
                 }
             };
             kept.insert(id, hosted);
@@ -378,8 +390,16 @@ impl<A: App> Customs<A> {
     /// When the elements next need a tick, asked of each now.
     pub(crate) fn schedule(&self, app: &A) -> Schedule {
         let mut schedule = Schedule::default();
-        for state in self.elements.values().filter_map(|hosted| hosted.state.as_deref()) {
-            if let Some(at) = state.next_deadline(app) {
+        for hosted in self.elements.values() {
+            let Some(state) = hosted.state.as_deref() else {
+                continue;
+            };
+            // A deadline that did not move past its tick is left out, so
+            // the loop does not spin on it.
+            if let Some(at) = state
+                .next_deadline(app)
+                .filter(|at| hosted.stuck.is_none_or(|stuck| *at > stuck))
+            {
                 schedule.deadline = Some(schedule.deadline.map_or(at, |soonest| soonest.min(at)));
             }
             schedule.frames |= state.animating(app);
