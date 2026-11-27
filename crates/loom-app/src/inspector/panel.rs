@@ -123,20 +123,21 @@ impl App {
         };
         let dragging = self.session.gestures.assign_drag().is_some() && !self.session.learn.is_on();
         let model = self.inspector_model();
+        let part_authors = match &model {
+            Inspector::SubPatch(sub) => self
+                .session
+                .patch_info
+                .part_authors(sub.id)
+                .map_or_else(|| sub.authors.join("\n"), ToString::to_string),
+            _ => String::new(),
+        };
         let panel = Panel {
-            model: model.clone(),
+            model,
             authors: self.session.patch_info.authors.clone(),
             looks,
             rows,
             drop_row: self.session.gestures.drop_row().filter(|_| dragging),
-            part_authors: match &model {
-                Inspector::SubPatch(sub) => self
-                    .session
-                    .patch_info
-                    .part_authors(sub.id)
-                    .map_or_else(|| sub.authors.join("\n"), ToString::to_string),
-                _ => String::new(),
-            },
+            part_authors,
         };
         view.panel_with(inspector_id(), Layer::Panels, &panel, build);
     }
