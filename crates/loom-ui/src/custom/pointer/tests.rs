@@ -67,6 +67,10 @@ struct KnobState {
 
 impl Custom<Drags> for KnobState {
     fn event(&mut self, _app: &Drags, event: &CustomEvent, _moment: &Moment, _out: &mut Out<'_, Message>) -> Used {
+        // Being placed is no pointer event; these tests count those only.
+        if *event == CustomEvent::Placed {
+            return Used::No;
+        }
         self.heard.push(event.clone());
         Used::Yes
     }
@@ -74,6 +78,10 @@ impl Custom<Drags> for KnobState {
 
 impl Custom<Drags> for PadState {
     fn event(&mut self, app: &Drags, event: &CustomEvent, moment: &Moment, out: &mut Out<'_, Message>) -> Used {
+        // Being placed is no pointer event; these tests count those only.
+        if *event == CustomEvent::Placed {
+            return Used::No;
+        }
         self.heard.push(event.clone());
         self.seen.push(app.log.len());
         self.at.push(moment.pointer);

@@ -16,6 +16,17 @@ impl<A: App> Panels<'_, A> {
     /// Gives a deadline tick to each element whose deadline came by `now`.
     /// What they send runs in this turn, after its batch.
     pub(crate) fn tick_deadlines(&mut self, now: Instant) {
+        // First, each element a layout placed, moved, or resized hears it
+        // once, before any deadline of this turn (section 9, rule 4).
+        let placed: Vec<UiId> = self
+            .customs
+            .elements
+            .iter_mut()
+            .filter_map(|(id, hosted)| std::mem::take(&mut hosted.placed).then(|| id.clone()))
+            .collect();
+        for id in placed {
+            self.tick(&id, &CustomEvent::Placed);
+        }
         let due: Vec<UiId> = self
             .customs
             .elements
@@ -88,13 +99,19 @@ impl<A: App> Panels<'_, A> {
 
     /// Wakes the loop for a turn when a call outside a turn changed what
     /// only a turn tells the driver or the app: an element asked for a
-    /// frame, its nodes changed, or the
+    /// frame, its nodes changed, a layout placed, moved, or resized it, or the
     /// elements' deadline or frames changed, as a state a layout made
     /// does. Transitional, as [`Panels::send_custom_later`] is: from P4
     /// every event reaches an element inside a turn.
     pub(crate) fn wake_if_rescheduled(&mut self) {
         let schedule: Schedule = self.customs.schedule(self.app);
-        if self.customs.redraw_asked() || self.customs.nodes_reported() || schedule != self.customs.planned {
+        // An element a layout placed, moved, or resized hears it on the
+        // next turn, which this wakes (section 9, rule 4).
+        if self.customs.redraw_asked()
+            || self.customs.nodes_reported()
+            || self.customs.any_placed()
+            || schedule != self.customs.planned
+        {
             self.waker.nudge();
         }
     }

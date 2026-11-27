@@ -349,3 +349,5 @@ fn a_deadline_that_does_not_move_does_not_spin() {
     assert_eq!(ticks(&harness), [CustomEvent::Deadline, CustomEvent::Deadline]);
     assert_eq!(harness.next().deadline, None);
 }
+
+mod placed;

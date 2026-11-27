@@ -230,6 +230,15 @@ pub enum CustomEvent {
     /// gesture began, where a release would finish it (section 9, rule 1,
     /// "when a capture ends").
     CaptureLost,
+    /// A layout placed it for the first time, moved it, or changed its
+    /// size, once, in the next turn (Brylie's decision, 2026-11-27). It
+    /// may send messages, which run in this turn, as a deadline's tick
+    /// does, and it comes before any [`CustomEvent::Deadline`] of the
+    /// same turn. Its new bounds are in the [`Moment`]. *Why:* what it
+    /// shows can depend on its size, as which lights a canvas shows or a
+    /// waveform in a resized plugin window, and a layout runs outside a
+    /// turn, so it could not send then.
+    Placed,
     /// Its deadline came ([`Custom::next_deadline`]). It may send messages,
     /// which run in this turn, and must move its deadline on.
     Deadline,
@@ -401,6 +410,9 @@ struct Hosted<A: App> {
     /// A deadline it gave that did not move past its tick, which the
     /// schedule leaves out until it gives a later one.
     stuck: Option<Instant>,
+    /// A layout placed, moved, or resized it since its last
+    /// [`CustomEvent::Placed`].
+    placed: bool,
 }
 
 impl<A: App> Default for Customs<A> {
@@ -432,7 +444,11 @@ impl<A: App> Customs<A> {
         let mut made = Vec::new();
         for (id, kind, bounds) in found {
             let hosted = match self.elements.remove(&id) {
-                Some(hosted) if hosted.kind == kind => Hosted { bounds, ..hosted },
+                Some(hosted) if hosted.kind == kind => Hosted {
+                    bounds,
+                    placed: hosted.placed || hosted.bounds != bounds,
+                    ..hosted
+                },
                 _ => {
                     made.push(id.clone());
                     let state = app.make_custom(&id, kind);
@@ -445,6 +461,7 @@ impl<A: App> Customs<A> {
                         bounds,
                         state,
                         stuck: None,
+                        placed: true,
                         built: None,
                         #[cfg(feature = "gpu")]
                         seen: None,
@@ -463,6 +480,12 @@ impl<A: App> Customs<A> {
         if self.hovered.as_ref().is_some_and(|id| !live(id)) {
             self.hovered = None;
         }
+    }
+
+    /// True when a layout placed, moved, or resized an element that has
+    /// not heard [`CustomEvent::Placed`] since.
+    pub(crate) fn any_placed(&self) -> bool {
+        self.elements.values().any(|hosted| hosted.placed)
     }
 
     /// True when `id` is a custom element's UI ID.
