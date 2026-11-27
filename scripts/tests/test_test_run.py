@@ -277,6 +277,28 @@ class QueueSettingsTests(CleanEnv):
             with mock.patch.dict(os.environ, {"LOOM_TEST_THREADS": "3"}):
                 self.assertEqual(test_run.nextest_threads(True, True), ["--test-threads", "3"])
 
+    def test_a_thread_count_on_the_command_line(self):
+        """Each form nextest takes is found; arguments after `--` are not."""
+        for arguments, expected in [
+            (["--test-threads", "2"], "2"),
+            (["--test-threads=3"], "3"),
+            (["-j", "4"], "4"),
+            (["-j5"], "5"),
+            (["--no-fail-fast"], None),
+            (["--", "-j", "6"], None),
+        ]:
+            self.assertEqual(test_run.thread_setting(["cargo", "nextest", "run"] + arguments), expected, arguments)
+
+    def test_a_given_thread_count_is_not_doubled(self):
+        """A run that sets --test-threads gets no second one from the script."""
+        os.environ["LOOM_TEST_QUEUE"] = "0"
+        seen = os.path.join(self.dir, "argv.json")
+        record = "import json, sys; json.dump(sys.argv[1:], open(%r, 'w'))" % seen
+        command = [sys.executable, "-c", record, "--test-threads", "2"]
+        self.assertEqual(test_run.queued(command, "t", test_run.Spans(), test_run.nextest_threads), 0)
+        with open(seen) as handle:
+            self.assertEqual(json.load(handle), ["--test-threads", "2"])
+
     def test_slot_count(self):
         """LOOM_TEST_SLOTS, at least 1, and 1 when it is not a number."""
         for value, expected in [("2", 2), ("0", 1), ("x", 1)]:

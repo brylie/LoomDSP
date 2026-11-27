@@ -492,7 +492,13 @@ def queued(command, what, spans, threads_flag=None, extra_attributes=None):
         print("test queue: off (no flock on this system)", flush=True)
     held = slot is not None or off == "held"
     threads = threads_flag(held, off == "CI") if threads_flag else []
-    full = list(command) + threads
+    given = thread_setting(command)
+    if given is not None:
+        # The command sets its own count; nextest refuses a second one.
+        threads = ["--test-threads", given]
+        full = list(command)
+    else:
+        full = list(command) + threads
     start = time.time_ns()
     try:
         code = run_child(full, env)
@@ -507,6 +513,25 @@ def queued(command, what, spans, threads_flag=None, extra_attributes=None):
     attributes.update(extra_attributes or {})
     spans.record("test run", start, time.time_ns(), attributes, code != 0)
     return code
+
+
+def thread_setting(arguments):
+    """The thread count a nextest command line sets itself, or None.
+
+    Reads `--test-threads N`, `--test-threads=N`, `-j N`, and `-jN`, up to a
+    `--`, after which the arguments are for the test binaries.
+    """
+    arguments = list(arguments)
+    for index, argument in enumerate(arguments):
+        if argument == "--":
+            break
+        if argument in ("--test-threads", "-j"):
+            return arguments[index + 1] if index + 1 < len(arguments) else None
+        if argument.startswith("--test-threads="):
+            return argument.split("=", 1)[1]
+        if argument.startswith("-j") and not argument.startswith("--"):
+            return argument[2:].lstrip("=")
+    return None
 
 
 def nextest_threads(held, ci):
