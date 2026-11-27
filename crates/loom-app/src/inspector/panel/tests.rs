@@ -709,18 +709,18 @@ fn the_sub_patch_mode_rows_act() {
         panic!("a sub-patch's inspector");
     };
     assert_eq!(sub.copies, 3, "the third option is three copies");
-    if let Some(spread) = sub.spread.first() {
-        let id = ids::part(&panel, "spread").with(spread.name.as_str());
-        let steps = ui.app().session.edits.history.len();
-        let before = spread.amount;
-        ui.a11y_action(&id, accesskit::Action::Increment);
-        let _ = ui.wake_after(std::time::Duration::from_millis(600));
-        let crate::inspector::Inspector::SubPatch(sub) = ui.app().inspector_model() else {
-            panic!("a sub-patch's inspector");
-        };
-        assert!(sub.spread[0].amount > before, "the spread moved");
-        assert_eq!(ui.app().session.edits.history.len(), steps + 1, "one undo step");
-    }
+    // The fixture exposes the filter's cutoff, so stack mode spreads it.
+    let spread = sub.spread.first().expect("an exposed item to spread");
+    let id = ids::part(&panel, "spread").with(spread.name.as_str());
+    let steps = ui.app().session.edits.history.len();
+    let before = spread.amount;
+    ui.a11y_action(&id, accesskit::Action::Increment);
+    let _ = ui.wake_after(std::time::Duration::from_millis(600));
+    let crate::inspector::Inspector::SubPatch(sub) = ui.app().inspector_model() else {
+        panic!("a sub-patch's inspector");
+    };
+    assert!(sub.spread[0].amount > before, "the spread moved");
+    assert_eq!(ui.app().session.edits.history.len(), steps + 1, "one undo step");
 }
 
 /// A sub-patch's name field takes typing as a draft and Enter applies it,
