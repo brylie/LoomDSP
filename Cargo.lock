@@ -2476,6 +2476,7 @@ dependencies = [
  "loom-core",
  "loom-dsp",
  "serde",
+ "tempfile",
 ]
 
 [[package]]
@@ -2511,6 +2512,7 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
+ "tempfile",
  "windows-sys 0.61.2",
  "winit",
 ]
@@ -2543,6 +2545,7 @@ dependencies = [
  "loom-patch",
  "loom-rt",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -2579,6 +2582,7 @@ dependencies = [
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
  "rtrb",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
@@ -2624,6 +2628,7 @@ version = "0.1.0"
 dependencies = [
  "hound",
  "loom-core",
+ "tempfile",
 ]
 
 [[package]]

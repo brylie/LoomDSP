@@ -85,3 +85,5 @@ The status line holds one of these values and nothing else. The date line is the
 | [0047](0047-portable-midi-protocol.md) | Portable MIDI protocol code lives in `loom-midi` | Accepted |
 | [0048](0048-local-development-telemetry-in-files.md) | Local development telemetry as OpenTelemetry spans in files | Accepted |
 | [0049](0049-git-hooks-reuse-a-pass-on-the-same-tree.md) | Git hooks reuse a check that passed on the same tree | Accepted |
+| [0050](0050-a-machine-wide-queue-for-test-runs.md) | A machine-wide queue for the test runs of the local check | Accepted |
+| [0051](0051-the-local-check-tests-only-what-a-change-can-reach.md) | The local check tests only the crates a change can reach | Accepted |

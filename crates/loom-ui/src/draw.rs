@@ -65,6 +65,8 @@ pub struct Panels<'a, A: App> {
     pub(crate) waker: &'a Waker<A::Message>,
     /// Physical pixels per logical pixel, for the caret.
     pub(crate) scale: f32,
+    /// The custom elements' state, made, kept, or dropped at each layout.
+    pub(crate) customs: &'a mut crate::custom::Customs<A>,
 }
 
 /// What painting a panel needs besides its layout: the fields' state,
@@ -119,12 +121,26 @@ impl<A: App> Panels<'_, A> {
         let laid = self.window.lay_out(self.size, text);
         self.counts.panels_laid_out += laid.panels;
         self.counts.elements_laid_out += laid.elements;
+        self.customs.settle(self.window.customs(), self.app);
+        // An element the layout made or moved builds its nodes again; the
+        // app hears of a change on the next turn (section 9, rule 3).
+        self.build_custom_nodes_later();
         self.focus.settle(self.window);
-        self.reveal();
-        self.reveal_caret();
+        // A reveal scrolls a container in place, which moves the custom
+        // elements inside it: settle them again, so their bounds, their
+        // GPU viewports, and their nodes follow the scroll.
+        let scrolled = self.reveal() | self.reveal_caret();
+        if scrolled {
+            self.customs.settle(self.window.customs(), self.app);
+            self.build_custom_nodes_later();
+        }
         self.place_hint(text);
         self.report_focus();
         self.report_hidden_anchors();
+        // A custom element the layout moved from under the pointer hears
+        // it left, on the next turn, since a layout runs outside one.
+        self.report_custom_left();
+        self.send_custom_later();
     }
 
     /// Tells the app of each root placed under an element that stopped
@@ -258,11 +274,14 @@ impl<A: App> Panels<'_, A> {
     /// The app's message for a focus move it has not been told of yet,
     /// marking it told. `None` when nothing moved, or the app does not ask.
     pub(crate) fn focus_report(&mut self) -> Option<A::Message> {
-        if self.focus.id() == self.focus.reported.as_ref() {
+        // On a custom element, a move between the parts inside it is a
+        // move too.
+        let focused = self.focused_part();
+        if focused == self.focus.reported {
             return None;
         }
-        self.focus.reported = self.focus.id().cloned();
-        self.app.focus_moved(self.focus.id())
+        self.focus.reported.clone_from(&focused);
+        self.app.focus_moved(focused.as_ref())
     }
 
     /// Paints the panels of `layer`, as
@@ -283,9 +302,16 @@ impl<A: App> Panels<'_, A> {
             layer,
             painter,
             style,
-            self.focus.id(),
-            (hovered.as_ref(), pressed.as_ref()),
-            self.scale,
+            crate::window::Shown {
+                focus: self.focus.id(),
+                hovered: hovered.as_ref(),
+                pressed: pressed.as_ref(),
+                scale: self.scale,
+            },
+            &mut crate::custom::Kept {
+                customs: self.customs,
+                app: self.app,
+            },
         );
         self.counts.panels_painted += painted.panels;
         self.counts.elements_painted += painted.elements;
@@ -312,6 +338,8 @@ impl<A: App> Panels<'_, A> {
             }
             painter.end_layer();
         }
+        // What an element draws above this layer goes here.
+        painter.mark(crate::paint::Mark::LayerEnd(layer));
     }
 }
 
@@ -369,6 +397,7 @@ impl Layout {
         painter: &mut dyn TextPainter,
         style: &PanelStyle,
         fields: Option<&PaintState<'_>>,
+        customs: &mut dyn crate::custom::PaintCustoms,
     ) -> u64 {
         let by = Vector::new(origin.x, origin.y);
         let records = self.records();
@@ -490,6 +519,16 @@ impl Layout {
                 } else {
                     painter.text_spans(&run, text.spans);
                 }
+            }
+            // A custom element paints its own, after its box, cut to its
+            // bounds and every clip around it (section 9, rule 4).
+            if let (Some(kind), Some(id)) = (record.custom, &record.id) {
+                let around = record.clip.map_or(clip, |inner| cut(clip, moved(inner, by)));
+                painter.begin_layer(cut(around, bounds));
+                // A host that draws the element with the GPU cuts here.
+                painter.mark(crate::paint::Mark::Custom(id.clone()));
+                customs.paint(id, kind, bounds, painter);
+                painter.end_layer();
             }
             if look.clip {
                 painter.begin_layer(bounds);
@@ -759,4 +798,4 @@ fn paint_field(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

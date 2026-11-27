@@ -24,12 +24,15 @@ fn capture(args: &[&str]) -> (i32, String) {
 /// error names what was looked for.
 #[test]
 fn no_matching_device_exits_with_2() {
-    let file = std::env::temp_dir().join(format!("loom-cli-capture-none-{}.wav", std::process::id()));
+    let temp = tempfile::Builder::new()
+        .prefix("loom-cli-capture-none-")
+        .tempdir()
+        .unwrap();
+    let file = temp.path().join("capture.wav");
     let name = "no device has this name 8f3c";
     let (status, stderr) = capture(&["--device", name, "-o", file.to_str().unwrap(), "--seconds", "0.1"]);
     assert_eq!(status, 2, "{stderr}");
     assert!(stderr.contains("error:"), "{stderr}");
-    let _ = std::fs::remove_file(file);
 }
 
 /// A length that is not a positive number exits with status 2 before
@@ -73,7 +76,11 @@ fn captures_a_loopback_device() {
         eprintln!("skipped: set LOOM_LOOPBACK to part of a loopback device's name (docs/dev/test-devices.md)");
         return;
     };
-    let file = std::env::temp_dir().join(format!("loom-cli-capture-loopback-{}.wav", std::process::id()));
+    let temp = tempfile::Builder::new()
+        .prefix("loom-cli-capture-loopback-")
+        .tempdir()
+        .unwrap();
+    let file = temp.path().join("capture.wav");
     let (status, stderr) = capture(&["--device", &loopback, "-o", file.to_str().unwrap(), "--seconds", "0.5"]);
     // `loom` runs as its own process, so the test reads its message: the
     // text of `HostError::NoInputDevice`. Any other failure fails the test.
@@ -93,6 +100,4 @@ fn captures_a_loopback_device() {
     // whole buffers, so the bounds are loose.
     let seconds = f64::from(reader.duration()) / f64::from(spec.sample_rate);
     assert!((0.4..2.0).contains(&seconds), "captured {seconds} s");
-
-    let _ = std::fs::remove_file(file);
 }

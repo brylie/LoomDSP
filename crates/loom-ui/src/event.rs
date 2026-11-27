@@ -80,6 +80,11 @@ pub enum WindowEvent {
     /// The window became the one that takes the keys (`true`), or stopped
     /// being it (`false`).
     Focused(bool),
+    /// The window stopped showing (`true`): it was hidden, minimised, or
+    /// covered whole, as a plugin host may do to its window at any time.
+    /// `false` when it shows again. A capture a custom element holds ends
+    /// with a cancel when it hides (section 9, rule 1).
+    Hidden(bool),
     /// The user asked to close the window.
     CloseRequested,
     /// A file was dropped on the window.

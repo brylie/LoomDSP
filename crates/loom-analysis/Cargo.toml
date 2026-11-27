@@ -17,5 +17,8 @@ loom-dsp.workspace = true
 hound.workspace = true
 serde.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

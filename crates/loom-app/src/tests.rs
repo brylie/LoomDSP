@@ -1,4 +1,5 @@
 use super::*;
+use crate::recovery::tests::TempDir;
 use loom_canvas::iced_convert::ToCore as _;
 use loom_core::{EngineConfig, LoomError, TRANSPORT_MODULE, create_engine};
 use std::sync::atomic::Ordering;
@@ -410,8 +411,7 @@ pub(crate) fn app_args() -> Args {
 /// app is dropped.
 #[test]
 fn record_writes_a_wav_file() {
-    let dir = std::env::temp_dir().join(format!("loom-app-record-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = TempDir::new("app-record");
     let path = dir.join("out.wav");
     let app = App::new(Args {
         fake_audio: true,
@@ -425,7 +425,6 @@ fn record_writes_a_wav_file() {
     assert_eq!(reader.spec().channels, 2);
     assert_eq!(reader.spec().sample_rate, 48_000);
     assert!(reader.duration() > 0, "some audio was recorded");
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// With `--fake-audio`, a timer thread plays the engine and drains its
@@ -1921,8 +1920,7 @@ fn the_inspector_names_the_choices_of_a_whole_number_parameter() {
 /// (control-ranges.md, rule 7).
 #[test]
 fn a_range_note_shows_in_the_status_bar() {
-    let dir = std::env::temp_dir().join(format!("loom-app-range-note-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = TempDir::new("app-range-note");
     let path = dir.join("range.ron");
     std::fs::write(
             &path,
@@ -1951,8 +1949,7 @@ fn opening_a_patch_names_only_its_load_notes() {
     app.open_path(&clean);
     assert_eq!(app.alerts.status(), format!("opened {}", clean.display()));
 
-    let dir = std::env::temp_dir().join(format!("loom-app-open-note-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = TempDir::new("app-open-note");
     let noted = dir.join("noted.ron");
     std::fs::write(
             &noted,
@@ -2226,8 +2223,7 @@ fn the_run_toggle_follows_a_cable_on_run() {
 /// (#413 review).
 #[test]
 fn a_loaded_run_cable_hands_its_state_to_the_toggle() {
-    let dir = std::env::temp_dir().join(format!("loom-app-run-cable-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = TempDir::new("app-run-cable");
     let path = dir.join("run.ron");
     std::fs::write(
         &path,

@@ -64,7 +64,11 @@ description = "Run every test (debug build, so the no-allocation test is active)
 # use separate GPU devices in the same process (LoomDSP #827).
 # https://github.com/KhronosGroup/Vulkan-Loader/issues/1863
 # Nextest gives each test a process of its own. Cargo runs the doc tests.
-run = ["cargo nextest run --workspace", "mise run doctest"]
+# The nextest run waits in the machine-wide test queue (docs/dev/test-runs.md);
+# the queue is off in CI. It builds first, then runs every test. `python`,
+# not `python3`: CI runs this task on Windows, where mise's Python may have no
+# python3 command.
+run = ["python scripts/test_run.py --all", "mise run doctest"]
 
 [tasks.coverage]
 description = "Run every test with line coverage, and fail under LOOM_COVERAGE_MIN"
@@ -91,7 +95,9 @@ run = [
   # A mise template, not a shell `if`, so the line runs in any shell,
   # including cmd on Windows.
   '''cargo llvm-cov clean{% if get_env(name="LOOM_COVERAGE_CLEAN", default="all") == "workspace" %} --workspace{% endif %}''',
-  '''cargo llvm-cov nextest --workspace --profile ci --ignore-filename-regex 'device_tests\.rs$' --lcov --output-path target/lcov.info''',
+  # The test run waits in the machine-wide test queue (docs/dev/test-runs.md),
+  # build included, since llvm-cov builds and runs in one command. Off in CI.
+  '''python scripts/test_run.py queue -- cargo llvm-cov nextest --workspace --profile ci --ignore-filename-regex 'device_tests\.rs$' --lcov --output-path target/lcov.info''',
   '''cargo llvm-cov report --ignore-filename-regex 'device_tests\.rs$' --cobertura --output-path target/cobertura.xml''',
   '''cargo llvm-cov report --ignore-filename-regex 'device_tests\.rs$' --fail-under-lines {{env.LOOM_COVERAGE_MIN}}''',
 ]
@@ -193,6 +199,14 @@ description = "Measure the workspace for an architecture review: sizes, complexi
 tools = { "cargo:rust-code-analysis-cli" = "latest" }
 run = ["mkdir -p target", "python3 .claude/skills/review-architecture/scripts/measure.py > target/metrics.md", "sed -n '1,40p' target/metrics.md"]
 
+[tasks.test-health]
+description = "Measure the test suite for a test health review: CI per-test times and coverage, load, sleeps, leaks, devtel trends (add --probe for the cost per test process)"
+# The test health review skill (.claude/skills/review-tests) reads this report.
+# It reads coverage from CI's `coverage` artifact and never runs coverage
+# here. Extra arguments go to the script (`mise run test-health -- --probe`).
+# Informational only: no check or CI job runs it.
+run = "python3 .claude/skills/review-tests/scripts/measure_tests.py"
+
 [tasks.help-pages]
 description = "Regenerate the module help pages in docs/modules from the descriptors"
 # A test (`committed_pages_are_current` in loom-cli) fails while they are
@@ -200,21 +214,24 @@ description = "Regenerate the module help pages in docs/modules from the descrip
 run = "cargo run -p loom-cli -- modules --markdown docs/modules"
 
 [tasks.check]
-description = "The local check: the quick checks through prek (fmt, clippy, typos, the file rules), and every test, with no coverage build"
-# The quick checks first, through prek (`quick-checks`), then every test
+description = "The local check: the quick checks through prek (fmt, clippy, typos, the file rules), and the tests the change can reach, with no coverage build"
+# The quick checks first, through prek (`quick-checks`), then the tests
 # once with nextest. Running them through prek records each pass, so the
 # commit and push hooks reuse it on the same tree instead of checking again
 # (docs/dev/check-reuse.md). No coverage:
 # an instrumented build of the workspace costs far more CPU than a plain
 # test run, and CI measures coverage on every pull request, so CI is the
 # coverage gate. `check-full` runs everything CI runs, coverage included.
-# The tests use half the cores, rounded up (LOOM_TEST_THREADS overrides
-# it), as the worktree's `[build] jobs` does (setup-worktree-target.sh),
-# so agents on one machine leave each other room. `devtel-test` runs here
-# only: it tests local development tooling (docs/dev/devtel.md), and CI
+# The test step is scripts/test_run.py (docs/dev/test-runs.md): it runs
+# only the crates the change can reach (LOOM_TEST_ALL=1 or `-- --all` runs
+# every test), builds them, then waits for the machine-wide test queue, so
+# one test run at a time uses every core instead of several fighting.
+# With the queue off (LOOM_TEST_QUEUE=0) it uses half the cores, rounded
+# up (LOOM_TEST_THREADS overrides it). `devtel-test` and `test-run-test` run here
+# only: they test local development tooling (docs/dev/devtel.md), and CI
 # never runs this task.
-depends = ["quick-checks", "portable", "devtel-test"]
-run = """cargo nextest run --workspace --test-threads "${LOOM_TEST_THREADS:-$(( ($(getconf _NPROCESSORS_ONLN) + 1) / 2 ))}""""
+depends = ["quick-checks", "portable", "devtel-test", "test-run-test"]
+run = "python3 scripts/test_run.py"
 
 [tasks.quick-checks]
 description = "The quick checks as the git hooks run them (prek run --all-files), so their passes are reused by the hooks"
@@ -256,6 +273,10 @@ raw = true
 [tasks.devtel-import]
 description = "Copy new Claude Code transcripts and spool files into the devtel archive"
 run = "python3 scripts/devtel/devtel.py import"
+
+[tasks.test-run-test]
+description = "Test the test queue and test selection script (docs/dev/test-runs.md)"
+run = "python3 -m unittest discover -s scripts/tests -v"
 
 [tasks.devtel-test]
 description = "Test the development telemetry scripts"

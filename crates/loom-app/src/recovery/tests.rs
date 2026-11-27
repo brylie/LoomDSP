@@ -1,23 +1,52 @@
 use super::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A fresh folder under the system temp folder, deleted when dropped.
-pub(crate) struct TempDir(pub PathBuf);
+///
+/// Every test in the crate that needs a folder makes it with this guard.
+/// `tempfile` gives the folder a unique name and removes it on drop, even
+/// when the test panics, so no test leaves a folder behind. Hold the guard
+/// for the whole test: a temporary such as `args(&TempDir::new("x"))`
+/// removes the folder at the end of that statement.
+pub(crate) struct TempDir(pub PathBuf, tempfile::TempDir);
 
 impl TempDir {
+    /// An empty folder whose name starts with `loom-{label}-`.
     pub(crate) fn new(label: &str) -> Self {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("loom-recovery-{label}-{}-{n}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        Self(dir)
+        let dir = tempfile::Builder::new()
+            .prefix(&format!("loom-{label}-"))
+            .tempdir()
+            .unwrap();
+        Self(dir.path().to_path_buf(), dir)
     }
 }
 
+/// Lets a guard stand where a `&Path` is wanted, so `dir.join(..)` and
+/// `&dir` read as they did when the helpers returned a `PathBuf`.
+impl std::ops::Deref for TempDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        self.1.path()
+    }
+}
+
+/// Removes the folder before `tempfile` tries, retrying for a short while.
+/// A test that drops an app to stand for a crash leaves its recovery writer
+/// thread finishing one last write, and a file it adds while the folder is
+/// being removed makes that removal fail. The writer never makes the folder
+/// again, so a retry after it stops removes everything.
 impl Drop for TempDir {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while fs::remove_dir_all(&self.0).is_err() && self.0.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+}
+
+impl AsRef<Path> for TempDir {
+    fn as_ref(&self) -> &Path {
+        self.1.path()
     }
 }
 

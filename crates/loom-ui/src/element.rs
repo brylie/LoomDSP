@@ -351,6 +351,9 @@ pub(crate) enum Kind {
     Space,
     /// The place of another panel, named by its key.
     Slot(UiId),
+    /// A custom element: its state, drawing, and input are the app's
+    /// ([`Element::custom`]).
+    Custom(crate::CustomKind),
 }
 
 /// Where an overlay's root panel goes (ui-layer.md, section 5, rule 13),
@@ -885,6 +888,20 @@ impl Element {
     /// other panel's.
     pub fn slot(panel: UiId) -> Self {
         Self::new(Kind::Slot(panel), Vec::new())
+    }
+
+    /// A custom element of `kind`: a box the app fills, whose state the
+    /// runtime keeps by its UI ID (ui-layer.md, section 9). It has no
+    /// children and is sized like an empty space, so give it a width and a
+    /// height. The first layout that finds it asks the app for its state
+    /// ([`App::make_custom`](crate::App::make_custom)).
+    ///
+    /// # Panics
+    ///
+    /// In a debug build, when the panel is laid out, if it has no key: its
+    /// state is kept by its UI ID.
+    pub fn custom(kind: crate::CustomKind) -> Self {
+        Self::new(Kind::Custom(kind), Vec::new())
     }
 
     /// Names the element, so it can be found again across rebuilds.

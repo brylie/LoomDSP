@@ -157,13 +157,30 @@ impl Module for NanAtTen {
     }
 }
 
-/// A reference file in the temp folder, removed when the test ends, also
-/// when it panics.
-fn temp_reference(name: &str) -> std::mem::DropGuard<PathBuf, fn(PathBuf)> {
-    let path = std::env::temp_dir().join(format!("loom-test-{}-{name}.wav", std::process::id()));
-    std::mem::DropGuard::new(path, |path| {
-        let _ = std::fs::remove_file(path);
-    })
+/// A reference file in a folder of its own in the temp folder. The folder
+/// is removed when the test ends, also when it panics.
+struct TempReference {
+    /// The reference file's path, inside `_folder`.
+    path: PathBuf,
+    /// Owns the folder and removes it on drop.
+    _folder: tempfile::TempDir,
+}
+
+impl std::ops::Deref for TempReference {
+    type Target = PathBuf;
+
+    fn deref(&self) -> &PathBuf {
+        &self.path
+    }
+}
+
+/// A reference file named `name` that does not exist yet.
+fn temp_reference(name: &str) -> TempReference {
+    let folder = tempfile::Builder::new().prefix("loom-test-").tempdir().unwrap();
+    TempReference {
+        path: folder.path().join(format!("{name}.wav")),
+        _folder: folder,
+    }
 }
 
 fn ramp(offset: f32) -> Harness {

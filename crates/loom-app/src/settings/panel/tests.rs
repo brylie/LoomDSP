@@ -2,6 +2,7 @@ use super::*;
 use crate::devices::fake::{self, Fake};
 use crate::input_owner::InputOwner;
 use crate::preferences::DeviceChoice;
+use crate::recovery::tests::TempDir;
 use crate::settings::Message;
 use crate::ui_test::Ui;
 use accesskit::{Action, Role as KitRole, Toggled};
@@ -11,10 +12,10 @@ use std::rc::Rc;
 
 /// An app on a fake host with `fake`'s devices, with its preferences file
 /// in a folder of its own. No real device's name is ever used.
-fn app(name: &str, fake: Fake) -> (App, Rc<Fake>) {
-    let dir = std::env::temp_dir().join(format!("loom-prefs-panel-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+/// The folder comes first, so a caller that binds the tuple drops it
+/// last, after the app.
+fn app(name: &str, fake: Fake) -> (TempDir, App, Rc<Fake>) {
+    let dir = TempDir::new(&format!("prefs-panel-{name}"));
     let fake = Rc::new(fake);
     let args = crate::Args {
         no_audio: false,
@@ -26,7 +27,7 @@ fn app(name: &str, fake: Fake) -> (App, Rc<Fake>) {
         ..crate::tests::app_args()
     };
     let app = App::boot_with(args, Rc::new(fake::Shared(fake.clone())));
-    (app, fake)
+    (dir, app, fake)
 }
 
 /// Two output devices and two MIDI inputs.
@@ -35,14 +36,14 @@ fn two_of_each() -> Fake {
 }
 
 /// The app in the harness with Preferences opened by Cmd+, as a keyboard
-/// user opens it.
-fn open(name: &str, fake: Fake) -> (Ui, Rc<Fake>) {
-    let (app, fake) = app(name, fake);
+/// user opens it. The folder comes first, as in [`app`].
+fn open(name: &str, fake: Fake) -> (TempDir, Ui, Rc<Fake>) {
+    let (dir, app, fake) = app(name, fake);
     let mut ui = Ui::with_app(app);
     ui.tap(Key::Character(",".into()), Modifiers::COMMAND);
     let _ = ui.redraw();
     assert!(ui.app().preferences_model().is_some(), "Cmd+, opens Preferences");
-    (ui, fake)
+    (dir, ui, fake)
 }
 
 /// Presses `key` and lays out what it changed.
@@ -110,7 +111,7 @@ fn safety(ui: &Ui) -> OutputSafety {
 /// (ui-layer.md, section 7, rules 29 and 32).
 #[test]
 fn preferences_is_a_dialog_of_named_parts() {
-    let (mut ui, _) = open("dialog", two_of_each());
+    let (_dir, mut ui, _) = open("dialog", two_of_each());
     let tree = ui.a11y_tree();
     let window = tree.node_by_id(&preferences_id());
     assert_eq!(window.role(), KitRole::Dialog);
@@ -155,7 +156,7 @@ fn preferences_is_a_dialog_of_named_parts() {
 /// Two MIDI inputs with one name get two check boxes with two IDs.
 #[test]
 fn midi_inputs_with_one_name_have_their_own_ids() {
-    let (mut ui, _) = open("same-name", Fake::new(&[fake::device("Fake A")], &["Keys", "Keys"]));
+    let (_dir, mut ui, _) = open("same-name", Fake::new(&[fake::device("Fake A")], &["Keys", "Keys"]));
     let boxes = ids_under(&mut ui, &part_id("midi"));
     assert_eq!(boxes.len(), 2);
     assert_ne!(boxes[0], boxes[1]);
@@ -166,7 +167,7 @@ fn midi_inputs_with_one_name_have_their_own_ids() {
 /// in reading order and stay inside (preferences.md, Keys and focus).
 #[test]
 fn it_opens_on_close_and_tab_cycles_its_stops() {
-    let (mut ui, _) = open("tab", two_of_each());
+    let (_dir, mut ui, _) = open("tab", two_of_each());
     assert_eq!(ui.runtime().focused(), Some(&close_id()));
     assert_eq!(ui.runtime().focus_ring().map(|(id, _)| id), Some(close_id()));
     let offset = |ui: &mut Ui| {
@@ -201,7 +202,7 @@ fn it_opens_on_close_and_tab_cycles_its_stops() {
 /// decision, 2026-11-24).
 #[test]
 fn the_safety_arrows_choose_off_included() {
-    let (mut ui, _) = open("safety", two_of_each());
+    let (_dir, mut ui, _) = open("safety", two_of_each());
     tab_to(&mut ui, &part_id("safety").with("low-latency"));
     tap(&mut ui, Key::Named(Named::ArrowDown), Modifiers::default());
     assert_eq!(safety(&ui), OutputSafety::Clean);
@@ -222,7 +223,7 @@ fn the_safety_arrows_choose_off_included() {
 /// and a second Escape closes the window.
 #[test]
 fn a_list_chooses_with_enter_and_escape_closes_it_first() {
-    let (mut ui, _) = open("list", two_of_each());
+    let (_dir, mut ui, _) = open("list", two_of_each());
     tab_to(&mut ui, &part_id("device"));
     tap(&mut ui, Key::Named(Named::ArrowDown), Modifiers::default());
     tap(&mut ui, Key::Named(Named::ArrowDown), Modifiers::default());
@@ -246,7 +247,7 @@ fn a_list_chooses_with_enter_and_escape_closes_it_first() {
 /// as choosing it from the list does, and a step at the last does nothing.
 #[test]
 fn a_step_on_the_device_list_plays_the_next_device() {
-    let (mut ui, _) = open("step", two_of_each());
+    let (_dir, mut ui, _) = open("step", two_of_each());
     let device = part_id("device");
     act(&mut ui, &device, Action::Increment, None);
     act(&mut ui, &device, Action::Increment, None);
@@ -271,7 +272,7 @@ fn a_device_that_fails_is_said_and_stepped_past() {
         &[],
     );
     fake.broken.borrow_mut().push("Fake B".into());
-    let (mut ui, _) = open("broken", fake);
+    let (_dir, mut ui, _) = open("broken", fake);
     let device = part_id("device");
     act(&mut ui, &device, Action::Increment, None);
     act(&mut ui, &device, Action::Increment, None);
@@ -302,7 +303,7 @@ fn a_device_that_fails_is_said_and_stepped_past() {
 /// and saved when the window closes; Enter saves it too.
 #[test]
 fn the_name_field_saves_on_enter_and_on_close() {
-    let (mut ui, _) = open("author", Fake::new(&[fake::device("Fake A")], &[]));
+    let (_dir, mut ui, _) = open("author", Fake::new(&[fake::device("Fake A")], &[]));
     act(
         &mut ui,
         &author_part(),
@@ -325,7 +326,7 @@ fn the_name_field_saves_on_enter_and_on_close() {
 /// name; the focus goes back to what had it before it opened.
 #[test]
 fn closing_from_the_name_field_saves_and_gives_the_focus_back() {
-    let (app, _) = app("close", Fake::new(&[fake::device("Fake A")], &[]));
+    let (_dir, app, _) = app("close", Fake::new(&[fake::device("Fake A")], &[]));
     let mut ui = Ui::with_app(app);
     tap(&mut ui, Key::Named(Named::Tab), Modifiers::SHIFT);
     let before = ui
@@ -346,7 +347,7 @@ fn closing_from_the_name_field_saves_and_gives_the_focus_back() {
 /// focus); Clear moves the focus to Learn when it turns itself off.
 #[test]
 fn the_backdrop_does_nothing_and_clear_gives_the_focus_to_learn() {
-    let (mut ui, _) = open("backdrop", two_of_each());
+    let (_dir, mut ui, _) = open("backdrop", two_of_each());
     tab_to(&mut ui, &part_id("activity"));
     ui.move_to(loom_ui_core::Point::new(4.0, 300.0));
     ui.press();
@@ -373,7 +374,7 @@ fn the_backdrop_does_nothing_and_clear_gives_the_focus_to_learn() {
 /// sending on.
 #[test]
 fn midi_clock_preferences_are_operable_with_a_screen_reader() {
-    let (mut ui, fake) = open("midi-clock", Fake::new(&[fake::device("Fake A")], &["Drums"]));
+    let (_dir, mut ui, fake) = open("midi-clock", Fake::new(&[fake::device("Fake A")], &["Drums"]));
     fake.midi_outputs.borrow_mut().push("Synth".into());
     ui.app_mut().poll_midi();
     let _ = ui.redraw();
@@ -395,7 +396,7 @@ fn midi_clock_preferences_are_operable_with_a_screen_reader() {
 /// over Preferences (section 7, rule 27).
 #[test]
 fn the_tree_reports_the_overlay_that_owns_the_input() {
-    let (mut app, _) = app("owner", two_of_each());
+    let (_dir, mut app, _) = app("owner", two_of_each());
     app.preferences(Message::Open);
     assert_eq!(app.input_owner(), InputOwner::Preferences);
     assert_eq!(app.ours_overlay().map(|(_, _, id)| id), Some(preferences_id()));
@@ -419,7 +420,7 @@ fn the_tree_reports_the_overlay_that_owns_the_input() {
 /// change changes what the window shows, so the key changes.
 #[test]
 fn preferences_with_audio_playing_rebuilds_only_on_a_change() {
-    let (mut app, _) = app("poll", two_of_each());
+    let (_dir, mut app, _) = app("poll", two_of_each());
     app.preferences(Message::Open);
     assert!(app.session.engine.stream.is_playing());
     app.a11y_event(crate::a11y::Event::Activated);
@@ -443,7 +444,7 @@ fn preferences_with_audio_playing_rebuilds_only_on_a_change() {
 /// (help-pages.md; ui-layer.md, section 6, rule 4).
 #[test]
 fn help_over_preferences_gives_the_focus_back_when_it_closes() {
-    let (mut ui, _) = open("help-back", two_of_each());
+    let (_dir, mut ui, _) = open("help-back", two_of_each());
     let activity = part_id("activity");
     tab_to(&mut ui, &activity);
     tap(&mut ui, Key::Named(Named::F1), Modifiers::default());

@@ -134,6 +134,9 @@ pub struct PaintRenderer {
     uploaded: (Vec<u8>, Vec<u8>),
     atlas: Atlas,
     steps: Vec<Step>,
+    /// For each layer of the list last prepared, its first step, and one
+    /// more at the end ([`PaintRenderer::draw_range`]).
+    layer_steps: Vec<usize>,
     /// The viewport's own scissor, to leave set after the steps.
     full: [u32; 4],
 }
@@ -267,6 +270,7 @@ impl PaintRenderer {
             uploaded: (Vec::new(), Vec::new()),
             atlas: Atlas::new(max),
             steps: Vec::new(),
+            layer_steps: vec![0],
             full: [0, 0, 0, 0],
         }
     }
@@ -317,17 +321,32 @@ impl PaintRenderer {
         }
         self.full = scissor(Rect::new(target.origin, target.size), target).unwrap_or([0, 0, 0, 0]);
         self.steps = plan.steps;
+        self.layer_steps = plan.layer_steps;
         counts
     }
 
     /// Draws the steps last prepared, then leaves the scissor as the
     /// viewport's own, for whatever the host draws after.
     pub fn draw(&self, pass: &mut wgpu::RenderPass<'_>) {
+        self.draw_range(pass, 0..self.layer_steps.len().saturating_sub(1));
+    }
+
+    /// Draws the steps of the list's layers in `layers`, as last prepared,
+    /// then leaves the scissor as the viewport's own. A host that draws
+    /// something between two parts of one list, as a custom element's GPU
+    /// drawing at its place in paint order, draws each part with this
+    /// (ui-layer.md, section 9, rule 4). The layers are those the list
+    /// holds, as [`PaintList::marks`](super::PaintList::marks) counts
+    /// them; a range past the end draws up to the end.
+    pub fn draw_range(&self, pass: &mut wgpu::RenderPass<'_>, layers: std::ops::Range<usize>) {
         let Some(pages) = &self.pages else { return };
-        if self.steps.is_empty() {
+        let last = self.layer_steps.len().saturating_sub(1);
+        let step_of = |layer: usize| self.layer_steps[layer.min(last)];
+        let steps = &self.steps[step_of(layers.start)..step_of(layers.end.max(layers.start))];
+        if steps.is_empty() {
             return;
         }
-        for step in &self.steps {
+        for step in steps {
             let [x, y, width, height] = step.scissor;
             pass.set_scissor_rect(x, y, width, height);
             match &step.draw {

@@ -203,8 +203,9 @@ fn notes_print_only_when_present() {
 /// a page is out of date or for an unknown module.
 #[test]
 fn markdown_writes_then_checks() {
-    let dir = std::env::temp_dir().join(format!("loom-cli-markdown-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let temp = tempfile::Builder::new().prefix("loom-cli-markdown-").tempdir().unwrap();
+    // A folder that does not exist yet, as on a first run.
+    let dir = temp.path().join("modules");
     assert_eq!(markdown(&dir, true).unwrap(), ExitCode::FAILURE);
     assert_eq!(markdown(&dir, false).unwrap(), ExitCode::SUCCESS);
     assert_eq!(markdown(&dir, true).unwrap(), ExitCode::SUCCESS);
@@ -212,7 +213,6 @@ fn markdown_writes_then_checks() {
     std::fs::write(dir.join("loom.gone.module.md"), "Old notes.\n").unwrap();
     assert_eq!(markdown(&dir, false).unwrap(), ExitCode::FAILURE);
     assert_eq!(markdown(&dir, true).unwrap(), ExitCode::FAILURE);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The live player hands its MIDI input the sender for the mapped patch's engine.

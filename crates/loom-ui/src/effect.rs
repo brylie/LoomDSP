@@ -15,7 +15,7 @@
 //!
 //! | Effect | Carried out by |
 //! |---|---|
-//! | [`Effect::NextTurn`], [`Effect::Redraw`], [`Effect::AfterDraw`], [`Effect::Quit`] | The runtime, the same under every driver |
+//! | [`Effect::NextTurn`], [`Effect::Redraw`], [`Effect::AfterDraw`], [`Effect::ReleasePointer`], [`Effect::Quit`] | The runtime, the same under every driver |
 //! | [`Effect::Focus`], [`Effect::ScrollIntoView`] | The routing target that holds the element |
 //! | The rest | The driver: a window shell, or the headless driver |
 
@@ -49,6 +49,8 @@ pub mod names {
     pub const NEXT_TURN: &str = "next turn";
     /// [`super::Effect::Redraw`].
     pub const REDRAW: &str = "redraw";
+    /// [`super::Effect::ReleasePointer`].
+    pub const RELEASE_POINTER: &str = "release pointer";
     /// [`super::Effect::Quit`].
     pub const QUIT: &str = "quit";
     /// [`super::Effect::Accessibility`].
@@ -322,6 +324,10 @@ pub enum Effect<M> {
     /// Draw the window again although no panel model changed: a request
     /// handed to a custom element that it applies when it draws.
     Redraw,
+    /// End the capture a custom element holds, with a cancel: it hears
+    /// [`CaptureLost`](crate::CustomEvent::CaptureLost), and no release
+    /// (ui-layer.md, section 9, rule 1).
+    ReleasePointer,
     /// End the loop.
     Quit,
     /// Give the screen reader the app's accessibility tree: `whole`, the
@@ -353,6 +359,7 @@ impl<M> Effect<M> {
             Self::AfterDraw(_) => names::AFTER_DRAW,
             Self::NextTurn(_) => names::NEXT_TURN,
             Self::Redraw => names::REDRAW,
+            Self::ReleasePointer => names::RELEASE_POINTER,
             Self::Quit => names::QUIT,
             Self::Accessibility { .. } => names::ACCESSIBILITY,
         }
@@ -378,6 +385,7 @@ impl<M> fmt::Debug for Effect<M> {
             Self::AfterDraw(_) => f.write_str("AfterDraw"),
             Self::NextTurn(messages) => write!(f, "NextTurn({} messages)", messages.len()),
             Self::Redraw => f.write_str("Redraw"),
+            Self::ReleasePointer => f.write_str("ReleasePointer"),
             Self::Quit => f.write_str("Quit"),
             Self::Accessibility { whole, changes } => f
                 .debug_struct("Accessibility")
@@ -543,6 +551,11 @@ impl<M> Effects<M> {
     /// Draw the window again although no panel model changed.
     pub fn redraw() -> Self {
         Self::one(Effect::Redraw)
+    }
+
+    /// End the capture a custom element holds, with a cancel.
+    pub fn release_pointer() -> Self {
+        Self::one(Effect::ReleasePointer)
     }
 
     /// End the loop.

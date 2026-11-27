@@ -176,6 +176,21 @@ pub enum Action {
 }
 
 impl Action {
+    /// Our action for AccessKit's `action`, or `None` for one that is not
+    /// an element's own to carry out, as Focus, a scroll, or a text edit.
+    pub(crate) fn from_kit(action: KitAction) -> Option<Self> {
+        Some(match action {
+            KitAction::Click => Self::Click,
+            KitAction::Increment => Self::Increment,
+            KitAction::Decrement => Self::Decrement,
+            KitAction::SetValue => Self::SetValue,
+            KitAction::ShowContextMenu => Self::ShowContextMenu,
+            KitAction::Expand => Self::Expand,
+            KitAction::Collapse => Self::Collapse,
+            _ => return None,
+        })
+    }
+
     /// AccessKit's action for it.
     fn kit(self) -> KitAction {
         match self {
@@ -253,6 +268,10 @@ pub enum Problem {
     /// ([`Element::keys_from`](crate::Element::keys_from)) that is no focus
     /// stop of its panel (ui-layer.md, section 5, rule 12).
     KeysFromNoStop,
+    /// It is a custom element that gives nodes for its parts and has no
+    /// [`Access`] of its own, so its parts have no named node to sit in
+    /// (ui-layer.md, section 9, rule 2).
+    PartsWithoutAccess,
 }
 
 impl fmt::Display for Problem {
@@ -265,6 +284,7 @@ impl fmt::Display for Problem {
             Self::NoValue => "it has no value of the kind its role needs",
             Self::NotOperable => "a user acts on it, and it offers no action",
             Self::KeysFromNoStop => "it takes its keys from an element that is no focus stop of its panel",
+            Self::PartsWithoutAccess => "it is a custom element with parts and no Access of its own",
         })
     }
 }
@@ -327,6 +347,16 @@ impl Access {
     #[must_use]
     pub fn active_descendant(mut self, id: UiId) -> Self {
         self.active = Some(id);
+        self
+    }
+
+    /// Names the element it controls, by its UI ID, as a button that shows
+    /// a part of the canvas names that part (section 7, rule 13). The
+    /// runtime gives the node the other's node ID when the tree is sent,
+    /// and leaves it out while the tree holds no node for that UI ID.
+    #[must_use]
+    pub fn controlling(mut self, id: UiId) -> Self {
+        self.controls = Some(id);
         self
     }
 

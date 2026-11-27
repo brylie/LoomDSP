@@ -4,6 +4,7 @@
 use super::*;
 use crate::Args;
 use crate::devices::fake::{self, Fake};
+use crate::recovery::tests::TempDir;
 use loom_host_desktop::Tape;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -18,11 +19,11 @@ fn open_app() -> App {
     app
 }
 
-/// An example patch, playing on a fake device, with the window open.
-fn playing(name: &str) -> App {
-    let dir = std::env::temp_dir().join(format!("loom-timers-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+/// An example patch, playing on a fake device, with the window open, and
+/// the folder that holds its preferences file. Bind the folder first, so
+/// it drops after the app.
+fn playing(name: &str) -> (TempDir, App) {
+    let dir = TempDir::new(&format!("timers-{name}"));
     let host = Rc::new(Fake {
         tape: Some(Tape::new()),
         ..Fake::new(&[fake::device("Fake A")], &[])
@@ -44,7 +45,7 @@ fn playing(name: &str) -> App {
     let mut app = App::boot_with(args, Rc::new(fake::Shared(host)));
     assert!(app.session.engine.stream.is_playing(), "{}", app.alerts.status());
     let _ = app.send(Message::StartWatching);
-    app
+    (dir, app)
 }
 
 /// A timer that starts is due one period later, keeps that time while it
@@ -157,7 +158,7 @@ fn measuring_runs_frames_at_display_rate() {
 /// assignment is on. Turning the assignments off stops it.
 #[test]
 fn the_live_frame_runs_only_while_modulation_moves() {
-    let mut app = playing("modulation.ron");
+    let (_dir, mut app) = playing("modulation.ron");
     assert!(
         app.timers.due(Timer::LiveFrame).is_some(),
         "assignments play, so live values move"
@@ -238,7 +239,7 @@ fn a_swap_fade_with_no_stream_does_not_tick() {
 /// swap crossfades).
 #[test]
 fn a_swap_fade_ticks_while_audio_plays() {
-    let mut app = playing("effect-chain.ron");
+    let (_dir, mut app) = playing("effect-chain.ron");
     assert_eq!(app.timers.due(Timer::Tick), None, "an idle patch does not tick");
     let slot = app
         .session

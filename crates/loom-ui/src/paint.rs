@@ -46,6 +46,8 @@ mod typesetter;
 pub use gpu::{INSTANCE_ATTRIBUTES, InstanceBuffer, PaintCounts, PaintRenderer, SHAPE_ATTRIBUTES};
 pub use list::{ListPainter, PaintList};
 #[cfg(feature = "gpu")]
+pub(crate) use plan::scissor;
+#[cfg(feature = "gpu")]
 pub use plan::{Shape, Target, packed};
 pub use typesetter::Typesetter;
 pub(crate) use typesetter::{editing_contexts, properties, span_of};
@@ -207,6 +209,20 @@ pub struct Shadow {
     pub blur: f32,
 }
 
+/// A place in what was painted, for a host that cuts the painting there to
+/// draw something else between (ui-layer.md, section 9, rule 4, draw order
+/// is paint order).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Mark {
+    /// The custom element with this UI ID begins its own layer here: what
+    /// it draws with the GPU goes after what was painted before, and its
+    /// own painting after that.
+    Custom(loom_ui_core::UiId),
+    /// The panels of this window layer end here: what an element draws
+    /// above that layer goes here.
+    LayerEnd(crate::view::Layer),
+}
+
 /// Takes what an element paints, in the order it is to appear: a later
 /// piece is over an earlier one in the same layer, whether it is text or a
 /// box. So a selection highlight goes before its text, and a caret after.
@@ -234,6 +250,11 @@ pub trait Painter {
     fn begin_layer(&mut self, clip: Rect);
     /// Ends the layer last started.
     fn end_layer(&mut self);
+    /// Notes `mark` at this place in what was painted. A painter that
+    /// keeps no order of layers ignores it, as by default.
+    fn mark(&mut self, mark: Mark) {
+        let _ = mark;
+    }
 }
 
 /// Paints and measures with one object, so the size an element lays a box

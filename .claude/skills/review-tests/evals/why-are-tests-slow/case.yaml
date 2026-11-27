@@ -1,0 +1,10 @@
+schema_version: "1.1"
+name: why-are-tests-slow
+expected_outcome: |
+  A test health review of the loom-app tests that runs the measurement
+  script (through mise) with the probe limited to loom-app, states the
+  machine's load per core beside every wall-clock time, compares the
+  local per-process cost with CI's per-test times, names the cause of
+  any large gap with a path and line, sorts findings against open issues
+  and branches in flight, never runs coverage locally, never kills
+  processes by pattern, and edits no source or test file.

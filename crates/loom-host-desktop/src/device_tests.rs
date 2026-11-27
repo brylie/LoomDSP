@@ -88,8 +88,8 @@ fn capture_a_stop_with_input_rate(
     let mut output = or_skip(AudioOutput::open(&options))?;
     let rate = output.sample_rate();
     let dir = record::TestDir::new(&format!("capture-{:?}", std::thread::current().id()));
-    let path = dir.0.join("capture.wav");
-    let rendered_path = dir.0.join("rendered.wav");
+    let path = dir.path().join("capture.wav");
+    let rendered_path = dir.path().join("rendered.wav");
     let recorder = Recorder::start(&rendered_path, rate).expect("create engine recording");
     output.record(&recorder).expect("record at the output rate");
     let input = AudioOptions {
@@ -344,7 +344,7 @@ fn a_manually_resumed_stream_fades_on_the_loopback() {
             panic!("the loopback is a device");
         };
         let dir = record::TestDir::new(&format!("resume-{rate}"));
-        let path = dir.0.join("capture.wav");
+        let path = dir.path().join("capture.wav");
         let Some(capture) = or_skip(Capture::start(&options, &path)) else {
             return;
         };

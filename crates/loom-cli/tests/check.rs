@@ -6,9 +6,8 @@ use std::process::Command;
 /// `loom check` says the value was ignored (transient-params.md).
 #[test]
 fn check_reports_a_saved_transient_value() {
-    let dir = std::env::temp_dir().join(format!("loom-cli-check-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let temp = tempfile::Builder::new().prefix("loom-cli-check-").tempdir().unwrap();
+    let dir = temp.path();
     let path = dir.join("held.ron");
     std::fs::write(
         &path,
@@ -23,14 +22,13 @@ fn check_reports_a_saved_transient_value() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{stdout}{}", String::from_utf8_lossy(&out.stderr));
     assert!(stdout.contains("module 7 saves `hold`"), "{stdout}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Check fails on a missing module, while render warns and produces audio.
 #[test]
 fn unknown_module_is_reported_by_check_and_render() {
-    let dir = std::env::temp_dir().join(format!("loom-cli-unknown-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let temp = tempfile::Builder::new().prefix("loom-cli-unknown-").tempdir().unwrap();
+    let dir = temp.path();
     let path = dir.join("missing.ron");
     let wave = dir.join("render.wav");
     std::fs::write(
@@ -57,15 +55,14 @@ fn unknown_module_is_reported_by_check_and_render() {
     let warning = String::from_utf8_lossy(&render.stderr);
     assert!(warning.contains("warning:") && warning.contains("future.effect@1"));
     assert!(wave.exists());
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// A patch with sub-patches is flattened: `check` counts them and `render`
 /// writes audio (sub-patches.md, Flattening).
 #[test]
 fn nested_patches_check_and_render() {
-    let dir = std::env::temp_dir().join(format!("loom-cli-nested-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let temp = tempfile::Builder::new().prefix("loom-cli-nested-").tempdir().unwrap();
+    let dir = temp.path();
     let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/nested-subtractive.ron");
     let path = dir.join("nested.ron");
     std::fs::copy(&source, &path).unwrap();
@@ -117,14 +114,14 @@ fn nested_patches_check_and_render() {
         .unwrap();
     assert!(render.status.success(), "{}", String::from_utf8_lossy(&render.stderr));
     assert!(wave.exists());
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// A missing patch file fails with the path, then the system's reason, as it
 /// did when `loom-patch` read files (#617).
 #[test]
 fn check_names_a_missing_file() {
-    let path = std::env::temp_dir().join("loom-cli-no-such-patch.ron");
+    let temp = tempfile::Builder::new().prefix("loom-cli-missing-").tempdir().unwrap();
+    let path = temp.path().join("no-such-patch.ron");
     let out = Command::new(env!("CARGO_BIN_EXE_loom"))
         .arg("check")
         .arg(&path)
@@ -183,8 +180,8 @@ fn check_passes_on_the_polysynth_large_example() {
 /// or a missing file, it renders the stored copy.
 #[test]
 fn linked_parts_in_check_and_render_follow_the_selected_library() {
-    let dir = std::env::temp_dir().join(format!("loom-cli-library-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let temp = tempfile::Builder::new().prefix("loom-cli-library-").tempdir().unwrap();
+    let dir = temp.path();
     let library = dir.join("library");
     std::fs::create_dir_all(&library).unwrap();
     let patch = dir.join("linked.ron");
@@ -257,5 +254,4 @@ fn linked_parts_in_check_and_render_follow_the_selected_library() {
         .unwrap();
     assert!(check.status.success());
     assert!(String::from_utf8_lossy(&check.stderr).contains("Updated from the library: Voice."));
-    std::fs::remove_dir_all(dir).unwrap();
 }

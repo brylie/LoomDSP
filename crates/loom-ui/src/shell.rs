@@ -173,6 +173,38 @@ fn ime_to_apply(memory: &mut ImeMemory, runtime: Option<Ime>, reported: Option<I
     Some(want)
 }
 
+/// What the shell remembers of the pointer's shape between reports: the
+/// layers' last report, since they report only a change, and what the
+/// window was last set to.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct CursorMemory {
+    /// The layers' last report, or `None` if they never sent one.
+    layers: Option<Pointer>,
+    /// What the window was last set to.
+    applied: Option<Pointer>,
+}
+
+/// The pointer to show now, or `None` when it shows already. The runtime's
+/// shape comes first: while `runtime` is `Some` it wins over the layers,
+/// so a custom element's drag keeps its shape over a toolkit's part.
+/// Otherwise the layers' last report holds, and with none, the plain
+/// arrow, so a shape a custom element asked for never outlasts it.
+/// `reported` is what the layers reported this time, if anything.
+fn cursor_to_apply(memory: &mut CursorMemory, runtime: Option<Cursor>, reported: Option<Pointer>) -> Option<Pointer> {
+    if reported.is_some() {
+        memory.layers = reported;
+    }
+    let want = runtime
+        .map(Pointer::Icon)
+        .or(memory.layers)
+        .unwrap_or(Pointer::Icon(Cursor::Default));
+    if memory.applied == Some(want) {
+        return None;
+    }
+    memory.applied = Some(want);
+    Some(want)
+}
+
 /// What the window needs to do to show `pointer`, when it was `hidden`
 /// before: the cursor to set, and whether to show or hide the pointer.
 /// A hidden pointer is shown again only when it leaves `Hidden`, since
@@ -341,6 +373,7 @@ where
         live: None,
         held: Held::default(),
         hidden: false,
+        cursor: CursorMemory::default(),
         ime: ImeMemory::default(),
         shown: false,
         pacing: Pacing::default(),
@@ -402,6 +435,8 @@ struct Handler<A: App, T, L, S> {
     held: Held,
     /// The pointer is hidden.
     hidden: bool,
+    /// The pointer's shape, between reports.
+    cursor: CursorMemory,
     /// The input method, between reports.
     ime: ImeMemory,
     /// A frame has been shown in the window, so a capture has one to show.
@@ -584,7 +619,7 @@ where
                 panels,
             })
         };
-        if let Some(pointer) = report.cursor {
+        if let Some(pointer) = cursor_to_apply(&mut self.cursor, live.runtime.cursor(), report.cursor) {
             let (icon, visible) = pointer_calls(&mut self.hidden, pointer);
             if let Some(icon) = icon {
                 live.window.set_cursor(icon);

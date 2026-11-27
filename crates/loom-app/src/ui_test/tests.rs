@@ -933,7 +933,8 @@ fn placeholder_label_is_editable_and_undoable() {
 /// Opening and saving placeholders preserves absent and fractional positions.
 #[test]
 fn unknown_positions_round_trip_until_moved() {
-    let path = std::env::temp_dir().join(format!("loom-unknown-positions-{}.ron", std::process::id()));
+    let dir = crate::recovery::tests::TempDir::new("unknown-positions");
+    let path = dir.join("patch.ron");
     std::fs::write(
         &path,
         r#"Patch(version: 1, metadata: Metadata(name: "Missing"), modules: [
@@ -975,13 +976,13 @@ fn unknown_positions_round_trip_until_moved() {
             .position,
         None
     );
-    let _ = std::fs::remove_file(path);
 }
 
 /// Real cable drags onto and from a placeholder are refused without an undo step.
 #[test]
 fn dragging_cables_to_unknown_ports_is_refused() {
-    let path = std::env::temp_dir().join(format!("loom-unknown-drag-{}.ron", std::process::id()));
+    let dir = crate::recovery::tests::TempDir::new("unknown-drag");
+    let path = dir.join("patch.ron");
     std::fs::write(
         &path,
         r#"Patch(version: 1, metadata: Metadata(name: "Missing"), modules: [
@@ -1015,7 +1016,6 @@ fn dragging_cables_to_unknown_ports_is_refused() {
     assert_eq!(ui.app().alerts.status(), "Cannot connect to an unknown module");
     assert_eq!(ui.app().session.controller.graph().cables().count(), 0);
     assert!(ui.app().session.edits.history.undo_step().is_none());
-    let _ = std::fs::remove_file(path);
 }
 
 /// panels.md, Choice names: the inspector shows Button's mode by name,
@@ -3285,13 +3285,16 @@ fn copies_live_in_a_folder_of_their_own() {
         std::fs::canonicalize(copies_root()).unwrap(),
         "inside the harness's own folder",
     );
-    let stray = std::env::temp_dir().join(format!("loom-app-ui-{}-stray", std::process::id()));
-    std::fs::create_dir_all(&stray).unwrap();
+    // A copy-shaped name straight in the shared temporary folder, removed
+    // when the guard drops, even if the assertion fails.
+    let stray = tempfile::Builder::new()
+        .prefix(&format!("loom-app-ui-{}-", std::process::id()))
+        .tempdir_in(std::env::temp_dir())
+        .unwrap();
     assert!(
-        !is_copy_folder(&stray),
+        !is_copy_folder(stray.path()),
         "a folder in the shared temporary folder is not a copy"
     );
-    std::fs::remove_dir(&stray).unwrap();
 }
 
 /// A relative name that climbs out and back in (`../patches/...`) still

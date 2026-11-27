@@ -94,6 +94,39 @@ pub(crate) struct Window {
     /// closes the list builds the view at once but the app hears of it in
     /// the next turn (`App::access_changed`).
     pub(crate) select_reported: bool,
+    /// The custom elements' nodes, by the element's UI ID, as each last
+    /// built them (section 9, rule 3). Built outside `update`, which holds
+    /// the app mutably, and kept until the next build, so the tree read
+    /// inside `update` is this copy.
+    pub(crate) custom_nodes: std::collections::BTreeMap<UiId, Vec<crate::custom::CustomNode>>,
+    /// The custom elements' nodes that break section 7, rule 2, as a
+    /// release build reports them: the element's UI ID with the node's
+    /// path, and the problem.
+    pub(crate) custom_problems: Vec<(UiId, crate::access::Problem)>,
+}
+
+/// What painting shows of the live state: which element has the focus,
+/// which is hovered and which pressed, and the window's scale.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Shown<'a> {
+    /// The element with focus.
+    pub(crate) focus: Option<&'a UiId>,
+    /// The element under the pointer.
+    pub(crate) hovered: Option<&'a UiId>,
+    /// The element that shows as pressed.
+    pub(crate) pressed: Option<&'a UiId>,
+    /// Physical pixels per logical pixel.
+    pub(crate) scale: f32,
+}
+
+impl Shown<'_> {
+    /// Nothing focused, hovered, or pressed, at scale 1: a still picture.
+    pub(crate) const STILL: Shown<'static> = Shown {
+        focus: None,
+        hovered: None,
+        pressed: None,
+        scale: 1.0,
+    };
 }
 
 /// One panel, as the window keeps it.
@@ -222,6 +255,8 @@ impl Default for Window {
             groups: Vec::new(),
             reveal: None,
             caret_reveal: None,
+            custom_nodes: std::collections::BTreeMap::new(),
+            custom_problems: Vec::new(),
         }
     }
 }
@@ -728,10 +763,15 @@ impl Window {
         layer: Layer,
         painter: &mut dyn crate::paint::TextPainter,
         style: &crate::paint::PanelStyle,
-        focus: Option<&UiId>,
-        (hovered, pressed): (Option<&UiId>, Option<&UiId>),
-        scale: f32,
+        shown: Shown<'_>,
+        customs: &mut dyn crate::custom::PaintCustoms,
     ) -> crate::draw::Painted {
+        let Shown {
+            focus,
+            hovered,
+            pressed,
+            scale,
+        } = shown;
         let mut painted = crate::draw::Painted::default();
         for key in &self.drawn {
             let record = &self.records[key];
@@ -748,7 +788,7 @@ impl Window {
             };
             painted.elements += record
                 .layout
-                .paint(record.origin, record.clip, painter, style, Some(&fields));
+                .paint(record.origin, record.clip, painter, style, Some(&fields), customs);
             painted.panels += 1;
             painter.end_layer();
         }
@@ -756,7 +796,14 @@ impl Window {
             && hint.layer == layer
         {
             painter.begin_layer(hint.rect);
-            painted.elements += hint.layout.paint(hint.rect.position(), hint.rect, painter, style, None);
+            painted.elements += hint.layout.paint(
+                hint.rect.position(),
+                hint.rect,
+                painter,
+                style,
+                None,
+                &mut crate::custom::NoCustoms,
+            );
             painter.end_layer();
         }
         painted
@@ -869,6 +916,24 @@ impl Window {
         self.record_of(id).is_some_and(|record| record.focusable)
     }
 
+    /// The custom elements in every panel, in view order: each one's UI ID,
+    /// kind, and bounds in the window. A placed panel whose anchor was gone
+    /// at the last layout still holds its elements, so their state lasts
+    /// while it is hidden.
+    pub(crate) fn customs(&self) -> Vec<(UiId, crate::CustomKind, Rect)> {
+        self.order
+            .iter()
+            .filter_map(|key| self.records.get(key))
+            .flat_map(|record| {
+                let origin = record.origin;
+                record.layout.customs().map(move |(id, kind, bounds)| {
+                    let at = Point::new(origin.x + bounds.x, origin.y + bounds.y);
+                    (id.clone(), kind, Rect::new(at, bounds.size()))
+                })
+            })
+            .collect()
+    }
+
     /// The laid-out record of the element with UI ID `id`, in its panel.
     fn record_of(&self, id: &UiId) -> Option<&crate::layout::Record> {
         let panel = self.panel_of(id)?;
@@ -893,6 +958,18 @@ impl Window {
     #[cfg(test)]
     pub(crate) fn computes(&self, key: &UiId) -> u64 {
         self.records.get(key).map_or(0, |record| record.computes)
+    }
+
+    /// True when a mistake panics, as in a debug build, rather than being
+    /// reported.
+    pub(crate) fn panics_on_mistakes(&self) -> bool {
+        self.panic_on_mistake
+    }
+
+    /// The panel that holds the element with UI ID `id`, when that panel
+    /// is drawn: hidden panels give no nodes.
+    pub(crate) fn drawn_holds(&self, id: &UiId) -> bool {
+        self.panel_of(id).is_some_and(|panel| self.drawn.contains(panel))
     }
 
     /// Turns off the panics on slot mistakes and duplicate keys, as in a

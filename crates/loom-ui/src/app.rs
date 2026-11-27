@@ -1,5 +1,6 @@
 //! The app, as the runtime sees it.
 
+use crate::custom::CustomLookup;
 use crate::effect::Effects;
 use crate::event::{AccessEvent, WindowEvent, WindowState};
 use crate::focus::AccessNodes;
@@ -13,7 +14,14 @@ use std::time::Instant;
 ///
 /// `update` is the only place app state changes (ui-layer.md, section 2,
 /// rule 1). The other methods only read it.
-pub trait App {
+///
+/// It is `'static`: it holds no borrowed data. The runtime keeps each
+/// custom element's state as a trait object over the app and reads it back
+/// by its type ([`Context::custom`]), and only a `'static` type can be read
+/// back so. The bound is on the type, not on how long the app lives: a
+/// plugin's app lives as long as its plugin instance, and holds what the
+/// host gives it as owned handles (ui-layer.md, section 9, the model path).
+pub trait App: 'static {
     /// The app's message: the only way its state changes. It is `Send`
     /// because watcher threads and background work send messages.
     type Message: Send + 'static;
@@ -259,6 +267,31 @@ pub trait App {
     fn animating(&self) -> bool {
         false
     }
+
+    /// The window's home element: the custom element that hears the keys
+    /// while nothing has focus, at section 6, rule 6, step 5, after the
+    /// open overlay's keys (section 9, rule 2). The patch canvas is
+    /// LoomDSP's. `None`, the default, when the window has none. Until P4
+    /// it hears a key the routing target passed on; from P4 it takes the
+    /// target's place.
+    fn home(&self) -> Option<UiId> {
+        None
+    }
+
+    /// Makes the state of the custom element with UI ID `id`, of `kind`,
+    /// the first time a layout finds it (ui-layer.md, section 9, rule 1).
+    /// The runtime keeps it by `id` until a layout no longer finds that UI
+    /// ID. `None` for a kind the app does not know, which panics in a debug
+    /// build and, in a release build, leaves an element that hears, draws,
+    /// and sends nothing.
+    ///
+    /// It runs at layout, which a driver calls outside a turn, so it must
+    /// not expect one: with only `&self` it changes no app state, and it
+    /// can send no message.
+    fn make_custom(&self, id: &UiId, kind: crate::CustomKind) -> Option<Box<dyn crate::Custom<Self>>> {
+        let _ = (id, kind);
+        None
+    }
 }
 
 /// Who takes input now, as the app says ([`App::input`]).
@@ -335,6 +368,8 @@ pub struct Context<'a, M> {
     /// The runtime's panels, as last laid out, for their nodes. None
     /// outside a runtime.
     pub(crate) panels: Option<&'a Window>,
+    /// The custom elements' state, to read back by type.
+    pub(crate) customs: Option<&'a dyn CustomLookup>,
 }
 
 impl<'a, M> Context<'a, M> {
@@ -349,6 +384,7 @@ impl<'a, M> Context<'a, M> {
             focused,
             window,
             panels: None,
+            customs: None,
         }
     }
 
@@ -414,6 +450,14 @@ impl<'a, M> Context<'a, M> {
         self.window
     }
 
+    /// The state of the custom element with UI ID `id`, as its own type
+    /// `S`, as the last event, tick, or layout left it: in the same turn as
+    /// the event that changed it (ui-layer.md, section 9, rule 1). `None`
+    /// when no element has that UI ID, or its state is not an `S`.
+    pub fn custom<S: 'static>(&self, id: &UiId) -> Option<&S> {
+        self.customs?.state(id)?.downcast_ref()
+    }
+
     /// The nodes of the runtime's own elements, as last laid out, for the
     /// app to put in the tree it sends (ui-layer.md, section 7). Node IDs
     /// come from `ids`, the app's one table for every node in the window,
@@ -427,11 +471,17 @@ impl<'a, M> Context<'a, M> {
     /// any other does, through [`App::accessibility_event`]. The app turns
     /// it into a message by the UI ID its table gives (section 7, rule 6),
     /// and a Focus action into [`Effects::focus`](crate::Effects::focus).
-    /// The one exception is a text field's: when [`App::access_target`]
+    /// There are two exceptions. A text field's: when [`App::access_target`]
     /// names a field or its run, the runtime carries out SetValue,
     /// ReplaceSelectedText, and SetTextSelection itself, and an edit reaches
-    /// the app through [`App::field_event`] (rule 10). Focus on a field
-    /// still comes through `accessibility_event`. Empty outside a runtime.
+    /// the app through [`App::field_event`] (rule 10). And a custom
+    /// element's: when it names the element or a part inside it, the
+    /// runtime gives the request to the element
+    /// ([`Custom::access_action`](crate::Custom::access_action)), whose
+    /// messages run in the same turn (section 9, rule 3). Focus on either
+    /// still comes through `accessibility_event`. A custom element's parts
+    /// are the nodes it last built, outside `update`. Empty outside a
+    /// runtime.
     pub fn access_nodes(&self, ids: &mut IdTable) -> AccessNodes {
         self.panels.map_or_else(AccessNodes::default, |panels| {
             panels.access_nodes(ids, self.window.scale, self.focused.as_ref())

@@ -6,6 +6,7 @@
 use super::run::{Region, crop, crop_region, save_screenshot, search};
 use super::transport::*;
 use super::*;
+use crate::recovery::tests::TempDir;
 use std::cell::RefCell;
 
 thread_local! {
@@ -165,11 +166,11 @@ fn file_shortcuts_are_refused() {
 /// deleted, when the app closes or otherwise.
 #[test]
 fn closing_leaves_other_files_alone() {
-    let path = std::env::temp_dir().join(format!("loom-control-not-a-socket-{}", std::process::id()));
+    let dir = TempDir::new("control-not-a-socket");
+    let path = dir.join("not-a-socket");
     std::fs::write(&path, "keep me").unwrap();
     close(&[Listener::Socket(path.clone())]);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "keep me");
-    std::fs::remove_file(&path).unwrap();
 }
 
 #[test]
@@ -1402,8 +1403,7 @@ fn a_real_release_during_a_script_drag_is_not_lost() {
 /// error.
 #[test]
 fn a_capture_is_saved_whole_or_cut_to_an_area() {
-    let dir = std::env::temp_dir().join(format!("loom-control-shot-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = TempDir::new("control-shot");
     let path = dir.join("shot.png");
     let shot = || Ok(loom_ui::effect::Image::new(40, 20, 2.0, vec![255u8; 40 * 20 * 4]).unwrap());
     let whole = save_screenshot(shot(), &path, None).unwrap();
@@ -1427,7 +1427,6 @@ fn a_capture_is_saved_whole_or_cut_to_an_area() {
             .unwrap_err()
             .contains("no window")
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// After the window is searched: `locate` answers, and a `screenshot`
@@ -1885,11 +1884,10 @@ fn screenshot_fields_are_checked() {
 }
 
 /// An app on the fake host, playing the subtractive patch, with its
-/// preferences file in a folder of its own.
-fn on_fake_devices(name: &str, fake: &std::rc::Rc<crate::devices::fake::Fake>) -> App {
-    let dir = std::env::temp_dir().join(format!("loom-control-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+/// preferences file in a folder of its own. The folder comes first, so a
+/// caller that binds the pair drops it after the app.
+fn on_fake_devices(name: &str, fake: &std::rc::Rc<crate::devices::fake::Fake>) -> (TempDir, App) {
+    let dir = TempDir::new(&format!("control-{name}"));
     let args = crate::Args {
         patch: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/subtractive.ron")),
         no_audio: false,
@@ -1900,7 +1898,8 @@ fn on_fake_devices(name: &str, fake: &std::rc::Rc<crate::devices::fake::Fake>) -
         },
         ..crate::tests::app_args()
     };
-    App::boot_with(args, std::rc::Rc::new(crate::devices::fake::Shared(fake.clone())))
+    let app = App::boot_with(args, std::rc::Rc::new(crate::devices::fake::Shared(fake.clone())));
+    (dir, app)
 }
 
 /// The Preferences commands go through the window's messages: the
@@ -1915,7 +1914,7 @@ fn preferences_commands_change_what_the_window_shows() {
         &[fake::device("Fake A"), fake::device("Fake B")],
         &["Keys", "Pad"],
     ));
-    let mut app = on_fake_devices("preferences", &fake);
+    let (_dir, mut app) = on_fake_devices("preferences", &fake);
 
     let reply = run(&mut app, r#"{"cmd": "audio", "device": "fake b"}"#).unwrap();
     assert_eq!(app.rig.shown_audio().device, DeviceChoice::Named("Fake B".into()));
@@ -2011,7 +2010,7 @@ fn the_snapshot_sees_a_device_stop_calling_back() {
     let mut fake = Fake::new(&[fake::device("Fake A"), fake::device("Stuck")], &[]);
     fake.stalls = vec!["Stuck".to_string()];
     let fake = std::rc::Rc::new(fake);
-    let mut app = on_fake_devices("stall", &fake);
+    let (_dir, mut app) = on_fake_devices("stall", &fake);
 
     let audio = |answer: Answer| answer.unwrap()["audio"].clone();
     let first = audio(run(&mut app, r#"{"cmd": "snapshot"}"#));
@@ -2041,11 +2040,8 @@ fn the_snapshot_sees_a_device_stop_calling_back() {
 /// A short folder for a socket: the path limit is the operating
 /// system's (rule 13).
 #[cfg(unix)]
-fn socket_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("loom-sock-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn socket_dir(name: &str) -> TempDir {
+    TempDir::new(&format!("sock-{name}"))
 }
 
 /// The socket replaces a stale one, answers each client one line per
@@ -2104,7 +2100,6 @@ fn socket_serves_clients_and_cleans_up() {
     app.join().unwrap();
     listener.join().unwrap();
     assert!(!path.exists(), "the socket is removed when the app closes");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A regular file at the socket path is never touched (rule 13).
@@ -2117,7 +2112,6 @@ fn socket_leaves_a_regular_file_alone() {
     let (outlet, _inlet) = crate::watcher::channel::<Call>(1);
     listen(&path, &outlet);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "precious");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A path longer than the operating system allows is refused, and
@@ -2130,7 +2124,6 @@ fn socket_refuses_a_path_that_is_too_long() {
     let (outlet, _inlet) = crate::watcher::channel::<Call>(1);
     listen(&path, &outlet);
     assert!(!path.exists());
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// `open` on a file that does not load, and `save` where nothing can be
@@ -2143,9 +2136,7 @@ fn open_and_save_failures_answer_with_the_reason() {
     // the status line, never to a dialog nobody can close (rule 9).
     app.control.push(Listener::Script(PathBuf::from("unused")));
     let _ = crate::files::fake::asked();
-    let dir = std::env::temp_dir().join(format!("loom-control-fail-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = TempDir::new("control-fail");
     let missing = dir.join("missing.ron");
     let line = serde_json::json!({ "cmd": "open", "path": missing }).to_string();
     let error = run(&mut app, &line).unwrap_err();
@@ -2382,8 +2373,7 @@ fn a_scripted_panic_key_works_over_a_question() {
 #[test]
 fn open_keeps_load_notes_in_the_status_line() {
     let mut app = crate::tests::app();
-    let dir = std::env::temp_dir().join(format!("loom-control-open-note-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = TempDir::new("control-open-note");
     let noted = dir.join("noted.ron");
     std::fs::write(
         &noted,
@@ -2412,7 +2402,7 @@ fn the_audio_field_reports_the_input_stream() {
         default: Some("Fake Mic".into()),
         devices: vec!["Fake Mic".into()],
     };
-    let mut app = on_fake_devices("input-report", &fake);
+    let (_dir, mut app) = on_fake_devices("input-report", &fake);
     let input = |app: &mut App| run(app, r#"{"cmd": "snapshot"}"#).unwrap()["audio"]["input"].clone();
     assert_eq!(input(&mut app), json!({"device": null, "state": "off"}));
 
@@ -2441,7 +2431,7 @@ fn an_audio_command_leaves_an_open_panel_alone() {
     use crate::input_owner::InputOwner;
     use crate::overlays::Overlay;
     let fake = std::rc::Rc::new(Fake::new(&[fake::device("Fake A"), fake::device("Fake B")], &[]));
-    let mut app = on_fake_devices("audio-over-panel", &fake);
+    let (_dir, mut app) = on_fake_devices("audio-over-panel", &fake);
     app.overlays.open(Overlay::RecentList(Vec::new()));
 
     run(&mut app, r#"{"cmd": "audio", "device": "fake b"}"#).unwrap();
@@ -2734,8 +2724,8 @@ fn a_screenshot_is_a_capture_effect_answered_by_a_message() {
     let mut ui = pointer_ui();
     let drawn = ui.draws_the_canvas();
     // Built as JSON, so a Windows path's backslashes are escaped.
-    let path = std::env::temp_dir().join(format!("loom-capture-effect-{}.png", std::process::id()));
-    let path = path.display().to_string();
+    let dir = TempDir::new("capture-effect");
+    let path = dir.join("capture.png").display().to_string();
     for line in [
         json!({"cmd": "screenshot", "path": path}),
         json!({"cmd": "screenshot", "path": path, "rect": [0, 0, 10, 10]}),
@@ -2862,11 +2852,8 @@ fn voice_count_crossings_switch_mode_and_undo_together() {
 }
 
 /// An empty folder of its own for a test's script files, on any platform.
-fn script_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("loom-script-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn script_dir(name: &str) -> TempDir {
+    TempDir::new(&format!("script-{name}"))
 }
 
 /// `watch` serves a script file to its end and returns. A script of blank
@@ -2879,7 +2866,6 @@ fn watch_serves_a_script_file_to_its_end() {
     let (outlet, inlet) = crate::watcher::channel::<Call>(1);
     watch(&Listener::Script(path), outlet);
     assert!(inlet.try_recv().is_none(), "a blank script sends nothing");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// `watch` returns at once for a script that cannot be opened, sending
@@ -2890,7 +2876,6 @@ fn watch_returns_for_a_missing_script() {
     let (outlet, inlet) = crate::watcher::channel::<Call>(1);
     watch(&Listener::Script(dir.join("missing.jsonl")), outlet);
     assert!(inlet.try_recv().is_none(), "a missing script sends nothing");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// `watch` runs a socket listener, which returns at once for a path the
@@ -2903,7 +2888,6 @@ fn watch_runs_a_socket_listener() {
     let (outlet, _inlet) = crate::watcher::channel::<Call>(1);
     watch(&Listener::Socket(path.clone()), outlet);
     assert!(!path.exists());
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// `locate` on a part of the runtime's own, answered in the turn after one
@@ -3230,7 +3214,8 @@ fn a_capture_uses_the_live_runtime_focus_ring() {
     }
     ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
     ui.redraw();
-    let path = std::env::temp_dir().join(format!("loom-bar-focus-{}.png", std::process::id()));
+    let dir = TempDir::new("bar-focus");
+    let path = dir.join("bar.png");
     let command = json!({
         "cmd": "screenshot", "path": path, "target": "stats/status/dismiss", "margin": 2
     })
@@ -3242,7 +3227,6 @@ fn a_capture_uses_the_live_runtime_focus_ring() {
     assert_eq!(ui.runtime().focused(), Some(&id));
     run_ui(&mut ui, &command).unwrap();
     let focused = std::fs::read(&path).unwrap();
-    std::fs::remove_file(path).unwrap();
     assert_ne!(plain, focused, "focus changes the painted control");
 }
 

@@ -71,6 +71,7 @@ pub(crate) fn driver_events(event: &winit::event::WindowEvent, scale: f32, held:
         W::ScaleFactorChanged { scale_factor, .. } => {
             vec![DriverEvent::Window(WindowEvent::ScaleChanged(*scale_factor as f32))]
         }
+        W::Occluded(hidden) => vec![DriverEvent::Window(WindowEvent::Hidden(*hidden))],
         W::CloseRequested => vec![DriverEvent::Window(WindowEvent::CloseRequested)],
         W::DroppedFile(path) => vec![DriverEvent::Window(WindowEvent::FileDropped(path.clone()))],
         W::Ime(ime) => vec![input(Event::Ime(self::ime(ime)), held)],

@@ -101,8 +101,11 @@ fn helpers_do_not_hide_non_finite_samples() {
 #[test]
 fn read_errors_name_the_file_and_keep_the_source() {
     use std::error::Error;
-    let dir = std::env::temp_dir().join(format!("loom-test-analysis-errors-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let temp = tempfile::Builder::new()
+        .prefix("loom-analysis-errors-")
+        .tempdir()
+        .unwrap();
+    let dir = temp.path();
     let path = dir.join("8bit.wav");
     let spec = hound::WavSpec {
         channels: 1,
@@ -125,7 +128,6 @@ fn read_errors_name_the_file_and_keep_the_source() {
     let e = read_wav(&broken).unwrap_err();
     assert!(e.to_string().contains("broken.wav"), "{e}");
     assert!(e.source().is_some());
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// Silence gives zeros, and a level of negative infinity dBFS.
@@ -142,8 +144,8 @@ fn silence_and_empty_audio() {
 /// Integer and float WAV files read back to the same values.
 #[test]
 fn reads_16_24_and_32_bit_files() {
-    let dir = std::env::temp_dir().join(format!("loom-test-analysis-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    let temp = tempfile::Builder::new().prefix("loom-analysis-").tempdir().unwrap();
+    let dir = temp.path();
     for (bits, format) in [
         (16, hound::SampleFormat::Int),
         (24, hound::SampleFormat::Int),
@@ -170,5 +172,4 @@ fn reads_16_24_and_32_bit_files() {
         assert_eq!(audio.sample_rate, 44_100);
         assert_eq!(audio.channels, vec![vec![0.5, 0.0], vec![-0.25, 0.75]], "{bits}-bit");
     }
-    std::fs::remove_dir_all(&dir).unwrap();
 }

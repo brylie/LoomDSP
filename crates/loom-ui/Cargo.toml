@@ -93,6 +93,13 @@ png.workspace = true
 name = "window"
 required-features = ["shell"]
 
+# A custom element that draws with the GPU, in a real window.
+[[example]]
+name = "xy_pad"
+required-features = ["shell"]
+# Its tests drive the pad through the headless harness.
+test = true
+
 [[test]]
 name = "integration"
 path = "tests/main.rs"

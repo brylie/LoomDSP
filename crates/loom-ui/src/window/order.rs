@@ -317,12 +317,9 @@ impl Window {
         }
         // Only a node that was made: a tree whose focus names no node is
         // refused by the screen reader's side.
+        // A part inside a custom element can have it too (section 9, rule 6).
         out.focus = focused
-            .filter(|id| self.stops.contains(id))
-            .filter(|id| {
-                self.panel_of(id)
-                    .is_some_and(|panel| self.records[panel].layout.has_node(id))
-            })
+            .and_then(|id| self.focus_node(id))
             .map(|id| NodeId(ids.number(id)));
         out
     }
@@ -370,10 +367,7 @@ impl Window {
                 let mut node = access.node(element.focusable);
                 // Only a node the tree holds (section 7, rule 13's rule
                 // for relations).
-                let held = |id: &&UiId| {
-                    self.panel_of(id)
-                        .is_some_and(|panel| self.records[panel].layout.has_node(id))
-                };
+                let held = |id: &&UiId| self.emits(id);
                 if let Some(active) = access.active().filter(held) {
                     node.set_active_descendant(NodeId(ids.number(active)));
                 }
@@ -499,6 +493,31 @@ impl Window {
                     made.push((run, node, Vec::new()));
                 }
             }
+            // A custom element's parts go inside its own node, or where
+            // its node would be when it has none (section 9, rule 3).
+            if let (Some(_), Some(id)) = (element.custom, &element.id)
+                && let Some(parts) = self.custom_nodes.get(id)
+            {
+                let clip = element.clip.map(|clip| {
+                    Rect::new(
+                        loom_ui_core::Point::new(record.origin.x + clip.x, record.origin.y + clip.y),
+                        clip.size(),
+                    )
+                });
+                let built = self.part_nodes(id, parts, clip, record.clip, ids, scale);
+                let tops: Vec<NodeId> = built.iter().filter(|part| part.top).map(|part| part.id).collect();
+                match node_of[index] {
+                    Some(own) => made[own].2.extend(tops),
+                    None => {
+                        for top in tops {
+                            add(top, &mut made);
+                        }
+                    }
+                }
+                for part in built {
+                    made.push((part.id, part.node, part.children));
+                }
+            }
             if let Some(child) = &element.slot {
                 if self.records.get(child).is_some_and(|held| held.held_by(key, slot)) {
                     for id in self.panel_nodes(child, ids, scale, &mut later) {
@@ -516,6 +535,126 @@ impl Window {
         }
         nodes.append(&mut later);
         tops
+    }
+}
+
+/// One part's node, as [`Window::part_nodes`] makes it.
+struct Part {
+    id: NodeId,
+    node: Node,
+    children: Vec<NodeId>,
+    /// True when no other part holds it, so it goes under the element.
+    top: bool,
+}
+
+impl Window {
+    /// The nodes of the parts of the custom element `owner`, from what it
+    /// last built: each numbered from `ids` by the element's UI ID and its
+    /// path, inside the earlier part whose path its own is under, with its
+    /// bounds cut by the element's clip and the panel's (`panel_clip`), in
+    /// physical pixels at `scale`.
+    fn part_nodes(
+        &self,
+        owner: &UiId,
+        parts: &[crate::custom::CustomNode],
+        clip: Option<Rect>,
+        panel_clip: Rect,
+        ids: &mut IdTable,
+        scale: f32,
+    ) -> Vec<Part> {
+        let mut built: Vec<Part> = Vec::with_capacity(parts.len());
+        for (at, part) in parts.iter().enumerate() {
+            let access = part.access();
+            let mut node = access.node(part.is_focusable());
+            if let Some(active) = access.active().filter(|id| self.emits(id)) {
+                node.set_active_descendant(NodeId(ids.number(active)));
+            }
+            if let Some(controlled) = access.controls().filter(|id| self.emits(id)) {
+                node.set_controls(vec![NodeId(ids.number(controlled))]);
+            }
+            let mut bounds = crate::layout::cut(part.bounds(), panel_clip);
+            if let Some(clip) = clip {
+                bounds = crate::layout::cut(bounds, clip);
+            }
+            let scale = f64::from(scale);
+            node.set_bounds(accesskit::Rect {
+                x0: f64::from(bounds.x) * scale,
+                y0: f64::from(bounds.y) * scale,
+                x1: f64::from(bounds.x + bounds.width) * scale,
+                y1: f64::from(bounds.y + bounds.height) * scale,
+            });
+            let id = part.path().iter().cloned().fold(owner.clone(), UiId::with);
+            let node_id = NodeId(ids.number(&id));
+            // The nearest earlier part it is under holds it.
+            let holder = (0..at).rev().find(|&before| {
+                let path = parts[before].path();
+                path.len() < part.path().len() && part.path().starts_with(path)
+            });
+            if let Some(holder) = holder {
+                built[holder].children.push(node_id);
+            }
+            built.push(Part {
+                id: node_id,
+                node,
+                children: Vec::new(),
+                top: holder.is_none(),
+            });
+        }
+        built
+    }
+
+    /// True when the tree sent now holds a node for `id`: a laid-out
+    /// element with a node, or a part of a custom element in a drawn
+    /// panel. A relation to anything else is left out (section 7, rule 13).
+    pub(crate) fn emits(&self, id: &UiId) -> bool {
+        let element = self
+            .panel_of(id)
+            .is_some_and(|panel| self.records[panel].layout.has_node(id));
+        element || self.emits_part(id)
+    }
+
+    /// True when `id` names a part of a custom element in a drawn panel,
+    /// whose last build has a node for it.
+    fn emits_part(&self, id: &UiId) -> bool {
+        self.part_owner(id).is_some()
+    }
+
+    /// The custom element whose part `id` names, when its panel is drawn
+    /// and its last build has a node for that part.
+    fn part_owner(&self, id: &UiId) -> Option<&UiId> {
+        let (owner, parts) = self
+            .custom_nodes
+            .iter()
+            .find(|(owner, _)| id.is_under(owner) && id.keys().len() > owner.keys().len())?;
+        let rest = &id.keys()[owner.keys().len()..];
+        (self.drawn_holds(owner) && parts.iter().any(|part| part.path() == rest)).then_some(owner)
+    }
+
+    /// The node the focus is on, for `focused`: a stop with a node, or a
+    /// part of a custom element that is a stop, or that element itself
+    /// when its last build has no node for the part.
+    fn focus_node<'a>(&'a self, focused: &'a UiId) -> Option<&'a UiId> {
+        let stop_with_node = |id: &UiId| {
+            self.stops.contains(id)
+                && self
+                    .panel_of(id)
+                    .is_some_and(|panel| self.records[panel].layout.has_node(id))
+        };
+        if stop_with_node(focused) {
+            return Some(focused);
+        }
+        let owner = self
+            .custom_nodes
+            .keys()
+            .find(|owner| focused.is_under(owner) && focused.keys().len() > owner.keys().len())?;
+        if !self.stops.contains(owner) {
+            return None;
+        }
+        if self.part_owner(focused).is_some() {
+            Some(focused)
+        } else {
+            stop_with_node(owner).then_some(owner)
+        }
     }
 }
 

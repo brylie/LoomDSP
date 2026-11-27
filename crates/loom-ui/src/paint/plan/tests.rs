@@ -179,3 +179,31 @@ fn a_half_pixel_clip_rounds_out_at_scale_two() {
     // 200.5 to 221.5 across, 101.5 to 121.5 down.
     assert_eq!(scissor(clip, target(2.0)), Some([200, 101, 22, 21]));
 }
+
+/// Each of the list's layers maps to its first step, a layer clipped away
+/// included, so a cut after one still draws the right steps: here the
+/// boxes before the cut are the first two steps, and the one after it the
+/// last.
+#[test]
+fn layers_map_to_their_steps_past_a_layer_clipped_away() {
+    let text = RefCell::new(Typesetter::new());
+    let mut list = PaintList::new(BOUNDS);
+    {
+        let mut painter = ListPainter::new(&text, &mut list);
+        painter.quad(quad(Point::new(120.0, 60.0)));
+        // Outside the target: no steps.
+        painter.begin_layer(Rect::new(Point::new(-500.0, -500.0), Size::new(10.0, 10.0)));
+        painter.quad(quad(Point::new(-495.0, -495.0)));
+        painter.end_layer();
+        painter.quad(quad(Point::new(140.0, 60.0)));
+        painter.mark(crate::paint::Mark::LayerEnd(crate::view::Layer::Panels));
+        painter.quad(quad(Point::new(160.0, 60.0)));
+    }
+    let mut atlas = Atlas::new(1024);
+    let plan = PaintPlan::build(&list, &mut atlas, target(1.0));
+    let cut = list.marks()[0].0;
+    assert_eq!(plan.layer_steps.len(), list.layer_count() + 1);
+    assert_eq!(plan.layer_steps[cut], 2, "two boxes drew before the cut");
+    assert_eq!(plan.layer_steps[list.layer_count()], 3);
+    assert_eq!(plan.steps.len(), 3);
+}

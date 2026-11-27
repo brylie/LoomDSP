@@ -15,5 +15,8 @@ categories = ["multimedia::audio", "development-tools::testing"]
 loom-core.workspace = true
 hound.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

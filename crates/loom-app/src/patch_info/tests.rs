@@ -2,15 +2,13 @@ use super::*;
 use crate::files::fake::{self as dialogs, Asked};
 use crate::inspector::Inspector;
 use crate::preferences::FILE_NAME;
+use crate::recovery::tests::TempDir;
 use crate::{Args, FileAction, Message as AppMessage};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// A folder for one test, emptied first.
-fn folder(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("loom-patch-info-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn folder(name: &str) -> TempDir {
+    TempDir::new(&format!("patch-info-{name}"))
 }
 
 /// Args for an app whose preferences file in `dir` holds `preferences`.
@@ -141,7 +139,6 @@ fn a_new_patch_takes_the_defaults() {
     let _ = app.send(AppMessage::File(FileAction::New));
     assert_eq!(app.session.document.info().authors, ["Ada Lovelace"]);
     assert_eq!(app.session.document.info().license.as_deref(), Some("CC-BY-4.0"));
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Acceptance and rule 3: opening a patch by others and saving it keeps
@@ -222,7 +219,6 @@ fn saving_someone_elses_patch_keeps_credit_and_offers_once() {
     dialogs::answer_add_author(Some(false));
     save(&mut app);
     assert_eq!(dialogs::asked().len(), 2);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// Patch info edits are saved with the patch, and the description of an
@@ -246,7 +242,6 @@ fn metadata_edits_are_saved() {
     let saved = crate::patch_file::load(&patch).unwrap();
     assert_eq!(saved.metadata.description, "Soft.");
     assert_eq!(saved.metadata.tags, ["ambient"]);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// In the window: patch info is in the inspector, the chooser asks the
@@ -316,7 +311,6 @@ fn the_window_shows_patch_info_the_chooser_and_the_browser() {
         crate::question::Answer::DontSave,
     )));
     assert_eq!(ui.app().session.document.name(), "Low Drone");
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// undo.md, Gestures: the undo shortcuts do nothing while a text field
@@ -456,7 +450,7 @@ fn part_credits_follow_nested_definitions_and_author_edits() {
     )"#,
     )
     .unwrap();
-    let mut args = args_with(&dir, &format!("(library: Some({dir:?}))"));
+    let mut args = args_with(&dir, &format!("(library: Some({:?}))", dir.0));
     args.patch = Some(file.clone());
     let mut app = App::new(args);
     assert_eq!(rows(&app).parts_by, ["Ada", "Sam"]);
@@ -520,5 +514,4 @@ fn part_credits_follow_nested_definitions_and_author_edits() {
     assert_eq!(saved.metadata.authors, ["Lena"]);
     assert_eq!(saved.subpatches["voice"].metadata.authors, ["lena", "Ada", "Yara"]);
     assert_eq!(saved.subpatches["voice"].library, None);
-    std::fs::remove_dir_all(dir).unwrap();
 }

@@ -1,10 +1,8 @@
 use super::*;
+use crate::recovery::tests::TempDir;
 
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("loom-prefs-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn temp_dir(name: &str) -> TempDir {
+    TempDir::new(&format!("prefs-{name}"))
 }
 
 /// The full rig configuration, including MIDI clock, reads back as written.

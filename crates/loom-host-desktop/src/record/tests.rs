@@ -4,7 +4,7 @@ use super::*;
 #[test]
 fn writes_what_was_pushed() {
     let dir = TestDir::new("record-test");
-    let path = dir.0.join("out.wav");
+    let path = dir.path().join("out.wav");
     let recorder = Recorder::start(&path, 48_000).unwrap();
     let mut tap = recorder.tap();
     let left: Vec<f32> = (0..1000).map(|i| i as f32 / 1000.0).collect();
@@ -29,7 +29,7 @@ fn writes_what_was_pushed() {
 #[test]
 fn streams_are_written_in_order_with_nothing_between() {
     let dir = TestDir::new("record-streams");
-    let path = dir.0.join("out.wav");
+    let path = dir.path().join("out.wav");
     let recorder = Recorder::start(&path, 48_000).unwrap();
     let mut first = recorder.tap();
     let mut second = recorder.tap();
@@ -55,7 +55,7 @@ fn streams_are_written_in_order_with_nothing_between() {
 #[test]
 fn interleaved_input_keeps_the_first_two_channels() {
     let dir = TestDir::new("record-interleaved");
-    let path = dir.0.join("out.wav");
+    let path = dir.path().join("out.wav");
     let recorder = Recorder::start(&path, 48_000).unwrap();
     let mut quad = recorder.tap();
     quad.push_interleaved(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], 4);
@@ -76,7 +76,7 @@ fn interleaved_input_keeps_the_first_two_channels() {
 #[test]
 fn close_reports_no_error_after_a_clean_recording() {
     let dir = TestDir::new("record-close");
-    let path = dir.0.join("out.wav");
+    let path = dir.path().join("out.wav");
     let recorder = Recorder::start(&path, 48_000).unwrap();
     let mut tap = recorder.tap();
     tap.push(&[0.25; 10], &[0.5; 10]);
@@ -160,7 +160,7 @@ fn a_failing_writer_reports_its_error() {
 fn a_full_ring_drops_and_counts() {
     let dir = TestDir::new("record-full");
     // 10 Hz: the ring holds 2 seconds, 20 frames.
-    let recorder = Recorder::start(&dir.0.join("out.wav"), 10).unwrap();
+    let recorder = Recorder::start(&dir.path().join("out.wav"), 10).unwrap();
     let mut tap = recorder.tap();
     // Hold the writer back by pushing faster than it drains.
     tap.push(&[0.0; 100], &[0.0; 100]);

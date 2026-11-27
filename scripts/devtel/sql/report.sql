@@ -37,6 +37,26 @@ select left(command, 70) as command, count(*) as sessions, max(times_in_ten_call
 from devtel_loops where first_ts >= now() - to_days($DAYS)
 group by 1 order by minutes desc limit 10;
 
+.print '== Test runs and the test queue (docs/dev/test-runs.md)'
+select coalesce(attributes['loom.test.selection'], 'queued command') as selection, count(*) as runs,
+  round(sum(end_ns - start_ns) / 6e10) as run_minutes,
+  round(median(end_ns - start_ns) / 1e9) as median_s
+from spool_spans
+where service = 'tests' and name = 'test run' and to_timestamp(start_ns::double / 1e9) >= now() - to_days($DAYS)
+group by 1 order by runs desc;
+
+-- A cancelled wait has no loom.test.wait_ms; its span's length is the wait.
+select count(*) as waits, count(*) filter (where wait_ms > 2000) as waited_over_2s,
+  round(sum(wait_ms) / 60000.0, 1) as wait_minutes,
+  round(max(wait_ms) / 60000.0, 1) as longest_wait_min,
+  count(*) filter (where cancelled) as cancelled
+from (
+  select coalesce(attributes['loom.test.wait_ms']::bigint, (end_ns - start_ns) // 1000000) as wait_ms,
+    coalesce(attributes['loom.test.cancelled'] = 'true', false) as cancelled
+  from spool_spans
+  where service = 'tests' and name = 'test queue wait' and to_timestamp(start_ns::double / 1e9) >= now() - to_days($DAYS)
+);
+
 .print '== Models (one row per API response; tokens counted once per message)'
 select model, count(*) as turns, count(distinct session_id) as sessions,
   round(sum(output_tokens) / 1e6, 2) as output_mtok,
@@ -45,6 +65,26 @@ select model, count(*) as turns, count(distinct session_id) as sessions,
   string_agg(distinct effort, ', ') as efforts
 from devtel_turns where ts >= now() - to_days($DAYS)
 group by 1 order by turns desc;
+
+.print '== Cost and model by subagent type (token shares; the archive has cost per session only)'
+-- A model change for an agent type shows as a new row with its own first
+-- and last day, so a later report can compare the two.
+with turns as (
+  select tu.*, coalesce(a.agent_type, case when tu.agent_id is null then '(main thread)' else '?' end) as agent_type
+  from devtel_turns tu left join claude_agents a using (session_id, agent_id)
+  where tu.ts >= now() - to_days($DAYS)
+),
+sized as (
+  select *, input_tokens + coalesce(cache_read_tokens, 0) + coalesce(cache_write_tokens, 0) as all_input from turns
+)
+-- A subagent's ID is unique only within its session, so count the pair.
+select agent_type, model, count(distinct session_id || ':' || coalesce(agent_id, '')) as agents, count(*) as turns,
+  round(sum(output_tokens) / 1e6, 2) as output_mtok, round(sum(all_input) / 1e6, 1) as input_mtok,
+  round(100.0 * sum(all_input) / sum(sum(all_input)) over (), 1) as input_share_pct,
+  round(sum(all_input) / count(*) / 1000) as input_k_per_turn,
+  min(ts)::date as first_day, max(ts)::date as last_day
+-- No row limit: a small new row is the one a model change adds.
+from sized group by all order by input_mtok desc;
 
 .print '== Work done (from the git hooks; empty until they are installed)'
 select count(*) as commits,

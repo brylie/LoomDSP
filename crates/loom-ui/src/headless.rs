@@ -339,6 +339,12 @@ impl<A: App, T: Target<A::Message>> Harness<A, T> {
         &self.runtime
     }
 
+    /// The runtime, to change for a test.
+    #[cfg(test)]
+    pub(crate) fn runtime_mut(&mut self) -> &mut Runtime<A, T> {
+        &mut self.runtime
+    }
+
     /// The app.
     pub fn app(&self) -> &A {
         self.runtime.app()

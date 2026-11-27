@@ -1,6 +1,7 @@
 use super::*;
 use crate::devices::fake::{self, Event, Fake};
 use crate::preferences::FILE_NAME;
+use crate::recovery::tests::TempDir;
 use crate::{Args, Source, undo};
 use loom_core::{EngineConfig, MidiInputId, create_engine};
 use loom_host_desktop::InputError;
@@ -10,11 +11,8 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// A folder for one test's preferences file.
-fn folder(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("loom-settings-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+fn folder(name: &str) -> TempDir {
+    TempDir::new(&format!("settings-{name}"))
 }
 
 /// Args for a run that plays on the fake devices, with the preferences
@@ -1451,7 +1449,8 @@ fn with_no_audio_a_choice_is_only_saved() {
 #[test]
 fn the_window_opens_and_closes_with_its_shortcut_and_escape() {
     use iced::keyboard::{Event, Key, Modifiers, key::Named};
-    let mut app = start(args(&folder("keys")), &two_devices());
+    let dir = folder("keys");
+    let mut app = start(args(&dir), &two_devices());
     let press = |key: Key, modifiers: Modifiers| {
         crate::Message::Key(Event::KeyPressed {
             key: key.clone(),

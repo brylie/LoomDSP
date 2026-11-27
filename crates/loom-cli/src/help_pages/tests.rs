@@ -6,12 +6,13 @@ fn docs_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/modules")
 }
 
-/// A fresh, empty folder for one test, in the system's temporary folder.
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("loom-help-pages-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+/// A fresh, empty folder for one test, in the system's temporary folder,
+/// removed when the guard drops, even when the test panics.
+fn temp_dir(name: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("loom-help-pages-{name}-"))
+        .tempdir()
+        .unwrap()
 }
 
 /// The pages in `docs/modules` match the descriptors. When this fails,
@@ -50,13 +51,14 @@ fn the_marker_counts_only_as_a_whole_line() {
 #[test]
 fn regenerating_keeps_notes() {
     let registry = loom_modules::registry();
-    let dir = temp_dir("notes");
-    let first = write_pages(&registry, &dir).unwrap();
+    let temp = temp_dir("notes");
+    let dir = temp.path();
+    let first = write_pages(&registry, dir).unwrap();
     assert_eq!(
         first.written.len(),
         registry.browsable().count() + registry.roles().count() + 1
     );
-    assert!(stale_pages(&registry, &dir).unwrap().is_empty());
+    assert!(stale_pages(&registry, dir).unwrap().is_empty());
 
     let d = registry.iter().next().unwrap();
     let path = dir.join(file_name(d));
@@ -64,15 +66,14 @@ fn regenerating_keeps_notes() {
     let text = std::fs::read_to_string(&path).unwrap();
     let edited = text.replacen(&format!("# {}", d.name), "# Old title", 1) + notes;
     std::fs::write(&path, edited).unwrap();
-    assert_eq!(stale_pages(&registry, &dir).unwrap().len(), 1);
+    assert_eq!(stale_pages(&registry, dir).unwrap().len(), 1);
 
-    let second = write_pages(&registry, &dir).unwrap();
+    let second = write_pages(&registry, dir).unwrap();
     assert_eq!(second.written, vec![path.clone()]);
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.starts_with(&format!("# {}\n", d.name)));
     assert!(text.ends_with(&format!("{MARKER}\n{notes}")));
-    assert!(write_pages(&registry, &dir).unwrap().written.is_empty());
-    let _ = std::fs::remove_dir_all(&dir);
+    assert!(write_pages(&registry, dir).unwrap().written.is_empty());
 }
 
 /// A page without the marker is left alone, and pages of unknown modules
@@ -80,34 +81,34 @@ fn regenerating_keeps_notes() {
 #[test]
 fn unmarked_and_unknown_pages_are_kept() {
     let registry = loom_modules::registry();
-    let dir = temp_dir("unknown");
+    let temp = temp_dir("unknown");
+    let dir = temp.path();
     let d = registry.iter().next().unwrap();
     let page = dir.join(file_name(d));
     std::fs::write(&page, "My own page.\n").unwrap();
     let old = dir.join("loom.gone.module.md");
     std::fs::write(&old, "Old notes.\n").unwrap();
 
-    let report = write_pages(&registry, &dir).unwrap();
+    let report = write_pages(&registry, dir).unwrap();
     assert_eq!(report.no_marker, vec![page.clone()]);
     assert_eq!(report.unknown, vec![old.clone()]);
     assert_eq!(std::fs::read_to_string(&page).unwrap(), "My own page.\n");
     assert!(old.exists());
-    let problems = stale_pages(&registry, &dir).unwrap();
+    let problems = stale_pages(&registry, dir).unwrap();
     assert_eq!(problems.len(), 2, "{problems:?}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Windows line endings in a checkout do not make pages stale.
 #[test]
 fn crlf_pages_are_current() {
     let registry = loom_modules::registry();
-    let dir = temp_dir("crlf");
-    write_pages(&registry, &dir).unwrap();
+    let temp = temp_dir("crlf");
+    let dir = temp.path();
+    write_pages(&registry, dir).unwrap();
     let path = dir.join(INDEX);
     let text = std::fs::read_to_string(&path).unwrap().replace('\n', "\r\n");
     std::fs::write(&path, text).unwrap();
-    assert!(stale_pages(&registry, &dir).unwrap().is_empty());
-    let _ = std::fs::remove_dir_all(&dir);
+    assert!(stale_pages(&registry, dir).unwrap().is_empty());
 }
 
 /// A page lists every port and parameter with its label, name, range,

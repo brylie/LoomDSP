@@ -374,3 +374,26 @@ fn our_field_taking_over_forgets_the_layers_area() {
     assert_eq!(ime_to_apply(&mut memory, Some(area(5.0)), None), Some(area(5.0)));
     assert_eq!(ime_to_apply(&mut memory, None, None), Some(Ime::Off));
 }
+
+/// The runtime's shape wins over the layers' while it asks for one; when
+/// it stops, the layers' last report holds, or the plain arrow with none.
+/// A shape already shown is not set again.
+#[test]
+fn the_runtime_cursor_wins_over_the_layers() {
+    let mut memory = CursorMemory::default();
+    let grab = Pointer::Icon(Cursor::Grab);
+    let text = Pointer::Icon(Cursor::Text);
+    assert_eq!(cursor_to_apply(&mut memory, Some(Cursor::Grab), Some(text)), Some(grab));
+    assert_eq!(cursor_to_apply(&mut memory, Some(Cursor::Grab), None), None);
+    assert_eq!(cursor_to_apply(&mut memory, None, None), Some(text));
+    let mut memory = CursorMemory::default();
+    assert_eq!(cursor_to_apply(&mut memory, Some(Cursor::Grab), None), Some(grab));
+    assert_eq!(
+        cursor_to_apply(&mut memory, None, None),
+        Some(Pointer::Icon(Cursor::Default))
+    );
+    assert_eq!(
+        cursor_to_apply(&mut memory, None, Some(Pointer::Hidden)),
+        Some(Pointer::Hidden)
+    );
+}
