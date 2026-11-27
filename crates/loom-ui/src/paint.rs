@@ -46,6 +46,8 @@ mod typesetter;
 pub use gpu::{INSTANCE_ATTRIBUTES, InstanceBuffer, PaintCounts, PaintRenderer, SHAPE_ATTRIBUTES};
 pub use list::{ListPainter, PaintList};
 #[cfg(feature = "gpu")]
+pub(crate) use plan::scissor;
+#[cfg(feature = "gpu")]
 pub use plan::{Shape, Target, packed};
 pub use typesetter::Typesetter;
 pub(crate) use typesetter::{editing_contexts, properties, span_of};

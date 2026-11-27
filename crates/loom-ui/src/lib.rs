@@ -91,7 +91,7 @@ pub use custom::{
     Out, Used,
 };
 #[cfg(feature = "gpu")]
-pub use custom::{CustomGpu, Gpu, Pass};
+pub use custom::{CustomGpu, Gpu, GpuFrame, Pass};
 pub use draw::Panels;
 pub use driver::{Driver, Paste};
 pub use effect::{ClipboardText, Effect, Effects};

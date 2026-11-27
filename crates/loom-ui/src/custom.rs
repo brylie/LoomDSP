@@ -35,7 +35,7 @@ mod ticks;
 
 pub use frame::{FramePlan, FrameStep};
 #[cfg(feature = "gpu")]
-pub use gpu::{CustomGpu, Gpu, Pass};
+pub use gpu::{CustomGpu, Gpu, GpuFrame, Pass};
 
 pub(crate) use paint::{Fresh, Kept, NoCustoms, PaintCustoms};
 
@@ -364,6 +364,10 @@ struct Hosted<A: App> {
     /// The access version and the bounds of its last node build, so the
     /// next is skipped while neither moved. `None` before the first.
     built: Option<(u64, Rect)>,
+    /// The device and format it last prepared for, so a change tells it
+    /// its GPU data is lost. `None` before its first prepare.
+    #[cfg(feature = "gpu")]
+    seen: Option<gpu::Seen>,
     /// A deadline it gave that did not move past its tick, which the
     /// schedule leaves out until it gives a later one.
     stuck: Option<Instant>,
@@ -408,6 +412,8 @@ impl<A: App> Customs<A> {
                         state,
                         stuck: None,
                         built: None,
+                        #[cfg(feature = "gpu")]
+                        seen: None,
                     }
                 }
             };
@@ -552,6 +558,14 @@ impl<A: App> Customs<A> {
             let _ = (app, id, layer);
             false
         }
+    }
+
+    /// The state of the element `id` as its own type `S`, to change for a
+    /// test.
+    #[cfg(test)]
+    pub(crate) fn state_mut<S: 'static>(&mut self, id: &UiId) -> Option<&mut S> {
+        let state: &mut dyn Any = self.elements.get_mut(id)?.state.as_deref_mut()?;
+        state.downcast_mut()
     }
 
     /// The element that holds the capture.
