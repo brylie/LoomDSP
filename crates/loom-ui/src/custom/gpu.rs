@@ -148,7 +148,13 @@ impl<A: App> Panels<'_, A> {
                 format: frame.format,
                 target: frame.target,
                 bounds,
-                viewport: viewport(bounds, frame.target, frame.device),
+                // Above a layer it draws with the whole target's viewport,
+                // as `draw_frame` sets it, so it prepares with that one.
+                viewport: if above {
+                    whole_viewport(frame.target)
+                } else {
+                    viewport(bounds, frame.target, frame.device)
+                },
                 scissor,
                 capture: frame.capture,
             };
@@ -177,7 +183,8 @@ impl<A: App> Panels<'_, A> {
         let target = frame.target;
         let whole = whole(target);
         let restore = |pass: &mut Pass<'_>| {
-            pass.set_viewport(0.0, 0.0, target.physical.0 as f32, target.physical.1 as f32, 0.0, 1.0);
+            let [x, y, width, height] = whole_viewport(target);
+            pass.set_viewport(x, y, width, height, 0.0, 1.0);
             let [x, y, width, height] = whole;
             pass.set_scissor_rect(x, y, width, height);
         };
@@ -217,6 +224,11 @@ impl<A: App> Panels<'_, A> {
 /// The scissor of the whole target.
 fn whole(target: Target) -> [u32; 4] {
     [0, 0, target.physical.0, target.physical.1]
+}
+
+/// The viewport of the whole target, in physical pixels.
+fn whole_viewport(target: Target) -> [f32; 4] {
+    [0.0, 0.0, target.physical.0 as f32, target.physical.1 as f32]
 }
 
 /// The viewport for an element at `bounds`: its bounds in the target's
