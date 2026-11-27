@@ -4,6 +4,7 @@ They need only Python and git. The queue tests start real processes that
 hold and wait for slots in a temporary folder.
 """
 
+import errno
 import glob
 import io
 import json
@@ -233,9 +234,22 @@ class ChangedFilesTests(unittest.TestCase):
 class QueueSettingsTests(CleanEnv):
     """When the queue is on, and the thread count."""
 
+    def setUp(self):
+        """Pretend flock exists, so these tests mean the same on Windows."""
+        super().setUp()
+        if test_run.fcntl is None:
+            patcher = mock.patch.object(test_run, "fcntl", object())
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def test_on_by_default(self):
         """No settings: the queue is on."""
         self.assertIsNone(test_run.queue_off_reason())
+
+    def test_no_flock(self):
+        """Without flock the queue is off, and says why."""
+        with mock.patch.object(test_run, "fcntl", None):
+            self.assertEqual(test_run.queue_off_reason(), "no flock on this system")
 
     def test_switches(self):
         """LOOM_TEST_QUEUE=0, CI, and a held slot turn it off; LOOM_TEST_QUEUE=1 turns it on in CI."""
@@ -252,7 +266,7 @@ class QueueSettingsTests(CleanEnv):
         """Without LOOM_TEST_QUEUE_DIR, the folder sits next to devtel's store."""
         del os.environ["LOOM_TEST_QUEUE_DIR"]
         with mock.patch.dict(os.environ, {"XDG_DATA_HOME": "/data"}):
-            self.assertEqual(test_run.queue_dir(), "/data/loomdsp/test-queue")
+            self.assertEqual(test_run.queue_dir(), os.path.join("/data", "loomdsp", "test-queue"))
 
     def test_threads(self):
         """Every core with a slot, half without, none passed in CI, LOOM_TEST_THREADS above all."""
@@ -374,6 +388,23 @@ class QueueTests(CleanEnv):
             code = test_run.queued([sys.executable, "-c", "pass"], "t", test_run.Spans())
         self.assertEqual(code, 0)
         self.assertIn("test queue: off", out.getvalue())
+
+    def test_a_lock_failure_that_is_not_contention_runs_without_the_queue(self):
+        """ENOLCK is no busy slot: the run goes on without the queue, not waiting for good."""
+        os.environ["LOOM_TEST_QUEUE_DIR"] = self.dir
+        failure = OSError(errno.ENOLCK, "No locks available")
+        out = io.StringIO()
+        with mock.patch.object(test_run.fcntl, "flock", side_effect=failure), mock.patch("sys.stdout", out):
+            code = test_run.queued([sys.executable, "-c", "pass"], "t", test_run.Spans())
+        self.assertEqual(code, 0)
+        self.assertIn("test queue: off", out.getvalue())
+
+    def test_a_word_for_the_thread_count_is_kept(self):
+        """LOOM_TEST_THREADS=num-cpus, which nextest takes, does not fail the run."""
+        os.environ["LOOM_TEST_QUEUE"] = "0"
+        os.environ["LOOM_TEST_THREADS"] = "num-cpus"
+        code = test_run.queued([sys.executable, "-c", "pass"], "t", test_run.Spans(), test_run.nextest_threads)
+        self.assertEqual(code, 0)
 
 
 class SpanTests(CleanEnv):

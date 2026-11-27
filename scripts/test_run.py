@@ -13,6 +13,7 @@ Arguments after `--` in the first two forms go to `cargo nextest run`.
 
 import argparse
 import datetime
+import errno
 import json
 import os
 import signal
@@ -344,9 +345,13 @@ def try_slots(folder, slots):
         fd = os.open(os.path.join(folder, "slot-%d.lock" % index), os.O_RDWR | os.O_CREAT, 0o644)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+        except OSError as error:
             os.close(fd)
-            continue
+            if error.errno in (errno.EAGAIN, errno.EACCES, errno.EWOULDBLOCK):
+                continue  # another run holds this slot
+            # Any other failure (such as ENOLCK) is no contention: waiting
+            # would never end, so let the caller run without the queue.
+            raise
         return Slot(fd, index, folder)
     return None
 
@@ -496,7 +501,9 @@ def queued(command, what, spans, threads_flag=None, extra_attributes=None):
             slot.release()
     attributes = {"process.exit.code": code, "process.command_line": " ".join(full)[:2000]}
     if threads:
-        attributes["loom.test.threads"] = int(threads[1])
+        # nextest also takes a word such as `num-cpus`; keep that as text.
+        setting = threads[1]
+        attributes["loom.test.threads"] = int(setting) if setting.isdigit() else setting
     attributes.update(extra_attributes or {})
     spans.record("test run", start, time.time_ns(), attributes, code != 0)
     return code
@@ -538,7 +545,9 @@ def run_tests(run_all, nextest_args):
     command += list(nextest_args)
     if queue_off_reason() is None:
         # Build before taking a slot, so only the run waits.
-        code = run_child(["cargo", "nextest", "run", "--workspace", "--no-run"], dict(os.environ))
+        # The same extra arguments, so a `--release` or `--profile` run
+        # builds what it then runs, and builds nothing while it holds a slot.
+        code = run_child(["cargo", "nextest", "run", "--workspace", "--no-run"] + list(nextest_args), dict(os.environ))
         if code != 0:
             return code
     what = "every test" if selection.kind == "all" else "the tests of %d crates" % len(selection.run)

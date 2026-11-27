@@ -37,12 +37,17 @@ from spool_spans
 where service = 'tests' and name = 'test run' and to_timestamp(start_ns::double / 1e9) >= now() - to_days($DAYS)
 group by 1 order by runs desc;
 
-select count(*) as waits, count(*) filter (where attributes['loom.test.wait_ms']::bigint > 2000) as waited_over_2s,
-  round(sum(coalesce(attributes['loom.test.wait_ms']::bigint, 0)) / 60000.0, 1) as wait_minutes,
-  round(max(coalesce(attributes['loom.test.wait_ms']::bigint, 0)) / 60000.0, 1) as longest_wait_min,
-  count(*) filter (where attributes['loom.test.cancelled'] = 'true') as cancelled
-from spool_spans
-where service = 'tests' and name = 'test queue wait' and to_timestamp(start_ns::double / 1e9) >= now() - to_days($DAYS);
+-- A cancelled wait has no loom.test.wait_ms; its span's length is the wait.
+select count(*) as waits, count(*) filter (where wait_ms > 2000) as waited_over_2s,
+  round(sum(wait_ms) / 60000.0, 1) as wait_minutes,
+  round(max(wait_ms) / 60000.0, 1) as longest_wait_min,
+  count(*) filter (where cancelled) as cancelled
+from (
+  select coalesce(attributes['loom.test.wait_ms']::bigint, (end_ns - start_ns) // 1000000) as wait_ms,
+    coalesce(attributes['loom.test.cancelled'] = 'true', false) as cancelled
+  from spool_spans
+  where service = 'tests' and name = 'test queue wait' and to_timestamp(start_ns::double / 1e9) >= now() - to_days($DAYS)
+);
 
 .print '== Models (one row per API response; tokens counted once per message)'
 select model, count(*) as turns, count(distinct session_id) as sessions,
