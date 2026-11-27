@@ -1000,6 +1000,25 @@ fn a_readers_focus_on_a_field_takes_the_keys_from_a_knob() {
     assert!(!ui.app().canvas_has_keys(), "the canvas has no keys");
 }
 
+/// The pointer leaving a row that has left the inspector's model, as one
+/// does when the selection changes mid-drag, still clears the lit drop
+/// row, so no row stays lit for a drop it cannot take.
+#[test]
+fn leaving_a_row_that_went_clears_the_drop_row() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.redraw();
+    let gone = ids::row(99, ids::Kind::Param, "cutoff");
+    assert!(
+        matches!(
+            ui.app().inspector_hovered(&gone, false),
+            Some(Message::Inspector(crate::inspector::Message::DropRow(None)))
+        ),
+        "leaving clears it"
+    );
+    assert!(ui.app().inspector_hovered(&gone, true).is_none(), "it takes no drop");
+}
+
 /// A double-click on a parameter's slider resets the parameter to its
 /// default, as the runtime's slider rule says (ui-layer.md, section 5,
 /// rule 16), from anywhere on the track.
