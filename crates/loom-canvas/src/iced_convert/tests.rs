@@ -423,3 +423,70 @@ fn each_cursor_shape_has_its_own_iced_cursor() {
         }
     }
 }
+
+/// Every key of ours goes to Iced and comes back the same, so a key the
+/// control channel makes up reaches the app as it was made.
+#[test]
+fn every_key_survives_the_trip_to_iced_and_back() {
+    let keys = [
+        Key::Up,
+        Key::Down,
+        Key::Left,
+        Key::Right,
+        Key::Enter,
+        Key::Escape,
+        Key::Space,
+        Key::Tab,
+        Key::Backspace,
+        Key::Delete,
+        Key::Home,
+        Key::End,
+        Key::PageUp,
+        Key::PageDown,
+        Key::ContextMenu,
+        Key::F1,
+        Key::F2,
+        Key::F10,
+        Key::Modifier,
+        Key::Character('['),
+        Key::Other,
+    ];
+    for key in keys {
+        assert_eq!((&key.to_iced()).to_core(), key, "{key:?}");
+    }
+    for code in [Code::BracketLeft, Code::BracketRight, Code::Other] {
+        assert_eq!(code.to_iced().to_core(), code, "{code:?}");
+    }
+    for modifiers in [
+        Modifiers::NONE,
+        Modifiers::SHIFT | Modifiers::META,
+        Modifiers::CONTROL | Modifiers::ALT,
+    ] {
+        assert_eq!(modifiers.to_iced().to_core(), modifiers);
+    }
+}
+
+/// A key event of ours goes to Iced and comes back the same; a release
+/// takes the modifiers it is given.
+#[test]
+fn a_key_event_survives_the_trip_to_iced_and_back() {
+    let press = KeyEvent::Pressed {
+        key: Key::Character('['),
+        code: Code::BracketLeft,
+        modifiers: Modifiers::META,
+        repeat: false,
+        text: Some("[".into()),
+    };
+    let release = KeyEvent::Released {
+        key: Key::Character('['),
+        code: Code::BracketLeft,
+    };
+    for event in [press, release.clone(), KeyEvent::ModifiersChanged(Modifiers::SHIFT)] {
+        let iced = iced::Event::Keyboard(key_event_to_iced(&event, Modifiers::META));
+        assert_eq!(event_to_core(&iced), Some(Event::Key(event)));
+    }
+    let keyboard::Event::KeyReleased { modifiers, .. } = key_event_to_iced(&release, Modifiers::META) else {
+        panic!("a release stays a release");
+    };
+    assert_eq!(modifiers, keyboard::Modifiers::LOGO);
+}

@@ -153,6 +153,104 @@ impl ToCore for keyboard::Modifiers {
     }
 }
 
+impl ToIced for Modifiers {
+    type Iced = keyboard::Modifiers;
+
+    /// The same keys held, as Iced's: the system key is Iced's logo key.
+    fn to_iced(self) -> keyboard::Modifiers {
+        let mut iced = keyboard::Modifiers::empty();
+        iced.set(keyboard::Modifiers::SHIFT, self.shift);
+        iced.set(keyboard::Modifiers::CTRL, self.control);
+        iced.set(keyboard::Modifiers::ALT, self.alt);
+        iced.set(keyboard::Modifiers::LOGO, self.meta);
+        iced
+    }
+}
+
+impl ToIced for Key {
+    type Iced = keyboard::Key;
+
+    /// The key as Iced names it. [`Key::Modifier`] becomes Shift, since
+    /// nothing reads which modifier it was, and [`Key::Other`] becomes
+    /// Iced's unidentified key.
+    fn to_iced(self) -> keyboard::Key {
+        use keyboard::key::Named;
+        let named = match self {
+            Key::Up => Named::ArrowUp,
+            Key::Down => Named::ArrowDown,
+            Key::Left => Named::ArrowLeft,
+            Key::Right => Named::ArrowRight,
+            Key::Enter => Named::Enter,
+            Key::Escape => Named::Escape,
+            Key::Space => Named::Space,
+            Key::Tab => Named::Tab,
+            Key::Backspace => Named::Backspace,
+            Key::Delete => Named::Delete,
+            Key::Home => Named::Home,
+            Key::End => Named::End,
+            Key::PageUp => Named::PageUp,
+            Key::PageDown => Named::PageDown,
+            Key::ContextMenu => Named::ContextMenu,
+            Key::F1 => Named::F1,
+            Key::F2 => Named::F2,
+            Key::F10 => Named::F10,
+            Key::Modifier => Named::Shift,
+            Key::Character(c) => return keyboard::Key::Character(c.to_string().into()),
+            Key::Other => return keyboard::Key::Unidentified,
+        };
+        keyboard::Key::Named(named)
+    }
+}
+
+impl ToIced for Code {
+    type Iced = keyboard::key::Physical;
+
+    /// The place as Iced names it, or Iced's unidentified place for
+    /// [`Code::Other`].
+    fn to_iced(self) -> keyboard::key::Physical {
+        use keyboard::key::{Code as IcedCode, NativeCode, Physical};
+        match self {
+            Code::BracketLeft => Physical::Code(IcedCode::BracketLeft),
+            Code::BracketRight => Physical::Code(IcedCode::BracketRight),
+            Code::Other => Physical::Unidentified(NativeCode::Unidentified),
+        }
+    }
+}
+
+/// A key event of ours as Iced's, for a key the control channel or a test
+/// makes up and Iced must still hear until the window leaves Iced (plan
+/// step P4). `modified_key` is the key itself, as a key typed with no
+/// modifier that changes it gives. A release carries no modifiers in ours,
+/// so it gets `released_with`.
+#[must_use]
+pub fn key_event_to_iced(event: &KeyEvent, released_with: Modifiers) -> keyboard::Event {
+    match event {
+        KeyEvent::Pressed {
+            key,
+            code,
+            modifiers,
+            repeat,
+            text,
+        } => keyboard::Event::KeyPressed {
+            key: key.to_iced(),
+            modified_key: key.to_iced(),
+            physical_key: code.to_iced(),
+            location: keyboard::Location::Standard,
+            modifiers: modifiers.to_iced(),
+            text: text.as_deref().map(Into::into),
+            repeat: *repeat,
+        },
+        KeyEvent::Released { key, code } => keyboard::Event::KeyReleased {
+            key: key.to_iced(),
+            modified_key: key.to_iced(),
+            physical_key: code.to_iced(),
+            location: keyboard::Location::Standard,
+            modifiers: released_with.to_iced(),
+        },
+        KeyEvent::ModifiersChanged(modifiers) => keyboard::Event::ModifiersChanged(modifiers.to_iced()),
+    }
+}
+
 impl ToCore for mouse::Button {
     type Core = PointerButton;
 
