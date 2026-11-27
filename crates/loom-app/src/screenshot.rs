@@ -392,7 +392,7 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
 fn draw_window(app: &crate::App, offscreen: &mut Offscreen, logical: Size, scale: f32) -> Option<Vec<u8>> {
     let physical = physical_size(logical, scale).expect("the caller checked the size");
     // A new cache, so the canvas starts from the still state.
-    let theme = app.theme();
+    let theme = crate::iced_bridge::theme();
     let renderer = &mut offscreen.renderer;
     let mut ui = UserInterface::build(app.view(), logical, Cache::default(), renderer);
     let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(std::time::Instant::now()));
@@ -406,16 +406,22 @@ fn draw_window(app: &crate::App, offscreen: &mut Offscreen, logical: Size, scale
         &mut messages,
     );
     let style = Style {
-        text_color: theme.palette().text,
+        text_color: crate::style::TEXT.to_iced(),
     };
     // The canvas leaves its frame in the app's slot while Iced draws.
     app.canvas_drawn.clear();
-    ui.draw(renderer, &theme, &style, mouse::Cursor::Unavailable);
+    ui.draw(renderer, theme, &style, mouse::Cursor::Unavailable);
     let drawing = app.canvas_drawn.take();
     // The renderer holds text paragraphs weakly, and the widget tree owns
     // them, so the tree must live until the frame is drawn.
     let panels = crate::iced_bridge::offscreen::still_panels(app, logical);
-    let pixels = offscreen.pixels_with(physical, scale, theme.palette().background, drawing, Some(panels));
+    let pixels = offscreen.pixels_with(
+        physical,
+        scale,
+        crate::style::PANEL_FILL.to_iced(),
+        drawing,
+        Some(panels),
+    );
     drop(ui);
     pixels
 }

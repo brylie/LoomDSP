@@ -28,6 +28,7 @@ use iced::advanced::widget::operation::Outcome;
 use iced::{Task, mouse};
 use iced_runtime::user_interface::{Cache, State, UserInterface};
 use iced_wgpu::graphics::Shell;
+use loom_canvas::iced_convert::ToIced as _;
 use loom_ui::shell::{Frame, Ime, Layers, Opened, Parts, Pointer, Redraw, Report};
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -397,10 +398,10 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
 
     fn draw(&mut self, mut parts: Parts<'_, Hosted, IcedTarget>, frame: &Frame<'_>) {
         let app = &parts.app.0;
-        let theme = app.theme();
-        let background = theme.palette().background;
+        let theme = super::theme();
+        let background = crate::style::PANEL_FILL.to_iced();
         let style = Style {
-            text_color: theme.palette().text,
+            text_color: crate::style::TEXT.to_iced(),
         };
         let physical = iced::Size::new(
             (frame.size.width * frame.scale).round() as u32,
@@ -469,7 +470,7 @@ impl Layers<Hosted, IcedTarget> for WindowLayers {
             // The canvas widget leaves its frame in the app's slot while
             // Iced draws; emptied first, so only this frame's is drawn.
             app.canvas_drawn.clear();
-            ui.draw(renderer, &theme, &style, cursor);
+            ui.draw(renderer, theme, &style, cursor);
             if let State::Updated { input_method, .. } = &state
                 && let Some(composed) = super::preedit::of(input_method)
                 && let iced::advanced::InputMethod::Enabled { cursor: caret, .. } = input_method

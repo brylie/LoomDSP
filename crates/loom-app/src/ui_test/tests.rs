@@ -3053,7 +3053,7 @@ fn the_canvas_draws_under_the_overlays_over_it() {
         "{bare} of {all} canvas pixels show the canvas background"
     );
     // Inside the browser's top padding, clear of its border and its rows.
-    let theme = ui.app().theme().extended_palette().background.base.color.into_rgba8();
+    let theme = loom_canvas::iced_convert::ToIced::to_iced(crate::style::PANEL_FILL).into_rgba8();
     assert_eq!(
         pixel_at(&image, browser.x + 20.0, browser.y + 3.0),
         [theme[0], theme[1], theme[2]],
@@ -3167,8 +3167,8 @@ fn a_capture_after_a_shrink_draws_the_last_frame_again() {
         return;
     };
     let app = ui.app();
-    let theme = app.theme();
-    let background = theme.palette().background;
+    let theme = crate::iced_bridge::theme();
+    let background = loom_canvas::iced_convert::ToIced::to_iced(crate::style::PANEL_FILL);
     let size = crate::WINDOW;
     let mut built = UserInterface::build(app.view(), size, Cache::default(), &mut offscreen.renderer);
     let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(ui.now()));
@@ -3181,14 +3181,9 @@ fn a_capture_after_a_shrink_draws_the_last_frame_again() {
     );
     app.canvas_drawn.clear();
     let style = Style {
-        text_color: theme.palette().text,
+        text_color: loom_canvas::iced_convert::ToIced::to_iced(crate::style::TEXT),
     };
-    built.draw(
-        &mut offscreen.renderer,
-        &theme,
-        &style,
-        iced::mouse::Cursor::Unavailable,
-    );
+    built.draw(&mut offscreen.renderer, theme, &style, iced::mouse::Cursor::Unavailable);
     let drawing = app.canvas_drawn.take();
     assert!(drawing.is_some(), "the canvas built a frame");
     let full = iced::Size::new(size.width as u32, size.height as u32);

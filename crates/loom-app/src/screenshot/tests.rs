@@ -35,8 +35,7 @@ fn window_images_draw_enabled_and_disabled_buttons_apart() {
         );
         return;
     };
-    let palette = app.theme().palette();
-    let rgb = |c: iced::Color| [c.r, c.g, c.b].map(|v| (v * 255.0).round() as i32);
+    let rgb = |c: loom_ui_core::Color| [c.r, c.g, c.b].map(|v| (v * 255.0).round() as i32);
     let near = |got: [u8; 3], want: [i32; 3]| got.iter().zip(want).all(|(&g, w)| (i32::from(g) - w).abs() <= 3);
     // The same app laid out by the test harness, to find the buttons
     // by their text. A new patch has nothing to undo.
@@ -54,14 +53,14 @@ fn window_images_draw_enabled_and_disabled_buttons_apart() {
     let undo = fill("Undo");
     assert_ne!(new, undo, "an enabled and a disabled button look the same");
     for label in ["New", "Open", "Add module", "Redo", "MIDI learn", "Preferences"] {
-        assert!(!near(fill(label), rgb(palette.primary)), "{label} is primary");
+        assert!(!near(fill(label), rgb(crate::style::ACCENT)), "{label} is primary");
     }
     let panic = fill("Panic");
     assert!(
-        near(panic, rgb(palette.danger)),
+        near(panic, rgb(crate::style::DANGER.normal.fill.expect("danger is filled"))),
         "Panic is drawn {panic:?}, not danger red"
     );
-    let primary = palette.primary;
+    let primary = crate::style::ACCENT;
     let expected = rgb(primary);
     let is_primary = |rgb: &[u8]| {
         rgb.iter()

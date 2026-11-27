@@ -7,7 +7,6 @@ use crate::{
     App, Args, Loaded, Source, alerts, bench, devices, document, files, layout, matrix, pointer, recovery, registry,
     settings, stream,
 };
-use iced::{Color, Theme};
 use loom_core::{Controller, EngineConfig, EngineParts, create_engine};
 use loom_host_desktop::AudioOutput;
 use loom_patch::{FlatIds, Hierarchy, Library, Metadata, ModulePath, Patch};
@@ -183,17 +182,6 @@ impl App {
             generation,
             test_modules: args.test_modules,
             quit: false,
-            theme: Theme::custom(
-                "Loom",
-                iced::theme::Palette {
-                    background: Color::from_rgb8(0x22, 0x24, 0x2A),
-                    text: Color::from_rgb8(0xE6, 0xE8, 0xEE),
-                    primary: Color::from_rgb8(0xF5, 0xA6, 0x23),
-                    success: Color::from_rgb8(0x4C, 0xB0, 0x6E),
-                    warning: Color::from_rgb8(0xE8, 0xD2, 0x4A),
-                    danger: Color::from_rgb8(0xE0, 0x4F, 0x4F),
-                },
-            ),
             rig,
             alerts: alerts::Alerts::with_notes(status),
             // The app's tests load the test modules but never list them.

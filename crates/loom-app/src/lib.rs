@@ -948,7 +948,6 @@ struct App {
     test_modules: bool,
     /// Set when the app should exit after this update.
     quit: bool,
-    theme: Theme,
     /// What belongs to the machine: preferences, devices, MIDI inputs.
     rig: settings::Rig,
     /// The status line, the stats bar's warnings, and problems reported once.
@@ -1139,10 +1138,6 @@ impl App {
 
     fn title(&self) -> String {
         files::titled(&self.patch_name(), self.unsaved())
-    }
-
-    fn theme(&self) -> Theme {
-        self.theme.clone()
     }
 
     /// Applies the edits queued for the idle engine, and frees what it

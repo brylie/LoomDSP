@@ -22,6 +22,7 @@ use iced::advanced::widget::Operation;
 use iced::advanced::widget::operation::Outcome;
 use iced::{Size, Task, mouse};
 use iced_runtime::user_interface::{Cache, UserInterface};
+use loom_canvas::iced_convert::ToIced as _;
 use loom_ui::effect::{Choice, FileRequest, Image, Job, NoGpu, Question, Reply};
 use loom_ui::headless::Headless;
 use loom_ui::{Driver, Waker, WindowSpec};
@@ -187,12 +188,12 @@ impl Surface {
     /// built, as in the window, and dropped: the measure renderer draws
     /// nothing, so no frame it drew is ever drawn on a GPU.
     pub(crate) fn draw(&mut self, app: &App) {
-        let theme = app.theme();
+        let theme = super::theme();
         let style = Style {
-            text_color: theme.palette().text,
+            text_color: crate::style::TEXT.to_iced(),
         };
         app.canvas_drawn.clear();
-        self.with_ui(app, |ui, renderer, cursor| ui.draw(renderer, &theme, &style, cursor));
+        self.with_ui(app, |ui, renderer, cursor| ui.draw(renderer, theme, &style, cursor));
         app.canvas_drawn.clear();
     }
 
@@ -222,9 +223,9 @@ impl Surface {
             return Err(NoGpu);
         };
         let renderer = &mut offscreen.renderer;
-        let theme = app.theme();
+        let theme = super::theme();
         let style = Style {
-            text_color: theme.palette().text,
+            text_color: crate::style::TEXT.to_iced(),
         };
         let physical = Size::new(size.width.round() as u32, size.height.round() as u32);
         let mut ui = UserInterface::build(app.view(), size, cache, renderer);
@@ -244,7 +245,7 @@ impl Surface {
         );
         // The canvas leaves its frame in the app's slot while Iced draws.
         app.canvas_drawn.clear();
-        ui.draw(renderer, &theme, &style, cursor);
+        ui.draw(renderer, theme, &style, cursor);
         let drawing = app.canvas_drawn.take();
         // The tree owns the text the renderer holds weakly, so it stays
         // until the frame is drawn.
@@ -259,7 +260,7 @@ impl Surface {
         let panels = super::paint::paint_sides(whole, |layer, list| {
             panels.paint(layer, &mut ListPainter::new(&text, list), &panel_style);
         });
-        let pixels = offscreen.pixels_with(physical, 1.0, theme.palette().background, drawing, Some(panels));
+        let pixels = offscreen.pixels_with(physical, 1.0, crate::style::PANEL_FILL.to_iced(), drawing, Some(panels));
         self.cache = Some(ui.into_cache());
         // A frame that could not be read back answers as the window's
         // capture does then: with no image (`shell/gpu.rs`, `capture`).

@@ -340,12 +340,10 @@ type Row = (&'static str, super::RoleTokens, [f32; 4], [f32; 4], [f32; 2]);
 fn the_role_tokens_meet_their_table() {
     use super::{DANGER, PLAIN, PRIMARY, RoleState, SECONDARY};
     use loom_canvas::contrast_ratio;
-    let app = crate::tests::app();
-    let background = app.theme().extended_palette().background.base.color;
     assert_eq!(
-        loom_canvas::iced_convert::ToCore::to_core(background),
+        super::PANEL_FILL,
         ROLE_BACKGROUND,
-        "the theme's background is the one the table is set for"
+        "the panel fill is the background the table is set for"
     );
     let round = |ratio: f32| (ratio * 100.0).round() / 100.0;
     let on = |state: RoleState| state.fill.unwrap_or(ROLE_BACKGROUND);
@@ -448,32 +446,4 @@ fn the_highlighted_row_reads_and_stands_out() {
     assert!(quiet >= 4.5, "quiet text on the row: {quiet:.2}:1");
     let outline = contrast_ratio(row.border, panel.fill);
     assert!(outline >= 3.0, "the outline: {outline:.2}:1");
-}
-
-/// The palette tokens are the exact shades Iced's theme gives for the
-/// app's six palette colours, so nothing drawn changes as the panels move
-/// from the theme to the tokens (plan for leaving Iced, phase 4, P3).
-#[test]
-fn the_palette_tokens_are_the_theme_shades() {
-    use loom_canvas::iced_convert::ToCore as _;
-    let theme = crate::tests::app().theme();
-    let palette = theme.extended_palette();
-    let half = |c: iced::Color| c.scale_alpha(0.5).to_core();
-    for (name, token, shade) in [
-        ("PANEL_FILL", super::PANEL_FILL, palette.background.base.color.to_core()),
-        ("PANEL_FILL", super::PANEL_FILL, theme.palette().background.to_core()),
-        ("TEXT", super::TEXT, palette.background.base.text.to_core()),
-        ("TEXT", super::TEXT, palette.background.weak.text.to_core()),
-        ("TEXT", super::TEXT, theme.palette().text.to_core()),
-        ("ACCENT", super::ACCENT, palette.primary.base.color.to_core()),
-        ("ACCENT", super::ACCENT, theme.palette().primary.to_core()),
-        ("RAISED", super::RAISED, palette.background.weak.color.to_core()),
-        ("EDGE", super::EDGE, palette.background.strong.color.to_core()),
-        ("CARD_FILL", super::CARD_FILL, half(palette.background.weak.color)),
-        ("CARD_BORDER", super::CARD_BORDER, half(palette.background.strong.color)),
-        ("ACCENT_WEAK", super::ACCENT_WEAK, palette.primary.weak.color.to_core()),
-        ("DANGER_EDGE", super::DANGER_EDGE, palette.danger.strong.color.to_core()),
-    ] {
-        assert_eq!(token, shade, "{name}");
-    }
 }

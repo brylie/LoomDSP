@@ -999,6 +999,32 @@ mod window;
 pub(crate) use services::AppServices;
 /// The bridge the crate's tests run on: the `Ui` harness's, the only one
 /// left since the app runs on the shell (`window.rs`).
+/// Iced's theme, for what Iced still draws until the cut-over (plan for
+/// leaving Iced, P4): the window's two rules and the default text colour.
+/// Built once, from the app's tokens in `style.rs`, so the app itself
+/// keeps no theme and reads no shade Iced works out. P4 deletes it with
+/// the bridge.
+pub(crate) fn theme() -> &'static iced::Theme {
+    use loom_canvas::iced_convert::ToIced as _;
+    static THEME: std::sync::LazyLock<iced::Theme> = std::sync::LazyLock::new(|| {
+        iced::Theme::custom(
+            "Loom",
+            iced::theme::Palette {
+                background: crate::style::PANEL_FILL.to_iced(),
+                text: crate::style::TEXT.to_iced(),
+                primary: crate::style::ACCENT.to_iced(),
+                // The only colours outside `style.rs`: Iced's palette needs a
+                // value for each, nothing the app draws reads them, and P4
+                // deletes them with the bridge. Kept as they were.
+                success: iced::Color::from_rgb8(0x4C, 0xB0, 0x6E),
+                warning: iced::Color::from_rgb8(0xE8, 0xD2, 0x4A),
+                danger: crate::style::DANGER.normal.fill.expect("danger is filled").to_iced(),
+            },
+        )
+    });
+    &THEME
+}
+
 #[cfg(test)]
 pub(crate) type AppBridge = Bridge<headless::UiDriver>;
 #[cfg(test)]

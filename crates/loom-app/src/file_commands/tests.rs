@@ -98,8 +98,6 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         // The update that sets it ends by exiting the app, so a replace never
         // starts with it set.
         quit: _,
-        // Built the same way every time.
-        theme: _,
         // What belongs to the machine. `Rig`'s own tests cover it.
         rig: _,
         alerts,

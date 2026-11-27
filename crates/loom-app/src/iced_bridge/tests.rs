@@ -344,3 +344,57 @@ fn a_screen_readers_events_become_the_apps() {
         Some(Message::A11y(crate::a11y::Event::Deactivated))
     ));
 }
+
+/// The theme the bridge builds for Iced gives back the app's palette
+/// tokens, exactly, for every shade the app once read from it, so what
+/// Iced still draws (the window's rules, its default text) cannot drift
+/// from the tokens. The tokens were recorded from this theme (plan for
+/// leaving Iced, phase 4, P3). P4 deletes this with the bridge.
+#[test]
+fn the_bridge_theme_gives_the_palette_tokens() {
+    use loom_canvas::iced_convert::ToCore as _;
+    let theme = theme();
+    let palette = theme.extended_palette();
+    let half = |c: iced::Color| c.scale_alpha(0.5).to_core();
+    for (name, token, shade) in [
+        (
+            "PANEL_FILL",
+            crate::style::PANEL_FILL,
+            palette.background.base.color.to_core(),
+        ),
+        (
+            "PANEL_FILL",
+            crate::style::PANEL_FILL,
+            theme.palette().background.to_core(),
+        ),
+        ("TEXT", crate::style::TEXT, palette.background.base.text.to_core()),
+        ("TEXT", crate::style::TEXT, palette.background.weak.text.to_core()),
+        ("TEXT", crate::style::TEXT, theme.palette().text.to_core()),
+        ("ACCENT", crate::style::ACCENT, palette.primary.base.color.to_core()),
+        ("ACCENT", crate::style::ACCENT, theme.palette().primary.to_core()),
+        ("RAISED", crate::style::RAISED, palette.background.weak.color.to_core()),
+        ("EDGE", crate::style::EDGE, palette.background.strong.color.to_core()),
+        (
+            "CARD_FILL",
+            crate::style::CARD_FILL,
+            half(palette.background.weak.color),
+        ),
+        (
+            "CARD_BORDER",
+            crate::style::CARD_BORDER,
+            half(palette.background.strong.color),
+        ),
+        (
+            "ACCENT_WEAK",
+            crate::style::ACCENT_WEAK,
+            palette.primary.weak.color.to_core(),
+        ),
+        (
+            "DANGER_EDGE",
+            crate::style::DANGER_EDGE,
+            palette.danger.strong.color.to_core(),
+        ),
+    ] {
+        assert_eq!(token, shade, "{name}");
+    }
+}
