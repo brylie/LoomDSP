@@ -193,7 +193,7 @@ Two built forms of the Phase warp type (ADR-0017): small, cheap, and needed now 
 | Data | `pattern`: 4 lanes of up to 64 steps, with step attributes ([data kinds](panel-widgets.md#data-kinds)). `scale`: a one-lane gate pattern (Own only) |
 | Panel | A step grid (rows layout) for `pattern`, with the attribute picker; radio buttons for `read`; knobs for `division`, `length`, and `steps1` to `steps4`. `type1` to `type4`, `scale`, `root`, and `seed` in the inspector. |
 
-**Settled:** four fixed lanes, each with its own length, so lanes can run in polymeter. *Why four:* ports are static in a descriptor. *Why own lengths from the start:* a 5-step lane against a 16-step lane is one of the quickest ways to make a pattern that keeps changing; it moves forward from M3 (FR-LIB-14). Per-lane rate and direction stay in M3.
+**Settled:** four fixed lanes, each with its own length, so lanes can run in polymeter. *Why four:* ports are static in a descriptor. *Why own lengths from the start:* a 5-step lane against a 16-step lane is one of the quickest ways to make a pattern that keeps changing; so own lengths ship with the first sequencer, in M3 (FR-LIB-14). Per-lane rate and direction come later in M3.
 
 **Reading** (`read` is a setting, not chosen by a cable):
 

@@ -644,7 +644,7 @@ What M1 builds. The rest of this spec is M2 and M3: exposed controls and most wi
 
 ### Out of scope for M1
 
-- The panel editor, sub-patch panels, and front panels (M3, FR-PANEL-*).
+- The panel editor, designed sub-patch panels, and front panels (M3, FR-PANEL-*). Derived sub-patch panels are M2 ([Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch)).
 - Step grid and curve editing on the tile. They need module data (OQ-17, M3).
 - XY pad (M2), themes (M3). Custom skins are ruled out by ADR-0025.
 - Restyling built-in panels.
