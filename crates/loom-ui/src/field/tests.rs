@@ -1869,6 +1869,24 @@ fn preedit(text: &str) -> ImeEvent {
     }
 }
 
+/// A focus effect that selects all of a field that is composing ends the
+/// composition, keeping its text, and the app hears that edit, as it hears
+/// one from a key.
+#[test]
+fn select_all_over_a_composition_tells_the_app_its_text() {
+    let Some((mut harness, mut typesetter)) = form("", true) else {
+        return;
+    };
+    harness.send(Message::Focus(name()));
+    harness.lay_out(&mut typesetter);
+    harness.step(ime_in(preedit("にほ")));
+    harness.lay_out(&mut typesetter);
+    harness.send(Message::FocusAll(name()));
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.runtime().field_text(&name()), Some("にほ"), "the field kept it");
+    assert_eq!(harness.app().text, "にほ", "and the app heard it");
+}
+
 /// The plan's sequence: a preedit, an empty preedit, then the commit,
 /// leaves the committed text once, with the caret after it, as one undo
 /// step. While composing, the field shows the preedit, but its committed

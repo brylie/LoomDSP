@@ -2230,6 +2230,17 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     {
                         let used = self.panels.fields.act(id, crate::field::FieldAction::SelectAll, now);
                         redraw |= used.changed;
+                        // Selecting all ends a composition, whose text it
+                        // keeps: an edit the app hears, as from a key.
+                        if used.edited {
+                            let text = self
+                                .panels
+                                .fields
+                                .get(id)
+                                .map(crate::field::FieldState::committed)
+                                .unwrap_or_default();
+                            self.pending.extend(self.app.field_event(id, &FieldEvent::Edited(text)));
+                        }
                     }
                     self.field_left_after_focus(now);
                 }
