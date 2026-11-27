@@ -392,6 +392,9 @@ pub(crate) struct TextLeaf {
     /// The last sizes of wrapping text, by the width it was given (`None`
     /// for no limit), oldest first.
     wrapped: [Option<(Option<u32>, Size)>; WRAPPED_SIZES],
+    /// Its padding and border across: taffy gives a width it must have as
+    /// the whole box, so the text's own width is that less this.
+    inset: f32,
 }
 
 impl TextLeaf {
@@ -418,12 +421,18 @@ impl TextLeaf {
             });
         }
         // The narrowest it can be is its longest word, which is what
-        // breaking at every space gives.
-        let width = known.width.or(match available.width {
-            AvailableSpace::Definite(width) => Some(width),
-            AvailableSpace::MinContent => Some(0.0),
-            AvailableSpace::MaxContent => None,
-        });
+        // breaking at every space gives. A known width is the whole box,
+        // while the space it may take is already inside its padding and
+        // border: both are measured inside, the width it is painted at, so
+        // a line the measure kept whole never breaks when painted.
+        let width = known
+            .width
+            .map(|width| (width - self.inset).max(0.0))
+            .or(match available.width {
+                AvailableSpace::Definite(width) => Some(width),
+                AvailableSpace::MinContent => Some(0.0),
+                AvailableSpace::MaxContent => None,
+            });
         let key = width.map(f32::to_bits);
         if let Some((_, size)) = self.wrapped.iter().flatten().find(|(kept, _)| *kept == key) {
             return *size;
@@ -898,6 +907,7 @@ impl Layout {
             _ => None,
         };
         let passive = element.passive;
+        let inset = element.padding.left + element.padding.right + 2.0 * element.look.border_width();
         let Element {
             kind,
             key,
@@ -942,6 +952,7 @@ impl Layout {
                     placeholder: None,
                     line: None,
                     wrapped: [None; WRAPPED_SIZES],
+                    inset,
                 });
                 self.tree.new_leaf_with_context(style, leaf)
             }
@@ -964,6 +975,7 @@ impl Layout {
                     placeholder,
                     line: None,
                     wrapped: [None; WRAPPED_SIZES],
+                    inset,
                 });
                 self.tree.new_leaf_with_context(style, leaf)
             }

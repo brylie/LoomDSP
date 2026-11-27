@@ -197,8 +197,8 @@ fn tree(panel: &Tree) -> Element {
         .min_height(0.0)
 }
 
-/// One row: a tree item, its mark, and its name. The current row is the
-/// tree's one stop.
+/// One row: a tree item, its mark, and its name, wrapped to the column's
+/// width as Iced's rows were. The current row is the tree's one stop.
 fn tree_row(panel: &Tree, row: &Row) -> Element {
     let current = panel.current.as_ref() == Some(&row.id);
     let mark = match row.expanded {
@@ -221,6 +221,7 @@ fn tree_row(panel: &Tree, row: &Row) -> Element {
     let key = row.id.keys().last().cloned().expect("a row has a key");
     let indent = 8.0 + (row.level.saturating_sub(1) as f32) * 12.0;
     let element = Element::text(format!("{mark}{}", row.name), style::BODY_TEXT)
+        .wrap()
         .padding(Padding {
             top: 5.0,
             bottom: 5.0,
@@ -249,6 +250,7 @@ fn jumps(panel: &Jumps) -> Element {
     let options = panel.names.iter().enumerate().map(|(index, name)| {
         let chosen = index == panel.selected;
         Element::text(name.clone(), style::BODY_TEXT)
+            .wrap()
             .padding(Padding::symmetric(5.0, 8.0))
             .width(Length::FILL)
             .radius(style::TAB_RADIUS)

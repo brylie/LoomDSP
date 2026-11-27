@@ -168,3 +168,26 @@ fn no_two_outline_rows_share_a_key_in_any_example() {
     }
     assert!(checked >= 10, "the examples were read: {checked}");
 }
+
+/// A long row wraps onto more lines inside the column rather than running
+/// past the tree's right edge, as Iced's rows did. That its box has room
+/// for every line it paints is `loom-ui`'s to check
+/// (`wrapping_text_is_measured_inside_its_padding_and_border`).
+#[test]
+fn long_rows_wrap_to_the_column() {
+    let mut ui = outline_open();
+    ui.lay_out_panels();
+    let list = ui.runtime().bounds(&rows_id()).expect("the tree is laid out");
+    let rows = ui.app().outline_rows();
+    let mut wrapped = false;
+    for row in rows.iter() {
+        let at = ui.runtime().bounds(&row.id).expect("the row is laid out");
+        assert!(
+            at.x + at.width <= list.x + list.width + 0.5,
+            "{} runs past the column: {at:?} in {list:?}",
+            row.id
+        );
+        wrapped |= at.height > 40.0;
+    }
+    assert!(wrapped, "some row of the subtractive example is long enough to wrap");
+}

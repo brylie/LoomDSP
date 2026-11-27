@@ -300,6 +300,29 @@ fn wrapping_text_is_as_tall_as_its_lines_at_its_width() {
     assert_eq!(at(&lay_out(column, 300.0, 300.0), "text").height, 16.0);
 }
 
+/// Wrapping text with its own padding and border is measured inside them,
+/// at the width it is painted at. A box 182 px across, with 8 px of padding
+/// and a 1 px border on each side, leaves 164 px for a text 176 px long: it
+/// takes two lines and the room for both, so the second line never spills
+/// over what comes under it.
+#[test]
+fn wrapping_text_is_measured_inside_its_padding_and_border() {
+    let column = Element::column([
+        Element::text("aaaaaaaaaa bbbbbbbbbbb", STYLE)
+            .wrap()
+            .padding(Padding::symmetric(5.0, 8.0))
+            .border(1.0, loom_ui_core::Color::TRANSPARENT)
+            .width(Length::FILL)
+            .key("text"),
+        space("next", 10.0, 10.0),
+    ])
+    .width(Length::Fixed(182.0));
+    let layout = lay_out(column, 300.0, 300.0);
+    let text = at(&layout, "text");
+    assert_eq!(text.height, 2.0 * 16.0 + 2.0 * 5.0 + 2.0, "two lines inside the inset");
+    assert_eq!(at(&layout, "next").y, text.y + text.height);
+}
+
 /// The root takes the whole space along a fill axis, and its content's
 /// size along a shrink axis.
 #[test]
