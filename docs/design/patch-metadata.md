@@ -3,7 +3,7 @@
 Authors, tags, and a licence stored in every patch, so people who share patches get credit, find patches again, and know what others may do with them.
 
 - **Kind:** living specification.
-- **Status:** Agreed (2026-11-01, [#243](https://github.com/brylie/LoomDSP/issues/243)). M2: the file fields, patch info, the licence chooser, the defaults, credit for parts, and [your patches browser](#your-patches-browser). M4: the same filters in the library browser (FR-SHARE-04). Implemented in M2, including [credit for parts](#credit-for-parts). See [Notes from building](#notes-from-building).
+- **Status:** Implemented for M2; agreed 2026-11-01 ([#243](https://github.com/brylie/LoomDSP/issues/243)). M2: the file fields, patch info, the licence chooser, the defaults, credit for parts, and [your patches browser](#your-patches-browser). M4: the same filters in the library browser (FR-SHARE-04), not built yet. Every M2 part is implemented, including [credit for parts](#credit-for-parts). See [Notes from building](#notes-from-building).
 - **Decision behind it:** [ADR-0023](../adr/0023-patch-licences-spdx-and-creative-commons.md) (licences); the patch format is [ADR-0008](../adr/0008-patch-format-ron.md).
 - **Use case and requirements:** UC7, UC9, FR-FILE-08, FR-FILE-09, FR-FILE-10, FR-SHARE-06, FR-SHARE-07, FR-NATIVE-09.
 - **Prior art:** package manifests list several authors, one per entry (as `Cargo.toml` does). Topic tags on code hosting sites are lowercase words joined by hyphens. Creative Commons offers a licence chooser that asks two questions. We use those conventions, in our own words and UI.

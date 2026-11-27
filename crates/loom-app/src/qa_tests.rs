@@ -277,12 +277,96 @@ fn dc_through_the_app() {
             ..Setup::new("dc", PatchFrom::Text(CONSTANT_ONE))
         }
         .start();
-        run.play(1.0);
+        run.play(2.0);
         let left = run.left();
         let tail = &left[RATE / 2..];
         match mode {
             OutputSafety::Off => assert!(tail.iter().all(|&x| x == 1.0), "Off holds 1.0"),
             _ => assert!(peak(tail) < 0.001, "{mode}: DC left: {}", peak(tail)),
+        }
+        // `loom analyze --from 0.5 --max-dc 0.001` fails on Off and passes
+        // on the others: the low-pass DC lets real DC through.
+        let dc = analyze_tape(&run, 0.5).channels[0]
+            .dc_low_pass
+            .expect("2 s is long enough");
+        match mode {
+            OutputSafety::Off => assert!((dc - 1.0).abs() < 1e-3, "Off reads 1.0: {dc}"),
+            _ => assert!(dc.abs() < 0.001, "{mode}: low-pass DC {dc}"),
+        }
+    }
+}
+
+/// Measures the tape with `loom_analysis`, as `loom analyze` measures a
+/// recording, from `from` seconds.
+fn analyze_tape(run: &Run, from: f64) -> loom_analysis::Analysis {
+    let audio = loom_analysis::Audio {
+        sample_rate: RATE as u32,
+        channels: vec![run.tape.left(), run.tape.right()],
+    };
+    loom_analysis::analyze(&audio, Some(from), None)
+}
+
+/// The value after `flag` on the `loom-cli analyze` command line in
+/// AGENTS.md, so this test checks the limits agents are told to use.
+fn agents_analyze_flag(flag: &str) -> f64 {
+    let agents = include_str!("../../../AGENTS.md");
+    let line = agents
+        .lines()
+        .find(|line| line.contains("loom-cli -- analyze"))
+        .expect("AGENTS.md has the analyze command");
+    let mut words = line.split_whitespace();
+    words
+        .find(|word| *word == flag)
+        .unwrap_or_else(|| panic!("{flag} in: {line}"));
+    words
+        .next()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_else(|| panic!("{flag} value in: {line}"))
+}
+
+/// The note and the total wait, in seconds, of the control script the
+/// AGENTS.md `--record` command plays.
+fn held_note_script() -> (u8, f64) {
+    let script = include_str!("../../../examples/dev/check-held-note.jsonl");
+    let (mut note, mut seconds) = (None, 0.0);
+    for line in script.lines().filter(|line| !line.trim().is_empty()) {
+        let command: serde_json::Value = serde_json::from_str(line).unwrap();
+        match command["cmd"].as_str() {
+            Some("note") if command["on"] == true => note = command["note"].as_u64(),
+            Some("wait") => seconds += command["ms"].as_f64().unwrap() / 1000.0,
+            _ => {}
+        }
+    }
+    (note.expect("the script plays a note") as u8, seconds)
+}
+
+/// The check AGENTS.md gives passes on a played note (#789): `sine.ron` and
+/// `subtractive.ron`, with the note and the length of
+/// `examples/dev/check-held-note.jsonl`, played from the start of the tape
+/// (before `--from`, as the spec's rule for a check asks), measured with
+/// the `--from`, `--max-peak`, and `--max-dc` of the AGENTS.md command.
+/// Before #789 the DC check failed on both, because it measured the tone.
+#[test]
+fn a_held_note_passes_the_agents_check() {
+    assert!(
+        include_str!("../../../AGENTS.md").contains("examples/dev/check-held-note.jsonl"),
+        "AGENTS.md records with the held-note script"
+    );
+    let (note, seconds) = held_note_script();
+    let from = agents_analyze_flag("--from");
+    let max_peak = agents_analyze_flag("--max-peak");
+    let max_dc = agents_analyze_flag("--max-dc");
+    for patch in ["sine.ron", "subtractive.ron"] {
+        let run = Setup::new("held-note", PatchFrom::Example(patch)).start();
+        let midi = run.app.session.engine.midi.as_ref().expect("the engine takes MIDI");
+        loom_host_desktop::send_midi(midi, MidiEvent::note_on(0, 0, note, 100));
+        run.play(seconds);
+        let analysis = analyze_tape(&run, from);
+        for (i, c) in analysis.channels.iter().enumerate() {
+            assert!(c.peak > 0.05, "{patch} channel {i}: the note plays, peak {}", c.peak);
+            assert!(f64::from(c.peak) <= max_peak, "{patch} channel {i}: peak {}", c.peak);
+            let dc = c.dc_low_pass.expect("the script plays long enough to measure DC");
+            assert!(dc.abs() <= max_dc, "{patch} channel {i}: low-pass DC {dc}");
         }
     }
 }

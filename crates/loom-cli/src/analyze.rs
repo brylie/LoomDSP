@@ -26,17 +26,21 @@ pub struct Options {
     /// Fail if any step between neighbouring samples is over this.
     #[arg(long, value_name = "X")]
     max_step: Option<f32>,
-    /// Fail if the DC of any 100 ms window is over this in size.
+    /// Fail if the low-pass DC is over this in size: the largest size of
+    /// the signal after a 1 Hz low-pass, from 1 s into the part. A part of
+    /// 1 s or less cannot be measured, and exits with status 2.
     #[arg(long, value_name = "X")]
     max_dc: Option<f64>,
 }
 
-/// Exit status when the file cannot be read: a broken run, not a failed
-/// check.
+/// Exit status when the run could not measure: the file cannot be read, an
+/// option is not usable, or a check has nothing to measure. A broken run,
+/// not a failed check.
 const UNREADABLE: u8 = 2;
 
 /// Runs `loom analyze`. Exit status 0 when every check passes, 1 when one
-/// fails, and 2 when the file cannot be read or an option is not usable.
+/// fails, and 2 when the file cannot be read, an option is not usable, or
+/// a check has nothing to measure.
 pub fn run(options: &Options) -> ExitCode {
     if let Err(e) = validate(options) {
         eprintln!("error: {e}");
@@ -60,6 +64,10 @@ pub fn run(options: &Options) -> ExitCode {
         }
     } else {
         print_text(&result);
+    }
+    if let Some(problem) = unmeasurable(&result, options) {
+        eprintln!("error: {problem}");
+        return ExitCode::from(UNREADABLE);
     }
     let failures = failures(&result, options);
     for failure in &failures {
@@ -96,6 +104,20 @@ fn validate(options: &Options) -> Result<(), String> {
         return Err(format!("--from {from} is after --to {to}"));
     }
     Ok(())
+}
+
+/// Why a check given cannot be measured, if one cannot: `--max-dc` on a
+/// part too short for the low-pass to settle. It must never pass, and it is
+/// not a failed check either, so the run exits with status 2.
+fn unmeasurable(result: &Analysis, options: &Options) -> Option<String> {
+    let limit = options.max_dc?;
+    result.channels.iter().any(|c| c.dc_low_pass.is_none()).then(|| {
+        format!(
+            "--max-dc {limit}: the part is {:.3} s; DC is measured from {} s into it, so it needs more",
+            result.seconds,
+            analysis::DC_SETTLE_SECONDS
+        )
+    })
 }
 
 /// One line per failed check, naming the check, the channel, and the value.
@@ -140,9 +162,10 @@ fn failures(result: &Analysis, options: &Options) -> Vec<String> {
             ));
         }
         if let Some(limit) = options.max_dc
-            && c.dc_window.abs() > limit
+            && let Some(dc) = c.dc_low_pass
+            && dc.abs() > limit
         {
-            out.push(format!("--max-dc {limit}: channel {} DC {}", i + 1, c.dc_window));
+            out.push(format!("--max-dc {limit}: channel {} low-pass DC {dc}", i + 1));
         }
     }
     out
@@ -165,10 +188,14 @@ fn print_text(result: &Analysis) {
         println!("  at full scale  {}", c.full_scale);
         println!("  not finite     {}", c.non_finite);
         println!("  largest step   {:.6} at {:.4} s", c.max_step, c.max_step_at);
-        println!(
-            "  DC             {:+.6} (largest 100 ms window {:+.6})",
-            c.dc, c.dc_window
-        );
+        match c.dc_low_pass {
+            Some(low_pass) => println!("  DC             {:+.6} (low-pass {low_pass:+.6})", c.dc),
+            None => println!(
+                "  DC             {:+.6} (low-pass: part too short, needs more than {} s)",
+                c.dc,
+                analysis::DC_SETTLE_SECONDS
+            ),
+        }
         println!("  RMS            {:.6} ({:.2} dBFS)", c.rms, c.rms_dbfs);
     }
 }

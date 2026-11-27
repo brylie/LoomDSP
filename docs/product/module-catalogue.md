@@ -16,7 +16,7 @@ Each entry is a **module type**, not a module ID. A type says what a module does
 - **Catalogue IDs** look like `MT-FILTER-02` (MT for "module type"). They are stable, like requirement IDs: if an entry is dropped, mark it **Withdrawn** instead of reusing the ID. Issues say "Implements MT-FILTER-02", so the link survives renames.
 - **Primitive** entries are modules with one job. **Abstraction** entries are open patches made from primitives (FR-LIB-24): they work as one module, and you can open and change them.
 - **Traits** are shared options, listed by name. They are defined in [Traits](#traits).
-- **Phase** follows the use case the type unblocks: M1 for the subtractive tutorial (UC1), M2 for panels, sub-patches, and live play (UC2, UC3), M3 for self-arranging sets and for sequencing chords and note clips (UC8, UC10), M4 for the rest.
+- **Phase** follows the use case the type unblocks: M1 for the subtractive tutorial (UC1), M2 for sub-patches and polyphony, M3 for panels and live play (UC2, UC3), self-arranging sets, and sequencing chords and note clips (UC8, UC10), M4 for the rest.
 - **Req.** links to the requirement that covers the type, or says **New** when no requirement covers it yet.
 - **Status** is **Built** (with its module IDs), **Built in part** (some of the described behaviour is built; the status names what is missing), **Specified** (in a design specification), or **Planned**.
 
@@ -50,7 +50,7 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 | MT-PHASE-06 | Phase split | Divides one cycle into N parts and outputs a phase for each part. | | M3 | New | Planned |
 | MT-PHASE-08 | Phase wrap and fold | Brings any signal into the 0 to 1 phase range, by wrapping it around or by folding it back at the edges. | | M1 | FR-LIB-01 | Built (`loom.phase.wrap`) |
 | MT-PHASE-07 | Span phase | A phase that covers N bars and is anchored to bar 1, so it has the same value at the same musical time after any jump. | | M3 | New | Planned |
-| MT-PHASE-09 | Clock to phase | Turns a clock that arrives as triggers into a phase, by measuring the time between them, so it can be multiplied and divided like any phase. | | M2 | FR-LIB-27 | Specified ([clock](../design/clock.md#clock-to-phase)) |
+| MT-PHASE-09 | Clock to phase | Turns a clock that arrives as triggers into a phase, by measuring the time between them, so it can be multiplied and divided like any phase. | | M3 | FR-LIB-27 | Specified ([clock](../design/clock.md#clock-to-phase)) |
 
 ## Sound sources
 
@@ -62,7 +62,7 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 | MT-SRC-04 | Chaotic source | Signals from chaotic systems, such as iterated maps, attractors, and stochastic waveforms. | Seed | M4 | New | Planned |
 | MT-SRC-05 | Swept sine | Sweeps a sine between two frequencies, for tests, risers, and effects. | Timebase | M4 | New | Planned |
 | MT-SRC-06 | Modal resonator | A bank of tuned resonant modes that rings like a bar, plate, or membrane when excited. | Character | M4 | FR-LIB-15 | Planned |
-| MT-SRC-07 | FM operator (abstraction) | An oscillator with a phase modulation input, its own envelope, and its own level, for building FM voices. | | M2 | New | Planned |
+| MT-SRC-07 | FM operator (abstraction) | An oscillator with a phase modulation input, its own envelope, and its own level, for building FM voices. | | M3 | New | Planned |
 | MT-SRC-08 | Synth voice (abstraction) | A subtractive voice with slots for oscillators, a filter, an amplitude envelope, and a modulation envelope. Stackable for unison. | | M2 | FR-ENCAP-08 | Built (`crates/loom-app/library/Synth voice.ron`, a built-in; [sub-patches](../design/sub-patches.md#the-synth-voice-mt-src-08)) |
 | MT-SRC-09 | Drum voice (abstraction) | One template for kick, snare, hat, and percussion: slots for an exciter (oscillator, noise, or sample), a shaper, a filter, and an envelope. | | M3 | New | Planned |
 | MT-SRC-10 | String model (abstraction) | A plucked or bowed string from a tuned delay line, a filter, and feedback. | | M4 | New | Planned |
@@ -75,8 +75,8 @@ Sampling is built from small parts, so one set of primitives covers one-shot pla
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-SAMPLE-01 | Buffer | Holds audio in memory. It can be loaded from a file, recorded into, and shared by readers. Saved with the patch or referenced. | | M2 | FR-LIB-19 | Planned |
-| MT-SAMPLE-02 | Buffer reader | Reads a buffer by phase or by position, at a pitch, with loop points and a crossfade at the loop. | Timebase, Retrigger, Quality | M2 | FR-LIB-15 | Planned |
+| MT-SAMPLE-01 | Buffer | Holds audio in memory. It can be loaded from a file, recorded into, and shared by readers. Saved with the patch or referenced. | | M3 | FR-LIB-19 | Planned |
+| MT-SAMPLE-02 | Buffer reader | Reads a buffer by phase or by position, at a pitch, with loop points and a crossfade at the loop. | Timebase, Retrigger, Quality | M3 | FR-LIB-15 | Planned |
 | MT-SAMPLE-03 | Buffer writer | Records a signal into a buffer, with overdub and clear, into memory allocated before recording starts. | | M3 | FR-LIB-20 | Planned |
 | MT-SAMPLE-04 | Slice map | Turns a slice number into the start and end of a slice, so a reader plays one slice per trigger. | | M3 | New | Planned |
 | MT-SAMPLE-05 | Zone map | Picks a buffer by pitch and velocity range, for multi-sampled instruments. | | M4 | FR-LIB-15 | Planned |
@@ -93,23 +93,23 @@ Sampling is built from small parts, so one set of primitives covers one-shot pla
 | MT-FILTER-01 | State variable filter | A resonant filter with low-pass, high-pass, band-pass, and notch outputs at once. | Character | M1 | FR-LIB-03 | Built (`loom.filter.svf`: low-pass, band-pass, high-pass, and notch outputs) |
 | MT-FILTER-02 | Ladder low-pass | A resonant low-pass built from up to four stages, with a selectable slope and saturation in its feedback path. | Character, Quality | M1 | FR-LIB-03 | Built (`loom.filter.ladder`, [M1 modules](../design/p1-modules.md#ladder-low-pass-loomfilterladder)) |
 | MT-FILTER-03 | One-pole filter | First-order low-pass and high-pass, for smoothing and gentle tone control. | | M1 | FR-LIB-03 | Built (`loom.filter.onepole`) |
-| MT-FILTER-04 | Slope filter | Low-pass, high-pass, or all-pass with a selectable steepness. | | M2 | FR-LIB-03 | Planned |
-| MT-FILTER-05 | Comb filter | A tuned delay with feedback that boosts or cuts a harmonic series. | | M2 | FR-LIB-15 | Planned |
-| MT-FILTER-06 | Low-pass gate | A filter and an amplifier closed together by one control, for plucked and percussive tones. | Character | M2 | New | Planned |
+| MT-FILTER-04 | Slope filter | Low-pass, high-pass, or all-pass with a selectable steepness. | | M3 | FR-LIB-03 | Planned |
+| MT-FILTER-05 | Comb filter | A tuned delay with feedback that boosts or cuts a harmonic series. | | M3 | FR-LIB-15 | Planned |
+| MT-FILTER-06 | Low-pass gate | A filter and an amplifier closed together by one control, for plucked and percussive tones. | Character | M3 | New | Planned |
 | MT-FILTER-07 | Crossover | Splits a signal into two or three frequency bands that sum to a flat level. | | M2 | New | Built (`loom.filter.crossover`) |
 | MT-FILTER-08 | Formant filter | Shapes a sound toward vowel sounds, with a morph between vowels. | | M4 | New | Planned |
 | MT-FILTER-09 | Filter bank | Many band-pass filters in parallel, fixed or tuned. With high resonance it is a resonator bank. | | M4 | FR-LIB-15 | Planned |
 | MT-FILTER-10 | Hilbert pair | Splits a signal into two outputs 90 degrees apart, for frequency shifting and envelope detection. | Quality | M4 | New | Planned |
 | MT-FILTER-11 | Biquad | A general two-pole, two-zero filter set by coefficients, for building custom filters in a patch. | | M4 | New | Planned |
-| MT-FILTER-12 | All-pass stage | A first- or second-order all-pass filter tuned by pitch, for phasers and phase dispersion. | | M2 | FR-LIB-15 | Planned |
+| MT-FILTER-12 | All-pass stage | A first- or second-order all-pass filter tuned by pitch, for phasers and phase dispersion. | | M3 | FR-LIB-15 | Planned |
 
 ## Shapers and distortion
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-SHAPE-01 | Shaper | Bends a signal through a transfer curve to add harmonics. Curves include soft and hard clipping, saturation, folding, rectifying, polynomial curves that pick a harmonic of a sine, and a user-drawn curve. | Character, Quality, Mix and output | M2 | FR-LIB-09 | Planned |
-| MT-SHAPE-02 | Bit and rate reducer | Lowers bit depth and sample rate on purpose, for digital grit. | Mix and output | M2 | New | Planned |
-| MT-SHAPE-03 | Ring and amplitude modulator | Multiplies two signals, with a blend from dry through amplitude modulation to ring modulation. | | M2 | New | Planned |
+| MT-SHAPE-01 | Shaper | Bends a signal through a transfer curve to add harmonics. Curves include soft and hard clipping, saturation, folding, rectifying, polynomial curves that pick a harmonic of a sine, and a user-drawn curve. | Character, Quality, Mix and output | M3 | FR-LIB-09 | Planned |
+| MT-SHAPE-02 | Bit and rate reducer | Lowers bit depth and sample rate on purpose, for digital grit. | Mix and output | M3 | New | Planned |
+| MT-SHAPE-03 | Ring and amplitude modulator | Multiplies two signals, with a blend from dry through amplitude modulation to ring modulation. | | M3 | New | Planned |
 | MT-SHAPE-04 | Subharmonic generator | Derives tones at whole-number fractions of the input frequency. | | M4 | New | Planned |
 
 ## Level, mixing, and routing
@@ -127,8 +127,8 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 | MT-MIX-02 | Crossfade | Blends two signals by a control, with an equal-power or linear law. | | M1 | FR-LIB-05 | Built (`loom.mix.crossfade`) |
 | MT-MIX-03 | Stereo tool | Pans, sets width, converts between left/right and mid/side, and splits or joins channels. M1 builds join and split. Pan, width, and mid/side come later. | | M1 | FR-SIG-07 | Planned |
 | MT-ROUTE-01 | Selector | Picks one of N inputs. It steps to the next on a trigger, jumps to the input a control value points at, or picks at random. | Seed, Smoothing | M2 | FR-LIB-30 | Built (`loom.route.selector`) |
-| MT-ROUTE-02 | Distributor | Sends one input to one of N outputs, with the same three ways to choose. | Seed | M2 | FR-LIB-30 | Planned |
-| MT-ROUTE-03 | Mute | Silences a signal on a button or gate, with a short fade so it never clicks. | | M2 | New | Planned |
+| MT-ROUTE-02 | Distributor | Sends one input to one of N outputs, with the same three ways to choose. | Seed | M3 | FR-LIB-30 | Planned |
+| MT-ROUTE-03 | Mute | Silences a signal on a button or gate, with a short fade so it never clicks. | | M3 | New | Planned |
 | MT-ROUTE-04 | Matrix | Connects N inputs to M outputs with a level and a mute at each crossing. Presets cover a plain multiple, a mutable multiple, and a router that rotates by one place on each trigger. | | M3 | New | Planned |
 | MT-ROUTE-05 | Send and receive | Passes a signal by name without a cable. Needs a decision first, because hidden routing makes patches harder to read (ADR-0014 weighed the same risk). | | M4 | New | Planned |
 
@@ -146,14 +146,14 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-ENV-01 | Envelope | Shapes a level from a gate or trigger: AD, AR, ADSR, and ADSR with delay and hold, with curve control and an optional loop. The character trait gives plucked and slow, lagging responses. | Timebase, Character | M1 | FR-LIB-04 | Built in part (`loom.env.envelope`: ADSR and AD modes with curve, [M1 modules](../design/p1-modules.md#envelope-ad-mode-mt-env-01)) |
-| MT-ENV-02 | Segment envelope | An envelope drawn as any number of points, with a hold point or a loop between two points. Uses the shared curve data. | Timebase, Retrigger | M2 | FR-LIB-12 | Planned |
-| MT-ENV-03 | Function generator | A rise and a fall that can be triggered once, looped, or used to slew an input. | Timebase | M2 | New | Planned |
-| MT-ENV-04 | Envelope follower | Outputs the loudness of an audio signal as a control signal. | Sidechain | M2 | FR-LIB-12 | Planned |
+| MT-ENV-02 | Segment envelope | An envelope drawn as any number of points, with a hold point or a loop between two points. Uses the shared curve data. | Timebase, Retrigger | M3 | FR-LIB-12 | Planned |
+| MT-ENV-03 | Function generator | A rise and a fall that can be triggered once, looped, or used to slew an input. | Timebase | M3 | New | Planned |
+| MT-ENV-04 | Envelope follower | Outputs the loudness of an audio signal as a control signal. | Sidechain | M3 | FR-LIB-12 | Planned |
 | MT-ENV-05 | Slope detector | Outputs whether a signal is rising, falling, or still. | | M4 | New | Planned |
 | MT-MOD-01 | LFO | A slow periodic signal, free or synced, with extra outputs at fixed phase offsets. The shape comes from the shape source trait. | Shape source, Timebase, Retrigger, Spread | M1 | FR-LIB-04 | Built (`loom.mod.lfo`) |
-| MT-MOD-02 | Curve reader | Reads the shared curve data in one of three ways: by phase (it repeats), by time over seconds or bars (it runs once), or by value (it maps an input to an output). This one type covers drawn LFOs, section curves, velocity curves, and keytracking curves. | Timebase, Retrigger | M2 | FR-LIB-12, FR-LIB-16 | Planned |
-| MT-MOD-03 | Note values | Turns note information into control signals: keytracking, note count, and one gate per pitch class. | | M2 | FR-LIB-12 | Planned |
-| MT-MOD-04 | Vibrato (abstraction) | An LFO with a delay and a fade-in, scaled by mod wheel or pressure. | | M2 | FR-LIB-12 | Planned |
+| MT-MOD-02 | Curve reader | Reads the shared curve data in one of three ways: by phase (it repeats), by time over seconds or bars (it runs once), or by value (it maps an input to an output). This one type covers drawn LFOs, section curves, velocity curves, and keytracking curves. | Timebase, Retrigger | M3 | FR-LIB-12, FR-LIB-16 | Planned |
+| MT-MOD-03 | Note values | Turns note information into control signals: keytracking, note count, and one gate per pitch class. | | M3 | FR-LIB-12 | Planned |
+| MT-MOD-04 | Vibrato (abstraction) | An LFO with a delay and a fade-in, scaled by mod wheel or pressure. | | M3 | FR-LIB-12 | Planned |
 
 ## Randomness
 
@@ -170,7 +170,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-MATH-01 | Arithmetic | Adds, subtracts, multiplies, or divides two or more signals. | | M1 | FR-LIB-05 | Built (`loom.math.add`, `loom.math.sub`, `loom.math.mul`, `loom.math.div`; Divide outputs 0 while B is within 1e-9 of zero) |
-| MT-MATH-02 | Function | Applies one chosen function: power, root, exponential, logarithm, rounding, absolute value and sign, minimum, maximum, mean, or trigonometry. The tile shows the symbol. | | M2 | New | Planned |
+| MT-MATH-02 | Function | Applies one chosen function: power, root, exponential, logarithm, rounding, absolute value and sign, minimum, maximum, mean, or trigonometry. The tile shows the symbol. | | M3 | New | Planned |
 | MT-MATH-03 | Convert | Converts between units: linear and decibels, frequency and pitch. | | M1 | FR-SIG-05 | Built (`loom.math.convert`: dB, level, pitch, Hz; limits are -120 to 120 dB, 0.001 Hz, and pitch 1.0) |
 | MT-MATH-04 | Expression | Evaluates a short typed formula on its inputs. The formula is data, parsed and checked when the patch loads, never run as code (vision, principle 7). | | M4 | New | Planned |
 | MT-LOGIC-01 | Compare | Outputs a gate when one signal is above, below, or equal to another, inside a window, or on a rising or falling edge. M1 builds above and below. The other modes come later. | | M1 | FR-LIB-05 | Built (`loom.logic.compare`) |
@@ -187,7 +187,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-GATE-01 | Gate shaper | Sets the length of a gate, delays it, or turns its start or end into a trigger. | Timebase | M2 | New | Planned |
+| MT-GATE-01 | Gate shaper | Sets the length of a gate, delays it, or turns its start or end into a trigger. | Timebase | M3 | New | Planned |
 | MT-GATE-02 | Euclidean rhythm | Spreads N hits as evenly as possible over M steps, with rotation. | | M2 | FR-LIB-08 | Built (`loom.gate.euclid`) |
 | MT-GATE-03 | Repeater | Repeats a gate at a rate while it is high, or fires a quick burst of N triggers from one trigger. | Timebase | M3 | New | Planned |
 
@@ -195,16 +195,16 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-PITCH-01 | Pitch math | Moves a pitch by octaves, semitones, scale steps, or a frequency ratio; sums several pitches; or spreads a pair around one pitch. | Scale awareness | M2 | FR-LIB-13 | Planned |
-| MT-PITCH-02 | Pitch quantiser | Snaps a pitch signal to the nearest note of a scale, or of the notes being held. | Scale awareness | M2 | FR-LIB-29 | Specified ([M2 modules](../design/p2-modules.md)) |
-| MT-PITCH-03 | Scale and tuning | Sets the patch-wide scale and tuning (equal divisions, just ratios, imported tuning files) that pitch modules follow. Can be changed live by a trigger. | | M2 | FR-LIB-29 | Specified ([scale and tuning](../design/scale-and-tuning.md)) |
+| MT-PITCH-01 | Pitch math | Moves a pitch by octaves, semitones, scale steps, or a frequency ratio; sums several pitches; or spreads a pair around one pitch. | Scale awareness | M3 | FR-LIB-13 | Planned |
+| MT-PITCH-02 | Pitch quantiser | Snaps a pitch signal to the nearest note of a scale, or of the notes being held. | Scale awareness | M3 | FR-LIB-29 | Specified ([M2 modules](../design/p2-modules.md)) |
+| MT-PITCH-03 | Scale and tuning | Sets the patch-wide scale and tuning (equal divisions, just ratios, imported tuning files) that pitch modules follow. Can be changed live by a trigger. | | M3 | FR-LIB-29 | Specified ([scale and tuning](../design/scale-and-tuning.md)) |
 | MT-PITCH-04 | Pitch tracker | Estimates the pitch of incoming audio. | | M4 | New | Planned |
 
 ## Sequencers and generators
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-SEQ-01 | Multi-lane sequencer | Steps through stored values in one or more lanes. Each lane has a type (value, gate, pitch, or curve), a length, a direction, and a read mode: by clock, by phase, or by a control value that points at a step. Steps can carry accent, chance, and repeat. M2 builds four lanes, each with its own length (polymeter), with step attributes (FR-LIB-08). Per-lane rate and direction come in M3 (FR-LIB-14). | Timebase, Retrigger, Seed, Scale awareness | M2 | FR-LIB-08, FR-LIB-14 | Specified in part (M2, [M2 modules](../design/p2-modules.md)) |
+| MT-SEQ-01 | Multi-lane sequencer | Steps through stored values in one or more lanes. Each lane has a type (value, gate, pitch, or curve), a length, a direction, and a read mode: by clock, by phase, or by a control value that points at a step. Steps can carry accent, chance, and repeat. The first version builds four lanes, each with its own length (polymeter), with step attributes (FR-LIB-08). Per-lane rate and direction come later in M3 (FR-LIB-14). | Timebase, Retrigger, Seed, Scale awareness | M3 | FR-LIB-08, FR-LIB-14 | Specified in part ([M2 modules](../design/p2-modules.md)) |
 | MT-SEQ-02 | Parameter sequencer | Each step sets its own group of parameter values elsewhere in the patch. | Timebase | M3 | FR-LIB-12 | Planned |
 | MT-SEQ-03 | Piano roll | Notes of any length and pitch in a loop, drawn or recorded. | Timebase, Scale awareness | M3 | New | Planned |
 | MT-SEQ-04 | Generator | Makes melodies or rhythms from a chosen algorithm: random notes in a scale, a random walk, a looping pattern that slowly mutates, a Markov chain, or rule systems such as L-systems and cellular automata. | Seed, Scale awareness, Timebase | M3 | FR-LIB-28 | Planned |
@@ -233,11 +233,11 @@ Notes travel as per-voice signals ([ADR-0038](../adr/0038-notes-travel-as-per-vo
 | MT-DELAY-01 | One-sample delay | Delays by exactly one sample, to close feedback loops. | | M0 | FR-LIB-06 | Built (`loom.time.delay1`) |
 | MT-DELAY-02 | Delay line | An interpolated delay with a modulated time, for building effects and models. | Quality | M1 | FR-LIB-06 | Built in part (`loom.time.delay`: fixed Catmull-Rom cubic interpolation; Quality selector waits for TR-06; [delay](../design/delay.md)) |
 | MT-DELAY-03 | All-pass | A delay line with feedback and feed-forward that passes every frequency at equal level, for building reverbs and diffusers. | Quality | M1 | FR-LIB-06 | Built in part (`loom.time.allpass`: fixed Catmull-Rom cubic interpolation; Quality selector waits for TR-06; [delay](../design/delay.md)) |
-| MT-DELAY-04 | Delay | A finished delay with several taps, feedback, filtering, ping-pong, and a choice of how it reacts when the time changes (pitch glide, crossfade, or jump). | Timebase, Character, Mix and output | M2 | FR-LIB-15 | Planned |
-| MT-DELAY-05 | Modulated delay | Short delays moved by an LFO, for chorus, ensemble, and flanging. | Spread, Mix and output | M2 | FR-LIB-09 | Planned |
-| MT-FX-01 | Reverb | A room, hall, plate, or spring sound from a network of delays and diffusers. | Character, Mix and output | M2 | FR-LIB-09 | Planned |
-| MT-FX-02 | Phaser | Swept all-pass stages that move notches through the sound. | Mix and output | M2 | FR-LIB-15 | Planned |
-| MT-FX-03 | Tremolo and auto-pan (abstraction) | An LFO moving level or stereo position. | | M2 | FR-LIB-15 | Planned |
+| MT-DELAY-04 | Delay | A finished delay with several taps, feedback, filtering, ping-pong, and a choice of how it reacts when the time changes (pitch glide, crossfade, or jump). | Timebase, Character, Mix and output | M3 | FR-LIB-15 | Planned |
+| MT-DELAY-05 | Modulated delay | Short delays moved by an LFO, for chorus, ensemble, and flanging. | Spread, Mix and output | M3 | FR-LIB-09 | Planned |
+| MT-FX-01 | Reverb | A room, hall, plate, or spring sound from a network of delays and diffusers. | Character, Mix and output | M3 | FR-LIB-09 | Planned |
+| MT-FX-02 | Phaser | Swept all-pass stages that move notches through the sound. | Mix and output | M3 | FR-LIB-15 | Planned |
+| MT-FX-03 | Tremolo and auto-pan (abstraction) | An LFO moving level or stereo position. | | M3 | FR-LIB-15 | Planned |
 | MT-FX-04 | Buffer repeat | Captures a short slice of the input and repeats it, with reverse and a tape-stop slowdown. A live performance tool. | Timebase, Mix and output | M3 | New | Planned |
 | MT-FX-05 | Frequency shifter | Moves every partial up or down by a fixed number of hertz. | Mix and output | M4 | FR-LIB-15 | Planned |
 | MT-FX-06 | Pitch shifter | Changes pitch without changing length. | Quality, Mix and output | M4 | FR-LIB-15 | Planned |
@@ -268,12 +268,12 @@ Notes travel as per-voice signals ([ADR-0038](../adr/0038-notes-travel-as-per-vo
 | MT-VIEW-01 | Probe | Shows signals on the tile: over time (scope), one against another (XY), or as a number in chosen units. | | M1 | FR-LIB-17 | Scope mode built (`loom.display.scope`, [panels](../design/panels.md#scope-module)); trace drawing specified in [panels](../design/panels.md#drawing-the-scope-trace). XY mode built (`loom.display.xy`, [panel widgets](../design/panel-widgets.md#xy-scope)). |
 | MT-VIEW-02 | Level meter | Shows peak and average level, and the level over the last seconds. | | M1 | FR-LIB-17 | Built (`loom.display.meter`) |
 | MT-VIEW-03 | Spectrum | Shows the frequency content of a signal. | | M2 | FR-LIB-17 | Built (`loom.display.spectrum`, [M2 modules](../design/p2-modules.md#spectrum-mt-view-03)) |
-| MT-VIEW-04 | Note monitor | Shows incoming notes and controller values, for checking a setup. | | M2 | New | Planned |
+| MT-VIEW-04 | Note monitor | Shows incoming notes and controller values, for checking a setup. | | M3 | New | Planned |
 | MT-VIEW-05 | Tuner | Shows the pitch of a signal against the nearest note. | | M4 | New | Planned |
 | MT-UI-01 | Button | A large button that outputs a toggle or momentary gate. | | M1 | FR-LIB-27 | Built (`loom.ui.button`) |
 | MT-UI-02 | Macro | A knob or slider whose value is a signal. One macro can drive many parameters through modulation assignments. | Smoothing | M2 | FR-LIB-12 | Built (`loom.ui.macro`) |
-| MT-UI-03 | XY and vector pad | A two-axis control, or one point that blends between several sources. | Smoothing | M2 | FR-LIB-12 | Planned |
-| MT-UI-04 | Keyboard | Plays notes from the canvas or a front panel. | | M2 | New | Planned |
+| MT-UI-03 | XY and vector pad | A two-axis control, or one point that blends between several sources. | Smoothing | M3 | FR-LIB-12 | Planned |
+| MT-UI-04 | Keyboard | Plays notes from the canvas or a front panel. | | M3 | New | Planned |
 
 ## Structure, arrangement, and state
 
@@ -304,9 +304,9 @@ Notes travel as per-voice signals ([ADR-0038](../adr/0038-notes-travel-as-per-vo
 | MT-IO-03 | Note input | Turns incoming notes into gate, pitch, and velocity signals, per voice. | | M0 | FR-LIB-07 | Built (`loom.midi.note`: up to 16 voices, stealing modes, pressure, and timbre; [polyphony](../design/polyphony.md#note-input-mt-io-03)) |
 | MT-IO-04 | Controller input | Outputs a chosen MIDI controller, pitch bend, or aftertouch as a signal. | Smoothing | M1 | FR-LIB-07 | Built (`loom.midi.controller`, [M1 modules](../design/p1-modules.md#controller-input-mt-io-04)) |
 | MT-IO-05 | Expression input | Outputs per-note pressure, timbre, and slide as signals. | | M2 | FR-VOICE-04 | Built as outputs of Note input, `pressure` and `timbre` (slide is the same MPE dimension), so that expression follows the same voices as the notes ([polyphony](../design/polyphony.md#note-input-mt-io-03), rule 28). No separate module. |
-| MT-IO-06 | Note output | Builds outgoing notes from gate, pitch, and velocity signals. | | M2 | FR-MIDI-04 | Planned |
-| MT-IO-07 | Controller output | Sends a signal out as a MIDI controller value. | | M2 | FR-MIDI-04 | Planned |
-| MT-IO-08 | Key state | Reports whether a given key is held, or how many keys are held. | | M2 | New | Planned |
+| MT-IO-06 | Note output | Builds outgoing notes from gate, pitch, and velocity signals. | | M3 | FR-MIDI-04 | Planned |
+| MT-IO-07 | Controller output | Sends a signal out as a MIDI controller value. | | M3 | FR-MIDI-04 | Planned |
+| MT-IO-08 | Key state | Reports whether a given key is held, or how many keys are held. | | M3 | New | Planned |
 | MT-IO-09 | OSC input and output | Receives or sends values over Open Sound Control. | | M4 | FR-MIDI-05 | Planned |
 | MT-IO-10 | Hardware CV | Exchanges DC-coupled control voltages with modular hardware through an audio interface. | | M4 | New | Planned |
 
@@ -358,9 +358,9 @@ A user's own sub-patch can declare a role and then fill any matching slot (FR-EN
 |---|---|---|
 | M0 | 3 | 0 |
 | M1 | 35 | 0 |
-| M2 | 57 | 13 |
-| M3 | 32 | 13 |
+| M2 | 21 | 1 |
+| M3 | 69 | 25 |
 | M4 | 46 | 30 |
-| **Total** | **173** | **56** |
+| **Total** | **174** | **56** |
 
 Plus 11 traits and 7 initial roles. The summary is counted from the tables above; update it when entries change.

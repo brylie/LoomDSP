@@ -88,6 +88,10 @@ enum Command {
     },
     /// Measure a WAV file: peak, clipping, largest step, DC, and RMS, with
     /// optional checks for scripts (docs/design/audio-qa.md).
+    ///
+    /// Exit status: 0 when every check given passes, 1 when one fails, and 2
+    /// when the run could not measure: the file cannot be read, an option is
+    /// not usable, or `--max-dc` is given for a part of 1 s or less.
     Analyze(analyze::Options),
     /// Create a virtual MIDI controller and play the notes read on standard
     /// input: `on NOTE [VELOCITY]`, `off NOTE`, `wait MS`. macOS and Linux

@@ -3,7 +3,7 @@
 How modules keep data beyond parameters (curves, patterns, and audio), how it is saved with a patch, how it reaches the audio thread, and how undo treats it.
 
 - **Kind:** living specification.
-- **Status:** Agreed. [Buffer data](#buffer-data) and [Loading audio into a slot](#loading-audio-into-a-slot) are M1. The rest is M2. The choices marked "Settled" were made with the maintainer on 2026-11-01. Nothing is built yet.
+- **Status:** Agreed. [Buffer data](#buffer-data) and [Loading audio into a slot](#loading-audio-into-a-slot) are M1. The rest is M3. The choices marked "Settled" were made with the maintainer on 2026-11-01. Nothing is built yet.
 - **Decision behind it:** [ADR-0032](../adr/0032-module-data-in-typed-slots.md) (typed slots, sidecar audio, swap and return). [ADR-0024](../adr/0024-widgets-follow-the-kind-of-value.md) for the three data kinds and their editors.
 - **Use case and requirements:** FR-LIB-19, FR-LIB-02 (wavetable reader), FR-ENCAP-08. Settles OQ-17.
 - **Builds on:** [Panel widgets: data kinds](panel-widgets.md#data-kinds) (what each kind holds and its limits), [Undo](undo.md), [Open, Save, and Save As](files.md), [Autosave](autosave.md), [Copy, paste, and duplicate](clipboard.md), [Stereo cables](stereo.md).
@@ -100,7 +100,7 @@ M1, so the wavetable reader can ship (FR-LIB-02).
 - The inspector shows each buffer slot as a row: label, length, channels, and a **Load audio file** button. It opens a file dialog for WAV files.
 - Loading replaces the slot's contents. It is one undo step.
 - The audio is decoded and resampled on the control thread, then sent to the engine. Audio keeps playing.
-- The waveform widget that draws a buffer is M2 ([#288](https://github.com/brylie/LoomDSP/issues/288)).
+- The waveform widget that draws a buffer is M3 ([#288](https://github.com/brylie/LoomDSP/issues/288)).
 
 ## Reaching the audio thread
 
@@ -147,7 +147,7 @@ M1 (buffer):
 - [ ] Loading a file is one undo step; undo restores the earlier audio (test).
 - [ ] No allocation on the audio thread when a buffer is swapped in (`no_alloc` test).
 
-M2 (curve and pattern, recording):
+M3 (curve and pattern, recording):
 
 - [ ] Curve and pattern data round-trip through the patch file; default slots are not written (test).
 - [ ] A pattern with more steps than its slot holds is cut on load with a message (test).

@@ -1,0 +1,3 @@
+{"cmd":"note","note":60,"on":true}
+{"cmd":"wait","ms":4000}
+{"cmd":"quit"}

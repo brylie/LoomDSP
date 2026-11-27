@@ -3,7 +3,7 @@
 How a patch holds one tuning and a set of scales, how pitch modules follow them without cables, and how the patch changes key by itself.
 
 - **Kind:** living specification.
-- **Status:** Agreed, M2 (2026-11-01). The choices marked "Settled" were made with the maintainer. Nothing is built yet.
+- **Status:** Agreed, M3 (2026-11-01). The choices marked "Settled" were made with the maintainer. Nothing is built yet.
 - **Decision behind it:** [ADR-0033](../adr/0033-one-scale-and-tuning-per-patch.md) (one scale and tuning per patch). Settles OQ-22.
 - **Use case and requirements:** FR-LIB-29, FR-SIG-05, FR-LIB-19. Trait TR-08 (scale awareness).
 - **Builds on:** [Module data](module-data.md) (the scales are a pattern slot), [Panel widgets: step grid](panel-widgets.md#step-grid) (the keys layout), [Clock and transport](clock.md) (the same pattern of patch-wide state).

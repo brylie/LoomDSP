@@ -3,7 +3,7 @@
 How a performer links a hardware knob or fader to any parameter in a few seconds, and how those links are saved, shown, and removed.
 
 - **Kind:** living specification.
-- **Status:** Implemented for the base behaviour and [mapping modes](#mapping-modes-fr-midi-09) ([#164](https://github.com/brylie/LoomDSP/issues/164), [#165](https://github.com/brylie/LoomDSP/issues/165)), with frame-stamped control changes on the 32-frame grid ([#167](https://github.com/brylie/LoomDSP/issues/167)). [Device mappings](#device-mappings-fr-midi-06) Agreed, M2 (2026-11-01, [#166](https://github.com/brylie/LoomDSP/issues/166)); not built.
+- **Status:** Implemented for the base behaviour and [mapping modes](#mapping-modes-fr-midi-09) ([#164](https://github.com/brylie/LoomDSP/issues/164), [#165](https://github.com/brylie/LoomDSP/issues/165)), with frame-stamped control changes on the 32-frame grid ([#167](https://github.com/brylie/LoomDSP/issues/167)). [Device mappings](#device-mappings-fr-midi-06) Agreed, M3 (2026-11-01, [#166](https://github.com/brylie/LoomDSP/issues/166)); not built.
 - **Decision behind it:** none of its own. Builds on [ADR-0001](../adr/0001-lock-free-control-audio-boundary.md) (control and audio threads), [ADR-0004](../adr/0004-export-as-runtime-plus-patch-data.md) (export as runtime plus patch data), [ADR-0008](../adr/0008-patch-format-ron.md) (patch format), and [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (the inspector shows and removes mappings; learn mode extends the gesture to tile controls).
 - **Use case and requirements:** [UC3, perform live](../product/personas-and-use-cases.md#uc3-perform-live-tomas-highest-priority-use-case), FR-MIDI-02. FR-MIDI-06 (per-device mappings, [own section](#device-mappings-fr-midi-06)). FR-MIDI-09 (pickup, relative encoders, scaling, [own section](#mapping-modes-fr-midi-09)).
 - **Background:** [parameter mapping](modulation.md#parameter-mapping) (value to position and back), [hardware controls and decibel faders](../learn/hardware-controls.md) (why pickup and encoders work as they do).
@@ -115,7 +115,7 @@ midi: [
 
 ## Device mappings (FR-MIDI-06)
 
-**Status:** Agreed, M2 ([#166](https://github.com/brylie/LoomDSP/issues/166)). The choices marked "Settled" were made with the maintainer on 2026-11-01. Depends on the [front panel](panels.md#the-panel-editor) and on MIDI hot-plugging ([device changes](device-changes.md), built).
+**Status:** Agreed, M3 ([#166](https://github.com/brylie/LoomDSP/issues/166); moved from M2 on 2026-11-27). The choices marked "Settled" were made with the maintainer on 2026-11-01. Depends on the [front panel](panels.md#the-panel-editor) and on MIDI hot-plugging ([device changes](device-changes.md), built).
 
 > I set up my 8-knob controller once: knob 1 is slot 1, knob 2 is slot 2, and so on. Every patch I open, the knobs move the first eight controls on its front panel. On one patch I want knob 3 on the filter drive, so I pin Drive to slot 3 in the panel editor.
 

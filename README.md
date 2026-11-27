@@ -7,7 +7,7 @@
 [![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
 [![Status: early alpha](https://img.shields.io/badge/status-early%20alpha-orange.svg)](docs/product/roadmap.md)
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-2-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-3-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 ![A subtractive synth patched from primitives in the LoomDSP desktop app: MIDI note, phase, saw, filter, two envelopes, a VCA, transport, and a scope showing the filtered wave, with the filter's parameters in the inspector](docs/images/readme-subtractive.png)
@@ -44,12 +44,12 @@ The goal is bigger than a synth. LoomDSP is for **living musical systems**: patc
 | Phase | What you get |
 |---|---|
 | **M0. Engine** (done) | A real-time engine that plays patch files with live MIDI. |
-| **M1. Desktop patcher** (now) | Build and play a synth from primitives, with MIDI controllers. |
-| M2. Panels and performance | Sub-patches with their own front panels, polyphony, presets, and a locked performance mode. |
-| M3. Living systems | Loopers, sequencers, scenes, counters, and logic: patches that arrange themselves on stage. |
+| **M1. Desktop patcher** | Build and play a synth from primitives, with MIDI controllers. |
+| **M2. Encapsulation and polyphony** (now) | Sub-patches, a library of your own parts, polyphony, and swappable parts in slots. |
+| M3. Living systems | Front panels, presets, and a locked performance mode first. Then loopers, sequencers, scenes, counters, and logic: patches that arrange themselves on stage. |
 | M4. Sharing | Self-contained patch files, a patch library, and a module SDK for community modules. |
 
-Plugin export (CLAP, VST3) and a browser version may come later. See the full [roadmap](docs/product/roadmap.md).
+Plugin and standalone export (CLAP, VST3) and a browser version come after M3. They will ship: the roadmap sets when, not whether. See the full [roadmap](docs/product/roadmap.md).
 
 ## What you can do today
 
@@ -194,8 +194,9 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
 <table>
   <tbody>
     <tr>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/brylie"><img src="https://avatars.githubusercontent.com/u/17307?v=4?s=100" width="100px;" alt="Brylie Oxley"/><br /><sub><b>Brylie Oxley</b></sub></a><br /><a href="https://github.com/brylie/LoomDSP/commits?author=brylie" title="Code">💻</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/montionugera"><img src="https://avatars.githubusercontent.com/u/5601426?v=4?s=100" width="100px;" alt="Pasit Nusso"/><br /><sub><b>Pasit Nusso</b></sub></a><br /><a href="https://github.com/brylie/LoomDSP/commits?author=montionugera" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/brylie"><img src="https://avatars.githubusercontent.com/u/17307?v=4&size=100" width="100px" height="100px" alt="Brylie Oxley"/><br /><sub><b>Brylie Oxley</b></sub></a><br /><a href="https://github.com/brylie/LoomDSP/commits?author=brylie" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/montionugera"><img src="https://avatars.githubusercontent.com/u/5601426?v=4&size=100" width="100px" height="100px" alt="Pasit Nusso"/><br /><sub><b>Pasit Nusso</b></sub></a><br /><a href="https://github.com/brylie/LoomDSP/commits?author=montionugera" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://www.basuoikantik.in/"><img src="https://avatars.githubusercontent.com/u/140976895?v=4&size=100" width="100px" height="100px" alt="Oikantik Basu"/><br /><sub><b>Oikantik Basu</b></sub></a><br /><a href="https://github.com/brylie/LoomDSP/commits?author=Golden007-prog" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

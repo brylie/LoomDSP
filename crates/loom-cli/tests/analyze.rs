@@ -48,9 +48,10 @@ fn analyze(args: &[&str]) -> (i32, String, String) {
     )
 }
 
-/// A 0.5 peak at 0.25 s and one step of 0.5 there, on silence.
+/// A 0.5 peak at 0.25 s and one step of 0.5 there, on 2 s of silence:
+/// longer than the 1 s the DC low-pass settles for.
 fn signal() -> Vec<f32> {
-    let mut samples = vec![0.0; 1000];
+    let mut samples = vec![0.0; 2000];
     samples[250] = 0.5;
     samples
 }
@@ -72,7 +73,7 @@ fn json_has_every_measurement_in_each_format() {
         assert_eq!(status, 0, "{bits}-bit");
         let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
         assert_eq!(json["sample_rate"], 1000);
-        assert_eq!(json["frames"], 1000);
+        assert_eq!(json["frames"], 2000);
         let c = &json["channels"][0];
         for key in [
             "first",
@@ -85,7 +86,7 @@ fn json_has_every_measurement_in_each_format() {
             "max_step",
             "max_step_at",
             "dc",
-            "dc_window",
+            "dc_low_pass",
             "rms",
             "rms_dbfs",
         ] {
@@ -121,14 +122,44 @@ fn checks_set_the_exit_status() {
     write(&path, &signal(), 32, hound::SampleFormat::Float);
     let file = path.to_str().unwrap();
 
-    let (status, _, _) = analyze(&[file, "--max-peak", "0.6", "--max-step", "0.6", "--max-dc", "0.01"]);
-    assert_eq!(status, 0);
+    let (status, _, _) = analyze(&[file, "--max-peak", "0.6", "--max-step", "0.6", "--max-dc", "0.001"]);
+    assert_eq!(status, 0, "one sample is not DC");
 
-    for (flag, limit) in [("--max-peak", "0.4"), ("--max-step", "0.4"), ("--max-dc", "0.001")] {
+    for (flag, limit) in [("--max-peak", "0.4"), ("--max-step", "0.4")] {
         let (status, _, stderr) = analyze(&[file, flag, limit]);
         assert_eq!(status, 1, "{flag}");
         assert!(stderr.contains(flag), "{flag} not named in: {stderr}");
     }
+
+    let offset = dir.join("offset.wav");
+    write(&offset, &[0.005; 2000], 32, hound::SampleFormat::Float);
+    let (status, _, stderr) = analyze(&[offset.to_str().unwrap(), "--max-dc", "0.001"]);
+    assert_eq!(status, 1);
+    assert!(stderr.contains("--max-dc"), "--max-dc not named in: {stderr}");
+}
+
+/// `--max-dc` on a part of 1 s or less exits with status 2 and says the
+/// part is too short, so it can never pass. Without the check, the file is
+/// measured, and the low-pass DC prints as `null`.
+#[test]
+fn max_dc_on_a_short_part_exits_with_2() {
+    let temp = folder("short");
+    let dir = temp.path();
+    let path = dir.join("a.wav");
+    write(&path, &signal(), 32, hound::SampleFormat::Float);
+    let file = path.to_str().unwrap();
+    let (status, _, stderr) = analyze(&[file, "--from", "1.0", "--max-dc", "0.5"]);
+    assert_eq!(status, 2, "{stderr}");
+    assert!(stderr.contains("--max-dc") && stderr.contains("1.000 s"), "{stderr}");
+
+    let (status, stdout, _) = analyze(&[file, "--from", "1.0", "--json"]);
+    assert_eq!(status, 0);
+    let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(json["channels"][0]["dc_low_pass"].is_null(), "{stdout}");
+
+    let (status, stdout, _) = analyze(&[file, "--from", "1.0"]);
+    assert_eq!(status, 0);
+    assert!(stdout.contains("too short"), "{stdout}");
 }
 
 /// `--from` and `--to` measure only part of the file.
@@ -141,7 +172,7 @@ fn from_and_to_measure_a_part() {
     let (status, stdout, _) = analyze(&[path.to_str().unwrap(), "--from", "0.5", "--json", "--max-peak", "0.1"]);
     assert_eq!(status, 0);
     let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    assert_eq!(json["frames"], 500);
+    assert_eq!(json["frames"], 1500);
     assert_eq!(json["channels"][0]["peak"], 0.0);
 }
 

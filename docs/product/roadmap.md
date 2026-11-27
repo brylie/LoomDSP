@@ -10,8 +10,8 @@ Phases are numbered M0 to M4, to match the GitHub milestones. P0 to P2 are issue
 |---|---|---|
 | M0 | Engine foundations | Headless engine that plays a patch file with live MIDI |
 | M1 | Desktop patcher and live basics | Build and play a synth from primitives, with MIDI controllers |
-| M2 | Encapsulation, panels, performance | Sub-patches, front panels, polyphony, performance mode, set lists |
-| M3 | Living systems | Loopers, groups and next actions, counters and logic, scenes, sequencers, note effects |
+| M2 | Encapsulation and polyphony | Sub-patches, polyphony, roles and slots, patch metadata, our own UI layer |
+| M3 | Living systems | Ready for the stage (front panels, performance mode, presets, set lists), then loopers, groups and next actions, counters and logic, scenes, sequencers, note effects |
 | M4 | Sharing and ecosystem | Self-contained shareable patches, patch library, module SDK, community modules |
 | Later | Not scheduled | Plugin and standalone export (CLAP, VST3), web target. Revisit after M3. |
 
@@ -24,7 +24,7 @@ Why this order:
 5. **Scope is kept tight on purpose.** Generative live performance and plugin export pull in different directions: plugins bring host integration, parameter automation, many formats, and per-platform builds and signing. Doing both at once risks doing neither well. So plugin and standalone export, and the web target, come later ("Later"). They are first class and will ship (Brylie's decision, 2026-11-19; [UI design goal 3](../design/ui-layer.md#design-goals)): after M3 the roadmap sets when, not whether.
 6. The engine core stays portable and WASM-compatible (NFR-PORT-01, NFR-PORT-02), and ADR-0004 records how export would work, so the option stays open at low cost.
 
-**Module types per phase.** The [module catalogue](module-catalogue.md) gives every planned module type a stable ID (such as `MT-FILTER-02`) and a phase. Each phase below builds the catalogue entries marked with that phase. A type's phase follows the use case it unblocks: the subtractive synth in M1, panels and live play in M2, self-arranging sets in M3, and the rest in M4.
+**Module types per phase.** The [module catalogue](module-catalogue.md) gives every planned module type a stable ID (such as `MT-FILTER-02`) and a phase. Each phase below builds the catalogue entries marked with that phase. A type's phase follows the use case it unblocks: the subtractive synth in M1, sub-patches and polyphony in M2, panels, live play, and self-arranging sets in M3, and the rest in M4.
 
 ---
 
@@ -80,46 +80,60 @@ Issues for this phase are in the [M1 milestone](https://github.com/brylie/LoomDS
 - [x] Module panels on tiles and the scope module (ADR-0013) ([#6](https://github.com/brylie/LoomDSP/issues/6) to [#10](https://github.com/brylie/LoomDSP/issues/10)).
 - [x] Module browser, undo/redo, copy and paste, open and save ([#11](https://github.com/brylie/LoomDSP/issues/11) to [#15](https://github.com/brylie/LoomDSP/issues/15)).
 - [x] Modulation on parameters, MIDI learn, panic, device selection and hot-plugging ([#19](https://github.com/brylie/LoomDSP/issues/19) to [#29](https://github.com/brylie/LoomDSP/issues/29)).
-- [x] Phase 1 module library, test harness, and help pages ([#30](https://github.com/brylie/LoomDSP/issues/30) to [#44](https://github.com/brylie/LoomDSP/issues/44)). The tutorial moved to M2 ([#45](https://github.com/brylie/LoomDSP/issues/45)).
+- [x] Phase 1 module library, test harness, and help pages ([#30](https://github.com/brylie/LoomDSP/issues/30) to [#44](https://github.com/brylie/LoomDSP/issues/44)). The tutorial moved to M3 ([#45](https://github.com/brylie/LoomDSP/issues/45)).
 
 Exit criteria:
-- [ ] A subtractive synth can be built from primitives in the app, with the module browser, inspector, and cables, and played from MIDI. (The written tutorial, tested with newcomers, is a M2 exit criterion: it is written once the foundation has settled, so it is written once.)
+- [ ] A subtractive synth can be built from primitives in the app, with the module browser, inspector, and cables, and played from MIDI. (The written tutorial, tested with newcomers, is an M3 exit criterion: it is written once the foundation has settled, so it is written once.)
 - [ ] Play that synth with a MIDI keyboard and map 4 knobs with MIDI learn.
 - [x] An FM feedback patch sounds the same at buffer sizes 32 and 1024. (Already true in the M0 engine; covered by tests.)
 - [ ] Unplugging and replugging the MIDI controller during playback works without a restart.
 - [ ] Canvas holds 60 fps at full window size on the reference laptop, with 100 modules visible and 300 in the patch, including 4 live scopes (NFR-PERF-04).
 
-## M2. Encapsulation, panels, performance
+## M2. Encapsulation and polyphony
 
-**Goal:** complex instruments stay manageable and are ready for the stage.
+**Goal:** complex instruments stay manageable.
+
+M2 ends with what is built (Brylie's decision, 2026-11-27). The work that makes LoomDSP ready for the stage (front panels, performance mode, presets, and set lists) moved to the top of M3, with the exit criteria that need it. Every scope line below is built, except the UI layer, which is finishing.
 
 Scope:
-- Sub-patches, nesting, exposed parameters, user library (FR-ENCAP-*).
-- Polyphony and voice allocation (FR-SIG-08, FR-VOICE-*).
-- Panel editor, the same for patches and sub-patches, and the full widget set (FR-PANEL-*). A sub-patch's front panel is its tile.
-- Performance mode, presets, set lists, layers (FR-PERF-01, 02, 06, 07).
-- Per-device controller mappings, MIDI clock, MIDI out, MPE, pickup modes (FR-MIDI-03, 04, 06, 07, 09).
-- Effects and sequencing modules (FR-LIB-08, 09).
-- Modulators as modules (FR-LIB-12), including drawn modulation curves.
-- Module data beyond parameters, for patterns and samples (FR-LIB-19, OQ-17).
-- Cable styles for stereo, polyphony, and inserted delays (FR-CANVAS-12).
+- Sub-patches, nesting, exposed parameters, and a user library with linked and copied items (FR-ENCAP-01 to 07, [specification](../design/sub-patches.md)).
+- Polyphony and voice allocation, with MPE (FR-SIG-08, FR-VOICE-*, FR-MIDI-03, [specification](../design/polyphony.md)).
+- MIDI clock in and out, and mapping modes for pickup and relative encoders (FR-MIDI-07, 09).
+- Roles, slots, and sub-patch modes (ADR-0017): slots in abstractions, surface controls bound to role parameters, and roles checked by the registry (FR-ENCAP-08 to 10, FR-SDK-08). The first abstractions: a synth voice and an effect chain with swappable slots.
+- Panel widgets on tiles: fader, number, select list, XY pad, range, readout, level history, spectrum, and XY scope (part of FR-PANEL-02, and FR-PANEL-04).
+- Cable styles for stereo, polyphony, and inserted delays (FR-CANVAS-12), and a patch map (FR-CANVAS-13).
 - How notes travel on cables (OQ-16): decided as per-voice signals in [ADR-0038](../adr/0038-notes-travel-as-per-voice-signals.md), so M3 builds note effects on a settled model. No spike was needed.
-- Roles, slots, and traits (ADR-0017): a specification first, then slots in abstractions, sub-patch modes, role-bound panel widgets, and traits in the SDK (FR-ENCAP-08 to 10, FR-PANEL-11, FR-SDK-07, 08). Patch-wide scale and tuning (FR-LIB-29).
-- The catalogue's M2 module types, including the first abstractions: a synth voice and an effect chain with swappable slots.
+- The catalogue's built M2 module types, among them Dynamics, EQ, Crossover, Euclidean rhythm, Random, Chance, Selector, and the voice modules, with their algorithms in `loom-dsp` ([ADR-0035](../adr/0035-pure-dsp-algorithms-in-loom-dsp.md)).
 - Patch authors, tags, and licence, and a browser for the user's own patches that filters by them (FR-FILE-08 to 10, FR-SHARE-06, ADR-0023, [specification](../design/patch-metadata.md)).
+- Our own UI layer on winit, wgpu, and AccessKit, in place of Iced ([ADR-0041](../adr/0041-own-ui-layer.md), [#683](https://github.com/brylie/LoomDSP/issues/683)). Still finishing.
 
 Exit criteria:
-- [ ] An 8-voice polysynth built from primitives, with a 6-knob panel, runs within the CPU budget. The polysynth is [`examples/patches/polysynth.ron`](../../examples/patches/polysynth.ron), and the CPU budget is signed off by hand on [#643](https://github.com/brylie/LoomDSP/issues/643).
-- [ ] A 30-minute test set with 4 patches, preset changes, and external MIDI clock runs with zero dropouts.
-- [ ] One-hour live soak test with edits during playback: zero dropouts, no memory growth.
-- [ ] Tutorial: build a subtractive synth from primitives in under 20 minutes (tested with 3 people who did not write the tutorial) ([#45](https://github.com/brylie/LoomDSP/issues/45)). Written last in this phase, when sub-patches, polyphony, and panels have settled.
-- [ ] First real live performance with LoomDSP.
+- [x] A selection collapses into a sub-patch that nests, exposes parameters, and saves to the user library ([sub-patches specification](../design/sub-patches.md), [#51](https://github.com/brylie/LoomDSP/issues/51)).
+- [x] An 8-voice polysynth built from primitives plays, matches its reference render, and has its NFR-PERF-01 benchmark ([`examples/patches/polysynth.ron`](../../examples/patches/polysynth.ron), [#677](https://github.com/brylie/LoomDSP/issues/677), [#787](https://github.com/brylie/LoomDSP/issues/787)).
+- [x] Swapping the part in a slot of the built-in Synth voice or Effect chain keeps its cables and values, with no click ([#700](https://github.com/brylie/LoomDSP/issues/700), [#768](https://github.com/brylie/LoomDSP/issues/768)).
+- [x] The Your patches browser finds the user's patches by author, tag, and licence (FR-SHARE-06, [patch metadata specification](../design/patch-metadata.md)).
+- [ ] The app runs on our own UI layer, with no Iced left ([#683](https://github.com/brylie/LoomDSP/issues/683) closed).
+- [ ] Manual QA for M2 is done ([#643](https://github.com/brylie/LoomDSP/issues/643)), including the sign-off that the polysynth runs within the CPU budget.
 
 ## M3. Living systems
 
-**Goal:** patches that play, evolve, and arrange themselves. Arrangement happens inside the grid, through loopers, groups, logic, and scenes, not on a timeline (ADR-0011).
+**Goal:** patches that play, evolve, and arrange themselves. Arrangement happens inside the grid, through loopers, groups, logic, and scenes, not on a timeline (ADR-0011). It starts by making LoomDSP ready for the stage.
 
 Scope:
+- **Ready for the stage** (moved from M2, 2026-11-27). This part comes first: the stage exit criteria below need it.
+  - One panel editor for patches and sub-patches. A sub-patch's front panel is its tile, and panels can be embedded (FR-PANEL-01, 03, 05, 08 to 11, [#76](https://github.com/brylie/LoomDSP/issues/76)). A 6-knob front panel for the polysynth example ([#795](https://github.com/brylie/LoomDSP/issues/795)).
+  - The rest of the widget set (curve, step grid, waveform, and label), on module data beyond parameters, for patterns and samples (FR-PANEL-02, FR-LIB-19, OQ-17, [#50](https://github.com/brylie/LoomDSP/issues/50), [#281](https://github.com/brylie/LoomDSP/issues/281), [#287](https://github.com/brylie/LoomDSP/issues/287), [#288](https://github.com/brylie/LoomDSP/issues/288)).
+  - Performance mode (FR-PERF-01, [#492](https://github.com/brylie/LoomDSP/issues/492)).
+  - Presets, set lists, and layers (FR-PERF-02, 06, 07, [#667](https://github.com/brylie/LoomDSP/issues/667)).
+  - Controller mappings saved per device, and MIDI note and controller output (FR-MIDI-04, 06, [#166](https://github.com/brylie/LoomDSP/issues/166), [#510](https://github.com/brylie/LoomDSP/issues/510)).
+  - The tutorial ([#45](https://github.com/brylie/LoomDSP/issues/45)), written last in this part, once panels have settled.
+- **Library and editing** (moved from M2, 2026-11-27):
+  - Effects and sequencing still to build: reverb, chorus, a waveshaper, and the multi-lane step sequencer (FR-LIB-08, 09, [#307](https://github.com/brylie/LoomDSP/issues/307)).
+  - Modulators as modules, including drawn modulation curves and the segment envelope (FR-LIB-12).
+  - Traits defined once in the SDK (FR-SDK-07). Only the shared seed parameter exists today.
+  - Patch-wide scale and tuning, and the pitch quantiser (FR-LIB-29, [#309](https://github.com/brylie/LoomDSP/issues/309), [#308](https://github.com/brylie/LoomDSP/issues/308)).
+  - The range each port receives, and suggested control ranges (FR-VIS-05, FR-MOD-10, [#146](https://github.com/brylie/LoomDSP/issues/146), [#147](https://github.com/brylie/LoomDSP/issues/147)). Modulated modulation depth (FR-MOD-02). Comments and colour groups on the canvas (FR-CANVAS-07). A light theme (FR-PANEL-06).
+  - The rest of the catalogue's former M2 module types, now marked M3.
 - Arrangement from phase-driven primitives (ADR-0012, [specification](../design/arrangement.md)):
   - Note and audio cycles that read the clock's bar phase and output an end trigger (FR-LIB-20).
   - Counter (with phase output) and Step Select (FR-LIB-22), with Clock Divide from M1 (FR-LIB-27). These small logic modules can be built as early as M1.
@@ -132,6 +146,11 @@ Scope:
 - Seeded melody and rhythm generators (FR-LIB-28), and the rest of the catalogue's M3 module types.
 
 Exit criteria:
+- [ ] The 8-voice polysynth from M2 has a 6-knob front panel and runs within the CPU budget ([#795](https://github.com/brylie/LoomDSP/issues/795); the CPU budget, signed off in M2's QA, [#643](https://github.com/brylie/LoomDSP/issues/643)). Moved from M2.
+- [ ] A 30-minute test set with 4 patches, preset changes, and external MIDI clock runs with zero dropouts. Moved from M2.
+- [ ] One-hour live soak test with edits during playback: zero dropouts, no memory growth. Moved from M2.
+- [ ] Tutorial: build a subtractive synth from primitives in under 20 minutes (tested with 3 people who did not write the tutorial) ([#45](https://github.com/brylie/LoomDSP/issues/45)). Moved from M2.
+- [ ] First real live performance with LoomDSP. Moved from M2.
 - [ ] A patch plays group A round robin, each loop twice; after two rounds it plays group B the same way, then returns to A, with no manual action (the [worked example](../design/arrangement.md#worked-example)).
 - [ ] A polymetric step sequencer with lanes of different lengths drives notes and modulation in the same patch.
 - [ ] A 30-minute self-arranging set runs live with zero dropouts.

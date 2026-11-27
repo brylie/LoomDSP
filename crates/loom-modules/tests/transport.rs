@@ -107,6 +107,28 @@ fn bar_and_beat_triggers_agree_with_phase_trigger() {
     }
 }
 
+#[test]
+fn unpatched_phase_trigger_follows_the_running_bar() {
+    for block in [1, 77, 512] {
+        let mut button = None;
+        let (mut parts, _) = engine(block, |c, t| {
+            let b = c.add_module("loom.ui.button").unwrap();
+            c.connect_named(b, "gate", t, "run").unwrap();
+            button = Some(b);
+            let watch = c.add_module("loom.phase.trigger").unwrap();
+            listen(c, (t, "bar"), (watch, "trigger"));
+        });
+        let (bar, watched) = render(&mut parts, 2048, block, &[]);
+        assert!(highs(&bar).is_empty(), "block {block}: transport stopped");
+        assert!(highs(&watched).is_empty(), "block {block}: trigger stopped");
+        parts.controller.set_param_named(button.unwrap(), "on", 1.0).unwrap();
+        let (bar, watched) = render(&mut parts, 2 * BAR + 1024, block, &[]);
+        let expected = highs(&bar);
+        assert_eq!(expected.len(), 3, "block {block}: three bar starts");
+        assert_eq!(highs(&watched), expected, "block {block}: follows the bar");
+    }
+}
+
 /// Rule 10: a new time signature while playing is a jump. The jump trigger
 /// fires once and no skipped bar triggers burst out, at block sizes 1, 32,
 /// and 1024.

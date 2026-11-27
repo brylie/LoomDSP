@@ -98,9 +98,9 @@ Examples: the LFO's phase input in sync mode defaults to bar phase, with a rate 
 | **Button** `loom.ui.button` | none | gate | mode (toggle, momentary), on, hold (transient) | A large button. Toggle flips `on` on each press and the gate is `on`. Momentary holds `hold` high while the button is held and the gate is `hold`. |
 | **Clock Divide** `loom.logic.divide` | trigger, reset | trigger | N (1 to 64), offset (0 to N-1) | Counts rising edges. Fires on the triggers numbered N, 2N, 3N after a reset; offset k moves each firing k triggers earlier. With offset N-1 it fires on the first trigger. |
 | **Phase Scale** `loom.phase.scale` | phase, reset | phase | multiply (1 to 16), divide (1 to 16) | Scales a phase by multiply ÷ divide, and stays locked to it. Divide counts the input's wraps, so a divide of 2 wraps once every two input cycles, counted from the module's first cycle or its last reset. |
-| **Phase Trigger** `loom.phase.trigger` | phase | trigger | none | Fires a trigger each time the input phase wraps: forward from near 1 to near 0, or backward from near 0 to near 1. Turns any phase into triggers: a scaled phase, an LFO's phase, or the transport's bar phase. |
+| **Phase Trigger** `loom.phase.trigger` | phase | trigger | bar phase | Fires a trigger each time the input phase wraps: forward from near 1 to near 0, or backward from near 0 to near 1. With no cable, fires on the transport's bar starts while it runs. |
 
-*Phase Scale's `phase` input defaults to the bar phase, like the LFO in sync mode.* Why: a constant 0 never wraps, so an unpatched module would output a flat 0 at every ratio. With the bar phase, Phase Scale followed by Phase Trigger multiplies the bar into triggers with no cables. Phase Trigger keeps a default of 0, because on the bar phase it would only repeat the Transport's own bar trigger.
+*Phase Scale and Phase Trigger default to the bar phase, like the LFO in sync mode.* Why: a constant 0 never wraps. The bar phase gives Phase Scale a running cycle and gives an unpatched Phase Trigger the transport's bar triggers. Connect Phase Scale to Phase Trigger to multiply the bar into triggers.
 
 *Why both Clock Divide and Phase Scale:* triggers are events, for counting and arrangement logic (ADR-0012). Phases are continuous, for anything that should move smoothly and in sync: LFOs, sequencers, cycles. Each domain needs its own divider. Phase Scale also gives polyrhythm: multiply 3, divide 2 plays three against two.
 
@@ -148,6 +148,7 @@ These details were settled while building the module.
 
 ### Phase Trigger details
 
+- **Default input.** With no cable, `phase` follows the bar, so the trigger fires on the same frames as the Transport's bar trigger. It stays low while the transport is stopped. A stop or jump restarts wrap detection for this default input.
 - **What counts as a wrap.** The phase jumps by more than 0.5 from one frame to the next, in either direction. *Why:* a phase moving at any rate below half the sample rate changes by less than 0.5 per frame, so only a wrap can jump that far. A small wobble does not fire.
 - **Both directions.** A phase running forward wraps from near 1 to near 0. One running backward wraps from near 0 to near 1. Both start a new cycle, so both fire.
 - **No latency.** The trigger fires on the first frame of the new cycle. That frame is also the end of the old cycle, so this is the same frame an end-of-cycle trigger marks.
@@ -160,7 +161,7 @@ These details were settled while building the module.
 
 **Status:** Implemented ([#31](https://github.com/brylie/LoomDSP/issues/31)). Code: `loom.phase.scale` in `loom-modules/src/phase.rs`.
 
-- **Default input.** The `phase` input defaults to bar phase. With nothing connected, Phase Scale follows the transport, and Phase Scale into Phase Trigger multiplies the bar clock with no cables. *Why:* a constant phase never wraps, so a value default would make an unpatched Phase Scale output a flat 0 at every ratio. Phase Trigger keeps a value default, because on bar phase it would only repeat the Transport's bar trigger.
+- **Default input.** The `phase` input defaults to bar phase. With nothing connected, Phase Scale follows the transport. Connect its output to Phase Trigger to multiply the bar clock. *Why:* a constant phase never wraps, so a value default would make an unpatched Phase Scale output a flat 0 at every ratio.
 
 ### Button details
 
@@ -197,7 +198,7 @@ These details were settled while building the module.
 
 ## Clock to phase
 
-**Status:** Agreed, M2 ([#116](https://github.com/brylie/LoomDSP/issues/116), 2026-11-01). Decides how LoomDSP multiplies a clock that arrives only as triggers: turn it into a phase, then multiply the phase as usual with Phase Scale and Phase Trigger. *Why:* every clock tool in LoomDSP works in the phase domain ([phase and cycles](../learn/phase-and-cycles.md)); this module is the one place that has to measure time.
+**Status:** Agreed, M3 ([#116](https://github.com/brylie/LoomDSP/issues/116), 2026-11-01). Decides how LoomDSP multiplies a clock that arrives only as triggers: turn it into a phase, then multiply the phase as usual with Phase Scale and Phase Trigger. *Why:* every clock tool in LoomDSP works in the phase domain ([phase and cycles](../learn/phase-and-cycles.md)); this module is the one place that has to measure time.
 
 `loom.phase.from-clock` (MT-PHASE-09):
 
@@ -216,7 +217,7 @@ These details were settled while building the module.
 
 ## MIDI clock
 
-**Status:** Agreed, M2 ([#77](https://github.com/brylie/LoomDSP/issues/77), 2026-11-01). Requirements: FR-MIDI-07, FR-LIB-25.
+**Status:** Implemented, M2 ([#77](https://github.com/brylie/LoomDSP/issues/77), 2026-11-01). Requirements: FR-MIDI-07, FR-LIB-25.
 
 > I play with a drum machine. In Preferences I set the clock source to it. The Transport tile says "Following TR clock", my sequencers follow its tempo and its Start and Stop, and the LoomDSP clock goes on to my synth.
 

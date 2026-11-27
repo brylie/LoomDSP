@@ -3,7 +3,7 @@
 Tools that let tests, scripts, and QA agents check what the app actually plays, so safety checks on the final output do not depend on a person listening.
 
 - **Kind:** living specification.
-- **Status:** Stepped test output, Recording the whole run, and `loom analyze`: Implemented. Agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320). Device capture: Implemented. Agreed and built in the pull request that adds `loom capture`. Virtual MIDI controllers: agreed and built for [#26](https://github.com/brylie/LoomDSP/issues/26); run on macOS, not yet on Linux.
+- **Status:** Stepped test output, Recording the whole run, and `loom analyze`: Implemented. Agreed and built in [#320](https://github.com/brylie/LoomDSP/pull/320). Device capture: Implemented. Agreed and built in the pull request that adds `loom capture`. Virtual MIDI controllers: agreed and built for [#26](https://github.com/brylie/LoomDSP/issues/26); run on macOS, not yet on Linux. Measuring DC (the low-pass DC): Implemented. Agreed by Brylie on 2026-11-27 and built for [#789](https://github.com/brylie/LoomDSP/issues/789).
 - **Decision behind it:** None. It builds on [output safety](output-safety.md) (ADR-0019), the [control channel](control-channel.md), and the `devices::Host` trait from the [preferences spec](preferences.md).
 - **Use case and requirements:** Developer tooling. It protects UC3 (perform live), FR-PERF-08, NFR-SND-02, and NFR-SND-03 by testing them in the app, not only in the engine.
 - **Background:** [Output safety explainer](../learn/output-safety.md).
@@ -76,7 +76,7 @@ A `loom` subcommand that reads a WAV file (16-bit, 24-bit, or 32-bit float) and 
 | At full scale | Samples of size 1.0 or more, which is what a hard clip leaves. |
 | Not finite | NaN and infinite samples. The other measurements leave them out (see below). |
 | Largest step | Largest difference between two neighbouring samples, with its time. A click shows up here. |
-| DC | The mean of the whole file, and the largest mean of any 100 ms window. |
+| DC | The mean of the whole part, and the low-pass DC: the largest size of the signal after a second-order 1 Hz low-pass, from 1 s into the part (see [Measuring DC](#measuring-dc)). |
 | RMS | The level, linear and in dBFS. |
 
 Options:
@@ -85,13 +85,46 @@ Options:
 |---|---|
 | `--from SECONDS`, `--to SECONDS` | Measure only this part of the file, for example after a fade-in. |
 | `--json` | Print JSON instead of text, for scripts and agents. |
-| `--max-peak X`, `--max-step X`, `--max-dc X` | Checks. When one fails, the command says which, and exits with status 1. |
+| `--max-peak X`, `--max-step X`, `--max-dc X` | Checks. When one fails, the command says which, and exits with status 1. `--max-dc` compares the low-pass DC. |
 
-When the file cannot be read, or an option is not usable, the command exits with status 2. Unusable options are a NaN or infinite time or limit, and `--from` after `--to`. *Why:* a script can then tell a failed check from a broken run. A NaN limit would also pass every check, because every comparison with NaN is false.
+**Exit status.** 0 when every check given passes, 1 when one fails, and 2 when the run could not measure. When the file cannot be read, an option is not usable, or `--max-dc` is given for a part of 1 s or less, the command exits with status 2. Unusable options are a NaN or infinite time or limit, and `--from` after `--to`. *Why:* a script can then tell a failed check from a broken run. A NaN limit would also pass every check, because every comparison with NaN is false.
 
-**NaN and infinite samples.** Peak, Over the ceiling, At full scale, DC, and RMS leave them out and measure the finite samples. Largest step compares only two finite neighbours, so a step next to a broken sample is not counted. A DC window counts a broken sample as 0. Not finite counts them. Each check given (`--max-peak`, `--max-step`, `--max-dc`) fails for a channel with any such sample, whatever the other measurements say. With no checks, the file is only measured and the command exits with status 0. *Why:* the same rule as the module test harness ([rule 7](module-test-harness.md#rules)): a NaN in audio is always a bug, and broken audio must not pass a check because it was left out of the arithmetic.
+**NaN and infinite samples.** Peak, Over the ceiling, At full scale, DC, and RMS leave them out and measure the finite samples. Largest step compares only two finite neighbours, so a step next to a broken sample is not counted. The low-pass reads a broken sample as 0, so one NaN cannot stay in its state. Not finite counts them. Each check given (`--max-peak`, `--max-step`, `--max-dc`) fails for a channel with any such sample, whatever the other measurements say. With no checks, the file is only measured and the command exits with status 0. *Why:* the same rule as the module test harness ([rule 7](module-test-harness.md#rules)): a NaN in audio is always a bug, and broken audio must not pass a check because it was left out of the arithmetic.
 
-**JSON.** `--json` prints every measurement as a number. JSON has no infinity, so a level of silence in dBFS (negative infinity) prints as `null`. No other measurement can be infinite, because broken samples are left out.
+**JSON.** `--json` prints every measurement as a number. JSON has no infinity, so a level of silence in dBFS (negative infinity) prints as `null`. No other measurement can be infinite, because broken samples are left out. The low-pass DC (`dc_low_pass`) is `null` when the part is 1 s or shorter, because the filter has not settled and there is nothing to measure. *Why not 0:* a script that read 0 would think the part has no DC.
+
+### Measuring DC
+
+*Agreed (Brylie, 2026-11-27, [#789](https://github.com/brylie/LoomDSP/issues/789)).*
+
+`--max-dc` checks the low-pass DC. The signal goes through two one-pole low-pass stages in series, each with a cut-off of 1 Hz:
+
+```text
+a  = 1 - exp(-2 pi fc / fs)       fc = 1 Hz, fs = the sample rate
+y1 = y1 + a (x  - y1)
+y2 = y2 + a (y1 - y2)
+```
+
+Both stages start at 0. The low-pass DC is the largest size of `y2`, kept with its sign, from 1 s into the measured part to its end. The first second is skipped while the filter settles: one stage's time constant is 1 / (2 pi fc), about 0.16 s, so 1 s is about six of them. A part of 1 s or less has no low-pass DC.
+
+*Why a low-pass and not a mean over a window:* a window that holds a part of a tone's cycle has a mean of up to A / (pi f T) for a tone of peak A and frequency f, and a window that slides one sample at a time finds the worst phase. Middle C at peak 0.3, in a 100 ms window, reads about 0.002, so the old check failed on almost every played note with no DC in it. A second-order low-pass cuts a steady tone by about (fc / f)^2, and lets real DC through unchanged. It is also close to what the output safety DC blocker reacts to.
+
+Measured at 48 kHz, peak 0.5, with no DC:
+
+| Tone | Low-pass DC |
+|---|---|
+| 1 kHz | 0.000006 |
+| 261.6 Hz | 0.00003 |
+| 40 Hz | 0.00045 |
+| 20 Hz | 0.0015 |
+
+The 40 Hz and 20 Hz figures include what is left at 1 s of the filter's answer to the tone's start. The steady figures alone would be 0.0003 and 0.0013.
+
+**Known limits.**
+
+- A steady tone near 20 Hz at peak 0.5 reads over 0.001.
+- A tone that starts or stops abruptly after `--from` reads more than a steady one. A 40 Hz tone at peak 0.5 that starts at the phase of a sine reads about 0.005, and about 0.004 with a 5 ms attack. At 261.6 Hz it reads about 0.0007, at 1 kHz about 0.0002. *Why:* a sine switched on at phase 0 has a net area of about A / (2 pi f) in its first half cycle. That is real low-frequency content, and the DC blocker reacts to it too, so the reading is not wrong. **Rule for a check:** play the note on before `--from`, and hold it to the end of the part. The filter sees nothing before `--from`, starts there, and DC is read from 1 s after it, so a note already playing at `--from` has settled by then. A note that starts or stops after `--from` can read high.
+- A short DC fault reads smaller than its size. A 100 ms burst of 0.5 reads about 0.11. The old window found such a burst at full size, but it could not tell DC from a tone, which is the worse fault for a check.
 
 The measurements are functions in `loom-analysis`, so the app tests of the stepped test output and `loom analyze` measure in the same way. *Why a crate of their own:* `loom analyze` ships with the `loom` tool, and the module test harness in `loom-test` should not ship with it.
 
@@ -200,7 +233,7 @@ loom-app examples/patches/subtractive.ron   # terminal 3, started after the port
 6. **A recording keeps one sample rate.** If a new stream runs at a different rate (a device change), the recording ends, and the status bar and stderr say why. *Why:* a WAV file has one sample rate. Resampling would change the very samples we want to check.
 7. **Recording never waits on the audio thread.** The existing writer thread and its dropped-frame count stay. *Why:* real-time safety (hard rule 1).
 8. **`loom analyze` only measures.** It does not judge whether a sound is good. Checks pass or fail only on the limits given. *Why:* the same rule as `sample` on the control channel: tools measure, and a person or the test decides what is right for a patch.
-9. **Measurements are plain arithmetic on the samples.** Peak is not oversampled, and DC is a plain mean. *Why:* the numbers must be easy to check by hand, and must match what the engine's output safety stage limits (it also works on samples, not true peaks).
+9. **Measurements are plain arithmetic on the samples, or first-order filters run on them.** Peak is not oversampled. DC is a plain mean, and the low-pass DC is two one-pole stages in series ([Measuring DC](#measuring-dc)). *Why:* the numbers must be easy to check by hand, and must match what the engine's output safety stage limits (it also works on samples, not true peaks). A one-pole stage is one line of arithmetic per sample, so it can still be checked by hand. A plain mean over a window cannot tell a tone from DC (#789).
 10. **Capture writes what the device delivered, nothing more** (device capture). It does not resample, align, trim, or fill gaps. Dropped frames and input stream errors are counted and reported, and make the run fail with status 2. *Why:* the point is to see what the device really did. Any repair would hide the very fault we look for.
 11. **Capture never waits on the audio thread** (device capture). Its input callback only pushes into a ring, as `--record` does. *Why:* real-time safety (hard rule 1), and a slow callback could itself drop input.
 12. **A virtual controller goes through the same MIDI code as hardware** (virtual MIDI). The app does not know or check that a port is virtual. *Why:* the point is to test the real path. A special case in the app would test something else.
@@ -234,6 +267,10 @@ Each is a `loom-app` test that uses the stepped output, through `App::new` and `
 - [x] A failed `--max-peak`, `--max-step`, or `--max-dc` check exits with status 1 and names the check. A passing one exits with status 0.
 - [x] A NaN sample fails every check given; with no checks, the file is only measured.
 - [x] A NaN or infinite time or limit, and `--from` after `--to`, exit with status 2.
+- [x] **Tones are not DC** ([#789](https://github.com/brylie/LoomDSP/issues/789)). Sines with no DC at 40 Hz, 261.6 Hz, and 1 kHz, peak 0.5, pass `--max-dc 0.001` (unit tests in `loom-analysis`).
+- [x] **Real DC still fails.** A sine with a small offset reads the offset, and a Constant of 1.0 into Audio Out with output safety Off reads 1.0 through the app (`dc_through_the_app`).
+- [x] **The AGENTS.md check passes on a played note.** `sine.ron` and `subtractive.ron` with a held note pass the limits of the `loom-cli analyze` command in AGENTS.md, read from that file (`qa_tests.rs`).
+- [x] `--max-dc` on a part of 1 s or less exits with status 2 and says the part is too short; the low-pass DC is `null` in `--json`.
 
 ### Device capture
 

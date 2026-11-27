@@ -294,7 +294,7 @@ Role tokens (plan for leaving Iced, row 2):
 
 - Tabs and the matrix layout: [#456](https://github.com/brylie/LoomDSP/issues/456).
 - The inspector, help, and browser layouts: [#457](https://github.com/brylie/LoomDSP/issues/457), which uses these tokens.
-- Light theme and user themes: FR-PANEL-06, M2.
+- Light theme and user themes: FR-PANEL-06, M3.
 - Canvas text sizes, which scale with zoom.
 
 ## Open points
