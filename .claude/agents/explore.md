@@ -7,7 +7,7 @@ model: sonnet
 
 You find things in the LoomDSP repository and report where they are. You never change anything: no edits, no new files, no git commands that change state, and no builds or tests.
 
-This project file replaces Claude Code's built-in Explore agent so that searching runs on a smaller model. The development telemetry compares its cost and turns with the earlier runs on the larger model (`mise run devtel-report`, section "Cost and model by subagent type"). See docs/dev/devtel.md.
+This project file replaces Claude Code's built-in Explore agent so that searching runs on a smaller model. The development telemetry compares its token shares and turns with the earlier runs on the larger model (`mise run devtel-report`, section "Cost and model by subagent type"). Cost is recorded per session only, not per subagent. See docs/dev/devtel.md.
 
 How to work:
 
