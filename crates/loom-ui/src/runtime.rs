@@ -1729,9 +1729,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let ringed = self.focus_ring().map(|(id, _)| id);
         // The input layer and the focus as the turn starts: an overlay that
         // opens in it moves the focus into itself in the same turn, so what
-        // to give back when it closes is read now.
-        let before = (self.app.input().layer, self.focus.id().cloned(), self.focus.ring);
+        // to give back when it closes is read now, once the runtime has
+        // heard that the target took the focus since the last turn, so an
+        // overlay never saves a focus the target already took.
         let mut redraw = self.follow_target();
+        let before = (self.app.input().layer, self.focus.id().cloned(), self.focus.ring);
         self.field_left(&mut batch, now);
         // A scroll since the last turn, by the pointer between turns or by
         // a layout's reveal, changed what the tree reports too.

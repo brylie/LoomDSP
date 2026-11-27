@@ -562,6 +562,37 @@ fn a_toolkit_focus_is_left_alone_after_the_layout() {
     assert_eq!(harness.runtime().focused(), None);
 }
 
+/// Rule 4: an overlay saves the focus the turn it opens in starts with,
+/// after the runtime heard that the target took the focus since the last
+/// turn. So it saves nothing of the runtime's, and closing it takes no
+/// focus from the target.
+#[test]
+fn an_overlay_never_saves_a_focus_the_target_took() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let mut harness = Harness::new(Panels::default(), Toolkit::default(), window, Instant::now());
+    harness.send(Message::Show(vec![
+        panel("bar", row(&["a"])),
+        (UiId::panel("menu"), Layer::Overlays, row(&["item"])),
+    ]));
+    harness.lay_out(&mut Mono::default());
+    harness.send(Message::Focus(id("bar", "a")));
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "a")));
+    // Between turns, the toolkit's own field takes the focus, as a press
+    // on it does.
+    let field = UiId::panel("inspector").with("name");
+    harness.runtime_mut().target_mut().focused = Some(field.clone());
+    // An overlay that leaves the focus where it is opens, then closes.
+    harness.send(Message::Input(Layer::Overlays));
+    harness.send(Message::Input(Layer::Canvas));
+    harness.lay_out(&mut Mono::default());
+    assert_ne!(
+        harness.runtime().focused(),
+        Some(&id("bar", "a")),
+        "the focus the target took is not given back"
+    );
+    assert_eq!(harness.runtime().target().focused, Some(field), "the toolkit keeps it");
+}
+
 /// Rule 2, as Brylie decided 2026-11-16: Tab passes over a turned-off
 /// element, as macOS and Windows controls do. Its node stays in the tree
 /// with its description, offering nothing, not even Focus.
