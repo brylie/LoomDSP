@@ -601,9 +601,7 @@ impl App {
             // which a press never gives it), it starts on its first item,
             // as the WAI-ARIA menu pattern does (section 6, rule 8).
             let by_key = self.focus.as_ref() == Some(&crate::toolbar::toolbar_id().with("recent"));
-            let first = rows
-                .first()
-                .map(|row| crate::menus::recent_id().with(row.path.display().to_string()));
+            let first = rows.first().map(|row| crate::menus::recent_row_id(&row.path));
             self.overlays.open(Overlay::RecentList(rows));
             if by_key && let Some(first) = first {
                 self.overlays.set_menu_highlight(Some(0));

@@ -71,6 +71,18 @@ pub(crate) fn recent_id() -> UiId {
     UiId::panel("recent")
 }
 
+/// The UI ID of the Recent list's scrolling rows. Every row is keyed under
+/// it, since a scroll container keeps its offset by its UI ID (ui-layer.md,
+/// section 5, rule 12).
+pub(crate) fn recent_list_id() -> UiId {
+    recent_id().with("list")
+}
+
+/// The UI ID of the Recent row for the file at `path`.
+pub(crate) fn recent_row_id(path: &std::path::Path) -> UiId {
+    recent_list_id().with(path.display().to_string().as_str())
+}
+
 /// The UI ID of a tile menu's item, under the menu's `menu`, from what the
 /// item does, not from what it says: rewording an item, or a name in it,
 /// keeps its node (section 4).
@@ -188,7 +200,7 @@ impl App {
             .iter()
             .enumerate()
             .map(|(at, row)| MenuItem {
-                id: id.clone().with(row.path.display().to_string().as_str()),
+                id: recent_row_id(&row.path),
                 label: row.name.clone(),
                 description: Some(if row.missing {
                     format!("{} (not found)", row.folder)
