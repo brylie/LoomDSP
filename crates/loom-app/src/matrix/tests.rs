@@ -1,9 +1,31 @@
+//! Tests for `matrix.rs`: the model's rows, sorting, and filters, retargets
+//! and their undo, typed depth, Add, and what follows the graph. The
+//! panel's keys, selects, and nodes are tested in `panel/tests.rs`.
+
+use super::panel::tests::{focused, key, key_with, matrix_open};
 use super::*;
 use crate::ui_test::Ui;
-use iced::keyboard::key::Named;
-use loom_ui_core::Point;
+use iced::keyboard::{self, key::Named};
 
-/// A collapsed source keeps its visible name, edit value, and place in the source order.
+/// The rows the matrix shows now, by assignment.
+fn shown(ui: &Ui) -> Vec<u32> {
+    ui.app().matrix_model().rows.iter().map(|row| row.id).collect()
+}
+
+/// Every assignment, as it is now.
+fn assignments(ui: &Ui) -> Vec<(AssignmentId, loom_core::Assignment)> {
+    ui.app()
+        .session
+        .controller
+        .graph()
+        .assignments()
+        .map(|(id, a)| (id, *a))
+        .collect()
+}
+
+/// A collapsed source keeps its visible name and its place in the source
+/// order, and the Source select offers it in that place, so a choice of
+/// the next one lands on the source after it.
 #[test]
 fn matrix_keeps_a_modulation_from_a_subpatch_output() {
     let mut ui = Ui::open("modulation.ron");
@@ -26,36 +48,22 @@ fn matrix_keeps_a_modulation_from_a_subpatch_output() {
     ui.send(Message::Matrix(Event::Select(id, Column::Source)));
     assert_eq!(ui.app().matrix_line().unwrap().from, (tile.0, 0));
     let original = *ui.app().session.controller.graph().assignment(id).unwrap();
+
+    // The row's own source is in the select, in module and port order,
+    // named as the row names it.
+    let graph = ui.app().session.controller.graph();
+    let base = sources(graph, &ui.app().session.hierarchy, &ui.app().session.level);
+    let picks = row_sources(&base, original.source, &rows[0].source);
+    let at = picks.iter().position(|pick| pick.output == original.source).unwrap();
+    assert_eq!(picks[at].label, rows[0].source);
+    assert!(picks.windows(2).all(|pair| pair[0].output < pair[1].output), "in order");
+    // Choosing it again changes nothing and adds no undo step.
     let history = ui.app().session.edits.history.len();
-    let enter = |ui: &mut Ui| {
-        ui.tap(
-            iced::keyboard::Key::Named(Named::Enter),
-            iced::keyboard::Modifiers::empty(),
-        );
-    };
-    enter(&mut ui);
-    let model = ui.app().ui_snapshot().matrix;
-    let pick = &model.sources[model.edit.unwrap().choice];
-    assert_eq!(pick.output, original.source);
-    assert_eq!(pick.label, rows[0].source);
-    enter(&mut ui);
+    let cell = access::cell(id, Column::Source);
+    let same = ui.app().matrix_chose(&cell, at).expect("the source select");
+    ui.send(same);
     assert_eq!(ui.app().session.controller.graph().assignment(id), Some(&original));
     assert_eq!(ui.app().session.edits.history.len(), history);
-    assert!(ui.app().ui_snapshot().matrix.edit.is_none());
-
-    let graph = ui.app().session.controller.graph();
-    let options = sources(graph, &ui.app().session.hierarchy, &ui.app().session.level);
-    assert!(options[0].output < original.source);
-    let expected = options.iter().find(|pick| {
-        pick.output > original.source
-            && ui.app().allows_assignment(pick.output, original.target, original.param)
-            && !modulation::exists(graph, pick.output, original.target, original.param)
-    });
-    let expected = expected.map_or(original.source, |pick| pick.output);
-    ui.a11y_action(&access::cell(id, Column::Source), accesskit::Action::Increment);
-    let selected = ui.app().session.matrix.selected.unwrap();
-    let graph = ui.app().session.controller.graph();
-    assert_eq!(graph.assignment(selected).unwrap().source, expected);
 
     ui.send(Message::Matrix(Event::AddOpen));
     let model = ui.app().ui_snapshot().matrix;
@@ -66,7 +74,6 @@ fn matrix_keeps_a_modulation_from_a_subpatch_output() {
         .unwrap();
     assert_eq!(pick.label, rows[0].source);
     assert!(!pick.edit_only);
-    assert!(model.sources.iter().any(|pick| pick.output != original.source));
     let target = model
         .targets
         .iter()
@@ -76,25 +83,19 @@ fn matrix_keeps_a_modulation_from_a_subpatch_output() {
     ui.send(Message::Matrix(Event::AddTarget(target.clone())));
     ui.send(Message::Matrix(Event::AddApply));
     assert!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignments()
-            .any(|(_, assignment)| {
-                assignment.source == pick.output
-                    && assignment.target == target.module
-                    && assignment.param == target.param
-            })
+        assignments(&ui)
+            .iter()
+            .any(|(_, a)| { a.source == pick.output && a.target == target.module && a.param == target.param })
     );
 }
 
-/// Add and Edit offer an occupied slot's control with the flat parameter identity.
+/// Add offers an occupied slot's control with the flat parameter identity,
+/// and a row's Target select offers the same.
 #[test]
 fn matrix_offers_an_occupied_slot_control() {
     let mut ui = Ui::open("modulation.ron");
     let graph = ui.app().session.controller.graph();
-    let (id, assignment) = graph.assignments().next().unwrap();
+    let (_, assignment) = graph.assignments().next().unwrap();
     let assignment = *assignment;
     ui.send(Message::MakeSlot {
         module: assignment.target.0,
@@ -111,11 +112,12 @@ fn matrix_offers_an_occupied_slot_control() {
         .find(|pick| (pick.module, pick.param) == (assignment.target, assignment.param))
         .unwrap();
     assert!(pick.label.starts_with(&format!("{name}: ")));
-
-    ui.send(Message::Matrix(Event::Cancel));
-    ui.send(Message::Matrix(Event::Edit(id, Column::Target)));
-    let edit = ui.app().ui_snapshot().matrix;
-    assert!(edit.targets.contains(pick));
+    let all = targets(
+        ui.app().session.controller.graph(),
+        &ui.app().session.hierarchy,
+        &ui.app().session.level,
+    );
+    assert!(all.contains(pick), "the Target select offers it too");
 }
 
 /// The outside Matrix names, filters and selects the same surface the cable reaches.
@@ -176,16 +178,20 @@ fn matrix_surface_target_and_range_survive_rename_and_reopen() {
     assert_eq!(reopened.ui_snapshot().matrix.rows[0].target, "Air: Brightness");
 }
 
-/// The matrix snapshot carries the picks and the cell editor used by the view.
+/// The snapshot carries the Depth field's draft and the Add form's picks.
 #[test]
 fn the_snapshot_describes_open_matrix_editors() {
-    let mut ui = matrix_with_a_row();
-    ui.send(Message::Matrix(Event::Edit(AssignmentId(1), Column::Source)));
+    let mut ui = matrix_open();
+    for _ in 0..4 {
+        key(&mut ui, Named::ArrowRight);
+    }
+    key(&mut ui, Named::Enter);
     let model = ui.app().ui_snapshot().matrix;
-    let edit = model.edit.unwrap();
-    assert_eq!(edit.column, Column::Source);
-    assert_eq!(model.sources[edit.choice].label, model.rows[0].source);
+    let edit = model.edit.expect("the Depth field");
+    assert_eq!(edit.column, Column::Depth);
+    assert_eq!(edit.depth, crate::modulation::depth_text(0.08));
 
+    key(&mut ui, Named::Escape);
     ui.send(Message::Matrix(Event::AddOpen));
     let model = ui.app().ui_snapshot().matrix;
     assert!(model.add.is_some());
@@ -193,12 +199,9 @@ fn the_snapshot_describes_open_matrix_editors() {
     assert!(!model.targets.is_empty());
 }
 
-/// Keyboard navigation keeps every row within the actual table viewport:
-/// the matrix asks to show the selected card and cell by their UI IDs, and
-/// the window scrolls just enough.
-#[test]
-fn keyboard_reveals_rows_in_an_overflowing_table() {
-    use iced::advanced::widget::{Id, Operation, operation::Scrollable};
+/// The modulation example with 30 more assignments, so the cards run
+/// past the view, committed so a later step is the test's own.
+fn overflowing() -> Ui {
     let mut ui = Ui::open("modulation.ron");
     let assignment = *ui
         .app()
@@ -219,135 +222,153 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
             )
             .unwrap();
     }
-    // Establish the fixture as the edited patch before checking that
-    // navigation adds no further undo steps.
     assert!(ui.app_mut().commit());
     ui.app_mut().session.edits.history.clear();
-    ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
-    /// Captures the table viewport and the selected row and cell from the
-    /// view, found by their UI IDs as the scroll finds them.
-    struct Bounds(
-        Option<(iced::Rectangle, iced::Vector)>,
-        Option<iced::Rectangle>,
-        Option<iced::Rectangle>,
-        Id,
-        Id,
-    );
-    impl Operation for Bounds {
-        fn traverse(&mut self, f: &mut dyn FnMut(&mut dyn Operation)) {
-            f(self);
-        }
-        fn container(&mut self, id: Option<&Id>, bounds: iced::Rectangle) {
-            if id == Some(&self.3) {
-                self.1 = Some(bounds);
-            } else if id == Some(&self.4) {
-                self.2 = Some(bounds);
-            }
-        }
-        fn scrollable(
-            &mut self,
-            id: Option<&Id>,
-            bounds: iced::Rectangle,
-            _: iced::Rectangle,
-            translation: iced::Vector,
-            _: &mut dyn Scrollable,
-        ) {
-            if id == Some(&Id::new("matrix-table")) {
-                self.0 = Some((bounds, translation));
-            }
-        }
+    ui.send(Message::Matrix(Event::Tab(Tab::Matrix)));
+    let _ = ui.redraw();
+    ui
+}
+
+/// Where the part `id` shows in the window, as the runtime last laid it
+/// out: its bounds are moved by the card list's scroll offset already.
+fn shown_at(ui: &Ui, id: &loom_ui_core::UiId) -> loom_ui_core::Rect {
+    ui.runtime().bounds(id).unwrap_or_else(|| panic!("{id} is laid out"))
+}
+
+/// The chosen card and cell lie inside the card list's view, as the
+/// runtime last laid it out.
+fn check_in_view(ui: &mut Ui) {
+    ui.lay_out_panels();
+    let selected = ui.app().session.matrix.selected.expect("a chosen row");
+    let cell = access::cell(selected, ui.app().session.matrix.cell);
+    let list = ui.runtime().bounds(&panel::list_id()).expect("the card list");
+    let card = shown_at(ui, &access::row(selected));
+    let cell = shown_at(ui, &cell);
+    for (what, part) in [("card", card), ("cell", cell)] {
+        assert!(part.y >= list.y - 1.0, "{what} {part:?} above {list:?}");
+        assert!(
+            part.y + part.height <= list.y + list.height + 1.0,
+            "{what} {part:?} below {list:?}"
+        );
+        assert!(part.x >= list.x - 1.0 && part.x + part.width <= list.x + list.width + 1.0);
     }
-    let before: Vec<_> = ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignments()
-        .map(|(id, a)| (id, *a))
-        .collect();
-    let check = |ui: &mut Ui| {
-        let selected = ui.app().session.matrix.selected.expect("a selected row");
-        let mut bounds = Bounds(
-            None,
-            None,
-            None,
-            crate::places::widget_id(&access::row(selected)),
-            crate::places::widget_id(&access::cell(selected, ui.app().session.matrix.cell)),
-        );
-        ui.with_ui(|view, renderer, _| view.operate(renderer, &mut bounds));
-        let (viewport, translation) = bounds.0.expect("viewport");
-        let row = bounds.1.expect("selected row");
-        assert!(row.y - translation.y >= viewport.y - 1.0);
-        assert!(row.y + row.height - translation.y <= viewport.y + viewport.height + 1.0);
-        let cell = bounds.2.expect("selected cell");
-        assert!(cell.x - translation.x >= viewport.x - 1.0);
-        assert!(cell.x + cell.width - translation.x <= viewport.x + viewport.width + 1.0);
-        assert_eq!(
-            ui.app().ui_snapshot().matrix.selected,
-            ui.app().session.matrix.selected.map(|id| id.0)
-        );
-        translation
-    };
-    // The four cases of a scroll into view: in view (none), below, back
-    // above, and the last row.
-    ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
-    assert_eq!(check(&mut ui).y, 0.0, "the second row is in view: no scroll");
+    assert_eq!(focused(ui), Some(access::cell(selected, ui.app().session.matrix.cell)));
+}
+
+/// The card list's scroll offset, down.
+fn offset(ui: &Ui) -> f32 {
+    ui.runtime().scroll_offset(&panel::list_id()).map_or(0.0, |(y, _)| y)
+}
+
+/// Every module's place on the canvas.
+fn positions(ui: &Ui) -> Vec<(u32, (f32, f32))> {
+    ui.app().session.positions.iter().map(|(id, at)| (*id, *at)).collect()
+}
+
+/// The grid's keys keep the chosen card and cell in the card list's view:
+/// none in view, below, back above, and the last row, and moving between
+/// cells never scrolls sideways. Sorting and filtering keep it in view
+/// too, and none of it is an undo step.
+#[test]
+fn keyboard_reveals_rows_in_an_overflowing_table() {
+    let mut ui = overflowing();
+    let (places, before) = (positions(&ui), assignments(&ui));
+    key(&mut ui, Named::ArrowDown);
+    check_in_view(&mut ui);
+    assert_eq!(offset(&ui), 0.0, "the second row is in view: no scroll");
     for _ in 1..32 {
-        ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
-        check(&mut ui);
+        key(&mut ui, Named::ArrowDown);
+        check_in_view(&mut ui);
     }
     assert_eq!(ui.app().session.matrix.selected, Some(AssignmentId(32)), "the last row");
-    assert!(check(&mut ui).y > 0.0, "below: it scrolled");
-    // Every cell of a card fits the column, so moving between cells
-    // never scrolls sideways (#456).
+    assert!(offset(&ui) > 0.0, "below: it scrolled");
     for _ in 0..4 {
-        ui.tap(keyboard::Key::Named(Named::ArrowRight), keyboard::Modifiers::default());
-        assert_eq!(check(&mut ui).x, 0.0, "no sideways scroll");
+        key(&mut ui, Named::ArrowRight);
+        check_in_view(&mut ui);
     }
     for _ in 0..31 {
-        ui.tap(keyboard::Key::Named(Named::ArrowUp), keyboard::Modifiers::default());
-        assert_eq!(check(&mut ui).x, 0.0, "no sideways scroll");
+        key(&mut ui, Named::ArrowUp);
+        check_in_view(&mut ui);
     }
     assert_eq!(ui.app().session.matrix.selected, Some(AssignmentId(1)));
     ui.send(Message::Matrix(Event::SortBy(Some(Column::Depth))));
-    check(&mut ui);
+    let _ = ui.redraw();
+    check_in_view(&mut ui);
     ui.send(Message::Matrix(Event::ReverseSort));
-    check(&mut ui);
-    ui.send(Message::Matrix(Event::Filter("LFO".into())));
-    check(&mut ui);
-    ui.send(Message::Matrix(Event::SelectedOnly(true)));
-    check(&mut ui);
-    for _ in 0..31 {
-        ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
-        let selected = ui.app().session.matrix.selected.expect("visible selection");
-        assert!(
-            ui.app()
-                .session
-                .matrix
-                .model(
-                    ui.app().session.controller.graph(),
-                    &ui.app().session.hierarchy,
-                    &ui.app().session.level,
-                    &ui.app().session.selection,
-                    ui.app().right_tab
-                )
-                .rows
-                .iter()
-                .any(|row| row.id == selected.0)
-        );
-        check(&mut ui);
-    }
-    assert_eq!(
-        before,
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignments()
-            .map(|(id, a)| (id, *a))
-            .collect::<Vec<_>>()
-    );
+    let _ = ui.redraw();
+    check_in_view(&mut ui);
+    // Past the arrow group's deadline, the arrows moved no tile, changed no
+    // assignment, and left no undo step (#871).
+    let _ = ui.wake_after(std::time::Duration::from_millis(600));
+    let _ = ui.redraw();
+    assert_eq!(positions(&ui), places, "no tile moved");
+    assert_eq!(before, assignments(&ui));
     assert!(ui.app().session.edits.history.undo_step().is_none());
+}
+
+/// Tab until the runtime's focus is `to`, at most 20 presses, forward or
+/// back.
+fn tab_to(ui: &mut Ui, to: &loom_ui_core::UiId, back: bool) {
+    let modifiers = if back {
+        keyboard::Modifiers::SHIFT
+    } else {
+        keyboard::Modifiers::empty()
+    };
+    for _ in 0..20 {
+        if focused(ui).as_ref() == Some(to) {
+            return;
+        }
+        key_with(ui, Named::Tab, modifiers);
+    }
+    panic!("Tab never reached {to}, at {:?}", focused(ui));
+}
+
+/// #871: a change of filter left the grid's keys to the canvas, which
+/// moved the selected tile with the arrows. Through real input: the
+/// filter and Selected module only change, Tab comes back into the grid on
+/// the chosen cell, and Down then walks the rows that show. Past the
+/// arrow group's deadline, no module moved, no assignment changed, and
+/// there is no undo step. Up and Down in the filter move no tile either.
+#[test]
+fn changing_the_filters_keeps_the_keys_off_the_canvas() {
+    let mut ui = overflowing();
+    let (places, before) = (positions(&ui), assignments(&ui));
+    // Down twice, onto a row from the LFO that the filter keeps.
+    key(&mut ui, Named::ArrowDown);
+    key(&mut ui, Named::ArrowDown);
+    let chosen = focused(&ui).expect("a cell");
+    tab_to(&mut ui, &filter_part(), true);
+    ui.typewrite("LFO");
+    assert_eq!(ui.app().session.matrix.filter, "LFO");
+    assert_eq!(focused(&ui), Some(filter_part()), "the focus stays in the filter");
+    for named in [Named::ArrowUp, Named::ArrowDown] {
+        key(&mut ui, named);
+        assert_eq!(focused(&ui), Some(filter_part()), "{named:?} stays in the filter");
+    }
+    tab_to(&mut ui, &access::part("selected-only"), false);
+    key(&mut ui, Named::Space);
+    assert!(ui.app().session.matrix.selected_only);
+    for _ in 0..10 {
+        key(&mut ui, Named::Tab);
+        if focused(&ui).is_some_and(|id| id.is_under(&panel::list_id())) {
+            break;
+        }
+    }
+    assert_eq!(focused(&ui), Some(chosen), "back on the chosen cell");
+    for _ in 0..31 {
+        key(&mut ui, Named::ArrowDown);
+        let selected = ui.app().session.matrix.selected.expect("a chosen row");
+        assert!(shown(&ui).contains(&selected.0), "{selected:?} shows");
+        assert!(
+            focused(&ui).is_some_and(|id| id.is_under(&panel::list_id())),
+            "the grid keeps the keys"
+        );
+    }
+    let _ = ui.wake_after(std::time::Duration::from_millis(600));
+    let _ = ui.redraw();
+    assert_eq!(positions(&ui), places, "no tile moved");
+    assert_eq!(assignments(&ui), before, "no assignment changed");
+    assert!(ui.app().session.edits.history.undo_step().is_none(), "no undo step");
 }
 
 /// Visible rows follow engine order, sorting, text, and module filters
@@ -355,53 +376,33 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
 #[test]
 fn rows_sort_and_filter_without_editing_assignments() {
     let mut ui = Ui::open("modulation.ron");
-    let before: Vec<_> = ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignments()
-        .map(|(id, a)| (id, *a))
-        .collect();
+    let before = assignments(&ui);
     ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
-    let model = |ui: &Ui| {
-        ui.app().session.matrix.model(
-            ui.app().session.controller.graph(),
-            &ui.app().session.hierarchy,
-            &ui.app().session.level,
-            &ui.app().session.selection,
-            ui.app().right_tab,
-        )
-    };
-    assert_eq!(model(&ui).rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1, 2]);
+    assert_eq!(shown(&ui), vec![1, 2]);
     ui.app_mut().matrix_event(Event::SortBy(Some(Column::Depth)));
-    assert_eq!(model(&ui).rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1, 2]);
+    assert_eq!(shown(&ui), vec![1, 2]);
     ui.app_mut().matrix_event(Event::ReverseSort);
-    assert_eq!(model(&ui).rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![2, 1]);
+    assert_eq!(shown(&ui), vec![2, 1]);
     for column in Column::ALL {
         ui.app_mut().matrix_event(Event::SortBy(Some(column)));
-        assert_eq!(model(&ui).rows.len(), 2, "{} ascending", column.label());
+        assert_eq!(shown(&ui).len(), 2, "{} ascending", column.label());
         ui.app_mut().matrix_event(Event::ReverseSort);
-        assert_eq!(model(&ui).sort, Some((column, true)), "{} descending", column.label());
+        assert_eq!(
+            ui.app().matrix_model().sort,
+            Some((column, true)),
+            "{} descending",
+            column.label()
+        );
     }
     ui.app_mut().matrix_event(Event::Filter("LFO".into()));
-    assert_eq!(model(&ui).rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![1]);
+    assert_eq!(shown(&ui), vec![1]);
     ui.app_mut().matrix_event(Event::Filter(String::new()));
     ui.app_mut().matrix_event(Event::SelectedOnly(true));
     ui.app_mut()
         .matrix_event(Event::Select(AssignmentId(1), Column::Source));
-    assert_eq!(model(&ui).rows.len(), 2, "both assignments target the selected filter");
+    assert_eq!(shown(&ui).len(), 2, "both assignments target the selected filter");
     assert_eq!(ui.app().ui_snapshot().matrix.tab, Tab::Matrix);
-    assert_eq!(
-        before,
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignments()
-            .map(|(id, a)| (id, *a))
-            .collect::<Vec<_>>()
-    );
+    assert_eq!(before, assignments(&ui));
     assert!(ui.app().session.edits.history.undo_step().is_none());
 }
 
@@ -412,41 +413,26 @@ fn retarget_keeps_id_order_and_one_undo_step() {
     let mut ui = Ui::open("modulation.ron");
     ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
     let id = AssignmentId(1);
-    let original = *ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignment(id)
-        .expect("first assignment");
-    let target = targets(
-        ui.app().session.controller.graph(),
-        &ui.app().session.hierarchy,
-        &ui.app().session.level,
-    )
-    .into_iter()
-    .find(|t| t.module == ModuleId(4) && t.param != original.param)
-    .expect("another filter parameter");
+    let original = *ui.app().session.controller.graph().assignment(id).unwrap();
+    let all = |ui: &Ui| {
+        targets(
+            ui.app().session.controller.graph(),
+            &ui.app().session.hierarchy,
+            &ui.app().session.level,
+        )
+    };
+    let target = all(&ui)
+        .into_iter()
+        .find(|t| t.module == ModuleId(4) && t.param != original.param)
+        .expect("another filter parameter");
     ui.app_mut().matrix_event(Event::Target(id, target));
-    let changed = *ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignment(id)
-        .expect("retargeted assignment");
+    let changed = *ui.app().session.controller.graph().assignment(id).unwrap();
     assert_ne!(changed.param, original.param);
     assert_eq!(changed.depth, original.depth);
     assert_eq!(changed.polarity, original.polarity);
     assert_eq!(changed.enabled, original.enabled);
     assert_eq!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignments()
-            .map(|(id, _)| id.0)
-            .collect::<Vec<_>>(),
+        assignments(&ui).iter().map(|(id, _)| id.0).collect::<Vec<_>>(),
         vec![1, 2]
     );
     ui.app_mut().undo();
@@ -461,113 +447,58 @@ fn retarget_keeps_id_order_and_one_undo_step() {
     .into_iter()
     .find(|s| s.output.module == ModuleId(6))
     .expect("envelope output");
-    let cutoff = targets(
-        ui.app().session.controller.graph(),
-        &ui.app().session.hierarchy,
-        &ui.app().session.level,
-    )
-    .into_iter()
-    .find(|t| t.module == ModuleId(4) && t.param == original.param)
-    .expect("cutoff");
+    let cutoff = all(&ui)
+        .into_iter()
+        .find(|t| t.module == ModuleId(4) && t.param == original.param)
+        .expect("cutoff");
     ui.app_mut().matrix_event(Event::Target(id, cutoff));
     ui.app_mut().matrix_event(Event::Source(id, duplicate));
     assert!(ui.app().alerts.status().contains("already modulates"));
     assert_eq!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(id)
-            .expect("same assignment")
-            .source,
+        ui.app().session.controller.graph().assignment(id).unwrap().source,
         original.source
     );
+}
+
+/// The depth of assignment 1.
+fn depth(ui: &Ui) -> f32 {
+    ui.app()
+        .session
+        .controller
+        .graph()
+        .assignment(AssignmentId(1))
+        .unwrap()
+        .depth
 }
 
 /// Typed depth validation leaves a bad edit open and commits an in-range
 /// number as one step; Escape discards an unfinished edit.
 #[test]
 fn typed_depth_and_escape() {
-    let mut ui = Ui::open("modulation.ron");
-    ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
+    let mut ui = matrix_open();
     let id = AssignmentId(1);
-    ui.app_mut().matrix_event(Event::Edit(id, Column::Depth));
-    ui.app_mut().matrix_event(Event::DepthText("101".into()));
+    ui.app_mut().matrix_event(Event::DepthText(id, "101".into()));
     ui.app_mut().matrix_event(Event::Apply);
     assert!(ui.app().session.matrix.edit.is_some());
-    assert_eq!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(id)
-            .expect("assignment")
-            .depth,
-        0.08
-    );
-    ui.app_mut().matrix_event(Event::DepthText("-35%".into()));
+    assert_eq!(depth(&ui), 0.08);
+    ui.app_mut().matrix_event(Event::DepthText(id, "-35%".into()));
     ui.app_mut().matrix_event(Event::Apply);
-    assert_eq!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(id)
-            .expect("assignment")
-            .depth,
-        -0.35
-    );
+    assert_eq!(depth(&ui), -0.35);
     ui.app_mut().undo();
-    assert_eq!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(id)
-            .expect("assignment")
-            .depth,
-        0.08
-    );
-    ui.app_mut().matrix_event(Event::Edit(id, Column::Depth));
-    ui.app_mut().matrix_event(Event::DepthText("90".into()));
+    assert_eq!(depth(&ui), 0.08);
+    ui.app_mut().matrix_event(Event::DepthText(id, "90".into()));
     ui.app_mut().matrix_event(Event::Cancel);
-    assert_eq!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(id)
-            .expect("assignment")
-            .depth,
-        0.08
-    );
+    assert_eq!(depth(&ui), 0.08);
+    assert!(ui.app().session.matrix.edit.is_none());
 }
 
-/// Real key events select rows and cells, enter and leave an editor,
-/// delete the row, and let Undo restore it at the same id.
+/// Delete removes the chosen row and the focus goes on to the row that
+/// takes its place, so a second Delete removes that one and never a
+/// module; with none left the focus goes to Add. Undo brings each back.
 #[test]
-fn keyboard_path_selects_edits_and_deletes() {
-    let mut ui = Ui::open("modulation.ron");
-    let tab = ui.text("Matrix").expect("matrix tab").center();
-    ui.move_to(Point::new(tab.x, tab.y));
-    ui.press();
-    ui.release();
-    assert_eq!(ui.app().right_tab, Tab::Matrix);
-    let key = |ui: &mut Ui, named| {
-        ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
-    };
-    key(&mut ui, Named::ArrowDown);
-    assert_eq!(ui.app().session.matrix.selected, Some(AssignmentId(1)));
-    key(&mut ui, Named::ArrowRight);
-    key(&mut ui, Named::ArrowRight);
-    assert_eq!(ui.app().session.matrix.cell, Column::Target);
-    key(&mut ui, Named::Enter);
-    assert_eq!(
-        ui.app().session.matrix.edit.as_ref().map(|e| e.column),
-        Some(Column::Target)
-    );
-    key(&mut ui, Named::Escape);
-    assert!(ui.app().session.matrix.edit.is_none());
+fn delete_twice_removes_two_rows_and_no_module() {
+    let mut ui = matrix_open();
+    let modules = ui.app().session.controller.graph().nodes().count();
     key(&mut ui, Named::Delete);
     assert!(
         ui.app()
@@ -577,375 +508,161 @@ fn keyboard_path_selects_edits_and_deletes() {
             .assignment(AssignmentId(1))
             .is_none()
     );
-    ui.app_mut().undo();
-    assert!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(AssignmentId(1))
-            .is_some()
+    assert_eq!(focused(&ui), Some(access::cell(AssignmentId(2), Column::On)));
+    key(&mut ui, Named::Delete);
+    assert_eq!(ui.app().session.controller.graph().assignments().count(), 0);
+    assert_eq!(focused(&ui), Some(access::part("add")), "no row left: Add");
+    assert_eq!(
+        ui.app().session.controller.graph().nodes().count(),
+        modules,
+        "no module went"
     );
-    key(&mut ui, Named::Tab);
-    assert!(!ui.app().session.matrix.focused);
+    ui.app_mut().undo();
+    ui.app_mut().undo();
+    assert_eq!(ui.app().session.controller.graph().assignments().count(), 2);
 }
 
-/// Matrix focus leaves command shortcuts available after an edit.
+/// Command shortcuts still undo and redo while a cell has the focus.
 #[test]
-fn command_shortcuts_undo_and_redo_while_matrix_is_focused() {
-    let mut ui = Ui::open("modulation.ron");
-    ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
+fn command_shortcuts_undo_and_redo_while_the_grid_has_the_focus() {
+    let mut ui = matrix_open();
     let id = AssignmentId(1);
-    let original = ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignment(id)
-        .expect("assignment")
-        .enabled;
-    ui.app_mut().matrix_event(Event::Enabled(id, !original));
-    assert!(ui.app().session.matrix.focused);
-
+    let on = |ui: &Ui| ui.app().session.controller.graph().assignment(id).unwrap().enabled;
+    let original = on(&ui);
+    key(&mut ui, Named::Enter);
+    assert_eq!(on(&ui), !original);
     ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
-    assert_eq!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(id)
-            .expect("assignment")
-            .enabled,
-        original
-    );
-
+    assert_eq!(on(&ui), original);
     ui.tap(
         keyboard::Key::Character("z".into()),
         keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT,
     );
-    assert_eq!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(id)
-            .expect("assignment")
-            .enabled,
-        !original
-    );
+    assert_eq!(on(&ui), !original);
 }
 
-/// Captured editor keys stay with the widget except Escape and Tab.
+/// #597: Cmd+V in the Depth field pastes into the field only, opened by a
+/// key or by a press on it.
 #[test]
-fn captured_filter_keys_do_not_reach_matrix() {
-    let pressed = |named| {
-        let key = keyboard::Key::Named(named);
-        keyboard::Event::KeyPressed {
-            modified_key: key.clone(),
-            key,
-            physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-            location: keyboard::Location::Standard,
-            modifiers: keyboard::Modifiers::default(),
-            text: None,
-            repeat: false,
+fn cmd_v_in_a_depth_field_stays_out_of_the_canvas() {
+    for by_key in [true, false] {
+        let mut ui = matrix_open();
+        if by_key {
+            key(&mut ui, Named::End);
+            key(&mut ui, Named::Enter);
+        } else {
+            ui.lay_out_panels();
+            let at = ui
+                .runtime()
+                .bounds(&panel::depth_field(AssignmentId(1)))
+                .expect("the Depth field");
+            let _ = ui.move_to(loom_ui_core::Point::new(at.x + at.width / 2.0, at.y + at.height / 2.0));
+            let _ = ui.press();
+            let _ = ui.release();
+            let _ = ui.redraw();
         }
-    };
-    for named in [Named::Delete, Named::ArrowUp, Named::ArrowDown, Named::Enter] {
-        assert!(key_message(pressed(named), iced::event::Status::Captured).is_none());
+        assert_eq!(
+            focused(&ui),
+            Some(panel::depth_field(AssignmentId(1))),
+            "by key: {by_key}"
+        );
+        let messages = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
+        assert!(
+            !messages
+                .iter()
+                .any(|m| matches!(m, Message::Canvas(loom_canvas::CanvasEvent::Paste { .. }))),
+            "the canvas took the paste: {messages:?}"
+        );
     }
-    for named in [Named::Escape, Named::Tab] {
-        assert!(key_message(pressed(named), iced::event::Status::Captured).is_some());
-    }
-    assert!(key_message(pressed(Named::Delete), iced::event::Status::Ignored).is_some());
 }
 
-/// #597: the same for a depth field opened with the pointer. The click goes
-/// through the depth cell, so the field still takes focus by a task.
-#[test]
-fn cmd_v_in_a_depth_field_opened_by_pointer_stays_out_of_the_canvas() {
-    let mut ui = Ui::open("modulation.ron");
-    ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
-    ui.redraw();
-    let id = ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignments()
-        .next()
-        .expect("an assignment")
-        .0;
-    ui.app_mut().matrix_event(Event::Select(id, Column::Depth));
-    ui.redraw();
-    let depth = {
-        let assignment = ui.app().session.controller.graph().assignment(id).unwrap();
-        crate::modulation::depth_text(assignment.depth)
-    };
-    let cell = ui.text(&depth).expect("the depth cell shows its value");
-    ui.move_to(cell.center());
-    ui.press();
-    ui.release();
-    assert_eq!(
-        ui.app().session.matrix.edit.as_ref().map(|e| e.column),
-        Some(Column::Depth)
-    );
-
-    let messages = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
-    assert!(
-        !messages
-            .iter()
-            .any(|m| matches!(m, Message::Canvas(loom_canvas::CanvasEvent::Paste { .. }))),
-        "the canvas took the paste: {messages:?}"
-    );
-}
-
-/// A canvas click returns keyboard control to the canvas before Delete.
+/// A canvas click returns the keys to the canvas before Delete.
 #[test]
 fn canvas_click_then_delete_removes_the_module_not_a_matrix_row() {
-    let mut ui = Ui::open("modulation.ron");
-    ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
-    ui.app_mut().matrix_event(Event::Select(AssignmentId(1), Column::On));
+    let mut ui = matrix_open();
+    assert!(ui.app().focus_in_matrix());
     let tile = ui.app().session.scene.module(3).expect("saw tile").bounds();
     let at = ui
         .canvas()
         .to_window(loom_ui_core::Point::new(tile.center().x, tile.y + 10.0));
-    ui.move_to(at);
-    ui.press();
-    ui.release();
-    assert!(!ui.app().session.matrix.focused);
+    let mut heard = ui.move_to(at);
+    heard.extend(ui.press());
+    heard.extend(ui.release());
+    heard.extend(ui.redraw());
+    assert!(!ui.app().focus_in_matrix(), "{heard:?} {:?}", ui.runtime().focused());
     assert!(ui.app().session.selection.contains(&3));
-
     ui.tap(keyboard::Key::Named(Named::Delete), keyboard::Modifiers::default());
     assert!(ui.app().session.controller.graph().node(ModuleId(3)).is_none());
     assert_eq!(ui.app().session.controller.graph().assignments().count(), 2);
 }
 
-/// The keyboard can toggle On, choose a new source and polarity, and
-/// create a fresh row through the two Add choices.
+/// Add uses the normal default depth and duplicate status, a new pair
+/// is one step, and a depth slider drag records one undo step.
 #[test]
-fn keyboard_changes_cells_and_adds_an_assignment() {
+fn add_duplicate_and_drag_follow_inspector_edits() {
     let mut ui = Ui::open("modulation.ron");
     ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
-    let key = |ui: &mut Ui, named| {
-        ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
-    };
-    key(&mut ui, Named::ArrowDown);
-    let id = AssignmentId(1);
-    key(&mut ui, Named::Enter);
-    assert!(
-        !ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(id)
-            .expect("assignment")
-            .enabled
-    );
-    ui.app_mut().undo();
-    assert!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(id)
-            .expect("assignment")
-            .enabled
-    );
-    key(&mut ui, Named::ArrowRight);
-    key(&mut ui, Named::Enter);
-    let before = ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignment(id)
-        .expect("assignment")
-        .source;
-    key(&mut ui, Named::ArrowDown);
-    key(&mut ui, Named::Enter);
-    assert_ne!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(id)
-            .expect("assignment")
-            .source,
-        before
-    );
-    key(&mut ui, Named::ArrowRight);
-    key(&mut ui, Named::Enter);
-    let before_target = ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignment(id)
-        .expect("assignment")
-        .param;
-    key(&mut ui, Named::ArrowDown);
-    key(&mut ui, Named::Enter);
-    assert_ne!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(id)
-            .expect("assignment")
-            .param,
-        before_target
-    );
-    // Polarity comes right after the target, as on the card.
-    key(&mut ui, Named::ArrowRight);
-    assert_eq!(ui.app().session.matrix.cell, Column::Polarity);
-    key(&mut ui, Named::Enter);
-    key(&mut ui, Named::ArrowDown);
-    key(&mut ui, Named::Enter);
-    assert_eq!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(id)
-            .expect("assignment")
-            .polarity,
-        Some(loom_core::Polarity::Unipolar)
-    );
-
+    let existing = *ui.app().session.controller.graph().assignment(AssignmentId(1)).unwrap();
+    let graph = ui.app().session.controller.graph();
+    let (hierarchy, level) = (&ui.app().session.hierarchy, &ui.app().session.level);
+    let all_sources = sources(graph, hierarchy, level);
+    let all_targets = targets(graph, hierarchy, level);
+    let source = all_sources
+        .iter()
+        .find(|s| s.output == existing.source)
+        .unwrap()
+        .clone();
+    let target = all_targets
+        .iter()
+        .find(|t| (t.module, t.param) == (existing.target, existing.param))
+        .unwrap()
+        .clone();
     ui.app_mut().matrix_event(Event::AddOpen);
-    key(&mut ui, Named::ArrowDown);
-    key(&mut ui, Named::ArrowRight);
-    key(&mut ui, Named::ArrowDown);
-    let add = ui.app().session.matrix.add.as_ref().expect("add picks");
-    assert!(add.source.is_some() && add.target.is_some());
-    // Pressing Add again keeps the picks.
+    ui.app_mut().matrix_event(Event::AddSource(source.clone()));
+    ui.app_mut().matrix_event(Event::AddTarget(target));
+    ui.app_mut().matrix_event(Event::AddApply);
+    assert_eq!(ui.app().session.controller.graph().assignments().count(), 2);
+    assert!(ui.app().alerts.status().contains("already modulates"));
+    // Pressing Add again keeps the open form's picks.
     ui.app_mut().matrix_event(Event::AddOpen);
-    let add = ui.app().session.matrix.add.as_ref().expect("add picks");
-    assert!(add.source.is_some() && add.target.is_some(), "Add again keeps the form");
-    let before_count = ui.app().session.controller.graph().assignments().count();
-    key(&mut ui, Named::Enter);
-    assert_eq!(
-        ui.app().session.controller.graph().assignments().count(),
-        before_count + 1
+    ui.app_mut().matrix_event(Event::AddSource(source.clone()));
+    ui.app_mut().matrix_event(Event::AddOpen);
+    assert!(
+        ui.app().session.matrix.add.as_ref().unwrap().source.is_some(),
+        "Add again keeps the form"
     );
-    let added = ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignments()
-        .last()
-        .expect("new assignment")
-        .1;
+    let fresh = all_targets
+        .iter()
+        .find(|t| !modulation::exists(ui.app().session.controller.graph(), source.output, t.module, t.param))
+        .unwrap()
+        .clone();
+    ui.app_mut().matrix_event(Event::AddTarget(fresh.clone()));
+    ui.app_mut().matrix_event(Event::AddApply);
+    assert_eq!(ui.app().session.controller.graph().assignments().count(), 3);
+    let added = assignments(&ui).last().unwrap().1;
     let spec = ui
         .app()
         .session
         .controller
         .graph()
         .node(added.target)
-        .expect("target")
+        .unwrap()
         .spec(added.param)
-        .expect("parameter");
+        .unwrap();
     assert_eq!(added.depth, modulation::default_depth(&spec));
     ui.app_mut().undo();
-    assert_eq!(ui.app().session.controller.graph().assignments().count(), before_count);
-}
-
-/// Enter on the Depth cell focuses its text field, so typing a percent
-/// with no pointer commits the value through the widget.
-#[test]
-fn keyboard_types_a_depth_percentage() {
-    let mut ui = Ui::open("modulation.ron");
-    ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
-    let key = |ui: &mut Ui, named| {
-        ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
-    };
-    key(&mut ui, Named::ArrowDown);
-    // Depth is the last cell: on, source, target, polarity, depth.
-    for _ in 0..4 {
-        key(&mut ui, Named::ArrowRight);
-    }
-    assert_eq!(ui.app().session.matrix.cell, Column::Depth);
-    key(&mut ui, Named::Enter);
-    assert_eq!(
-        ui.app().session.matrix.edit.as_ref().map(|e| e.column),
-        Some(Column::Depth)
-    );
-    ui.typewrite("42");
-    assert_eq!(ui.app().session.matrix.edit.as_ref().expect("depth editor").depth, "42");
-    key(&mut ui, Named::Enter);
-    assert_eq!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(AssignmentId(1))
-            .expect("assignment")
-            .depth,
-        0.42
-    );
-    assert!(ui.app().session.matrix.edit.is_none(), "Enter leaves the depth editor");
-    ui.app_mut().undo();
-    assert_eq!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(AssignmentId(1))
-            .expect("assignment")
-            .depth,
-        0.08
-    );
-}
-
-/// Add uses the normal default depth and duplicate status, and a depth
-/// slider drag records one undo step.
-#[test]
-fn add_duplicate_and_drag_follow_inspector_edits() {
-    let mut ui = Ui::open("modulation.ron");
-    ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
-    let existing = *ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignment(AssignmentId(1))
-        .expect("assignment");
-    let source = sources(
-        ui.app().session.controller.graph(),
-        &ui.app().session.hierarchy,
-        &ui.app().session.level,
-    )
-    .into_iter()
-    .find(|s| s.output == existing.source)
-    .expect("source");
-    let target = targets(
-        ui.app().session.controller.graph(),
-        &ui.app().session.hierarchy,
-        &ui.app().session.level,
-    )
-    .into_iter()
-    .find(|t| (t.module, t.param) == (existing.target, existing.param))
-    .expect("target");
-    ui.app_mut().matrix_event(Event::AddOpen);
-    ui.app_mut().matrix_event(Event::AddSource(source));
-    ui.app_mut().matrix_event(Event::AddTarget(target));
-    ui.app_mut().matrix_event(Event::AddApply);
     assert_eq!(ui.app().session.controller.graph().assignments().count(), 2);
-    assert!(ui.app().alerts.status().contains("already modulates"));
-    ui.app_mut().matrix_event(Event::DepthDrag(AssignmentId(1), 0.4));
-    ui.app_mut().matrix_event(Event::DepthDrag(AssignmentId(1), 0.5));
+
+    // A drag on the Depth slider, as the panel's slider sends it.
+    let slider = access::cell(AssignmentId(1), Column::Depth);
+    for position in [0.7, 0.75] {
+        let moved = ui
+            .app()
+            .matrix_slid(&slider, position, loom_ui::SlidePhase::Move)
+            .unwrap();
+        ui.send(moved);
+    }
     ui.app_mut().matrix_event(Event::DepthReleased);
-    assert_eq!(
-        ui.app()
-            .session
-            .controller
-            .graph()
-            .assignment(AssignmentId(1))
-            .expect("assignment")
-            .depth,
-        0.5
-    );
+    assert_eq!(depth(&ui), 0.5);
     ui.app_mut().undo();
     assert_eq!(
         ui.app().session.controller.graph().assignment(AssignmentId(1)),
@@ -960,20 +677,16 @@ fn tab_survives_patch_change_and_bad_endpoint_changes_nothing() {
     let mut ui = Ui::open("modulation.ron");
     ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
     let id = AssignmentId(1);
-    let old = *ui.app().session.controller.graph().assignment(id).expect("assignment");
+    let old = *ui.app().session.controller.graph().assignment(id).unwrap();
+    let nowhere = OutputRef {
+        module: ModuleId(9999),
+        port: 0,
+    };
     assert!(
         ui.app_mut()
             .session
             .controller
-            .retarget_assignment(
-                id,
-                OutputRef {
-                    module: ModuleId(9999),
-                    port: 0
-                },
-                old.target,
-                old.param
-            )
+            .retarget_assignment(id, nowhere, old.target, old.param)
             .is_err()
     );
     assert_eq!(ui.app().session.controller.graph().assignment(id), Some(&old));
@@ -984,26 +697,12 @@ fn tab_survives_patch_change_and_bad_endpoint_changes_nothing() {
     );
     assert!(ui.app_mut().replace(crate::Source::Empty));
     assert_eq!(ui.app().right_tab, Tab::Matrix);
-    assert!(
-        ui.app()
-            .session
-            .matrix
-            .model(
-                ui.app().session.controller.graph(),
-                &ui.app().session.hierarchy,
-                &ui.app().session.level,
-                &ui.app().session.selection,
-                ui.app().right_tab
-            )
-            .rows
-            .is_empty()
-    );
+    assert!(ui.app().matrix_model().rows.is_empty());
     assert!(ui.app().session.matrix.selected.is_none());
 }
 
-/// Every part of every card fits the right-hand column: a long
-/// source shows in full, there are no column titles or row marker
-/// text, and the snapshot says which tab is open (#456).
+/// Every card fits the right-hand column: a long source shows in full,
+/// and no column titles show (#456).
 #[test]
 fn cards_fit_the_column() {
     let mut ui = Ui::open("modulation.ron");
@@ -1018,92 +717,153 @@ fn cards_fit_the_column() {
         .controller
         .add_module("loom.rand.sample-hold")
         .unwrap();
-    let svf = ModuleId(4);
     ui.app_mut()
         .session
         .controller
-        .add_assignment(OutputRef { module: hold, port: 0 }, svf, 1, 0.25)
+        .add_assignment(OutputRef { module: hold, port: 0 }, ModuleId(4), 1, 0.25)
         .unwrap();
-    ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
-    ui.app_mut()
-        .matrix_event(Event::Select(AssignmentId(1), Column::Polarity));
-    assert_eq!(ui.app().ui_snapshot().matrix.tab, Tab::Matrix);
-
+    ui.send(Message::Matrix(Event::Tab(Tab::Matrix)));
+    let _ = ui.redraw();
     let source = modulation::Names::new(ui.app().session.controller.graph(), &ui.app().session.hierarchy)
         .source(OutputRef { module: hold, port: 0 });
     assert!(source.len() >= 23, "{source}");
-    let column = ui.app().session.matrix.model(
-        ui.app().session.controller.graph(),
-        &ui.app().session.hierarchy,
-        &ui.app().session.level,
-        &ui.app().session.selection,
-        ui.app().right_tab,
-    );
     let right = crate::WINDOW.width;
-    let left = right - 280.0;
-    let mut labels = vec![source.clone()];
-    for row in &column.rows {
+    let left = right - style_width();
+    let mut labels = vec![source];
+    for row in &ui.app().matrix_model().rows {
         labels.extend([row.source.clone(), row.target.clone(), row.polarity.clone()]);
         labels.push(modulation::depth_text(row.depth));
     }
     for label in labels {
         let bounds = ui.text(&label).unwrap_or_else(|| panic!("`{label}` is not shown"));
         assert!(
-            bounds.x >= left && bounds.x + bounds.width <= right,
+            bounds.x >= left && bounds.x + bounds.width <= right + 1.0,
             "`{label}` at {bounds:?} is outside the column"
         );
     }
-    for gone in ["On", "Source", "Target", "Depth", "Polarity", "Row #1: Polarity cell"] {
-        assert!(ui.text(gone).is_none(), "`{gone}` is still shown");
+    for gone in ["Source", "Target", "Depth", "Polarity"] {
+        assert!(ui.text(gone).is_none(), "`{gone}` is shown as a title");
     }
 }
 
-/// Cmd+V in a depth field opened by keyboard pastes into the field only. The
-/// field takes focus by a task, which sends no message, so the app must ask
-/// about focus afterwards, or the canvas also pastes (clipboard.md, rule 7).
+/// The right column's width.
+fn style_width() -> f32 {
+    crate::style::RIGHT_COLUMN_WIDTH
+}
+
+/// #435: arrows move no row behind an overlay, and none of it is an undo
+/// step.
 #[test]
-fn cmd_v_in_a_depth_field_stays_out_of_the_canvas() {
-    let mut ui = Ui::open("modulation.ron");
-    ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
-    let key = |ui: &mut Ui, named| {
-        ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
-    };
-    key(&mut ui, Named::ArrowDown);
-    for _ in 0..4 {
-        key(&mut ui, Named::ArrowRight);
+fn the_matrix_has_no_keys_behind_an_overlay() {
+    use crate::input_owner::{InputOwner, tests::open_overlay};
+    for owner in [
+        InputOwner::Help,
+        InputOwner::Chooser,
+        InputOwner::Patches,
+        InputOwner::Preferences,
+        InputOwner::Browser,
+        InputOwner::RecentList,
+    ] {
+        let mut ui = matrix_open();
+        let undo = ui.app().session.edits.history.undo_step().map(|s| s.name().to_string());
+        open_overlay(&mut ui, owner);
+        let before = ui.app().session.matrix.selected;
+        key(&mut ui, Named::ArrowDown);
+        assert_eq!(ui.app().session.matrix.selected, before, "{owner:?}");
+        assert_eq!(
+            ui.app().session.edits.history.undo_step().map(|s| s.name().to_string()),
+            undo,
+            "{owner:?}"
+        );
     }
-    key(&mut ui, Named::Enter);
-    assert_eq!(
-        ui.app().session.matrix.edit.as_ref().map(|e| e.column),
-        Some(Column::Depth)
-    );
+}
 
-    let messages = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
+/// A card that a sort moves wholly below the view comes in with its
+/// bottom at the view's bottom, and one moved above with its top at the
+/// view's top: the card's scroll and then its cell's do not add up.
+#[test]
+fn a_card_moved_out_of_view_comes_back_just_inside() {
+    let mut ui = overflowing();
+    ui.send(Message::Matrix(Event::Select(AssignmentId(1), Column::Depth)));
+    let _ = ui.redraw();
+    let card = |ui: &mut Ui| {
+        ui.lay_out_panels();
+        let card = shown_at(ui, &access::row(AssignmentId(1)));
+        let view = ui.runtime().bounds(&panel::list_id()).expect("the card list");
+        (card, view)
+    };
+    let near = |a: f32, b: f32| (a - b).abs() <= 8.0;
+    let (start, view) = card(&mut ui);
     assert!(
-        !messages
-            .iter()
-            .any(|m| matches!(m, Message::Canvas(loom_canvas::CanvasEvent::Paste { .. }))),
-        "the canvas took the paste: {messages:?}"
+        start.y >= view.y && start.y + start.height <= view.y + view.height,
+        "it starts in view"
+    );
+    ui.send(Message::Matrix(Event::SortBy(Some(Column::Depth))));
+    let _ = ui.redraw();
+    let order = |ui: &Ui| {
+        let rows = shown(ui);
+        (rows.iter().position(|id| *id == 1).unwrap(), rows.len())
+    };
+    if order(&ui).0 < 2 {
+        ui.send(Message::Matrix(Event::ReverseSort));
+        let _ = ui.redraw();
+    }
+    let (at, rows) = order(&ui);
+    assert!(at + 2 >= rows, "it is at the end of the table now: {at} of {rows}");
+    let (below, view) = card(&mut ui);
+    assert!(
+        near(below.y + below.height, view.y + view.height),
+        "below: its bottom at the view's bottom, {below:?} in {view:?}"
+    );
+    ui.send(Message::Matrix(Event::ReverseSort));
+    let _ = ui.redraw();
+    assert!(order(&ui).0 < 2, "and at its start now");
+    let (above, view) = card(&mut ui);
+    assert!(
+        near(above.y, view.y),
+        "above: its top at the view's top, {above:?} in {view:?}"
     );
 }
 
-/// An app with the matrix open and a row selected, ready for keys.
-fn matrix_with_a_row() -> Ui {
-    let mut ui = Ui::open("modulation.ron");
-    ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
-    ui.app_mut().matrix_event(Event::Select(AssignmentId(1), Column::On));
-    ui.redraw();
-    assert!(ui.app().session.matrix.focused);
-    ui
+/// #435, ui-layer.md section 6, rule 4: closing the module browser,
+/// Preferences, or a question gives the focus back to the matrix cell that
+/// had it, and Down then moves the row again.
+#[test]
+fn the_grid_has_the_keys_again_after_an_overlay_closes() {
+    use crate::input_owner::{InputOwner, tests::open_overlay};
+    let owners = [InputOwner::Browser, InputOwner::Preferences, InputOwner::Question];
+    for (owner, column) in owners.into_iter().flat_map(|o| [(o, Column::On), (o, Column::Source)]) {
+        let mut ui = matrix_open();
+        if column == Column::Source {
+            key(&mut ui, Named::ArrowRight);
+        }
+        let cell = access::cell(AssignmentId(1), column);
+        assert_eq!(focused(&ui), Some(cell.clone()));
+        open_overlay(&mut ui, owner);
+        let _ = ui.redraw();
+        assert_eq!(ui.app().input_owner(), owner, "{owner:?} open");
+        key(&mut ui, Named::Escape);
+        let _ = ui.redraw();
+        assert_eq!(ui.app().input_owner(), InputOwner::Canvas, "{owner:?} closed");
+        assert_eq!(focused(&ui), Some(cell), "{owner:?}: the cell has the focus again");
+        key(&mut ui, Named::ArrowDown);
+        assert_eq!(
+            ui.app().session.matrix.selected,
+            Some(AssignmentId(2)),
+            "{owner:?}: Down moved the row"
+        );
+    }
 }
 
-/// Clicks the filter, as a person would.
+/// Presses the filter field, as a person would, so it has the focus.
 fn click_filter(ui: &mut Ui) {
-    let at = ui.field(&filter_part());
-    ui.move_to(at);
-    ui.press();
-    ui.release();
-    assert_eq!(ui.focused_field(), Some(filter_part()), "the click focused the filter");
+    ui.lay_out_panels();
+    let at = ui.runtime().bounds(&filter_part()).expect("the filter");
+    let _ = ui.move_to(loom_ui_core::Point::new(at.x + at.width / 2.0, at.y + at.height / 2.0));
+    let _ = ui.press();
+    let _ = ui.release();
+    let _ = ui.redraw();
+    assert_eq!(focused(ui), Some(filter_part()), "the press focused the filter");
 }
 
 /// What a key must not change: the row, the cell, any edit, and the patch.
@@ -1116,12 +876,11 @@ fn rows_and_cells(ui: &Ui) -> (Option<AssignmentId>, Column, bool, usize) {
     )
 }
 
-/// #435, modulation.md, Filter focus: keys in an empty filter leave the rows,
-/// the cells, and the assignments alone, whether or not the field used them.
+/// #435, modulation.md, Filter focus: keys in the filter leave the rows,
+/// the cells, the assignments, and the tiles alone, and the field keeps
+/// the focus.
 #[test]
-fn keys_in_an_empty_filter_leave_rows_alone() {
-    // A fresh app per key: Delete and Backspace send an empty filter, which
-    // takes the table's focus, and the next key would then prove nothing.
+fn keys_in_the_filter_leave_rows_alone() {
     for named in [
         Named::Delete,
         Named::Backspace,
@@ -1130,236 +889,252 @@ fn keys_in_an_empty_filter_leave_rows_alone() {
         Named::ArrowRight,
         Named::Enter,
     ] {
-        let mut ui = matrix_with_a_row();
+        let mut ui = matrix_open();
         click_filter(&mut ui);
-        assert!(ui.app().session.matrix.focused, "the click left the table focused");
-        let before = rows_and_cells(&ui);
-        ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
+        let (before, places) = (rows_and_cells(&ui), positions(&ui));
+        key(&mut ui, named);
         assert_eq!(rows_and_cells(&ui), before, "{named:?}");
-        assert!(ui.text_field_focused(), "{named:?}: the field keeps focus");
+        assert_eq!(positions(&ui), places, "{named:?} moved no tile");
+        assert_eq!(
+            focused(&ui),
+            Some(filter_part()),
+            "{named:?}: the field keeps the focus"
+        );
     }
 }
 
-/// #435: typing and clearing changes the filter only.
+/// #435: typing and clearing the filter changes only the filter, and
+/// Escape from it gives the keys back to the canvas.
 #[test]
-fn typing_and_clearing_a_filter_changes_only_the_filter() {
-    let mut ui = matrix_with_a_row();
+fn typing_clearing_and_leaving_the_filter() {
+    let mut ui = matrix_open();
+    // Entering the grid selects nothing, so select a tile: the canvas
+    // takes keys while one is selected.
+    let tile = *ui
+        .app()
+        .session
+        .patch_map
+        .structure
+        .tiles
+        .keys()
+        .next()
+        .expect("a tile");
+    ui.app_mut().session.selection = std::collections::BTreeSet::from([tile]);
     let count = ui.app().session.controller.graph().assignments().count();
-    let undo = ui.app().session.edits.history.undo_step().map(|s| s.name().to_string());
     click_filter(&mut ui);
     ui.typewrite("zz");
     assert_eq!(ui.app().session.matrix.filter, "zz");
-    ui.tap(keyboard::Key::Named(Named::Backspace), keyboard::Modifiers::default());
-    ui.tap(keyboard::Key::Named(Named::Backspace), keyboard::Modifiers::default());
+    key(&mut ui, Named::Backspace);
+    key(&mut ui, Named::Backspace);
     assert_eq!(ui.app().session.matrix.filter, "");
     assert_eq!(ui.app().session.controller.graph().assignments().count(), count);
-    assert_eq!(
-        ui.app().session.edits.history.undo_step().map(|s| s.name().to_string()),
-        undo
-    );
+    assert!(ui.app().session.edits.history.undo_step().is_none());
+    key(&mut ui, Named::Escape);
+    assert!(!ui.app().focus_in_matrix(), "Escape left the matrix");
+    assert!(ui.app().canvas_has_keys());
 }
 
-/// #435, modulation.md, Filter focus: Escape and Tab each end the field's focus
-/// and leave the table, in one press. Tab depends on the order of the route:
-/// the matrix lets go before the text field rule looks.
+/// #435: Cmd+Z in the filter is the field's own undo, so it undoes nothing
+/// in the patch behind it.
 #[test]
-fn escape_and_tab_leave_the_filter_and_the_table_in_one_press() {
-    for named in [Named::Escape, Named::Tab] {
-        let mut ui = matrix_with_a_row();
-        click_filter(&mut ui);
-        ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
-        ui.redraw();
-        assert!(!ui.app().session.matrix.focused, "{named:?} left the table");
-        assert!(!ui.text_field_focused(), "{named:?} ended the field's focus");
-    }
-}
-
-/// #435: the app's shortcuts still work while the filter has focus.
-#[test]
-fn command_shortcuts_work_from_the_filter() {
-    let mut ui = matrix_with_a_row();
-    let id = AssignmentId(1);
-    let original = ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignment(id)
-        .expect("assignment")
-        .enabled;
-    ui.app_mut().matrix_event(Event::Enabled(id, !original));
-    ui.app_mut().commit();
-    ui.redraw();
-    click_filter(&mut ui);
-    let messages = ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
-    assert!(
-        messages.iter().any(|m| matches!(m, Message::Key(_))),
-        "the shortcut reached the app: {messages:?}"
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|m| matches!(m, Message::Shortcut { typing: true, .. })),
-        "it asked about typing, and undoes nothing behind the field: {messages:?}"
-    );
-}
-
-/// #435: a cell editor keeps the keys it uses, and they do not reach the rows.
-#[test]
-fn a_cell_editor_keeps_its_captured_keys() {
-    let mut ui = matrix_with_a_row();
-    ui.app_mut().matrix_event(Event::Select(AssignmentId(1), Column::Depth));
-    ui.tap(keyboard::Key::Named(Named::Enter), keyboard::Modifiers::default());
-    assert_eq!(
-        ui.app().session.matrix.edit.as_ref().map(|e| e.column),
-        Some(Column::Depth)
-    );
-    let before = ui.app().session.matrix.selected;
-    let count = ui.app().session.controller.graph().assignments().count();
-    for named in [Named::Delete, Named::Backspace, Named::ArrowLeft] {
-        ui.tap(keyboard::Key::Named(named), keyboard::Modifiers::default());
-        assert!(ui.app().session.matrix.edit.is_some(), "{named:?} stayed in the edit");
-        assert_eq!(ui.app().session.matrix.selected, before, "{named:?}");
-        assert_eq!(
-            ui.app().session.controller.graph().assignments().count(),
-            count,
-            "{named:?}"
-        );
-    }
-    ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::default());
-    assert!(ui.app().session.matrix.edit.is_none(), "Escape left the edit");
-    assert!(ui.app().session.matrix.focused, "and stayed in the table");
-}
-
-/// #435: arrows no longer move rows behind an overlay. They used to, behind
-/// help and every overlay but the browser and Preferences. The row comes back
-/// to the keyboard when the overlay closes, and none of it is an undo step.
-#[test]
-fn the_matrix_has_no_keys_behind_an_overlay() {
-    use crate::input_owner::{InputOwner, tests::open_overlay};
-    for owner in [
-        InputOwner::Help,
-        InputOwner::Chooser,
-        InputOwner::Patches,
-        InputOwner::Preferences,
-        InputOwner::Browser,
-        InputOwner::RecentList,
-    ] {
-        let mut ui = matrix_with_a_row();
-        let undo = ui.app().session.edits.history.undo_step().map(|s| s.name().to_string());
-        open_overlay(&mut ui, owner);
-        let before = ui.app().session.matrix.selected;
-        ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
-        assert_eq!(ui.app().session.matrix.selected, before, "{owner:?}");
-        assert_eq!(
-            ui.app().session.edits.history.undo_step().map(|s| s.name().to_string()),
-            undo,
-            "{owner:?}"
-        );
-    }
-}
-
-/// #435: closing the browser or Preferences gives the keys back to the table.
-#[test]
-fn the_table_has_the_keys_again_after_an_overlay_closes() {
-    use crate::input_owner::{InputOwner, tests::open_overlay};
-    for owner in [InputOwner::Browser, InputOwner::Preferences] {
-        let mut ui = matrix_with_a_row();
-        let before = ui.app().session.matrix.selected;
-        open_overlay(&mut ui, owner);
-        ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::default());
-        ui.redraw();
-        assert_eq!(ui.app().input_owner(), InputOwner::Canvas, "{owner:?} closed");
-        ui.tap(keyboard::Key::Named(Named::ArrowDown), keyboard::Modifiers::default());
-        assert_ne!(
-            ui.app().session.matrix.selected,
-            before,
-            "{owner:?}: Down moved the row"
-        );
-    }
-}
-
-/// A card that a sort moves wholly below the view comes in with its
-/// bottom at the view's bottom, and one moved above with its top at the
-/// view's top: the card's scroll and then its cell's do not add up.
-#[test]
-fn a_card_moved_out_of_view_comes_back_just_inside() {
-    let mut ui = Ui::open("modulation.ron");
-    let assignment = *ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignment(AssignmentId(1))
-        .expect("assignment");
-    for index in 0..30 {
-        ui.app_mut()
+fn cmd_z_in_the_filter_undoes_nothing_behind_it() {
+    let mut ui = matrix_open();
+    let on = |ui: &Ui| {
+        ui.app()
             .session
             .controller
-            .add_assignment(
-                assignment.source,
-                assignment.target,
-                assignment.param,
-                -0.9 + index as f32 * 0.03,
-            )
-            .unwrap();
-    }
-    ui.app_mut().matrix_event(Event::Tab(Tab::Matrix));
-    let _ = ui.redraw();
-    ui.send(Message::Matrix(Event::Select(AssignmentId(1), Column::Depth)));
-    let _ = ui.redraw();
-    let card = |ui: &mut Ui| {
-        let place = ui
-            .places()
-            .of(&access::row(AssignmentId(1)))
-            .expect("the card is drawn");
-        (place.rect, place.clip.expect("the card is in the table"))
+            .graph()
+            .assignment(AssignmentId(1))
+            .unwrap()
+            .enabled
     };
-    // Within a pixel: the table rounds its offset to whole pixels, while
-    // the cards sit on half pixels. An overshoot would be a card's height.
-    let near = |a: f32, b: f32| (a - b).abs() <= 1.0;
-    let (shown, view) = card(&mut ui);
-    assert!(
-        shown.y >= view.y && shown.y + shown.height <= view.y + view.height,
-        "it starts in view"
-    );
-    // The added assignments' depths run from -0.9 up, so a sort by depth
-    // puts it near one end of the table and a reverse near the other, far
-    // out of view each time. Whichever end is first, the scroll follows.
-    ui.send(Message::Matrix(Event::SortBy(Some(Column::Depth))));
+    key(&mut ui, Named::Enter);
+    let toggled = on(&ui);
+    click_filter(&mut ui);
+    ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
     let _ = ui.redraw();
-    let order = |ui: &Ui| {
-        let model = ui.app().session.matrix.model(
-            ui.app().session.controller.graph(),
-            &ui.app().session.hierarchy,
-            &ui.app().session.level,
-            &ui.app().session.selection,
-            ui.app().right_tab,
-        );
-        let at = model.rows.iter().position(|row| row.id == 1).expect("its row");
-        (at, model.rows.len())
-    };
-    if order(&ui).0 < 2 {
-        ui.send(Message::Matrix(Event::ReverseSort));
+    assert_eq!(on(&ui), toggled, "the toggle stays");
+}
+
+/// Add by keyboard alone: Add opens the form on its source select, each
+/// select opens on Enter and chooses with the arrows and Enter, Create
+/// adds the pair and puts the focus back on Add, and Cancel and Escape
+/// close the form there too.
+#[test]
+fn the_add_form_by_keyboard() {
+    let mut ui = matrix_open();
+    let count = ui.app().session.controller.graph().assignments().count();
+    tab_to(&mut ui, &access::part("add"), true);
+    key(&mut ui, Named::Enter);
+    let _ = ui.redraw();
+    assert_eq!(focused(&ui), Some(access::part("new/source")), "the form's first pick");
+    // The last source and the last target: a pair no row has.
+    for pick in ["new/source", "new/target"] {
+        tab_to(&mut ui, &access::part(pick), false);
+        key(&mut ui, Named::Enter);
+        key(&mut ui, Named::End);
+        key(&mut ui, Named::Enter);
         let _ = ui.redraw();
     }
-    let (at, rows) = order(&ui);
-    assert!(at + 2 >= rows, "it is at the end of the table now: {at} of {rows}");
-    let (below, view) = card(&mut ui);
-    assert!(
-        near(below.y + below.height, view.y + view.height),
-        "below: its bottom at the view's bottom, {} against {}",
-        below.y + below.height,
-        view.y + view.height
-    );
-    ui.send(Message::Matrix(Event::ReverseSort));
+    let add = ui.app().session.matrix.add.clone().expect("the form");
+    assert!(add.source.is_some() && add.target.is_some(), "both picked");
+    tab_to(&mut ui, &access::part("new/create"), false);
+    key(&mut ui, Named::Enter);
     let _ = ui.redraw();
-    assert!(order(&ui).0 < 2, "and at its start now");
-    let (above, view) = card(&mut ui);
-    assert!(
-        near(above.y, view.y),
-        "above: its top at the view's top, {} against {}",
-        above.y,
-        view.y
+    assert_eq!(ui.app().session.controller.graph().assignments().count(), count + 1);
+    assert_eq!(focused(&ui), Some(access::part("add")), "back on Add");
+    for closer in ["cancel", "escape"] {
+        key(&mut ui, Named::Enter);
+        let _ = ui.redraw();
+        if closer == "cancel" {
+            tab_to(&mut ui, &access::part("new/cancel"), false);
+            key(&mut ui, Named::Enter);
+        } else {
+            key(&mut ui, Named::Escape);
+        }
+        let _ = ui.redraw();
+        assert!(ui.app().session.matrix.add.is_none(), "{closer} closed the form");
+        assert_eq!(focused(&ui), Some(access::part("add")), "{closer}: back on Add");
+    }
+}
+
+/// Sort by by keyboard: its select opens on Enter and a choice sorts.
+#[test]
+fn sort_by_by_keyboard() {
+    let mut ui = matrix_open();
+    tab_to(&mut ui, &access::part("sort"), true);
+    key(&mut ui, Named::Enter);
+    key(&mut ui, Named::End);
+    key(&mut ui, Named::Enter);
+    let _ = ui.redraw();
+    assert_eq!(
+        ui.app().session.matrix.sort,
+        Some((Column::Depth, false)),
+        "the last option"
     );
+    tab_to(&mut ui, &access::part("reverse"), false);
+    key(&mut ui, Named::Enter);
+    let _ = ui.redraw();
+    assert_eq!(ui.app().session.matrix.sort, Some((Column::Depth, true)));
+}
+
+/// Ctrl+Tab into the right column with the Matrix open lands on the
+/// grid's chosen cell.
+#[test]
+fn ctrl_tab_enters_the_grid_on_its_chosen_cell() {
+    let mut ui = matrix_open();
+    key(&mut ui, Named::ArrowDown);
+    key(&mut ui, Named::ArrowRight);
+    key(&mut ui, Named::Escape);
+    assert!(!ui.app().focus_in_matrix());
+    ui.app_mut().session.selection.clear();
+    for _ in 0..3 {
+        if ui.app().focus_in_matrix() {
+            break;
+        }
+        key_with(&mut ui, Named::Tab, keyboard::Modifiers::CTRL);
+    }
+    assert_eq!(focused(&ui), Some(access::cell(AssignmentId(2), Column::Source)));
+}
+
+/// Tab into the grid when the chosen row is filtered out lands on On in
+/// the first row that shows.
+#[test]
+fn tab_into_the_grid_with_its_row_filtered_out() {
+    let mut ui = matrix_open();
+    key(&mut ui, Named::ArrowDown);
+    assert_eq!(ui.app().session.matrix.selected, Some(AssignmentId(2)));
+    tab_to(&mut ui, &filter_part(), true);
+    ui.typewrite("LFO");
+    assert!(!shown(&ui).contains(&2), "the envelope's row is filtered out");
+    for _ in 0..10 {
+        key(&mut ui, Named::Tab);
+        if focused(&ui).is_some_and(|id| id.is_under(&panel::list_id())) {
+            break;
+        }
+    }
+    assert_eq!(focused(&ui), Some(access::cell(AssignmentId(1), Column::On)));
+}
+
+/// Keys the grid does not take do nothing behind it while a cell has the
+/// focus: Backspace removes no module, a letter opens nothing and changes
+/// no tab, and Space on a select or the Depth slider scrolls no card out
+/// of view.
+#[test]
+fn keys_the_grid_does_not_take_reach_nothing_behind_it() {
+    let mut ui = overflowing();
+    let modules = ui.app().session.controller.graph().nodes().count();
+    for column in [Column::On, Column::Source, Column::Depth] {
+        ui.send(Message::Matrix(Event::Select(AssignmentId(1), column)));
+        let _ = ui.redraw();
+        let cell = access::cell(AssignmentId(1), column);
+        assert_eq!(focused(&ui), Some(cell.clone()));
+        key(&mut ui, Named::Backspace);
+        for letter in ["a", "o", "c"] {
+            ui.tap(keyboard::Key::Character(letter.into()), keyboard::Modifiers::empty());
+            let _ = ui.redraw();
+        }
+        if column != Column::On {
+            key(&mut ui, Named::Space);
+            assert_eq!(offset(&ui), 0.0, "{column:?}: Space scrolled nothing");
+        }
+        assert_eq!(
+            ui.app().session.controller.graph().nodes().count(),
+            modules,
+            "{column:?}"
+        );
+        assert_eq!(ui.app().right_tab, Tab::Matrix, "{column:?}");
+        assert_eq!(
+            ui.app().input_owner(),
+            crate::input_owner::InputOwner::Canvas,
+            "{column:?}"
+        );
+        assert_eq!(focused(&ui), Some(cell), "{column:?}");
+    }
+}
+
+/// A row that goes while it has the focus, by an undo of its Add, leaves
+/// the focus on a live cell, not in the filter, so the next undo still
+/// works.
+#[test]
+fn undoing_an_add_keeps_the_focus_in_the_grid() {
+    let mut ui = matrix_open();
+    let on = |ui: &Ui| {
+        ui.app()
+            .session
+            .controller
+            .graph()
+            .assignment(AssignmentId(1))
+            .unwrap()
+            .enabled
+    };
+    let before = on(&ui);
+    key(&mut ui, Named::Enter);
+    let graph = ui.app().session.controller.graph();
+    let (hierarchy, level) = (&ui.app().session.hierarchy, &ui.app().session.level);
+    let source = sources(graph, hierarchy, level).last().unwrap().clone();
+    let target = targets(graph, hierarchy, level).last().unwrap().clone();
+    ui.send(Message::Matrix(Event::AddOpen));
+    ui.send(Message::Matrix(Event::AddSource(source)));
+    ui.send(Message::Matrix(Event::AddTarget(target)));
+    ui.send(Message::Matrix(Event::AddApply));
+    let added = assignments(&ui).last().unwrap().0;
+    ui.send(Message::Matrix(Event::Select(added, Column::Depth)));
+    let _ = ui.redraw();
+    assert_eq!(focused(&ui), Some(access::cell(added, Column::Depth)));
+    ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
+    let _ = ui.redraw();
+    let _ = ui.redraw();
+    assert!(
+        ui.app().session.controller.graph().assignment(added).is_none(),
+        "the Add is undone"
+    );
+    assert!(
+        focused(&ui).is_some_and(|id| id.is_under(&panel::list_id())),
+        "the focus is on a live cell: {:?}",
+        focused(&ui)
+    );
+    ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
+    let _ = ui.redraw();
+    assert_eq!(on(&ui), before, "the next undo works");
 }

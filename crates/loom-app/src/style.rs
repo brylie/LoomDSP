@@ -6,9 +6,7 @@
 //! The canvas keeps its own text sizes in world units, because tile text
 //! grows and shrinks with zoom.
 
-use crate::Element;
 use iced::Theme;
-use iced::widget::button as iced_button;
 
 /// Table cells, row details, and captions in the inspector and matrix.
 pub const SMALL: f32 = 11.0;
@@ -210,38 +208,10 @@ pub fn check_look() -> loom_ui::paint::CheckLook {
     }
 }
 
-/// A checkbox that keeps its outline and check mark readable on cards and
-/// panels, from [`check_look`].
-pub fn check_box(theme: &Theme, status: iced::widget::checkbox::Status) -> iced::widget::checkbox::Style {
-    use iced::widget::checkbox::{Status, primary};
-    use loom_canvas::iced_convert::ToIced as _;
-    let mut style = primary(theme, status);
-    let look = check_look();
-    match status {
-        Status::Active { is_checked: true } | Status::Hovered { is_checked: true } => {
-            style.background = look.fill.to_iced().into();
-            style.icon_color = look.mark.to_iced();
-            style.border.color = look.fill.to_iced();
-        }
-        Status::Active { is_checked: false } | Status::Hovered { is_checked: false } => {
-            style.border.color = look.edge.to_iced();
-            style.border.width = 1.0;
-        }
-        Status::Disabled { .. } => {}
-    }
-    style
-}
 /// Status bar text for a warning, with the word `Warning:` beside it.
 pub const WARNING_TEXT: iced::Color = iced::Color::from_rgb8(0xF5, 0xA6, 0x23);
 /// Status bar text for an error, with the word `Error:` beside it.
 pub const ERROR_TEXT: iced::Color = iced::Color::from_rgb8(0xEB, 0x6B, 0x6B);
-
-/// A button in the default role, secondary: quiet, so the patch and its
-/// values stand out. Give it another role with `.style(style::primary)`,
-/// or `style::plain`. Danger is Panic's, which `loom-ui` draws (`toolbar.rs`).
-pub fn button<'a, M>(content: impl Into<Element<'a, M>>) -> iced_button::Button<'a, M, Theme, crate::Renderer> {
-    iced_button(content).style(secondary)
-}
 
 /// A button role's look in one state: its fill, or none, and its text
 /// (visual-system.md, Role tokens).
@@ -255,7 +225,7 @@ pub struct RoleState {
 
 /// A button role's look in each state. These tokens are the one source for
 /// both toolkits until Iced goes: `loom-ui`'s buttons take them through
-/// [`Role::looks`], and Iced's through the role style functions below.
+/// [`Role::looks`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RoleTokens {
     /// Neither hovered nor pressed, and turned on.
@@ -360,75 +330,6 @@ impl Role {
             off: state(tokens.off),
         }
     }
-
-    /// [`Role::iced`], for the tests: danger has no Iced style function,
-    /// since its one button, Panic, is `loom-ui`'s.
-    #[cfg(test)]
-    pub(crate) fn iced_for_tests(self, status: iced_button::Status) -> iced_button::Style {
-        self.iced(status)
-    }
-
-    /// Its style for an Iced button in `status`: Iced keeps its own state
-    /// handling, and each of its states takes the token for that state.
-    fn iced(self, status: iced_button::Status) -> iced_button::Style {
-        use loom_canvas::iced_convert::ToIced as _;
-        let tokens = self.tokens();
-        let state = match status {
-            iced_button::Status::Active => tokens.normal,
-            iced_button::Status::Hovered => tokens.hovered,
-            iced_button::Status::Pressed => tokens.pressed,
-            iced_button::Status::Disabled => tokens.off,
-        };
-        iced_button::Style {
-            background: state.fill.map(|fill| iced::Background::Color(fill.to_iced())),
-            text_color: state.text.to_iced(),
-            border: iced::Border {
-                radius: tokens.radius.into(),
-                ..iced::Border::default()
-            },
-            ..iced_button::Style::default()
-        }
-    }
-}
-
-/// The one main action of a view, or a mode that is on: orange.
-pub fn primary(_theme: &Theme, status: iced_button::Status) -> iced_button::Style {
-    Role::Primary.iced(status)
-}
-
-/// Every other button: a lifted grey fill with dark text.
-pub fn secondary(_theme: &Theme, status: iced_button::Status) -> iced_button::Style {
-    Role::Secondary.iced(status)
-}
-
-/// Small inline actions, such as the × that removes a row: text only.
-pub fn plain(_theme: &Theme, status: iced_button::Status) -> iced_button::Style {
-    Role::Plain.iced(status)
-}
-
-/// A value shown as plain text that can be clicked to edit it, such as a
-/// cell of the modulation matrix. A light fill on hover, and an outline
-/// while it has keyboard focus, so focus never depends on colour alone.
-pub fn cell(focused: bool) -> impl Fn(&Theme, iced_button::Status) -> iced_button::Style {
-    move |theme, status| {
-        let palette = theme.extended_palette();
-        let background = matches!(status, iced_button::Status::Hovered | iced_button::Status::Pressed)
-            .then(|| palette.background.weak.color.into());
-        iced_button::Style {
-            background,
-            text_color: palette.background.base.text,
-            border: iced::Border {
-                color: if focused {
-                    palette.primary.base.color
-                } else {
-                    iced::Color::TRANSPARENT
-                },
-                width: 1.0,
-                radius: 3.0.into(),
-            },
-            ..iced_button::Style::default()
-        }
-    }
 }
 
 /// The focus ring of a part the app's own UI layer draws (ui-layer.md,
@@ -485,8 +386,6 @@ pub const TAB_RADIUS: f32 = 4.0;
 /// The width of the open right-column tab's border.
 pub const TAB_BORDER: f32 = 1.0;
 
-/// A card in a list, such as one modulation assignment. The selected card
-/// is outlined in the primary colour.
 /// The radius of a modulation card's corners, in the inspector and the
 /// matrix.
 pub const CARD_RADIUS: f32 = 5.0;
@@ -494,25 +393,6 @@ pub const CARD_RADIUS: f32 = 5.0;
 /// The radius of an inspector row's corners while a dragged output over it
 /// lights it.
 pub const DROP_ROW_RADIUS: f32 = 4.0;
-
-pub fn card(selected: bool) -> impl Fn(&Theme) -> iced::widget::container::Style {
-    move |theme| {
-        let palette = theme.extended_palette();
-        iced::widget::container::Style {
-            background: Some(palette.background.weak.color.scale_alpha(0.5).into()),
-            border: iced::Border {
-                color: if selected {
-                    palette.primary.base.color
-                } else {
-                    palette.background.strong.color.scale_alpha(0.5)
-                },
-                width: if selected { 1.5 } else { 1.0 },
-                radius: CARD_RADIUS.into(),
-            },
-            ..iced::widget::container::Style::default()
-        }
-    }
-}
 
 /// How a dialog over the canvas looks: help and Your patches. Today's
 /// look, the palette's weak background with a corner of 2, now a token so

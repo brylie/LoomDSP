@@ -139,8 +139,9 @@ impl App {
 
     /// Where Tab from the open tab goes: into its panel. The runtime's
     /// inspector's first stop is `next` in reading order; with none, Tab
-    /// goes on as past the column's last stop. The matrix, which Iced
-    /// still draws, is entered as Ctrl+Tab enters it.
+    /// goes on as past the column's last stop. The matrix is entered on its
+    /// grid's one stop, the chosen cell or On in the first row, or on its
+    /// filter when it has no rows, as Ctrl+Tab enters it.
     pub(crate) fn tab_into_panel(&self, next: Option<&UiId>) -> loom_ui::TabStep<Message> {
         use loom_ui::TabStep;
         // The Outline's tree, its current row, or the jump list's list.
@@ -157,16 +158,10 @@ impl App {
                 .or_else(|| self.bar_stops().first().or(self.top_stops().first()).cloned());
             return stop.map_or(TabStep::Leave, TabStep::To);
         }
-        TabStep::Send(Message::EnterTabPanel)
-    }
-
-    /// Gives the matrix, which Iced draws, the keys, as Ctrl+Tab into the
-    /// column does, and the runtime's focus leaves the tab.
-    pub(crate) fn enter_tab_panel(&mut self) {
-        self.session.matrix.focused = self.right_tab == Tab::Matrix;
-        if self.focus_on_tabs() {
-            self.effect(loom_ui::Effects::unfocus());
+        if self.matrix_owns() {
+            return TabStep::To(self.matrix_entry().unwrap_or_else(crate::matrix::filter_part));
         }
+        TabStep::Leave
     }
 
     /// True while the runtime's focus is on one of the tabs.

@@ -81,29 +81,6 @@ fn ui_with(view: fn(&mut View)) -> Ui {
     ui
 }
 
-/// The subtractive patch with `view`'s panels added and the Matrix tab
-/// open, whose filter field is Iced's until plan 3.2, row 4e: the Iced
-/// field these tests hand the keyboard to and from. Returns the field's
-/// centre.
-fn ui_with_iced_field(view: fn(&mut View)) -> (Ui, Point) {
-    let mut ui = Ui::open("subtractive.ron");
-    ui.with_test_panels(TestPanels {
-        view,
-        clicked,
-        focuses,
-        fields: |_, _| None,
-    });
-    ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
-    ui.redraw();
-    let field = ui.field(&iced_field());
-    (ui, field)
-}
-
-/// The matrix's filter field, Iced's until row 4e.
-fn iced_field() -> loom_ui_core::UiId {
-    crate::matrix::filter_part()
-}
-
 /// The centre of the toolbar's button `key`, by its UI ID: text such as
 /// Open is shown by the inspector too.
 fn toolbar_centre(ui: &mut Ui, key: &'static str) -> Point {
@@ -163,37 +140,20 @@ fn a_question_holds_presses_on_both_toolkits() {
 
 /// A press Iced captures never reaches the runtime's layers, so the focus
 /// they had stays (section 6, rule 1 is the target's to keep there): a
-/// click on the matrix's Add, one of Iced's buttons until plan 3.2, row 4e
-/// moves the matrix.
+/// press on a tile of the canvas, the one part Iced still draws since the
+/// matrix moved (plan 3.2, row 4e).
 #[test]
 fn a_press_iced_captures_leaves_our_focus() {
     let mut ui = ui_with(bar);
-    ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
     // Focused as one of the app's panels would ask, with no click.
     ui.send(Message::MidiGhosts);
     assert_eq!(ui.runtime().focused(), Some(&go()));
-    let add = ui.text("Add").expect("Iced shows the matrix's Add").center();
-    click(&mut ui, add);
+    let tile = ui.app().session.scene.module(4).expect("the filter's tile").bounds();
+    let at = ui
+        .canvas()
+        .to_window(loom_ui_core::Point::new(tile.center().x, tile.y + 10.0));
+    click(&mut ui, at);
     assert_eq!(ui.runtime().focused(), Some(&go()), "Iced took that press");
-}
-
-/// One element has the keyboard across the window (section 6, rule 1):
-/// with our button focused, a click into an Iced value field moves the
-/// keyboard there, and the runtime lets go of its focus, so the app's one
-/// copy of focus is the field.
-#[test]
-fn an_iced_field_taking_the_keyboard_ends_our_focus() {
-    let (mut ui, field) = ui_with_iced_field(bar);
-    // Focused as one of the app's panels would ask, with no click, which
-    // the test's hook would turn into opening Help.
-    ui.send(Message::MidiGhosts);
-    assert_eq!(ui.runtime().focused(), Some(&go()));
-    click(&mut ui, field);
-    ui.redraw();
-    let part = ui.focused_field();
-    assert!(part.is_some(), "the filter field has the keyboard");
-    assert_eq!(ui.runtime().focused(), None, "ours let go");
-    assert_eq!(ui.app().focus, part, "the app's copy is the field");
 }
 
 /// A layer above Iced takes its point before Iced hears it, and before
@@ -254,27 +214,6 @@ fn shift_tab_from_nothing_enters_our_last_stop_and_not_iced() {
     assert_eq!(ui.runtime().focused(), Some(&go()));
     assert!(ui.runtime().focus_ring().is_some(), "from the keyboard, with a ring");
     assert_eq!(ui.focused_field(), None, "no Iced field took the Tab");
-}
-
-/// The bug this pull request fixes on main: when the runtime's element
-/// takes the focus from Iced's field, the field lets go before Iced hears
-/// the next key, so the key never lands in the field (section 6, rule 1).
-#[test]
-fn a_key_after_our_element_takes_the_focus_misses_the_old_field() {
-    let (mut ui, field) = ui_with_iced_field(bar);
-    click(&mut ui, field);
-    assert!(ui.focused_field().is_some(), "the filter field has the focus");
-    ui.send(Message::MidiGhosts);
-    assert_eq!(ui.runtime().focused(), Some(&go()));
-    let typed = ui.typewrite("7");
-    // Iced's field would send its new text if it still had the key.
-    assert!(
-        !typed
-            .iter()
-            .any(|m| matches!(m, Message::Matrix(crate::matrix::Event::Filter(_)))),
-        "the key missed the field: {typed:?}"
-    );
-    assert_eq!(ui.focused_field(), None);
 }
 
 /// The keys Iced heard, as the app's key listener reports them.
@@ -423,36 +362,6 @@ fn a_key_our_field_takes_is_kept_from_iced() {
 
     ui.step(&[key_press(tab.clone(), none, None, false)]);
     assert_ne!(ui.runtime().focused(), Some(&go()), "Tab left our field");
-}
-
-/// Where our text field's focus meets Iced's (section 6, rule 1): with our
-/// field focused, a click puts the keyboard in an Iced value field. The
-/// runtime lets go of its focus (`Runtime::follow_target`), so the next key
-/// is not our field's and is not kept: it reaches Iced, which types it into
-/// its field.
-#[test]
-fn our_field_gives_the_keyboard_to_an_iced_field() {
-    use crate::ui_test::key_press;
-    let a = keyboard::Key::Character("a".into());
-    let (mut ui, field) = ui_with_iced_field(bar_with_field);
-    ui.send(Message::MidiGhosts);
-    assert_eq!(ui.runtime().focused(), Some(&go()), "our field has the focus");
-
-    click(&mut ui, field);
-    ui.redraw();
-    let part = ui.focused_field();
-    assert_eq!(part, Some(iced_field()), "the clicked filter field has the keyboard");
-    assert_eq!(ui.runtime().focused(), None, "ours let go");
-
-    // Iced's field uses the key, so its listener reports no `Key`: the
-    // field's own message is the sign it got there.
-    let heard = ui.step(&[key_press(a, keyboard::Modifiers::default(), Some("a"), false)]);
-    assert!(
-        heard
-            .iter()
-            .any(|m| matches!(m, Message::Matrix(crate::matrix::Event::Filter(_)))),
-        "the clicked field typed it: {heard:?}"
-    );
 }
 
 /// An input method event, as Iced reports one.

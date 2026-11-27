@@ -605,7 +605,6 @@ impl App {
                 .first()
                 .map(|row| crate::menus::recent_id().with(row.path.display().to_string()));
             self.overlays.open(Overlay::RecentList(rows));
-            self.session.matrix.focused = false;
             if by_key && let Some(first) = first {
                 self.overlays.set_menu_highlight(Some(0));
                 self.effect(loom_ui::Effects::focus(first));

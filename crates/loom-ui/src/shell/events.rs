@@ -154,6 +154,7 @@ pub(crate) fn core_key(key: &WinitKey) -> Key {
             NamedKey::PageUp => Key::PageUp,
             NamedKey::PageDown => Key::PageDown,
             NamedKey::ContextMenu => Key::ContextMenu,
+            NamedKey::F2 => Key::F2,
             NamedKey::F10 => Key::F10,
             NamedKey::Shift
             | NamedKey::Control

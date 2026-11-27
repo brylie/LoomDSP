@@ -187,6 +187,9 @@ pub enum Key {
     PageDown,
     /// The menu key, which opens the menu of what has focus.
     ContextMenu,
+    /// F2: in a grid, edits the cell that has focus (the WAI-ARIA data
+    /// grid pattern).
+    F2,
     /// F10. With Shift, it opens a menu as the menu key does.
     F10,
     /// Shift, Control, Alt, or the system key, on either side. One variant

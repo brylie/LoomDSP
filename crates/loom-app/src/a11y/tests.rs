@@ -2681,17 +2681,8 @@ fn matrix_ui() -> crate::ui_test::Ui {
     let mut ui = crate::ui_test::Ui::open("modulation.ron");
     ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
     let _ = ui.redraw();
-    let places = ui.places();
-    let _ = ui.app_mut().a11y_tree(&places);
+    let _ = ui.a11y_tree();
     ui
-}
-
-/// The tree as it is now in `ui`, drawn first.
-fn matrix_tree(ui: &mut crate::ui_test::Ui) -> (Places, TreeUpdate) {
-    let _ = ui.redraw();
-    let places = ui.places();
-    let update = ui.app_mut().a11y_tree(&places);
-    (places, update)
 }
 
 /// The first assignment in the graph's order.
@@ -2705,67 +2696,48 @@ fn first_assignment(app: &App) -> loom_core::AssignmentId {
         .0
 }
 
-/// Every part the matrix reports has a role, every part but text has a
-/// name, and every part that acts is where the window drew it, inside the
-/// panel. With a sort set and the Add form open, so the reverse button and
-/// the form's parts are checked too.
+/// Every part of the matrix that acts has a name and bounds inside the
+/// right column, with a sort set and the Add form open, so the reverse
+/// button and the form's parts are checked too. Its nodes are the
+/// runtime's (plan 3.2, row 4e, commit 3).
 #[test]
 fn every_matrix_part_is_named_and_placed() {
-    use super::items::Kind;
+    use crate::matrix::{Column, access};
     let mut ui = matrix_ui();
-    ui.send(Message::Matrix(crate::matrix::Event::SortBy(Some(
-        crate::matrix::Column::Depth,
-    ))));
+    ui.send(Message::Matrix(crate::matrix::Event::SortBy(Some(Column::Depth))));
     ui.send(Message::Matrix(crate::matrix::Event::AddOpen));
-    let (places, update) = matrix_tree(&mut ui);
-    let items = ui.app().a11y_frames().panel;
-    assert_eq!(items.len(), 1, "one panel");
-    let panel = &items[0];
-    assert_eq!(panel.id, crate::matrix::access::panel());
-    let panel_place = places.of(&panel.id).expect("the panel is drawn");
-    assert!(node(&update, node_of(ui.app_mut(), &panel.id)).clips_children());
-    let mut acting = 0;
-    for item in panel.walk() {
-        let found = node(&update, node_of(ui.app_mut(), &item.id));
-        if item.kind == Kind::Text {
-            assert_eq!(found.label(), None, "{}", item.id);
-            continue;
-        }
+    let _ = ui.redraw();
+    let tree = ui.a11y_tree();
+    let panel = ui
+        .runtime()
+        .bounds(&crate::matrix::panel::matrix_id())
+        .expect("the panel is laid out");
+    let mut parts: Vec<UiId> = ["filter", "selected-only", "add", "sort", "reverse"]
+        .into_iter()
+        .chain(["new/source", "new/target", "new/create", "new/cancel"])
+        .map(access::part)
+        .collect();
+    for (id, _) in ui.app().session.controller.graph().assignments() {
+        parts.extend(Column::ALL.into_iter().map(|column| access::cell(id, column)));
+        parts.push(access::remove(id));
+    }
+    assert_eq!(parts.len(), 9 + 2 * 6);
+    for id in parts {
+        let found = tree.node_by_id(&id);
+        assert!(found.name().is_some_and(|name| !name.is_empty()), "{id} has a name");
+        let place = ui.runtime().bounds(&id).unwrap_or_else(|| panic!("{id} is laid out"));
+        assert!(place.width > 0.0 && place.height > 0.0, "{id}");
+        assert!(found.bounds().is_some(), "{id} has bounds");
         assert!(
-            item.label.as_deref().is_some_and(|name| !name.is_empty()),
-            "{} has a name",
-            item.id
-        );
-        let acts = item.click.is_some()
-            || item.step.0.is_some()
-            || item.step.1.is_some()
-            || item.set_number.is_some()
-            || item.set_text.is_some()
-            || item.focus.is_some();
-        if !acts {
-            continue;
-        }
-        acting += 1;
-        let place = places
-            .of(&item.id)
-            .unwrap_or_else(|| panic!("the window drew no `{}`", item.id));
-        assert!(place.rect.width > 0.0 && place.rect.height > 0.0, "{}", item.id);
-        assert!(found.bounds().is_some(), "{} has bounds", item.id);
-        assert!(
-            place.rect.x >= panel_place.rect.x - 0.5
-                && place.rect.x + place.rect.width <= panel_place.rect.x + panel_place.rect.width + 0.5,
-            "{} lies in the panel",
-            item.id
+            place.x >= panel.x - 0.5 && place.x + place.width <= panel.x + panel.width + 0.5,
+            "{id} lies in the panel"
         );
     }
-    // The filter, the switch, Add, the sort, its reverse, the form's two
-    // picks and two buttons, and six parts on each of the two rows.
-    assert_eq!(acting, 9 + 2 * 6);
 }
 
 /// The assignments are a list, not a table: the list says how many rows it
 /// has, each row is a list item with its place in it, and the rows follow
-/// the sort the view shows.
+/// the sort the panel shows.
 #[test]
 fn the_matrix_rows_are_a_list_in_the_order_shown() {
     let mut ui = matrix_ui();
@@ -2776,238 +2748,100 @@ fn the_matrix_rows_are_a_list_in_the_order_shown() {
         if reverse {
             ui.send(Message::Matrix(crate::matrix::Event::ReverseSort));
         }
-        let (_, update) = matrix_tree(&mut ui);
-        let list_id = crate::matrix::access::part("assignments");
-        let list = node(&update, node_of(ui.app_mut(), &list_id));
+        let _ = ui.redraw();
+        let tree = ui.a11y_tree();
+        let list = tree.node_by_id(&crate::matrix::panel::list_id());
         assert_eq!(list.role(), Role::List);
         assert_eq!(list.size_of_set(), Some(2));
-        let model = ui.app().session.matrix.model(
-            ui.app().session.controller.graph(),
-            &ui.app().session.hierarchy,
-            &ui.app().session.level,
-            &ui.app().session.selection,
-            ui.app().right_tab,
-        );
-        let shown: Vec<NodeId> = model
+        let shown: Vec<UiId> = ui
+            .app()
+            .matrix_model()
             .rows
             .iter()
-            .map(|r| node_of(ui.app_mut(), &crate::matrix::access::row(loom_core::AssignmentId(r.id))))
+            .map(|r| crate::matrix::access::row(loom_core::AssignmentId(r.id)))
             .collect();
-        assert_eq!(
-            list.children(),
-            shown.as_slice(),
-            "reverse {reverse}: in the order shown"
-        );
+        let children: Vec<UiId> = list
+            .children()
+            .iter()
+            .filter_map(|child| child.ui_id().cloned())
+            .collect();
+        assert_eq!(children, shown, "reverse {reverse}: in the order shown");
         for (at, row) in shown.iter().enumerate() {
-            let row = node(&update, *row);
+            let row = tree.node_by_id(row);
             assert_eq!(row.role(), Role::ListItem);
             assert_eq!(row.position_in_set(), Some(at));
-            assert!(row.label().is_some_and(|name| name.starts_with("Modulation from ")));
+            assert!(row.name().is_some_and(|name| name.starts_with("Modulation from ")));
         }
         ui.send(Message::Matrix(crate::matrix::Event::SortBy(None)));
     }
 }
 
-/// The matrix's parts are reported only while its tab is open, and the
-/// inspector's only while its own is.
+/// The matrix's parts are reported only while its tab is open.
 #[test]
 fn the_matrix_is_reported_only_while_its_tab_is_open() {
     let mut ui = matrix_ui();
-    let matrix = crate::matrix::access::panel();
-    assert!(super::items::find(&ui.app().a11y_frames().panel, &matrix).is_some());
+    let matrix = crate::matrix::panel::matrix_id();
+    assert!(ui.a11y_tree().has_part_under(&matrix));
     ui.send(Message::Matrix(crate::matrix::Event::Tab(
         crate::matrix::Tab::Inspector,
     )));
-    let (_, update) = matrix_tree(&mut ui);
-    let frames = ui.app().a11y_frames();
-    assert!(super::items::find(&frames.panel, &matrix).is_none());
+    let _ = ui.redraw();
+    let tree = ui.a11y_tree();
     let row = crate::matrix::access::row(first_assignment(ui.app()));
-    assert!(
-        !update
-            .nodes
-            .iter()
-            .any(|(id, _)| ui.app().a11y.ids.id(id.0) == Some(&row)),
-        "no row of the matrix is in the tree"
-    );
-}
-
-/// A source step goes to the next source the assignment may take. It skips
-/// the envelope, whose pair with the cutoff another row already has, so it
-/// edits something and warns of nothing. Each step is its own undo step,
-/// since it may give the row a new ID, and the reported focus follows the
-/// row.
-#[test]
-fn a_matrix_source_step_skips_a_taken_pair_and_is_its_own_undo_step() {
-    let mut ui = matrix_ui();
-    let graph = ui.app().session.controller.graph();
-    let (id, a) = graph.assignments().next().map(|(id, a)| (id, *a)).unwrap();
-    let other = graph.assignments().nth(1).map(|(_, a)| a.source).unwrap();
-    let options = crate::matrix::sources(graph, &ui.app().session.hierarchy, &ui.app().session.level);
-    // The step lands on a source no other row joins to this target.
-    let Some(Message::Matrix(crate::matrix::Event::Source(_, pick))) = ui.app().matrix_source_step(id, true, &options)
-    else {
-        panic!("a source step");
-    };
-    assert_ne!(pick.output, other, "the taken pair is skipped");
-    assert_ne!(pick.output, a.source);
-    let from = options.iter().position(|s| s.output == a.source).unwrap();
-    let to = options.iter().position(|s| s.output == pick.output).unwrap();
-    assert!(to > from, "forward");
-    for skipped in &options[from + 1..to] {
-        assert!(
-            skipped.output == other || !ui.app().allows_assignment(skipped.output, a.target, a.param),
-            "only a source the assignment may not take is skipped: {}",
-            skipped.label
-        );
-    }
-
-    let steps = ui.app().session.edits.history.len();
-    let source = crate::matrix::access::cell(id, crate::matrix::Column::Source);
-    let target = node_of(ui.app_mut(), &source);
-    let at = ui.now();
-    ui_act(&mut ui, &request(Action::Increment, target, None), at);
-    let moved = ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignments()
-        .find(|(_, b)| b.source == pick.output && b.target == a.target && b.param == a.param)
-        .map(|(id, _)| id)
-        .expect("retargeted onto the pick");
-    assert_eq!(ui.app().session.edits.history.len(), steps + 1, "one undo step");
-    assert_ne!(
-        ui.app().alerts.severity(),
-        crate::alerts::Severity::Warning,
-        "nothing refused, nothing warned: {}",
-        ui.app().alerts.status()
-    );
-    assert_eq!(ui.app().session.matrix.selected, Some(moved));
-    let (_, update) = matrix_tree(&mut ui);
-    let cell = crate::matrix::access::cell(moved, crate::matrix::Column::Source);
-    assert_eq!(
-        update.focus,
-        node_of(ui.app_mut(), &cell),
-        "focus is on the row's source"
-    );
-    let cell_node = node_of(ui.app_mut(), &cell);
-    ui_act(&mut ui, &request(Action::Decrement, cell_node, None), at);
-    assert_eq!(
-        ui.app().session.edits.history.len(),
-        steps + 2,
-        "a second step of its own"
-    );
-}
-
-/// A step with nothing allowed that way does nothing: the node offers the
-/// action, but no message is sent and nothing is said.
-#[test]
-fn a_matrix_step_with_nothing_allowed_does_nothing() {
-    let mut ui = matrix_ui();
-    let id = first_assignment(ui.app());
-    // Step back until no source is left that way.
-    for _ in 0..64 {
-        let Some(message) = ui.app().matrix_source_step(
-            id,
-            false,
-            &crate::matrix::sources(
-                ui.app().session.controller.graph(),
-                &ui.app().session.hierarchy,
-                &ui.app().session.level,
-            ),
-        ) else {
-            break;
-        };
-        ui.send(message);
-    }
-    let id = ui.app().session.matrix.selected.unwrap_or(id);
-    assert!(
-        ui.app()
-            .matrix_source_step(
-                id,
-                false,
-                &crate::matrix::sources(
-                    ui.app().session.controller.graph(),
-                    &ui.app().session.hierarchy,
-                    &ui.app().session.level
-                )
-            )
-            .is_none()
-    );
-    let steps = ui.app().session.edits.history.len();
-    let status = ui.app().alerts.status().to_string();
-    let source = crate::matrix::access::cell(id, crate::matrix::Column::Source);
-    let _ = matrix_tree(&mut ui);
-    let node_id = node_of(ui.app_mut(), &source);
-    let ui_now = ui.now();
-    ui_act(&mut ui, &request(Action::Decrement, node_id, None), ui_now);
-    assert_eq!(ui.app().session.edits.history.len(), steps);
-    assert_eq!(ui.app().alerts.status(), status, "nothing is said");
+    assert!(!tree.has_part_under(&row), "no row of the matrix is in the tree");
 }
 
 /// A row's depth is a slider in percent. SetValue sets what typing the
-/// depth would, and quick steps on it are one undo step, as on a tile.
+/// depth would, and a screen reader's set and steps on it are one undo
+/// step, as on a tile.
 #[test]
 fn a_matrix_depth_is_a_slider_in_percent_that_groups() {
     let mut ui = matrix_ui();
+    ui.app_mut().a11y_event(Event::Activated);
     let id = first_assignment(ui.app());
     let depth_id = crate::matrix::access::cell(id, crate::matrix::Column::Depth);
-    let (_, update) = matrix_tree(&mut ui);
-    let slider = node_of(ui.app_mut(), &depth_id);
-    let found = node(&update, slider);
+    let tree = ui.a11y_tree();
+    let found = tree.node_by_id(&depth_id);
     assert_eq!(found.role(), Role::Slider);
-    assert_eq!(
-        (found.min_numeric_value(), found.max_numeric_value()),
-        (Some(-100.0), Some(100.0))
-    );
-    assert_eq!(found.numeric_value_step(), Some(1.0));
+    assert_eq!(found.numeric_step(), Some(1.0));
     let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
     let steps = ui.app().session.edits.history.len();
-    let at = ui.now();
-    ui_act(
-        &mut ui,
-        &request(Action::SetValue, slider, Some(ActionData::NumericValue(40.0))),
-        at,
-    );
-    assert!((depth(ui.app()) - 0.4).abs() < 1e-6);
-    ui_act(&mut ui, &request(Action::Increment, slider, None), at);
-    ui_act(&mut ui, &request(Action::Increment, slider, None), at);
-    assert!((depth(ui.app()) - 0.42).abs() < 1e-5);
+    ui.a11y_set_value(&depth_id, 40.0);
+    assert!((depth(ui.app()) - 0.4).abs() < 1e-6, "{}", depth(ui.app()));
+    ui.a11y_action(&depth_id, Action::Increment);
+    ui.a11y_action(&depth_id, Action::Increment);
+    assert!((depth(ui.app()) - 0.42).abs() < 1e-5, "{}", depth(ui.app()));
     ui.app_mut().reader_event(crate::edits::ReaderEvent::Close);
+    let _ = ui.wake_after(std::time::Duration::from_millis(600));
     assert_eq!(
         ui.app().session.edits.history.len(),
         steps + 1,
         "the set and the steps are one undo step"
     );
-    let (_, update) = matrix_tree(&mut ui);
-    assert_eq!(update.focus, slider, "focus is on the cell acted on");
+    // The runtime carries out the slider's steps where the screen reader
+    // is, and moves no keyboard focus: it stays on the cell it was on, On
+    // in the first row (the decisions row of 2026-11-27).
+    let tree = ui.a11y_tree();
+    assert!(!tree.node_by_id(&depth_id).is_focused());
+    let on = crate::matrix::access::cell(id, crate::matrix::Column::On);
+    assert!(tree.node_by_id(&on).is_focused(), "the keyboard focus stays put");
 }
 
-/// The filter is a field: SetValue filters as typing does, and Focus gives
-/// it the keys.
+/// The filter is a field: SetValue filters as typing does.
 #[test]
-fn the_matrix_filter_takes_text_and_focus() {
+fn the_matrix_filter_takes_text() {
     let mut ui = matrix_ui();
     let filter = crate::matrix::access::part("filter");
-    let (_, update) = matrix_tree(&mut ui);
-    let node_id = node_of(ui.app_mut(), &filter);
-    let found = node(&update, node_id);
+    let tree = ui.a11y_tree();
+    let found = tree.node_by_id(&filter);
     assert_eq!(found.role(), Role::TextInput);
-    assert!(found.supports_action(Action::Focus) && found.supports_action(Action::SetValue));
-    let ui_now = ui.now();
-    ui_act(
-        &mut ui,
-        &request(Action::SetValue, node_id, Some(ActionData::Value("lfo".into()))),
-        ui_now,
-    );
+    assert!(found.offers(Action::Focus) && found.offers(Action::SetValue));
+    ui.a11y_set_value(&filter, "lfo");
     assert_eq!(ui.app().session.matrix.filter, "lfo");
-    let (_, update) = matrix_tree(&mut ui);
+    let _ = ui.redraw();
+    let tree = ui.a11y_tree();
     assert_eq!(
-        node(
-            &update,
-            node_of(ui.app_mut(), &crate::matrix::access::part("assignments"))
-        )
-        .size_of_set(),
+        tree.node_by_id(&crate::matrix::panel::list_id()).size_of_set(),
         Some(1),
         "one row is left"
     );
@@ -3033,8 +2867,9 @@ fn matrix_node_ids_survive_other_rows_and_are_dropped_when_gone() {
     let kept_node = node_of(ui.app_mut(), &kept_cell);
     let gone_node = node_of(ui.app_mut(), &gone_cell);
     ui.send(Message::Matrix(crate::matrix::Event::Remove(gone)));
-    let _ = matrix_tree(&mut ui);
-    let _ = matrix_tree(&mut ui);
+    let _ = ui.redraw();
+    let _ = ui.a11y_tree();
+    let _ = ui.a11y_tree();
     assert_eq!(
         ui.app().a11y.ids.id(kept_node.0),
         Some(&kept_cell),
@@ -3047,65 +2882,14 @@ fn matrix_node_ids_survive_other_rows_and_are_dropped_when_gone() {
     );
 }
 
-/// With no screen reader, a scroll of the rows sends no message. With one,
-/// it sends one that changes nothing and asks for a rebuild.
+/// A screen reader opens an assignment's Target select and chooses a
+/// parameter inside a sub-patch, where the retarget gives the row a new ID
+/// (sub-patches.md, Editor model). The choice is one undo step, and the
+/// reported focus follows the row to its new ID. With the runtime's select,
+/// a screen reader opens it and chooses through its own actions (the
+/// decisions row of 2026-11-27).
 #[test]
-fn a_matrix_scroll_is_a_message_only_while_listening() {
-    let mut ui = matrix_ui();
-    let a = *ui
-        .app()
-        .session
-        .controller
-        .graph()
-        .assignment(first_assignment(ui.app()))
-        .unwrap();
-    for n in 0..30 {
-        ui.app_mut()
-            .session
-            .controller
-            .add_assignment(a.source, a.target, a.param, -0.9 + n as f32 * 0.03)
-            .unwrap();
-    }
-    let scroll = |ui: &mut crate::ui_test::Ui| {
-        let _ = ui.redraw();
-        let list = ui.places().of(&crate::matrix::access::part("assignments")).unwrap();
-        let _ = ui.move_to(list.clip.unwrap().center());
-        ui.step(&[iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
-            delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -6.0 },
-        })])
-    };
-    let scrolled = |messages: &[Message]| {
-        messages
-            .iter()
-            .any(|message| matches!(message, Message::Matrix(crate::matrix::Event::Scrolled)))
-    };
-    let before = ui.scroll_translation("matrix-table").unwrap();
-    let messages = scroll(&mut ui);
-    assert_ne!(ui.scroll_translation("matrix-table").unwrap(), before, "it scrolled");
-    assert!(!scrolled(&messages), "no message with no screen reader");
-    ui.app_mut().a11y_event(Event::Activated);
-    // Its rebuild is not asked for here: this test counts the ones that
-    // one message makes.
-    drop(ui.app().take_window_questions());
-    ui.app_mut().a11y.locating = false;
-    let messages = scroll(&mut ui);
-    assert!(scrolled(&messages));
-    assert!(
-        messages
-            .iter()
-            .any(|message| matches!(message, Message::A11y(Event::Located(_)))),
-        "the scroll asked for a rebuild"
-    );
-}
-
-/// A screen reader steps an assignment's target in the matrix until it
-/// lands on a parameter inside a sub-patch, where the retarget gives the
-/// row a new ID (sub-patches.md, Editor model). Every step goes to a target
-/// the assignment may take, so each one edits and none warns; each is an
-/// undo step of its own; and the reported focus follows the row to its new
-/// ID (ui-layer.md, decisions, 2026-11-11).
-#[test]
-fn a_screen_reader_target_step_follows_a_renumbered_row_inside_a_sub_patch() {
+fn a_screen_reader_target_choice_follows_a_renumbered_row_inside_a_sub_patch() {
     use crate::matrix::{Column, Event, Tab, access};
     use loom_core::ModuleNames as _;
     use loom_patch::ModulePath;
@@ -3152,6 +2936,7 @@ fn a_screen_reader_target_step_follows_a_renumbered_row_inside_a_sub_patch() {
         .assign(loom_core::OutputRef { module: inner, port: 0 }, svf, cutoff);
     ui.app_mut().show_level(&ModulePath::root());
     ui.send(Message::Matrix(Event::Tab(Tab::Matrix)));
+    let _ = ui.redraw();
 
     let targets = crate::matrix::targets(
         ui.app().session.controller.graph(),
@@ -3162,58 +2947,36 @@ fn a_screen_reader_target_step_follows_a_renumbered_row_inside_a_sub_patch() {
         .iter()
         .position(|t| (t.module, t.param) == (svf, cutoff))
         .expect("the cutoff is a target");
-    let mut id = outer;
-    let mut steps = 0;
     let history = ui.app().session.edits.history.len();
-    loop {
-        let a = *ui.app().session.controller.graph().assignment(id).unwrap();
-        let at = targets
-            .iter()
-            .position(|t| (t.module, t.param) == (a.target, a.param))
-            .unwrap();
-        if at == goal {
-            break;
-        }
-        let forward = goal > at;
-        let cell = access::cell(id, Column::Target);
-        let node = node_of(ui.app_mut(), &cell);
-        let action = if forward { Action::Increment } else { Action::Decrement };
-        let ui_now = ui.now();
-        ui_act(&mut ui, &request(action, node, None), ui_now);
-        steps += 1;
-        assert_ne!(
-            ui.app().alerts.severity(),
-            crate::alerts::Severity::Warning,
-            "step {steps} warned: {}",
-            ui.app().alerts.status()
-        );
-        id = ui.app().session.matrix.selected.expect("a row is chosen");
-        let now = ui.app().session.controller.graph().assignment(id).unwrap();
-        assert_eq!(now.source, note_pitch, "the same assignment, followed");
-        assert!(ui.app().allows_assignment(note_pitch, now.target, now.param));
-        assert!(steps < targets.len(), "the steps reach the cutoff");
-    }
-    assert_eq!(
-        ui.app().session.edits.history.len(),
-        history + steps,
-        "one undo step each"
+    let cell = access::cell(outer, Column::Target);
+    ui.a11y_action(&cell, Action::Expand);
+    let option = UiId::panel("loom-ui.select-list")
+        .with("list")
+        .with("options")
+        .with(format!("o{goal}"));
+    ui.a11y_action(&option, Action::Click);
+    let _ = ui.redraw();
+    assert_ne!(
+        ui.app().alerts.severity(),
+        crate::alerts::Severity::Warning,
+        "the choice warned: {}",
+        ui.app().alerts.status()
     );
     let graph = ui.app().session.controller.graph();
     assert!(graph.assignment(outer).is_none(), "the moved assignment got a new id");
+    let (id, now) = graph
+        .assignments()
+        .find(|(_, a)| a.source == note_pitch)
+        .map(|(id, a)| (id, *a))
+        .expect("the same assignment, followed");
+    assert_eq!((now.target, now.param), (svf, cutoff));
     assert!(id > outer);
-
-    let _ = ui.redraw();
-    let places = ui.places();
-    let update = ui.app_mut().a11y_tree(&places);
+    assert_eq!(ui.app().session.edits.history.len(), history + 1, "one undo step");
     let cell = access::cell(id, Column::Target);
-    assert_eq!(
-        update.focus,
-        node_of(ui.app_mut(), &cell),
-        "focus is on the renumbered row's target"
-    );
+    let tree = ui.a11y_tree();
     assert!(
-        ui.app().a11y.ids.id(update.focus.0) == Some(&cell),
-        "the focused node is the new row's"
+        tree.node_by_id(&cell).is_focused(),
+        "focus is on the renumbered row's target"
     );
 }
 
@@ -3229,20 +2992,19 @@ fn a_matrix_depth_steps_onto_the_percent_grid() {
         depth: 0.304,
     }));
     ui.send(Message::SliderReleased);
+    let _ = ui.redraw();
     let depth_id = crate::matrix::access::cell(id, crate::matrix::Column::Depth);
-    let _ = matrix_tree(&mut ui);
-    let slider = node_of(ui.app_mut(), &depth_id);
     let depth = |app: &App| app.session.controller.graph().assignment(id).unwrap().depth;
-    let at = ui.now();
-    ui_act(&mut ui, &request(Action::Increment, slider, None), at);
+    ui.app_mut().a11y_event(Event::Activated);
+    ui.a11y_action(&depth_id, Action::Increment);
     assert!((depth(ui.app()) - 0.31).abs() < 1e-6, "{}", depth(ui.app()));
     for _ in 0..19 {
-        ui_act(&mut ui, &request(Action::Increment, slider, None), at);
+        ui.a11y_action(&depth_id, Action::Increment);
     }
     assert!((depth(ui.app()) - 0.50).abs() < 1e-6, "no drift: {}", depth(ui.app()));
-    let (_, update) = matrix_tree(&mut ui);
-    assert_eq!(node(&update, slider).numeric_value(), Some(50.0));
-    ui_act(&mut ui, &request(Action::Decrement, slider, None), at);
+    let tree = ui.a11y_tree();
+    assert_eq!(tree.node_by_id(&depth_id).number(), Some(50.0));
+    ui.a11y_action(&depth_id, Action::Decrement);
     assert!((depth(ui.app()) - 0.49).abs() < 1e-6);
 }
 
@@ -3754,7 +3516,8 @@ fn focus_on_a_knob_takes_the_keys_from_the_matrix() {
         first,
         crate::matrix::Column::On,
     )));
-    assert!(ui.app().matrix_has_keys());
+    let _ = ui.redraw();
+    assert!(ui.app().focus_in_matrix());
     let _ = ui.app_mut().a11y_tree(&Places::default());
     let filter = 4;
     let knob = ui
@@ -3775,7 +3538,7 @@ fn focus_on_a_knob_takes_the_keys_from_the_matrix() {
 
     ui.send(Message::A11y(Event::Action(request(Action::Focus, target, None))));
     let _ = ui.redraw();
-    assert!(!ui.app().matrix_has_keys(), "the canvas has the keys now");
+    assert!(!ui.app().focus_in_matrix(), "the canvas has the keys now");
     let _ = ui.tap(
         iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp),
         iced::keyboard::Modifiers::empty(),
@@ -4777,33 +4540,49 @@ fn typed_value_field_reports_its_draft_selection_and_returns_focus_to_the_knob()
     assert_eq!(ui.a11y_tree().focused().role(), Role::Slider);
 }
 
-/// Places measured before a resize are superseded before the reader sees them.
+/// Places measured before a resize are superseded before the reader sees
+/// them. A part placed from what Iced reports, since the matrix moved
+/// (plan 3.2, row 4e): the patch map, in the canvas's corner, which the
+/// window's new size moves.
 #[test]
 fn a_stale_located_answer_is_read_again_after_resize() {
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    // The matrix's filter, a part Iced still draws and places.
-    ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
     ui.deliver(Message::A11y(Event::Activated));
     for _ in 0..3 {
         ui.redraw();
     }
     let old = ui.places();
-    let id = crate::matrix::filter_part();
+    let id = tree::canvas_id().with("patch-map");
     let node_id = crate::a11y::tests::node_of(ui.app_mut(), &id);
-    let old_x = old.of(&id).unwrap().rect.x;
-    ui.take_sent_trees();
+    let x0 = |trees: &[TreeUpdate]| {
+        trees
+            .iter()
+            .rev()
+            .find_map(|tree| tree.nodes.iter().find(|(n, _)| *n == node_id))
+            .and_then(|(_, node)| node.bounds())
+            .map(|bounds| bounds.x0)
+    };
+    let before = x0(&ui.take_sent_trees()).or_else(|| {
+        let places = ui.places();
+        let tree = ui.app_mut().a11y_tree(&places);
+        node(&tree, node_id).bounds().map(|b| b.x0)
+    });
     ui.resize(1360.0, 810.0);
     ui.deliver(Message::A11y(Event::Located(old)));
     for _ in 0..4 {
         ui.redraw();
     }
-    let new_x = ui.places().of(&id).unwrap().rect.x;
-    assert_ne!(new_x, old_x);
     let trees = ui.take_sent_trees();
     assert!(!trees.is_empty());
-    for tree in &trees {
-        assert_eq!(node(tree, node_id).bounds().unwrap().x0, f64::from(new_x));
-    }
+    let after = x0(&trees).expect("the patch map was sent again");
+    assert_ne!(Some(after), before, "with its new place");
+    let places = ui.places();
+    let tree = ui.app_mut().a11y_tree(&places);
+    assert_eq!(
+        node(&tree, node_id).bounds().map(|b| b.x0),
+        Some(after),
+        "the last one sent is current"
+    );
 }
 
 /// The canvas describes the same neighbours as the outline and links outputs to their inputs.

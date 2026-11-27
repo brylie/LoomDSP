@@ -1107,7 +1107,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// and is not taken, so it moves the focus on after. Returns whether
     /// the key was taken, and whether anything that shows changed.
     fn select_key(&mut self, event: &Event, now: Instant) -> (bool, bool) {
-        use crate::select::{Closed, OpenKey, closed_key, moved, open_key};
+        use crate::select::{Closed, OpenKey, cell_key, closed_key, moved, open_key};
         let Event::Key(KeyEvent::Pressed {
             key, modifiers, text, ..
         }) = event
@@ -1129,7 +1129,12 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let text = text.as_deref();
         match open {
             None => {
-                let Some(action) = closed_key(*key, *modifiers, text) else {
+                let action = if select.in_cell {
+                    cell_key(*key, *modifiers)
+                } else {
+                    closed_key(*key, *modifiers, text)
+                };
+                let Some(action) = action else {
                     return (false, false);
                 };
                 let at = match action {

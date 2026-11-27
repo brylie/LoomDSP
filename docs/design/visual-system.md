@@ -63,7 +63,7 @@ A disabled button keeps its role's shape and is drawn dimmed, so it reads as una
 
 **Status:** Implemented, M2 (Brylie's decisions of 2026-11-18, [plan for leaving Iced](../dev/leaving-iced-plan.md), step 3.2, row 2). The tokens are `style::PRIMARY`, `SECONDARY`, `DANGER`, and `PLAIN`, read through `style::Role`.
 
-Each role has a look for each state a button can be in: normal, hovered (the pointer is over it), pressed (a press on it is held, by the pointer or by Space), and off (turned off). The tokens are ours, in `style.rs`, as `loom-ui-core` colours, and they are **the one source for both toolkits until Iced goes** (phase 4): `loom-ui`'s buttons read them, and so do the role style functions that Iced's buttons are drawn with (`style::primary`, `secondary`, `danger`, `plain`), which map each of Iced's button states to the token for that state. Iced keeps its own state handling for its buttons; only the colours come from here. That mapping is a bridge, deleted in phase 4 with Iced: the states are named for what our buttons need, not for Iced's. The values start from the dark theme's palette, whose panel background is `#22242A`.
+Each role has a look for each state a button can be in: normal, hovered (the pointer is over it), pressed (a press on it is held, by the pointer or by Space), and off (turned off). The tokens are ours, in `style.rs`, as `loom-ui-core` colours, and they are **the one source for every button**: `loom-ui`'s buttons read them. Iced's role style functions (`style::primary`, `secondary`, `plain`), which mapped Iced's button states to these tokens, went with the last of Iced's buttons, the matrix's (plan 3.2, row 4e, commit 3, 2026-11-27). The states are named for what our buttons need. The values start from the dark theme's palette, whose panel background is `#22242A`.
 
 | Role | State | Fill | Text | Text on fill | Fill on background | Fill against normal |
 |---|---|---|---|---|---|---|
@@ -257,7 +257,7 @@ The rest:
 Role tokens (plan for leaving Iced, row 2):
 
 - [x] Every ratio in the role token table, the state-to-state ratios included, is checked from the tokens in `style.rs` (`the_role_tokens_meet_their_table`).
-- [x] `loom-ui`'s buttons and Iced's role style functions read the same tokens, for every state (`both_toolkits_read_the_same_role_tokens`).
+- [x] `loom-ui`'s buttons and Iced's role style functions read the same tokens, for every state (`both_toolkits_read_the_same_role_tokens`, until Iced's last button went with the matrix's move in plan 3.2, row 4e; the test went with it).
 - [x] A hovered, a pressed, and an off button each paint their token's fill and text (`loom-ui`: `an_element_paints_the_look_of_its_state`, `off_wins_over_hover_and_press`; a capture: `a_capture_draws_enabled_buttons_as_enabled`).
 - [x] The toolbar never has two primary buttons (`the_toolbar_has_one_primary_at_most`).
 - [ ] Brylie has seen `--screenshot-window` of the toolbar at the top level and inside a sub-patch, of Preferences, and of one overlay with buttons, before row 2 merges.

@@ -9,7 +9,7 @@
 //! so a test sees what the app does.
 
 use crate::{App, Message, panic, recent, settings};
-use crate::{controls, matrix, subscriptions};
+use crate::{controls, subscriptions};
 use iced::event::Status;
 use iced::keyboard::{self, Key, key::Named};
 use iced::{mouse, window};
@@ -59,8 +59,6 @@ type Listener = fn(iced::Event, Status, window::Id) -> Option<Message>;
 pub(crate) struct Listening {
     /// No question is open.
     open: bool,
-    /// The matrix table has the keyboard.
-    matrix: bool,
     /// The module browser has the input.
     browser: bool,
     /// The patches browser has the input.
@@ -73,13 +71,12 @@ pub(crate) struct Listening {
 impl Listening {
     /// Every combination of who listens, for tests that must hold for all.
     pub(crate) fn all() -> Vec<Self> {
-        (0..32u8)
+        (0..16u8)
             .map(|bits| Self {
                 open: bits & 1 != 0,
-                matrix: bits & 2 != 0,
-                browser: bits & 4 != 0,
-                patches: bits & 8 != 0,
-                value_draft: bits & 16 != 0,
+                browser: bits & 2 != 0,
+                patches: bits & 4 != 0,
+                value_draft: bits & 8 != 0,
             })
             .collect()
     }
@@ -141,7 +138,7 @@ impl Listening {
     /// The listeners, each with whether it hears events, in the order their
     /// messages are applied. `Key` comes first, so a key no widget used
     /// reaches the overlay that has it before anything closes that overlay.
-    fn rows(self) -> [(bool, Listener); 5] {
+    fn rows(self) -> [(bool, Listener); 4] {
         // An open question has every key, Panic's included: the runtime
         // keeps each press from Iced and gives it to `question::key_of`
         // (ui-layer.md, section 6, rule 6, step 2), so no listener here
@@ -150,9 +147,8 @@ impl Listening {
         // has closed it (files.md, Asking before losing work).
         [
             (self.open, app_key),
-            // The matrix owns arrows and Escape even when a child widget uses
-            // the key. Its handler ignores them outside table focus.
-            (self.open && self.matrix, matrix::key_listener),
+            // The matrix's keys are the runtime's: its card list takes the
+            // grid's keys before its cells (`matrix/panel.rs`).
             // The module browser's keys are the runtime's: its search field
             // leaves them to the browser before it edits (`browser/panel.rs`).
             (self.open, subscriptions::help_key),
@@ -220,15 +216,16 @@ impl App {
     /// and the app's text fields. One place decides it, so the canvas never
     /// infers it from loose flags.
     pub(crate) fn canvas_focus_policy(&self) -> loom_canvas::CanvasFocusPolicy {
-        let matrix = self.matrix_has_keys();
         loom_canvas::CanvasFocusPolicy {
             interactive: self.input_owner() == InputOwner::Canvas,
-            matrix_keyboard: matrix
+            // The matrix keeps no flag: while the runtime's focus is on one
+            // of its parts, the canvas reports a press on it
+            // (`PointerDown`), which gives the keys back to the canvas.
+            matrix_keyboard: self.focus_in_matrix()
                 || self.session.outline.active
                 || self.toolbar_has_focus()
                 || self.session.outline.inspector_action.is_some(),
             jump_keyboard: self.session.outline.has_jump(),
-            matrix_escape: matrix && self.session.matrix.edit.is_none() && self.session.matrix.add.is_none(),
             text_field_keys: self.focus.is_some(),
             text_field_keeps_tab: self.text_field_tabs(self.focus.as_ref()),
         }
@@ -238,7 +235,6 @@ impl App {
     pub(crate) fn listening(&self) -> Listening {
         Listening {
             open: self.overlays.question.is_none(),
-            matrix: self.matrix_has_keys(),
             browser: self.input_owner() == InputOwner::Browser,
             patches: self.input_owner() == InputOwner::Patches,
             value_draft: self.session.value_draft.is_some(),

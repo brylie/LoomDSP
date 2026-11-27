@@ -39,12 +39,6 @@ pub(crate) enum Kind {
     Choice,
     /// A field to type text in.
     Field,
-    /// A list of rows, such as the matrix's assignments. Its children are
-    /// list items, each told its position and the list's size, so a screen
-    /// reader can say "3 of 7".
-    List,
-    /// One row of a list, holding that row's parts.
-    ListItem,
     /// A list of options to pick from, one selected, such as the module
     /// browser's results. Its children are list box options, each told its
     /// position and the list's size.
@@ -172,9 +166,6 @@ pub(crate) enum SetText {
     UnknownLabel(u32),
     /// A new tag for the patch.
     Tag,
-    /// The matrix's filter. It filters as it is typed in and has no Enter
-    /// of its own, so the text is the one message.
-    MatrixFilter,
 }
 
 impl SetText {
@@ -237,7 +228,6 @@ impl SetText {
                 Message::PatchInfo(crate::patch_info::Message::TagDraft(text)),
                 Message::PatchInfo(crate::patch_info::Message::TagSubmit),
             ],
-            Self::MatrixFilter => vec![Message::Matrix(crate::matrix::Event::Filter(text))],
         }
     }
 }

@@ -207,6 +207,7 @@ impl ToCore for &keyboard::Key {
                 Named::PageUp => Key::PageUp,
                 Named::PageDown => Key::PageDown,
                 Named::ContextMenu => Key::ContextMenu,
+                Named::F2 => Key::F2,
                 Named::F10 => Key::F10,
                 Named::Shift | Named::Control | Named::Alt | Named::AltGraph | Named::Meta | Named::Super => {
                     Key::Modifier

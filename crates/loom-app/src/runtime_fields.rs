@@ -49,6 +49,13 @@ impl App {
         {
             return Some(message);
         }
+        // The matrix's filter and its rows' Depth fields (plan 3.2, row
+        // 4e).
+        if id.is_under(&crate::matrix::panel::matrix_id())
+            && let Some(message) = self.matrix_field(id, event)
+        {
+            return Some(message);
+        }
         // Preferences' **Your name**: each edit is the text as typed, and
         // Enter saves it (preferences.md, Keys and focus).
         if *id == crate::settings::author_part() {

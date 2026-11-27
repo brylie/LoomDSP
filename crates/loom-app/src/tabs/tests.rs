@@ -68,7 +68,7 @@ fn arrows_choose_a_tab_and_the_panel_follows() {
         press(&mut ui, named);
         assert_eq!(ui.app().right_tab, open, "{named:?}");
         assert_eq!(ui.runtime().focused(), Some(&tab_id(open)), "the focus goes with it");
-        assert!(!ui.app().session.matrix.focused && !ui.app().session.outline.active);
+        assert!(!ui.app().focus_in_matrix() && !ui.app().session.outline.active);
     }
     // Up and Down are not the tab list's, and reach no content.
     press(&mut ui, Named::ArrowDown);
@@ -83,7 +83,8 @@ fn a_click_opens_a_tab_and_its_content_takes_the_keys() {
     let mut ui = Ui::open("subtractive.ron");
     ui.click_text("Matrix");
     assert_eq!(ui.app().right_tab, Tab::Matrix);
-    assert!(ui.app().session.matrix.focused);
+    let _ = ui.redraw();
+    assert!(ui.app().focus_in_matrix(), "the matrix has the focus");
     assert_ne!(ui.runtime().focused(), Some(&tab_id(Tab::Matrix)));
 }
 
@@ -149,16 +150,17 @@ fn tab_goes_from_the_tab_list_into_its_panel_and_back() {
     assert_eq!(ui.runtime().focused(), toolbar.as_ref());
 }
 
-/// Tab from the open Matrix tab gives the keys to the matrix Iced still
-/// draws, as Ctrl+Tab into the column does, and the focus leaves the tab.
+/// Tab from the open Matrix tab goes into the matrix, as Ctrl+Tab into the
+/// column does: the grid's entry cell, or the filter with no rows.
 #[test]
 fn tab_from_the_matrix_tab_enters_the_matrix() {
     let mut ui = on_the_inspector_tab();
     press(&mut ui, Named::ArrowRight);
     assert_eq!(ui.app().right_tab, Tab::Matrix);
     press(&mut ui, Named::Tab);
-    assert!(ui.app().session.matrix.focused, "the matrix has the keys");
-    assert_eq!(ui.runtime().focused(), None);
+    let _ = ui.redraw();
+    let entry = ui.app().matrix_entry().unwrap_or_else(crate::matrix::filter_part);
+    assert_eq!(ui.runtime().focused(), Some(&entry), "the matrix has the keys");
 }
 
 /// Tab from the open Outline tab goes to the tree's one stop, its current

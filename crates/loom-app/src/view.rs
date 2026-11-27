@@ -4,11 +4,9 @@
 
 use crate::Element;
 use crate::edits::ArrowGroup;
-use crate::matrix::Tab as RightTab;
-use crate::style::button;
-use crate::{App, Message, matrix, pointer, style};
+use crate::{App, Message, pointer, style};
 use iced::Length;
-use iced::widget::{column, container, row, rule, space, stack, text, tooltip};
+use iced::widget::{column, container, row, rule, space, stack};
 use loom_canvas::{DragLine, EditGroupView, PatchCanvas};
 
 impl App {
@@ -126,24 +124,10 @@ impl App {
         // The runtime draws the tabs in the root panel's slot here
         // (`tabs.rs`), so Iced keeps the space.
         let tabs = space().width(Length::Fill).height(style::RIGHT_TABS_HEIGHT);
-        // The runtime's inspector, Outline, and jump list draw in the root
-        // panel's slot here (`inspector/panel.rs`, `outline/panel.rs`), so
-        // Iced keeps the space.
-        let ours = self.session.outline.has_jump() || self.right_tab != RightTab::Matrix;
-        let panel = if ours {
-            space().width(Length::Fill).height(Length::Fill).into()
-        } else {
-            matrix::view(
-                self.session.matrix.model(
-                    self.session.controller.graph(),
-                    &self.session.hierarchy,
-                    &self.session.level,
-                    &self.session.selection,
-                    self.right_tab,
-                ),
-                self.a11y.is_active(),
-            )
-        };
+        // The runtime's inspector, matrix, Outline, and jump list draw in
+        // the root panel's slot here (`inspector/panel.rs`,
+        // `matrix/panel.rs`, `outline/panel.rs`), so Iced keeps the space.
+        let panel = space().width(Length::Fill).height(Length::Fill);
         column![tabs, panel]
             .width(style::RIGHT_COLUMN_WIDTH)
             .height(Length::Fill)
@@ -157,20 +141,3 @@ pub(crate) const HOLD_DISABLED: &str = "Hold note is disabled: no audio is playi
 
 /// Recent's hover text while it is disabled.
 const RECENT_DISABLED: &str = "Recent is disabled: no patches opened or saved yet";
-
-/// The inspector's remove button for an item in a list, such as a MIDI
-/// mapping or a modulation assignment: a small × at the end of its row,
-/// with hover text that names what it removes (panels.md, The inspector).
-pub(crate) fn remove_button<'a>(what: impl Into<String>, on_press: Message) -> Element<'a, Message> {
-    tooltip(
-        button(text("×").size(style::CONTROL))
-            .padding([0, 6])
-            .style(style::plain)
-            .on_press(on_press),
-        container(text(what.into()).size(style::BODY))
-            .padding(6)
-            .style(container::rounded_box),
-        tooltip::Position::Top,
-    )
-    .into()
-}

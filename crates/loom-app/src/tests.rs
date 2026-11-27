@@ -351,14 +351,14 @@ fn help_text_lists_every_canvas_shortcut() {
 }
 
 /// Text in the window chrome meets WCAG 1.4.3 (4.5:1) on the theme
-/// background: the theme text colour, the dimmed `DIM` text, and the
+/// background: the theme text colour, the quiet text, and the
 /// stats bar warning colours. Issue #257.
 #[test]
 fn window_text_meets_wcag_minimum_contrast() {
     let theme = app().theme.palette();
     let pairs = [
         ("theme text on background", theme.text),
-        ("DIM text on background", DIM),
+        ("quiet text on background", crate::style::QUIET),
         ("warning text on background", crate::style::WARNING_TEXT),
         ("alarm text on background", crate::style::ERROR_TEXT),
     ];

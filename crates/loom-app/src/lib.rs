@@ -107,7 +107,7 @@ mod window_question;
 mod xy;
 
 use clap::Parser;
-use iced::{Color, Size, Theme};
+use iced::{Size, Theme};
 use loom_canvas::CanvasEvent;
 use loom_core::{Controller, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef, OutputSafety, ProbeId};
 use loom_patch::Patch;
@@ -547,15 +547,10 @@ enum Message {
     EnterFields {
         backwards: bool,
     },
-    /// Tab from the open tab reached content Iced still draws, the matrix
-    /// or the Outline: it takes the keys (plan 3.2, row 4e).
-    EnterTabPanel,
     /// An inspector slider was let go.
     SliderReleased,
     /// A change in the session-only modulation matrix.
     Matrix(MatrixEvent),
-    /// A key handled by the focused matrix even if a widget used it.
-    MatrixKey(iced::keyboard::Event),
     /// A message for the Preferences window (`docs/design/preferences.md`).
     Preferences(settings::Message),
     /// Focuses a row of the patch outline.
@@ -881,14 +876,12 @@ impl Message {
             | Self::TextFieldTab { .. }
             | Self::TabFrom { .. }
             | Self::EnterFields { .. }
-            | Self::EnterTabPanel
             | Self::ToolbarFocus(_)
             | Self::MenuTab { .. }
             | Self::MenuMove { .. }
             | Self::FocusStep { .. }
             | Self::SliderReleased
             | Self::Matrix(_)
-            | Self::MatrixKey(_)
             | Self::Preferences(_)
             | Self::OutlineRow(_)
             | Self::JumpChoice(_)
@@ -1899,7 +1892,6 @@ impl App {
                 self.tab_between_fields(from.as_ref(), backwards);
             }
             Message::EnterFields { backwards } => self.enter_fields(backwards),
-            Message::EnterTabPanel => self.enter_tab_panel(),
             Message::MenuTab { back } => {
                 if let Some(menu) = self.runtime_menu() {
                     self.close_menu(menu.kind);
@@ -1935,7 +1927,6 @@ impl App {
                 }
             }
             Message::Matrix(event) => self.matrix_message(event),
-            Message::MatrixKey(key) => self.matrix_key_message(key),
             Message::ControlFrame(now) => self.control_frame(now),
             Message::FieldPasteRefused => {
                 self.alerts.warn(crate::clipboard::COULD_NOT_READ.to_string());
@@ -2269,7 +2260,6 @@ impl App {
             | Message::TextFieldTab { .. }
             | Message::TabFrom { .. }
             | Message::EnterFields { .. }
-            | Message::EnterTabPanel
             | Message::OutlineKey { .. }
             | Message::ToolbarFocus(_)
             | Message::MenuTab { .. }
@@ -2280,8 +2270,7 @@ impl App {
             | Message::Located { .. }
             | Message::Captured { .. }
             | Message::TypeFocus { .. }
-            | Message::Matrix(_)
-            | Message::MatrixKey(_) => {}
+            | Message::Matrix(_) => {}
             Message::A11y(_) => {}
             Message::ShowHelp => {
                 if self.overlays.help.is_none() {
@@ -2394,9 +2383,6 @@ impl App {
             Message::Recent(message) => self.recent_message(message),
             Message::FileDropped(path) => self.file_dropped(path),
             Message::DropsDone => self.drops_done(),
-            Message::Key(iced::keyboard::Event::KeyPressed { modifiers, .. })
-                if self.matrix_has_keys() && !modifiers.command() => {}
-            Message::Key(iced::keyboard::Event::KeyReleased { .. }) if self.matrix_has_keys() => {}
             Message::ProbeMenu(message) => {
                 if let (Some(menu), probe_menu::Message::Pick(probe)) = (self.overlays.take_probe_menu(), message) {
                     self.add_probe(probe, menu.output, menu.world);
@@ -2672,9 +2658,6 @@ impl App {
         self.session.run_driven = driven;
     }
 }
-
-/// Quiet text. The same as `style::QUIET`, kept as a short name here.
-const DIM: Color = style::QUIET;
 
 /// Inspector help text, shown with nothing selected. It lists every canvas
 /// gesture and shortcut (#16), so keep it in step with `PatchCanvas::handle`

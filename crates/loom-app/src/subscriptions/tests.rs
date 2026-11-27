@@ -106,10 +106,13 @@ fn the_close_request_is_the_apps_close() {
 fn the_listeners_are_a_snapshot() {
     let mut app = crate::tests::app();
     let before = app.listeners();
-    app.right_tab = crate::matrix::Tab::Matrix;
-    app.session.matrix.focused = true;
+    app.session.value_draft = Some(crate::controls::ValueDraft {
+        module: 1,
+        index: 0,
+        draft: loom_canvas::TypedDraft::new("1".to_string(), |_| Ok(())),
+    });
     let after = app.listeners();
-    let event = press(Key::Named(Named::ArrowDown));
+    let event = press(Key::Named(Named::Escape));
     assert_ne!(before, after);
     let route = |listeners: Listeners| {
         listeners
@@ -118,8 +121,9 @@ fn the_listeners_are_a_snapshot() {
             .flat_map(crate::input_owner::route)
             .collect::<Vec<_>>()
     };
-    assert!(!route(before).iter().any(|m| matches!(m, Message::MatrixKey(_))));
-    assert!(route(after).iter().any(|m| matches!(m, Message::MatrixKey(_))));
+    let clears = |m: &Message| matches!(m, Message::Inspector(crate::inspector::Message::ValueDraftClear));
+    assert!(!route(before).iter().any(clears));
+    assert!(route(after).iter().any(clears));
 }
 
 /// Iced's listeners do not hear redraw events, so one frame never posts a

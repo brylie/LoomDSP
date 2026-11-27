@@ -457,6 +457,9 @@ pub(crate) fn tree(
     // 7, rule 12).
     panel.extend(groups.outline);
     panel.extend(groups.jump);
+    // The runtime's matrix (plan 3.2, row 4e, commit 3), its parts in one
+    // group, the card list a list inside it.
+    panel.extend(groups.matrix);
     // The open tab's content, in its tab panel (the WAI-ARIA Tabs pattern).
     let panel = frame.tab_panel(panel, snapshot.matrix.tab);
     // The overlay that owns the input is not below anything: it is reported
@@ -478,6 +481,7 @@ pub(crate) fn tree(
             items::find(&frames.panel, id).is_some()
                 || id.is_under(&crate::outline::tree_id())
                 || id.is_under(&crate::outline::jump_id())
+                || id.is_under(&crate::matrix::panel::matrix_id())
         })
         .map(|id| node_id(table, id));
     // Focus is on the window unless a control on the canvas has it.
@@ -899,20 +903,18 @@ impl Frame<'_> {
             Kind::Option => Role::RadioButton,
             Kind::Choice => Role::ComboBox,
             Kind::Field => Role::TextInput,
-            Kind::List => Role::List,
-            Kind::ListItem => Role::ListItem,
             Kind::ListBox => Role::ListBox,
             Kind::ListBoxOption => Role::ListBoxOption,
         });
-        // A list says how many rows it has, and each row its place, so a
-        // screen reader can say "3 of 7". AccessKit puts the size on the
+        // A list box says how many options it has, and each its place, so
+        // a screen reader can say "3 of 7". AccessKit puts the size on the
         // list and counts places from zero.
-        if matches!(item.kind, Kind::List | Kind::ListBox) {
+        if item.kind == Kind::ListBox {
             let rows: Vec<usize> = item
                 .children
                 .iter()
                 .zip(&built)
-                .filter(|(child, _)| matches!(child.kind, Kind::ListItem | Kind::ListBoxOption))
+                .filter(|(child, _)| child.kind == Kind::ListBoxOption)
                 .map(|(_, (_, pushed))| *pushed)
                 .collect();
             node.set_size_of_set(rows.len());
@@ -1077,7 +1079,10 @@ impl Frame<'_> {
         let outline = under(&crate::outline::tree_id());
         // The jump list's list box is the runtime's node.
         let jump = under(&crate::outline::jump_id());
+        let matrix_id = crate::matrix::panel::matrix_id();
+        let matrix = under(&matrix_id);
         Ours {
+            matrix: self.group(matrix, Role::Group, "Modulation matrix", &matrix_id),
             inspector,
             // The right panel's tabs, one stop with arrows inside (the
             // WAI-ARIA Tabs pattern).
@@ -1149,6 +1154,8 @@ struct Ours {
     outline: Vec<NodeId>,
     /// The cable jump list's list box, while it is open.
     jump: Vec<NodeId>,
+    /// The matrix's group, while its tab is open.
+    matrix: Vec<NodeId>,
     /// The top nodes of the runtime's overlay that owns the input.
     overlay: Vec<NodeId>,
 }

@@ -60,16 +60,6 @@ impl CanvasModel<'_> {
         let screen = relative(pointer, bounds);
         state.size = bounds.size();
 
-        if self.focus_policy.matrix_escape
-            && matches!(event, Some(Event::Key(KeyEvent::Pressed { key: Key::Escape, .. })))
-            && self.pin(state).is_some()
-        {
-            state.pinned = None;
-            out.take();
-            out.redraw();
-            return;
-        }
-
         let keys_elsewhere = match event {
             Some(Event::Key(KeyEvent::Pressed { key, modifiers, .. })) => {
                 (self.focus_policy.jump_keyboard

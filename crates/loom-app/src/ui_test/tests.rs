@@ -2899,35 +2899,21 @@ fn gpu_required() -> bool {
 }
 
 /// The harness lays out on a renderer that only measures, and the window
-/// draws with wgpu. Both lay text out with Iced's same paragraphs, so every
-/// named part and the canvas land in the same place on both: with a module
-/// selected, and with the module browser open (plan for leaving Iced, step
-/// 2.3, item 2). Skips with no GPU adapter, unless one is required.
+/// draws with wgpu. Both lay Iced's view out alike, so the canvas lands in
+/// the same place on both (plan for leaving Iced, step 2.3, item 2). Since
+/// the matrix moved (plan 3.2, row 4e), the canvas is all Iced places:
+/// every other part is the runtime's, laid out by its own text measure.
+/// Skips with no GPU adapter, unless one is required.
 #[test]
 fn measure_and_wgpu_lay_out_alike() {
-    // The Matrix tab, Iced's until plan 3.2, row 4e: the inspector is the
-    // runtime's since row 4d.
     let mut ui = Ui::open("subtractive.ron");
     ui.send(Message::Matrix(crate::MatrixEvent::Tab(crate::matrix::Tab::Matrix)));
     let Some((measured, drawn)) = ui.places_on_both() else {
         assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
         return;
     };
-    // The toolbar and the bar are `loom-ui`'s, so Iced's walk finds the
-    // right column's parts and the canvas's.
-    assert!(
-        measured.len() > 5,
-        "the walk found the window's parts: {}",
-        measured.len()
-    );
-    assert_eq!(measured, drawn, "with module 4 selected");
-
-    // Every dialog is the runtime's (rows 5, 5b, 3c, 8), laid out by its
-    // own text measure, so the second layout is the matrix, which Iced
-    // still draws.
-    ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
-    let _ = ui.redraw();
-    let (measured, drawn) = ui.places_on_both().expect("the adapter is still there");
+    assert!(measured.canvas.is_some(), "the walk found the canvas");
+    assert_eq!(measured.len(), 0, "no part of Iced's own is named any more");
     assert_eq!(measured, drawn, "with the matrix open");
 }
 

@@ -52,6 +52,33 @@ const CTRL: Modifiers = Modifiers {
     ..Modifiers::NONE
 };
 
+/// Section 6, rule 12, in a grid: a closed select in a cell opens only on
+/// Enter, F2, and Alt with Down, and leaves the arrows, Home, End, Page Up,
+/// Page Down, Space, and type-ahead to the grid.
+#[test]
+fn the_keys_of_a_closed_select_in_a_cell() {
+    assert_eq!(cell_key(Key::Enter, NONE), Some(Closed::OpenOnChosen));
+    assert_eq!(cell_key(Key::F2, NONE), Some(Closed::OpenOnChosen));
+    assert_eq!(cell_key(Key::Down, ALT), Some(Closed::OpenOnChosen));
+    for key in [
+        Key::Down,
+        Key::Up,
+        Key::Left,
+        Key::Right,
+        Key::Home,
+        Key::End,
+        Key::PageUp,
+        Key::PageDown,
+        Key::Space,
+        Key::Escape,
+        Key::Delete,
+        Key::Character('s'),
+    ] {
+        assert_eq!(cell_key(key, NONE), None, "{key:?} is the grid's");
+    }
+    assert_eq!(cell_key(Key::Enter, CTRL), None, "a shortcut");
+}
+
 /// Section 6, rule 12, closed: Down, Alt with Down, Enter, and Space open
 /// on the chosen option; Up and Home on the first; End on the last; a
 /// printable character types; anything else goes on.

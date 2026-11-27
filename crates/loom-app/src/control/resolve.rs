@@ -331,6 +331,7 @@ pub(super) fn key(name: &str) -> Result<keyboard::Key, String> {
         "end" => Named::End,
         "pageup" => Named::PageUp,
         "pagedown" => Named::PageDown,
+        "f2" => Named::F2,
         _ if name.chars().count() == 1 => return Ok(keyboard::Key::Character(name.to_lowercase().into())),
         _ => return Err(format!("unknown key `{name}`")),
     };

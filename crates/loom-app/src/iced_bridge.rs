@@ -324,6 +324,7 @@ impl loom_ui::App for Hosted {
             .or_else(|| self.0.inspector_click(id))
             .or_else(|| self.0.tabs_click(id))
             .or_else(|| self.0.outline_click(id))
+            .or_else(|| self.0.matrix_click(id))
             .or_else(|| self.2.clicked(id))
     }
 
@@ -346,7 +347,9 @@ impl loom_ui::App for Hosted {
     /// The runtime's slider moving: the inspector's parameter and depth
     /// sliders (section 5, rule 16).
     fn slid(&self, id: &UiId, position: f32, phase: loom_ui::SlidePhase) -> Option<Message> {
-        self.0.inspector_slid(id, position, phase)
+        self.0
+            .inspector_slid(id, position, phase)
+            .or_else(|| self.0.matrix_slid(id, position, phase))
     }
 
     /// A right press or a screen reader's ShowContextMenu on an element with
@@ -373,6 +376,7 @@ impl loom_ui::App for Hosted {
             .or_else(|| self.0.inspector_panel_key(id, key))
             .or_else(|| self.0.tabs_key(id, key))
             .or_else(|| self.0.outline_panel_key(id, key))
+            .or_else(|| self.0.matrix_panel_key(id, key))
     }
 
     /// What a choice in one of the runtime's selects means: Preferences'
@@ -381,6 +385,7 @@ impl loom_ui::App for Hosted {
         self.0
             .preferences_chose(id, index)
             .or_else(|| self.0.inspector_chose(id, index))
+            .or_else(|| self.0.matrix_chose(id, index))
     }
 
     /// Where Tab goes from one of the runtime's stops: the toolbar and the

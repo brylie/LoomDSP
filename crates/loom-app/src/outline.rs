@@ -590,10 +590,7 @@ impl App {
         // A row of the tree has the runtime's focus: the tree's own keys
         // came by `outline_panel_key`, and the rest (type-ahead, the
         // brackets) are heard here.
-        if (self.focus.is_some() && !self.focus_on_outline())
-            || self.session.value_draft.is_some()
-            || self.matrix_has_keys()
-        {
+        if (self.focus.is_some() && !self.focus_on_outline()) || self.session.value_draft.is_some() {
             return false;
         }
         if !outline
@@ -646,11 +643,7 @@ impl App {
         let state = &mut self.session.outline;
         let current = if toolbar {
             2
-        } else if state.active
-            || state.inspector_action.is_some()
-            || self.session.matrix.focused
-            || self.focus.is_some()
-        {
+        } else if state.active || state.inspector_action.is_some() || self.focus.is_some() {
             1
         } else {
             0
@@ -662,7 +655,10 @@ impl App {
         let next = (current + if back { 2 } else { 1 }) % 3;
         state.active = false;
         state.inspector_action = None;
-        self.session.matrix.focused = next == 1 && self.right_tab == Tab::Matrix;
+        if next == 1 && self.right_tab == Tab::Matrix && !state.has_jump() {
+            self.focus_matrix();
+            return;
+        }
         if next == 1 && self.right_tab == Tab::Outline {
             self.focus_outline();
             return;

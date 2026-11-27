@@ -633,22 +633,20 @@ pub enum EditGroupView {
 /// once per view.
 ///
 /// It is a set of flags rather than one enum because they combine: the
-/// matrix's depth field is a text field inside the matrix, so
-/// `matrix_keyboard` and `text_field_keys` are both true while it has focus.
+/// Outline's tree has the keys and the pointer still works on the canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanvasFocusPolicy {
     /// False while a pop-up such as the module browser has the input. The
     /// canvas then ignores the keyboard and the pointer, and lets go of any
     /// hold or drag.
     pub interactive: bool,
-    /// The focused matrix has the keys: unmodified keys are left to it, and
-    /// the pointer still works.
+    /// A part of the right column or the toolbar has the keys (the
+    /// Outline's tree, a toolbar button, an inspector action): unmodified
+    /// keys are left to it, and the pointer still works. The name is the
+    /// matrix's, which had it first.
     pub matrix_keyboard: bool,
     /// A cable jump list takes only its navigation keys.
     pub jump_keyboard: bool,
-    /// The matrix has the keys and no cell editor is open, so Escape can
-    /// still hide a pinned badge's lines.
-    pub matrix_escape: bool,
     /// An app text field has focus. The canvas then leaves every key to it
     /// except Tab, which moves focus as usual. The pointer still works
     /// (panel-widgets.md, Typing a value).
@@ -665,7 +663,6 @@ impl Default for CanvasFocusPolicy {
             interactive: true,
             matrix_keyboard: false,
             jump_keyboard: false,
-            matrix_escape: false,
             text_field_keys: false,
             text_field_keeps_tab: [false; 2],
         }

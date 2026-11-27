@@ -58,7 +58,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     app.session.edits.set_arrow_group(crate::edits::ArrowGroup::Released {
         due: Instant::now() + Duration::from_secs(60),
     });
-    app.session.matrix.focused = true;
+    app.session.matrix.selected = Some(loom_core::AssignmentId(1));
     app.session.step_name = Some("step".to_string());
     app.session.linked_before = Some(std::collections::BTreeMap::new());
     // Overlays close, all but the Preferences window.
@@ -258,7 +258,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         crate::edits::ArrowGroup::Closed,
         "an old arrow group cannot reach the new patch"
     );
-    assert!(!matrix.focused);
+    assert!(matrix.selected.is_none());
     assert!(step_name.is_none());
     assert!(control_pending.is_empty());
 

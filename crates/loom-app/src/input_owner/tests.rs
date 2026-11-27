@@ -114,19 +114,15 @@ fn each_overlay_has_the_input_while_it_is_open() {
         assert_eq!(ui.app().no_overlay(), owner == InputOwner::Canvas, "{owner:?}");
         let policy = ui.app().canvas_focus_policy();
         assert_eq!(policy.interactive, owner == InputOwner::Canvas, "{owner:?}");
-        assert!(
-            !policy.matrix_keyboard && !policy.matrix_escape,
-            "{owner:?}: the matrix is not focused"
-        );
+        assert!(!policy.matrix_keyboard, "{owner:?}: the matrix is not focused");
     }
 }
 
-/// The canvas's focus policy follows the matrix: with the matrix focused it
-/// leaves the keys to it, and Escape reaches a pinned badge only while no
-/// cell editor is open.
+/// The canvas's focus policy follows the matrix: with a cell of it focused,
+/// the runtime's focus, the canvas leaves the keys to it.
 #[test]
 fn the_canvas_policy_follows_the_matrix() {
-    let mut ui = Ui::open("subtractive.ron");
+    let ui = Ui::open("subtractive.ron");
     let idle = ui.app().canvas_focus_policy();
     assert_eq!(
         idle,
@@ -134,11 +130,16 @@ fn the_canvas_policy_follows_the_matrix() {
         "the canvas has the keys"
     );
 
-    ui.app_mut().right_tab = crate::matrix::Tab::Matrix;
-    ui.app_mut().session.matrix.focused = true;
+    let mut ui = Ui::open("modulation.ron");
+    ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
+    let _ = ui.redraw();
+    assert!(ui.app().focus_in_matrix());
     let matrix = ui.app().canvas_focus_policy();
-    assert!(matrix.interactive && matrix.matrix_keyboard && matrix.matrix_escape);
-    assert!(!matrix.text_field_keys);
+    assert!(
+        matrix.interactive && matrix.text_field_keys,
+        "the keys are the matrix's"
+    );
+    assert!(matrix.matrix_keyboard, "a press on the canvas takes them back");
 }
 
 /// A plain key press is one input cause: the message for the event is not

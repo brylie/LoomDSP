@@ -220,6 +220,39 @@ fn each_key_opens_where_the_pattern_says() {
     }
 }
 
+/// A stop, then a select in a grid's cell ([`Select::in_cell`]).
+fn in_cell(version: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
+    let chosen = Some((version % 100) as usize);
+    let select = Select::new("Sample rate", options(0), chosen, SELECT).in_cell();
+    list_panel(Element::column([stop("before"), Element::select(select).key("rate")]))
+}
+
+/// Section 6, rule 12, in a grid: the arrows, Home, End, and Space leave a
+/// closed select in a cell alone, so the grid around it can take them;
+/// Enter and F2 open it on the chosen option, its keys are a select's
+/// while it is open, and Escape closes it with the focus still on it.
+#[test]
+fn a_select_in_a_cell_opens_on_enter_and_f2_only() {
+    for opener in [Key::Enter, Key::F2] {
+        let mut harness = at(in_cell, 2);
+        tab_in(&mut harness);
+        for other in [Key::Down, Key::Up, Key::Home, Key::End, Key::Space, Key::PageDown] {
+            step(&mut harness, key(other));
+            assert_eq!(highlight(&harness), None, "{other:?} leaves it closed");
+        }
+        step(&mut harness, typing('9'));
+        assert_eq!(highlight(&harness), None, "no type-ahead in a cell");
+        step(&mut harness, key(opener));
+        assert_eq!(highlight(&harness), Some(2), "{opener:?} opens it on the chosen option");
+        step(&mut harness, key(Key::Down));
+        assert_eq!(highlight(&harness), Some(3), "open, Down moves the highlight");
+        step(&mut harness, key(Key::Escape));
+        assert_eq!(highlight(&harness), None, "Escape closes it");
+        assert_eq!(harness.runtime().focused(), Some(&rate()), "back on the cell");
+        assert!(chosen(&harness).is_empty(), "nothing chosen");
+    }
+}
+
 /// A harness with the select focused and option `chosen` chosen.
 fn at_chosen(chosen: u32) -> Harness<Shown, Toolkit> {
     let mut harness = at(panel, chosen);

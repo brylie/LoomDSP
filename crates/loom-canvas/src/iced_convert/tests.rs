@@ -117,6 +117,7 @@ fn each_named_key_the_canvas_uses_has_its_own_key() {
         (Named::PageUp, Key::PageUp),
         (Named::PageDown, Key::PageDown),
         (Named::ContextMenu, Key::ContextMenu),
+        (Named::F2, Key::F2),
         (Named::F10, Key::F10),
     ];
     for (named, key) in pairs {
@@ -150,7 +151,6 @@ fn every_modifier_key_is_the_modifier_key() {
 #[test]
 fn a_key_with_no_use_is_other() {
     assert_eq!((&keyboard::Key::Named(Named::F5)).to_core(), Key::Other);
-    assert_eq!((&keyboard::Key::Named(Named::F2)).to_core(), Key::Other);
     assert_eq!((&keyboard::Key::Unidentified).to_core(), Key::Other);
 }
 

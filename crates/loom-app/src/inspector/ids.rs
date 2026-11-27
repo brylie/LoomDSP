@@ -10,8 +10,6 @@
 //! text, so the window can say where the part is (`places.rs`), and the
 //! accessibility tree gives the same ID to the part's node.
 
-use crate::Element;
-use iced::widget::container;
 use loom_ui_core::UiId;
 
 /// The UI ID of the inspector's content for tile `tile`: every row's ID is
@@ -86,13 +84,6 @@ pub(crate) fn patch() -> UiId {
 /// walk finds the container.
 pub(crate) fn field(id: &UiId) -> iced::advanced::widget::Id {
     crate::places::field_widget_id(id)
-}
-
-/// `content` in a container named `id`, so the window can say where it is.
-/// The container adds no padding and takes its content's size, so it
-/// moves nothing.
-pub(crate) fn named<'a, Message: 'a>(id: &UiId, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    container(content).id(crate::places::widget_id(id)).into()
 }
 
 #[cfg(test)]

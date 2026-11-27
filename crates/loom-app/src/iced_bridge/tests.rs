@@ -122,18 +122,21 @@ fn a_scroll_moves_only_its_own_area() {
 }
 
 /// A scroll to a part the window does not show scrolls nothing, and
-/// asks for nothing more.
+/// asks for nothing more: a row the matrix's card list does not hold,
+/// since the matrix is the runtime's (plan 3.2, row 4e).
 #[test]
 fn a_scroll_to_a_missing_part_does_nothing() {
-    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    ui.app_mut().right_tab = crate::matrix::Tab::Matrix;
+    let mut ui = crate::ui_test::Ui::open("modulation.ron");
+    ui.send(Message::Matrix(crate::matrix::Event::Tab(crate::matrix::Tab::Matrix)));
     let _ = ui.redraw();
-    let before = ui.scroll_translation("matrix-table");
-    assert!(before.is_some(), "the matrix's rows scroll in Iced");
+    let list = crate::matrix::panel::list_id();
+    let before = ui.runtime().scroll_offset(&list);
+    assert!(before.is_some(), "the matrix's rows scroll");
     let missing = UiId::panel("matrix").with("assignment").with(999u32);
     let messages = ui.scroll_to(&missing);
     assert!(messages.is_empty());
-    assert_eq!(ui.scroll_translation("matrix-table"), before);
+    let _ = ui.redraw();
+    assert_eq!(ui.runtime().scroll_offset(&list), before);
 }
 
 /// Two scrolls in one turn become one task, the second after the first,

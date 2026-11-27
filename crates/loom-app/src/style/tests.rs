@@ -32,7 +32,6 @@ fn quiet_text_meets_contrast() {
 /// Marks that identify a control are readable on both panels and cards.
 #[test]
 fn active_control_marks_and_family_tints_meet_contrast() {
-    use iced::widget::checkbox::Status;
     use loom_canvas::iced_convert::ToCore as _;
     use loom_canvas::{Palette, contrast_ratio};
     let theme = crate::tests::app().theme();
@@ -44,27 +43,6 @@ fn active_control_marks_and_family_tints_meet_contrast() {
                 contrast_ratio(crate::browser::family_swatch(family), fill.to_core()) >= 3.0,
                 "{family:?}"
             );
-        }
-        for status in [
-            Status::Active { is_checked: false },
-            Status::Hovered { is_checked: false },
-            Status::Active { is_checked: true },
-            Status::Hovered { is_checked: true },
-        ] {
-            let style = super::check_box(&theme, status);
-            assert!(
-                contrast_ratio(style.border.color.to_core(), fill.to_core()) >= 3.0,
-                "{status:?}"
-            );
-            if matches!(
-                status,
-                Status::Active { is_checked: true } | Status::Hovered { is_checked: true }
-            ) {
-                let iced::Background::Color(background) = style.background else {
-                    panic!("solid check box");
-                };
-                assert!(contrast_ratio(style.icon_color.to_core(), background.to_core()) >= 3.0);
-            }
         }
     }
     for (mark, fill) in [
@@ -462,46 +440,6 @@ fn the_role_tokens_meet_their_table() {
                 assert!(edge(*state) >= 3.0, "{name}: a turned-on fill at 3:1 or more");
             }
             assert!(steps.iter().all(|step| *step >= 1.3), "{name}: no state is lost");
-        }
-    }
-}
-
-/// `loom-ui`'s buttons and Iced's role style functions take the same
-/// tokens, state for state: one source for both toolkits.
-#[test]
-fn both_toolkits_read_the_same_role_tokens() {
-    use super::Role;
-    use iced::widget::button::Status;
-    use loom_canvas::iced_convert::ToIced as _;
-    let app = crate::tests::app();
-    let theme = app.theme();
-    let iced_style = |role: Role| match role {
-        Role::Primary => super::primary,
-        Role::Secondary => super::secondary,
-        Role::Plain => super::plain,
-        Role::Danger => |_: &iced::Theme, status| Role::Danger.iced_for_tests(status),
-    };
-    for role in [Role::Primary, Role::Secondary, Role::Danger, Role::Plain] {
-        let looks = role.looks();
-        let style = iced_style(role);
-        for (status, state) in [
-            (Status::Active, looks.normal),
-            (Status::Hovered, looks.hovered),
-            (Status::Pressed, looks.pressed),
-            (Status::Disabled, looks.off),
-        ] {
-            let iced = style(&theme, status);
-            let fill = match iced.background {
-                Some(iced::Background::Color(colour)) => Some(colour),
-                None => None,
-                Some(other) => panic!("{role:?}: a plain fill, not {other:?}"),
-            };
-            assert_eq!(fill, state.background.map(|c| c.to_iced()), "{role:?} {status:?}: fill");
-            assert_eq!(
-                Some(iced.text_color),
-                state.text.map(|c| c.to_iced()),
-                "{role:?} {status:?}: text"
-            );
         }
     }
 }

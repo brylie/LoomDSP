@@ -205,6 +205,7 @@ fn named_keys_map_to_ours() {
         (NamedKey::PageUp, Key::PageUp),
         (NamedKey::PageDown, Key::PageDown),
         (NamedKey::ContextMenu, Key::ContextMenu),
+        (NamedKey::F2, Key::F2),
         (NamedKey::F10, Key::F10),
         (NamedKey::Shift, Key::Modifier),
         (NamedKey::Control, Key::Modifier),
@@ -213,7 +214,6 @@ fn named_keys_map_to_ours() {
         (NamedKey::Meta, Key::Modifier),
         (NamedKey::Super, Key::Modifier),
         (NamedKey::F1, Key::Other),
-        (NamedKey::F2, Key::Other),
     ];
     for (named, expected) in cases {
         assert_eq!(core_key(&WinitKey::Named(named)), expected, "{named:?}");

@@ -19,7 +19,10 @@ impl App {
             self.session.outline.inspector_action = None;
             self.session.outline.close_jump();
             self.session.outline.focus_port = None;
-            self.session.matrix.focused = false;
+            // A press on the canvas takes the keys from the matrix too.
+            if self.focus_in_matrix() {
+                self.effect(loom_ui::Effects::unfocus());
+            }
             self.session.matrix.edit = None;
             self.session.matrix.add = None;
             return;

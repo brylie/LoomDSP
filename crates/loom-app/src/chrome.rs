@@ -27,6 +27,8 @@ impl App {
             inside: !self.session.level.is_root(),
             content: if self.inspector_ours() {
                 Some(crate::inspector::panel::inspector_id())
+            } else if self.matrix_ours() {
+                Some(crate::matrix::panel::matrix_id())
             } else {
                 self.outline_slot()
             },
@@ -38,6 +40,7 @@ impl App {
         self.tabs_panel(view);
         self.inspector_panel(view);
         self.outline_panels(view);
+        self.matrix_panel(view);
         // The browsers, then Preferences, then the chooser over it, then
         // help, which F1 opens over any of them (help-pages.md), so help
         // draws over them.
@@ -85,6 +88,8 @@ impl App {
         stops.extend(self.inspector_stops());
         stops.extend(self.inspector_tags());
         stops.extend(self.outline_stops());
+        stops.extend(self.matrix_stops());
+        stops.extend(self.matrix_cells());
         stops.extend(self.bar_stops());
         stops
     }
@@ -163,7 +168,15 @@ impl App {
         if let Some(step) = self.inspector_next_stop(from, back) {
             return step;
         }
-        let column = self.inspector_stops();
+        // The matrix, its grid one stop (plan 3.2, row 4e).
+        if let Some(step) = self.matrix_next_stop(from, back) {
+            return step;
+        }
+        let column = if self.matrix_owns() {
+            self.matrix_stops()
+        } else {
+            self.inspector_stops()
+        };
         // A module's, an unknown module's, or a slot's rows have no list of
         // stops of the app's: Tab follows the runtime's reading order among
         // them, and past either end leaves the column as patch info does.
@@ -244,8 +257,8 @@ impl App {
 
 /// What the root's slots are: the breadcrumb's is there `inside` a
 /// sub-patch, and the right column's content slot holds the panel the
-/// runtime draws there: the inspector, the Outline's tree, or the jump
-/// list.
+/// runtime draws there: the inspector, the matrix, the Outline's tree, or
+/// the jump list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Shape {
     inside: bool,
@@ -255,9 +268,8 @@ struct Shape {
 /// The root: the toolbar's slot, the breadcrumb's inside a sub-patch, the
 /// fill beside the right column, and the bar's slot. The column is at the
 /// right edge, as wide as Iced's: the tabs' slot (plan 3.2, row 4e), then
-/// the inspector's slot while the runtime draws the inspector, or room
-/// that is no element, so a point there goes on to Iced's content, then
-/// the rule over the bar.
+/// the content's slot, which holds the open tab's panel, then the rule over
+/// the bar.
 fn root(shape: &Shape) -> Element {
     let slot = |id: UiId, height: f32| Element::slot(id).width(Length::FILL).height(Length::Fixed(height));
     let mut parts = vec![slot(crate::toolbar::toolbar_id(), style::TOOLBAR_HEIGHT)];

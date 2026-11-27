@@ -741,8 +741,9 @@ impl crate::App {
             // The runtime's inspector gives its own nodes (`inspector/panel.rs`).
             crate::matrix::Tab::Inspector if self.inspector_ours() => Vec::new(),
             crate::matrix::Tab::Inspector => crate::inspector::access::items(&self.inspector_model()),
-            crate::matrix::Tab::Matrix => self.matrix_items(),
-            crate::matrix::Tab::Outline => Vec::new(),
+            // The runtime's matrix and Outline give their own nodes
+            // (`matrix/panel.rs`, `outline/panel.rs`).
+            crate::matrix::Tab::Matrix | crate::matrix::Tab::Outline => Vec::new(),
         };
         let (overlay, overlay_focus) = self.overlay_items();
         tree::Frames {
@@ -755,7 +756,6 @@ impl crate::App {
                         .then(|| self.outline_focus(&self.outline_rows()))
                         .flatten()
                 })
-                .or_else(|| self.matrix_focus())
                 .or_else(|| self.session.outline.inspector_action.clone()),
             overlay,
             overlay_focus,
@@ -786,8 +786,17 @@ impl crate::App {
         if in_overlay.is_none() && !self.pointer_reaches_window() {
             return None;
         }
-        let matrix = id.is_under(&crate::matrix::access::panel());
         let inspector = id.is_under(&loom_ui_core::UiId::panel("inspector"));
+        // The runtime's matrix carries out its own Click, Focus, Expand,
+        // Increment, and Decrement; a SetValue on a Depth slider is the
+        // app's, in percent, as the slider reports it.
+        if id.is_under(&crate::matrix::panel::matrix_id()) {
+            if request.action != accesskit::Action::SetValue || in_overlay.is_some() || !self.matrix_owns() {
+                return None;
+            }
+            let item = self.matrix_depth_item(&id)?;
+            return Some(self.a11y_item_action(&item, request, at));
+        }
         // The runtime's inspector carries out its own Click, Focus,
         // Increment, and Decrement; a SetValue on one of its sliders is the
         // app's, with the number its item reads (section 7, rule 30).
@@ -801,7 +810,7 @@ impl crate::App {
         }
         let item = match in_overlay {
             Some(item) => item,
-            None if matrix || inspector => items::find(&frames.panel, &id)?.clone(),
+            None if inspector => items::find(&frames.panel, &id)?.clone(),
             None => return None,
         };
         if request.action == accesskit::Action::Focus {
@@ -814,14 +823,7 @@ impl crate::App {
             }
             return Some(Vec::new());
         }
-        let messages = self.a11y_item_action(&item, request, at);
-        // A matrix cell is chosen first, as a click on it would choose it,
-        // so the keys and the reported focus stay where the screen reader
-        // is, also when a retarget gives the row a new ID.
-        if matrix && !messages.is_empty() {
-            self.matrix_reader_select(&id);
-        }
-        Some(messages)
+        Some(self.a11y_item_action(&item, request, at))
     }
 
     /// The messages `item` sends for `request`, after the screen reader's
@@ -917,6 +919,7 @@ impl crate::App {
                     || (!self.browser_stops().is_empty() && id.is_under(&crate::browser::browser_id()))
                     || (!self.patches_stops().is_empty() && id.is_under(&crate::patches::patches_id()))
                     || (self.inspector_owns() && id.is_under(&crate::inspector::panel::inspector_id()))
+                    || (self.matrix_owns() && id.is_under(&crate::matrix::panel::matrix_id()))
             })
             .cloned()
         {
@@ -936,11 +939,13 @@ impl crate::App {
                     .or_else(|| self.browser_click(&id))
                     .or_else(|| self.patches_click(&id))
                     .or_else(|| self.inspector_click(&id))
+                    .or_else(|| self.matrix_click(&id))
                     .into_iter()
                     .collect(),
                 accesskit::Action::Focus
                     if self.our_stops().contains(&id)
-                        || (self.inspector_owns() && id.is_under(&crate::inspector::panel::inspector_id())) =>
+                        || (self.inspector_owns() && id.is_under(&crate::inspector::panel::inspector_id()))
+                        || (self.matrix_owns() && id.is_under(&crate::matrix::panel::matrix_id())) =>
                 {
                     // The inspector sits beside the canvas, not over it: a
                     // knob that had the keys lets go, as on the canvas's
@@ -1031,7 +1036,6 @@ impl crate::App {
             self.session.outline.active = false;
             self.session.outline.inspector_action = None;
             self.session.outline.close_jump();
-            self.session.matrix.focused = false;
             self.effect(loom_ui::Effects::focus(id));
             return Vec::new();
         }

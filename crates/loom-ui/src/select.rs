@@ -67,6 +67,7 @@ pub struct Select {
     pub(crate) chosen: Option<usize>,
     pub(crate) from: Option<usize>,
     pub(crate) style: SelectStyle,
+    pub(crate) in_cell: bool,
 }
 
 impl Select {
@@ -81,7 +82,20 @@ impl Select {
             chosen,
             from: None,
             style,
+            in_cell: false,
         }
+    }
+
+    /// Makes it a cell of a grid (ui-layer.md, section 6, rule 12, In a
+    /// grid; the WAI-ARIA data grid pattern's "widget in a cell"): while
+    /// closed, it leaves the arrows, Home, End, Page Up, Page Down, Space,
+    /// and type-ahead to the grid around it, and only Enter, F2, and Alt
+    /// with Down open its list on the chosen option. Open, its keys are a
+    /// select's as always, and Escape closes it back to the cell.
+    #[must_use]
+    pub fn in_cell(mut self) -> Self {
+        self.in_cell = true;
+        self
     }
 
     /// Starts its steps at `from` in place of the chosen option, when it is
@@ -256,6 +270,19 @@ pub(crate) fn closed_key(key: Key, modifiers: Modifiers, text: Option<&str>) -> 
         _ if !(modifiers.control || modifiers.alt || modifiers.meta) && typed(text) => Closed::Type,
         _ => return None,
     })
+}
+
+/// What `key` with `modifiers` does to a closed select in a grid's cell
+/// ([`Select::in_cell`]): Enter and F2, the grid pattern's keys to edit a
+/// cell, and Alt with Down, the select's own, open it on the chosen option.
+/// `None` for any other key, which the grid around it takes.
+pub(crate) fn cell_key(key: Key, modifiers: Modifiers) -> Option<Closed> {
+    let alt_only = modifiers.alt && !(modifiers.control || modifiers.meta || modifiers.shift);
+    match key {
+        Key::Enter | Key::F2 if modifiers.none() => Some(Closed::OpenOnChosen),
+        Key::Down if alt_only => Some(Closed::OpenOnChosen),
+        _ => None,
+    }
 }
 
 /// What `key` with `modifiers`, typing `text`, does to an open list, by the

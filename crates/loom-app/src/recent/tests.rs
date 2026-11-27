@@ -579,17 +579,16 @@ fn the_list_takes_the_keys_from_a_focused_matrix() {
     let files = patches(&dir.0, 1);
     let mut ui = Ui::with_app(app());
     ui.app_mut().rig.recent.remember(&files[0]).unwrap();
-    ui.app_mut().right_tab = crate::matrix::Tab::Matrix;
-    ui.app_mut().session.matrix.focused = true;
+    ui.send(AppMessage::Matrix(crate::matrix::Event::Tab(
+        crate::matrix::Tab::Matrix,
+    )));
     ui.redraw();
+    let count = ui.app().session.controller.graph().assignments().count();
     ui.send(AppMessage::OpenRecent);
     ui.redraw();
-    assert!(!ui.app().session.matrix.focused);
-    let messages = ui.tap(Key::Named(Named::Delete), Modifiers::empty());
-    assert!(
-        !messages.iter().any(|m| matches!(m, AppMessage::MatrixKey(_))),
-        "{messages:?}"
-    );
+    assert!(!ui.app().matrix_owns(), "the list has the input");
+    let _ = ui.tap(Key::Named(Named::Delete), Modifiers::empty());
+    assert_eq!(ui.app().session.controller.graph().assignments().count(), count);
     ui.tap(Key::Named(Named::Escape), Modifiers::empty());
     assert!(ui.app().overlays.recent_rows().is_none(), "one Escape closes it");
 }

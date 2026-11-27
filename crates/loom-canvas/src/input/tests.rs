@@ -3245,26 +3245,6 @@ fn matrix_line_preserves_pinned_and_hovered_lines() {
     assert_eq!(canvas.overlay(&state, &LinesCache::default()).cables.len(), 2);
 }
 
-/// Escape can clear a canvas pin while matrix keyboard focus owns the key.
-#[test]
-fn matrix_escape_clears_canvas_pin() {
-    let (scene, values) = modulated_scene();
-    let none = BTreeSet::new();
-    let canvas = CanvasModel::new(&scene, &none)
-        .values(&values)
-        .focus_policy(CanvasFocusPolicy {
-            matrix_keyboard: true,
-            matrix_escape: true,
-            ..CanvasFocusPolicy::default()
-        });
-    let mut state = CanvasInput {
-        pinned: Some(OUT),
-        ..CanvasInput::default()
-    };
-    drive(&canvas, &mut state, &escape(), Point::ORIGIN);
-    assert_eq!(state.pinned, None);
-}
-
 /// Matrix keyboard focus leaves canvas clicks active but owns ordinary keys.
 #[test]
 fn matrix_keyboard_focus_keeps_canvas_pointer_active() {
