@@ -15,7 +15,6 @@
 
 use crate::bars::{self, Field, Item, Kind, Model};
 use crate::{App, Message, alerts, style};
-use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role, Value};
 use loom_ui::{Align, Element, Layer, Length, Padding, View};
 use loom_ui_core::{Color, UiId};
@@ -26,7 +25,7 @@ pub(crate) fn stats_id() -> UiId {
 }
 
 /// What the bar is drawn from: the model, and the colours of its parts that
-/// come from the theme.
+/// come from the palette tokens in `style.rs`.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Bar {
     /// The items, the status line, and the developer switches.
@@ -43,13 +42,11 @@ impl App {
     /// Adds the bar's panel to the runtime's view, for its slot in the
     /// window's root panel.
     pub(crate) fn bar_panel(&self, view: &mut View) {
-        let theme = self.theme();
-        let palette = theme.extended_palette();
         let bar = Bar {
             model: self.bars_model(),
-            on: palette.primary.base.color.to_core(),
-            off: palette.background.strong.color.to_core(),
-            knob: palette.background.base.text.to_core(),
+            on: crate::style::ACCENT,
+            off: crate::style::EDGE,
+            knob: crate::style::TEXT,
         };
         view.panel_with(stats_id(), Layer::Panels, &bar, stats);
     }
@@ -226,9 +223,9 @@ fn switch(bar: &Bar, key: &str, label: &str, on: bool) -> Element {
 /// The bar's colour for a warning level, as the window drew it.
 fn tone(severity: alerts::Severity) -> Color {
     match severity {
-        alerts::Severity::Normal => style::QUIET.to_core(),
-        alerts::Severity::Warning => style::WARNING_TEXT.to_core(),
-        alerts::Severity::Alarm => style::ERROR_TEXT.to_core(),
+        alerts::Severity::Normal => crate::style::QUIET,
+        alerts::Severity::Warning => crate::style::WARNING_TEXT,
+        alerts::Severity::Alarm => crate::style::ERROR_TEXT,
     }
 }
 

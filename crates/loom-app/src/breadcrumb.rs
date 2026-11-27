@@ -8,7 +8,6 @@
 
 use crate::style::{self, Role as ButtonRole};
 use crate::{App, Message};
-use loom_canvas::iced_convert::ToCore as _;
 use loom_patch::ModulePath;
 use loom_ui::access::{Access, Action, Role, States};
 use loom_ui::{Align, Element, Layer, Length, Padding, View};
@@ -40,7 +39,7 @@ pub(crate) struct Panel {
     pub(crate) crumbs: Vec<Crumb>,
     /// The colour of the "›" between entries.
     pub(crate) separator: Color,
-    /// The rule under it, the theme's strong background, as Iced's was.
+    /// The rule under it, in `style::EDGE`, as Iced's was.
     pub(crate) rule: Color,
 }
 
@@ -83,12 +82,10 @@ impl App {
         if crumbs.is_empty() {
             return;
         }
-        let theme = self.theme();
-        let palette = theme.extended_palette();
         let panel = Panel {
             crumbs,
-            separator: style::QUIET.to_core(),
-            rule: palette.background.strong.color.to_core(),
+            separator: crate::style::QUIET,
+            rule: crate::style::EDGE,
         };
         view.panel_with(breadcrumb_id(), Layer::Panels, &panel, breadcrumb);
     }

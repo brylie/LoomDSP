@@ -11,7 +11,6 @@
 use super::{MenuKind, MenuModel};
 use crate::style;
 use crate::{App, Message};
-use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role};
 use loom_ui::{Element, Layer, Length, Placement, View};
 use loom_ui_core::{Color, IdKey, Key, KeyEvent, UiId};
@@ -114,8 +113,6 @@ impl App {
                 .unwrap_or_default(),
             _ => Vec::new(),
         };
-        let theme = self.theme();
-        let palette = theme.extended_palette();
         let panel = Panel {
             items: menu
                 .items
@@ -134,9 +131,9 @@ impl App {
             heading: placement.is_none().then(|| menu.label.clone()),
             placement,
             width,
-            fill: palette.background.base.color.to_core(),
-            hover: palette.background.weak.color.to_core(),
-            text: palette.background.base.text.to_core(),
+            fill: crate::style::PANEL_FILL,
+            hover: crate::style::RAISED,
+            text: crate::style::TEXT,
         };
         view.panel_with(menu.id, Layer::Overlays, &panel, build);
     }
@@ -259,7 +256,7 @@ fn build(panel: &Panel) -> Element {
         .padding(4.0)
         .width(Length::Fixed(panel.width))
         .background(panel.fill)
-        .border(style::MENU_BORDER, style::QUIET.to_core())
+        .border(style::MENU_BORDER, crate::style::QUIET)
         .radius(style::MENU_RADIUS)
         .shadow(style::MENU_SHADOW)
         .placed(placement.clone())
@@ -292,7 +289,7 @@ fn centred(panel: &Panel, items: &[&Item]) -> Element {
         .max_height(CABLE_MENU_HEIGHT)
         .min_height(0.0)
         .background(panel.fill)
-        .border(style::MENU_BORDER, style::QUIET.to_core())
+        .border(style::MENU_BORDER, crate::style::QUIET)
         .radius(style::MENU_RADIUS)
         .shadow(style::MENU_SHADOW)
         .opaque()
@@ -361,7 +358,7 @@ fn row(panel: &Panel, item: &Item, key: IdKey) -> Element {
     // role's, as a turned-off control in Preferences does.
     let label = match (item.off, item.dim) {
         (true, _) => label,
-        (false, true) => label.colour(style::QUIET.to_core()),
+        (false, true) => label.colour(crate::style::QUIET),
         (false, false) => label.colour(panel.text),
     };
     let mut lines = vec![label];
@@ -375,7 +372,7 @@ fn row(panel: &Panel, item: &Item, key: IdKey) -> Element {
         });
     }
     if let Some(second) = &item.second {
-        lines.push(Element::text(second.clone(), style::BODY_TEXT).colour(style::QUIET.to_core()));
+        lines.push(Element::text(second.clone(), style::BODY_TEXT).colour(crate::style::QUIET));
         access = access.description(second.clone());
     }
     let hovered = loom_ui::StateLook {
@@ -389,7 +386,7 @@ fn row(panel: &Panel, item: &Item, key: IdKey) -> Element {
     let row = Element::column(lines)
         .padding(style::BUTTON_PADDING)
         .width(Length::FILL)
-        .border(style::MENU_BORDER, style::QUIET.to_core())
+        .border(style::MENU_BORDER, crate::style::QUIET)
         .radius(style::MENU_ITEM_RADIUS)
         .looks(loom_ui::Looks {
             normal,

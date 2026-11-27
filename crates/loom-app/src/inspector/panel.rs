@@ -18,7 +18,6 @@ use crate::App;
 use crate::matrix::Tab;
 use crate::patch_info::PatchRows;
 use crate::style::{self, Role as ButtonRole};
-use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role};
 use loom_ui::{Align, Element, Layer, Length, View};
 use loom_ui_core::{Color, Key, KeyEvent, UiId};
@@ -92,35 +91,33 @@ impl App {
         if !self.inspector_ours() {
             return;
         }
-        let theme = self.theme();
-        let palette = theme.extended_palette();
         let looks = Looks {
-            text: palette.background.base.text.to_core(),
-            quiet: style::QUIET.to_core(),
-            rule: palette.background.strong.color.to_core(),
-            chip: style::dialog(&theme),
-            field: style::field(&theme),
-            danger: palette.danger.strong.color.to_core(),
+            text: crate::style::TEXT,
+            quiet: crate::style::QUIET,
+            rule: crate::style::EDGE,
+            chip: crate::style::DIALOG,
+            field: crate::style::FIELD,
+            danger: crate::style::DANGER_EDGE,
         };
-        let mut small_select = style::select(&theme);
+        let mut small_select = crate::style::select();
         small_select.text = style::SMALL_TEXT;
         small_select.padding_y = 1.0;
         small_select.padding_x = 4.0;
         let mut quiet_select = small_select;
         quiet_select.background = Color::TRANSPARENT;
         quiet_select.border = Color::TRANSPARENT;
-        quiet_select.mark = style::QUIET.to_core();
+        quiet_select.mark = crate::style::QUIET;
         let rows = rows::Looks {
             text: looks.text,
             quiet: looks.quiet,
             field: looks.field,
-            select: style::select(&theme),
+            select: crate::style::select(),
             small_select,
             quiet_select,
-            danger: palette.danger.strong.color.to_core(),
-            drop: palette.primary.weak.color.to_core(),
-            card_fill: palette.background.weak.color.scale_alpha(0.5).to_core(),
-            card_border: palette.background.strong.color.scale_alpha(0.5).to_core(),
+            danger: crate::style::DANGER_EDGE,
+            drop: crate::style::ACCENT_WEAK,
+            card_fill: crate::style::CARD_FILL,
+            card_border: crate::style::CARD_BORDER,
         };
         let dragging = self.session.gestures.assign_drag().is_some() && !self.session.learn.is_on();
         let model = self.inspector_model();

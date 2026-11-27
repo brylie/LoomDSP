@@ -395,17 +395,14 @@ impl loom_ui::App for Hosted {
         self.0.tab_from(from, next, back)
     }
 
-    /// Hover text in the look of Iced's tooltips: the theme's weak
-    /// background, a 2 px radius, 6 px padding, at most 480 wide.
+    /// Hover text in the look of Iced's tooltips: the raised fill
+    /// (`style::RAISED`), a 2 px radius, 6 px padding, at most 480 wide.
     fn hint_style(&self) -> loom_ui::HintStyle {
-        use loom_canvas::iced_convert::ToCore as _;
-        let theme = self.0.theme();
-        let palette = theme.extended_palette();
         loom_ui::HintStyle {
             text: crate::style::BODY_TEXT,
-            colour: palette.background.weak.text.to_core(),
-            background: palette.background.weak.color.to_core(),
-            border: palette.background.weak.color.to_core(),
+            colour: crate::style::TEXT,
+            background: crate::style::RAISED,
+            border: crate::style::RAISED,
             border_width: 0.0,
             radius: 2.0,
             padding: 6.0,

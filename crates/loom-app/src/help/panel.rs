@@ -11,7 +11,6 @@ use super::{Help, Model};
 use crate::App;
 use crate::overlays::access::help_id;
 use crate::style::{self, Role as ButtonRole};
-use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role};
 use loom_ui::{Align, Element, Inline, Layer, Length, View};
 use loom_ui_core::{Color, UiId};
@@ -117,14 +116,13 @@ impl App {
         let Some(help) = &self.overlays.help else {
             return;
         };
-        let theme = self.theme();
-        let dialog = style::dialog(&theme);
+        let dialog = crate::style::DIALOG;
         let looks = Looks {
             scrim: style::HELP_SCRIM,
             fill: dialog.fill,
             text: dialog.text,
-            quiet: style::QUIET.to_core(),
-            link: style::link(&theme).colour,
+            quiet: crate::style::QUIET,
+            link: crate::style::LINK.colour,
             radius: dialog.radius,
         };
         let panel = self.help_model(&help.model, looks);

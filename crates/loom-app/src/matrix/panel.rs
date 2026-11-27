@@ -25,7 +25,6 @@ use super::{Column, Event, GridKey, SortPick, SourcePick, TargetPick, access, ro
 use crate::modulation::{self, PolarityChoice};
 use crate::style::{self, Role as ButtonRole};
 use crate::{App, Message};
-use loom_canvas::iced_convert::ToCore as _;
 use loom_core::AssignmentId;
 use loom_ui::access::{Access, Action, Role, Value};
 use loom_ui::{
@@ -164,25 +163,23 @@ impl App {
     /// What the matrix's panel is built from: its rows, the options of
     /// their selects, and the colours of the style tokens.
     fn matrix_panel_model(&self) -> Panel {
-        let theme = self.theme();
-        let palette = theme.extended_palette();
-        let mut small = style::select(&theme);
+        let mut small = crate::style::select();
         small.text = style::SMALL_TEXT;
         small.padding_y = 1.0;
         small.padding_x = 4.0;
         let mut cell = small;
         cell.background = Color::TRANSPARENT;
         cell.border = Color::TRANSPARENT;
-        cell.mark = style::QUIET.to_core();
+        cell.mark = crate::style::QUIET;
         let looks = Looks {
-            text: palette.background.base.text.to_core(),
-            quiet: style::QUIET.to_core(),
-            field: style::field(&theme),
+            text: crate::style::TEXT,
+            quiet: crate::style::QUIET,
+            field: crate::style::FIELD,
             select: small,
             cell,
-            card_fill: palette.background.weak.color.scale_alpha(0.5).to_core(),
-            card_border: palette.background.strong.color.scale_alpha(0.5).to_core(),
-            chosen: palette.primary.base.color.to_core(),
+            card_fill: crate::style::CARD_FILL,
+            card_border: crate::style::CARD_BORDER,
+            chosen: crate::style::ACCENT,
         };
         let graph = self.session.controller.graph();
         let model = self.matrix_model();

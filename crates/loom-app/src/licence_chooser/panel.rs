@@ -15,7 +15,6 @@ use super::{Answer, DISCLAIMER, Given, Message, Model, Pick, UNANSWERED};
 use crate::App;
 use crate::input_owner::InputOwner;
 use crate::style::{self, Role as ButtonRole};
-use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role, States};
 use loom_ui::{Align, Element, Layer, Length, View};
 use loom_ui_core::{Color, UiId};
@@ -83,15 +82,14 @@ impl App {
         let Some(chooser) = &self.overlays.chooser else {
             return;
         };
-        let theme = self.theme();
-        let dialog = style::dialog(&theme);
+        let dialog = crate::style::DIALOG;
         let looks = Looks {
             scrim: style::SCRIM,
             fill: dialog.fill,
             text: dialog.text,
-            quiet: style::QUIET.to_core(),
+            quiet: crate::style::QUIET,
             radius: dialog.radius,
-            field: style::field(&theme),
+            field: crate::style::FIELD,
         };
         let panel = Panel {
             model: chooser.model(),

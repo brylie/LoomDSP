@@ -10,7 +10,6 @@ use super::{Message, Model, Part, Picks};
 use crate::App;
 use crate::preferences::MapMode;
 use crate::style::{self, Role as ButtonRole};
-use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role, States};
 use loom_ui::{Align, Element, Layer, Length, Select, SelectStyle, View};
 use loom_ui_core::{Color, IdKey, UiId};
@@ -90,16 +89,15 @@ impl App {
         let Some(model) = self.preferences_model() else {
             return;
         };
-        let theme = self.theme();
-        let dialog = style::dialog(&theme);
+        let dialog = crate::style::DIALOG;
         let looks = Looks {
             scrim: style::SCRIM,
             fill: dialog.fill,
             text: dialog.text,
-            quiet: style::QUIET.to_core(),
-            rule: theme.extended_palette().background.strong.color.to_core(),
+            quiet: crate::style::QUIET,
+            rule: crate::style::EDGE,
             radius: dialog.radius,
-            select: style::select(&theme),
+            select: crate::style::select(),
         };
         view.panel_with(backdrop_panel(), Layer::Overlays, &looks.scrim, backdrop);
         view.panel_with(preferences_id(), Layer::Overlays, &Panel { model, looks }, build);

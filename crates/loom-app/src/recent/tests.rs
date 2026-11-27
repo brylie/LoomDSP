@@ -647,7 +647,6 @@ fn from_the_keyboard_the_list_starts_on_its_first_item_and_tab_leaves_it() {
 /// 2026-11-20; row 3b). The item below it has none.
 #[test]
 fn the_highlighted_item_has_the_weak_fill() {
-    use loom_canvas::iced_convert::ToCore as _;
     let dir = TempDir::new("recent-look");
     let files = patches(&dir.0, 2);
     let mut ui = Ui::with_app(app());
@@ -662,7 +661,7 @@ fn the_highlighted_item_has_the_weak_fill() {
     let first = ui.runtime().bounds(&id(0)).expect("laid out");
     let second = ui.runtime().bounds(&id(1)).expect("laid out");
     assert_eq!(ui.runtime().focused(), Some(&id(0)), "the keys highlighted the first");
-    let weak = ui.app().theme().extended_palette().background.weak.color.to_core();
+    let weak = crate::style::RAISED;
     let quads = ui.painted_quads(loom_ui::Layer::Overlays);
     assert!(
         quads.iter().any(|quad| quad.rect == first && quad.fill == weak),
@@ -676,7 +675,7 @@ fn the_highlighted_item_has_the_weak_fill() {
         quads.iter().any(|quad| is_ring_around(quad, first)),
         "the keys put the ring on top"
     );
-    let quiet = crate::style::QUIET.to_core();
+    let quiet = crate::style::QUIET;
     for (row, name) in [(first, "first"), (second, "second")] {
         assert!(
             quads
@@ -691,7 +690,6 @@ fn the_highlighted_item_has_the_weak_fill() {
 /// reached, and no focus ring (section 6, rule 8).
 #[test]
 fn a_hovered_item_has_the_weak_fill_and_no_ring() {
-    use loom_canvas::iced_convert::ToCore as _;
     let dir = TempDir::new("recent-hover-look");
     let files = patches(&dir.0, 2);
     let mut ui = Ui::with_app(app());
@@ -705,7 +703,7 @@ fn a_hovered_item_has_the_weak_fill_and_no_ring() {
     ui.move_to(second.center());
     ui.redraw();
     assert_eq!(ui.runtime().focused(), Some(&id(1)), "the pointer focused the second");
-    let weak = ui.app().theme().extended_palette().background.weak.color.to_core();
+    let weak = crate::style::RAISED;
     let quads = ui.painted_quads(loom_ui::Layer::Overlays);
     assert!(
         quads.iter().any(|quad| quad.rect == second && quad.fill == weak),

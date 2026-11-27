@@ -1,6 +1,5 @@
 use super::*;
 use crate::recovery::tests::TempDir;
-use loom_canvas::iced_convert::ToCore as _;
 use loom_core::{EngineConfig, LoomError, TRANSPORT_MODULE, create_engine};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -356,15 +355,14 @@ fn help_text_lists_every_canvas_shortcut() {
 /// stats bar warning colours. Issue #257.
 #[test]
 fn window_text_meets_wcag_minimum_contrast() {
-    let theme = app().theme.palette();
     let pairs = [
-        ("theme text on background", theme.text),
+        ("theme text on background", crate::style::TEXT),
         ("quiet text on background", crate::style::QUIET),
         ("warning text on background", crate::style::WARNING_TEXT),
         ("alarm text on background", crate::style::ERROR_TEXT),
     ];
     for (name, text) in pairs {
-        let ratio = loom_canvas::contrast_ratio(text.to_core(), theme.background.to_core());
+        let ratio = loom_canvas::contrast_ratio(text, crate::style::PANEL_FILL);
         assert!(
             ratio >= loom_canvas::MIN_TEXT_CONTRAST,
             "{name}: {ratio:.2}:1 is below {}:1",

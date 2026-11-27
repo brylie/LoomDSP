@@ -13,7 +13,6 @@
 use crate::matrix::{Event, Tab};
 use crate::style;
 use crate::{App, Message};
-use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role, States};
 use loom_ui::{Align, Element, Layer, Length, Looks, Padding, StateLook, View};
 use loom_ui_core::{Color, Key, KeyEvent, Modifiers, UiId};
@@ -66,7 +65,7 @@ pub(crate) fn label(tab: Tab) -> &'static str {
 struct Panel {
     /// The open tab.
     open: Tab,
-    /// The colours of the tabs, from the theme.
+    /// The colours of the tabs, from the palette tokens in `style.rs`.
     looks: TabLooks,
 }
 
@@ -84,15 +83,13 @@ struct TabLooks {
 impl App {
     /// Adds the tabs' panel to the runtime's view.
     pub(crate) fn tabs_panel(&self, view: &mut View) {
-        let theme = self.theme();
-        let palette = theme.extended_palette();
         let panel = Panel {
             open: self.right_tab,
             looks: TabLooks {
-                fill: palette.background.weak.color.to_core(),
-                border: palette.background.strong.color.to_core(),
-                text: palette.background.base.text.to_core(),
-                quiet: style::QUIET.to_core(),
+                fill: crate::style::RAISED,
+                border: crate::style::EDGE,
+                text: crate::style::TEXT,
+                quiet: crate::style::QUIET,
             },
         };
         view.panel_with(tabs_id(), Layer::Panels, &panel, build);

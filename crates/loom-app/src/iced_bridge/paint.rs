@@ -175,25 +175,23 @@ impl PanelPass {
     }
 }
 
-/// How the runtime's panels look from `theme`, for the window and its
-/// still captures alike: text in the theme's text colour, and a field
-/// looking like one of Iced's while both draw, its caret in the text
-/// colour and its selection in the theme's weak primary, quiet text such
-/// as a radio's note in the app's quiet colour, a radio's mark in the text
+/// How the runtime's panels look, for the window and its still captures
+/// alike: text in the text colour, and a field with its caret in the text
+/// colour and its selection in the weak accent, quiet text such as a
+/// radio's note in the app's quiet colour, a radio's mark in the text
 /// colour, a check box from the app's one check box look
-/// (`style::check_look`), a slider's thumb and fill in the theme's primary, and a slider's track in its strong
-/// background, as Iced's slider rail is.
-pub(crate) fn panel_style(theme: &iced::Theme) -> loom_ui::paint::PanelStyle {
-    use loom_canvas::iced_convert::ToCore as _;
+/// (`style::check_look`), a slider's thumb and fill in the accent, and a
+/// slider's track in the edge colour (`style.rs`).
+pub(crate) fn panel_style() -> loom_ui::paint::PanelStyle {
     loom_ui::paint::PanelStyle {
-        text: theme.palette().text.to_core(),
-        caret: theme.palette().text.to_core(),
-        selection: theme.extended_palette().primary.weak.color.to_core(),
+        text: crate::style::TEXT,
+        caret: crate::style::TEXT,
+        selection: crate::style::ACCENT_WEAK,
         ring: crate::style::focus_ring(),
-        quiet: crate::style::QUIET.to_core(),
-        mark: theme.palette().text.to_core(),
-        primary: theme.palette().primary.to_core(),
-        track: theme.extended_palette().background.strong.color.to_core(),
+        quiet: crate::style::QUIET,
+        mark: crate::style::TEXT,
+        primary: crate::style::ACCENT,
+        track: crate::style::EDGE,
         check: crate::style::check_look(),
     }
 }

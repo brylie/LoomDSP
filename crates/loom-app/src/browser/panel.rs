@@ -18,7 +18,6 @@ use super::{
 };
 use crate::App;
 use crate::style;
-use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role, States};
 use loom_ui::{Align, Element, Layer, Length, Placement, View};
 use loom_ui_core::{Color, IdKey, Key, KeyEvent, Point, UiId};
@@ -113,22 +112,20 @@ impl App {
         let Some(browser) = self.overlays.browser() else {
             return;
         };
-        let theme = self.theme();
-        let floating = style::floating_panel(&theme);
-        let palette = theme.extended_palette();
+        let floating = crate::style::FLOATING_PANEL;
         let looks = Looks {
             fill: floating.fill,
             text: floating.text,
-            quiet: style::QUIET.to_core(),
+            quiet: crate::style::QUIET,
             border: floating.border,
             border_width: floating.border_width,
             radius: floating.radius,
-            field: palette.background.weak.color.to_core(),
-            row: style::highlighted_row(&theme),
+            field: crate::style::RAISED,
+            row: crate::style::HIGHLIGHTED_ROW,
         };
         let panel = browser.panel(looks);
         view.panel_with(browser_id(), Layer::Overlays, &panel, build);
-        if let Some(menu) = browser.menu_panel(&theme) {
+        if let Some(menu) = browser.menu_panel() {
             view.panel_with(menu_id(&menu.row), Layer::Overlays, &menu, build_menu);
         }
     }
@@ -276,17 +273,16 @@ impl Browser {
         }
     }
 
-    /// The open row menu's panel model, in `theme`, if a menu is open.
-    fn menu_panel(&self, theme: &iced::Theme) -> Option<MenuPanel> {
+    /// The open row menu's panel model, if a menu is open.
+    fn menu_panel(&self) -> Option<MenuPanel> {
         let row = self.model.rows.get(self.model.menu?)?;
-        let palette = theme.extended_palette();
         Some(MenuPanel {
             row: row.id.clone(),
             highlighted: self.model.menu_highlight.is_some(),
-            outline: palette.primary.base.color.to_core(),
-            fill: palette.background.base.color.to_core(),
-            hover: palette.background.weak.color.to_core(),
-            text: palette.background.base.text.to_core(),
+            outline: crate::style::ACCENT,
+            fill: crate::style::PANEL_FILL,
+            hover: crate::style::RAISED,
+            text: crate::style::TEXT,
         })
     }
 }
@@ -435,7 +431,7 @@ fn build_menu(menu: &MenuPanel) -> Element {
             if menu.highlighted {
                 menu.outline
             } else {
-                style::QUIET.to_core()
+                crate::style::QUIET
             },
         )
         .radius(style::MENU_ITEM_RADIUS)
@@ -451,7 +447,7 @@ fn build_menu(menu: &MenuPanel) -> Element {
         .padding(4.0)
         .width(Length::Fixed(MENU_WIDTH))
         .background(menu.fill)
-        .border(style::MENU_BORDER, style::QUIET.to_core())
+        .border(style::MENU_BORDER, crate::style::QUIET)
         .radius(style::MENU_RADIUS)
         .shadow(style::MENU_SHADOW)
         .placed(Placement::Under(menu.row.clone()))

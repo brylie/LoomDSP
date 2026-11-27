@@ -14,7 +14,6 @@
 use super::{Message, PAGE_ROWS, PatchBrowser, ROW_HEIGHT, licence_id, part_id, patches_id, tag_id};
 use crate::App;
 use crate::style::{self, Role as ButtonRole};
-use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role, States, Value};
 use loom_ui::{Align, Element, Layer, Length, View};
 use loom_ui_core::{Color, IdKey, Key, KeyEvent, UiId};
@@ -105,19 +104,17 @@ impl App {
         let Some(browser) = self.overlays.patches() else {
             return;
         };
-        let theme = self.theme();
-        let dialog = style::dialog(&theme);
-        let palette = theme.extended_palette();
+        let dialog = crate::style::DIALOG;
         let looks = Looks {
             scrim: style::SCRIM,
             fill: dialog.fill,
             text: dialog.text,
-            quiet: style::QUIET.to_core(),
-            field: palette.background.weak.color.to_core(),
+            quiet: crate::style::QUIET,
+            field: crate::style::RAISED,
             radius: dialog.radius,
-            row: style::highlighted_row(&theme),
-            picked: palette.background.weak.color.to_core(),
-            picked_border: palette.background.strong.color.to_core(),
+            row: crate::style::HIGHLIGHTED_ROW,
+            picked: crate::style::RAISED,
+            picked_border: crate::style::EDGE,
         };
         let panel = browser.panel(looks);
         view.panel_with(backdrop_panel(), Layer::Overlays, &looks.scrim, backdrop);

@@ -20,7 +20,6 @@
 use super::{Row, jump_id, tree_id};
 use crate::style;
 use crate::{App, Message};
-use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role, States};
 use loom_ui::{Element, Layer, Length, Looks, Padding, StateLook, View};
 use loom_ui_core::{Color, Key, KeyEvent, UiId};
@@ -83,13 +82,11 @@ struct RowLooks {
 impl App {
     /// The colours the tree and the jump list are painted in.
     fn row_looks(&self) -> RowLooks {
-        let theme = self.theme();
-        let palette = theme.extended_palette();
         RowLooks {
-            fill: palette.background.weak.color.to_core(),
-            border: palette.background.strong.color.to_core(),
-            text: palette.background.base.text.to_core(),
-            quiet: style::QUIET.to_core(),
+            fill: crate::style::RAISED,
+            border: crate::style::EDGE,
+            text: crate::style::TEXT,
+            quiet: crate::style::QUIET,
         }
     }
 

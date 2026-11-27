@@ -271,7 +271,7 @@ pub(crate) fn still_panels(
     let still = loom_ui::Still::new(&view, size, &mut *text.borrow_mut());
     let whole = loom_ui_core::Rect::new(loom_ui_core::Point::ORIGIN, size);
     // As the window paints them (`window.rs`, `paint_panels`).
-    let style = paint::panel_style(&app.theme());
+    let style = paint::panel_style();
     paint::paint_sides(whole, |layer, list| {
         still.paint(layer, &mut ListPainter::new(&text, list), &style);
     })

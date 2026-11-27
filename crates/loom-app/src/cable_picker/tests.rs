@@ -320,7 +320,6 @@ fn with_no_port_to_offer_one_turned_off_item_says_so() {
 /// turned-off control in Preferences does (visual-system.md).
 #[test]
 fn the_turned_off_item_draws_in_the_off_text_colour() {
-    use loom_canvas::iced_convert::ToCore as _;
     let mut ui = open_with_no_port();
     let colours = ui.painted_text_colours(loom_ui::Layer::Overlays);
     let (_, colour) = colours
@@ -329,7 +328,7 @@ fn the_turned_off_item_draws_in_the_off_text_colour() {
         .expect("the item is painted");
     let off = crate::style::Role::Plain.looks().off.text.expect("an off text colour");
     assert_eq!(*colour, off);
-    assert_ne!(off, crate::style::QUIET.to_core(), "not just the quiet text");
+    assert_ne!(off, crate::style::QUIET, "not just the quiet text");
 }
 
 /// Page Down and Page Up move the focus ten rows, stopping at the ends,

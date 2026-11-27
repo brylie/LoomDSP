@@ -6,8 +6,6 @@
 //! The canvas keeps its own text sizes in world units, because tile text
 //! grows and shrinks with zoom.
 
-use iced::Theme;
-
 /// Table cells, row details, and captions in the inspector and matrix.
 pub const SMALL: f32 = 11.0;
 /// Running text, hover text, and the status bar.
@@ -185,12 +183,53 @@ pub const HEADING_TEXT: loom_ui_core::TextStyle = loom_ui_core::TextStyle {
     weight: loom_ui_core::Weight::Regular,
 };
 
+/// The fill of the window's panels: the toolbar, the right column, the
+/// stats bar, menus, fields, and the module browser. `#22242A`. The canvas
+/// has its own background (`loom_canvas::Palette`).
+///
+/// This and the shades below were Iced's: its theme worked them out from
+/// the app's six palette colours. They were recorded on 2026-11-27 by
+/// printing each value the running app used, as exact `f32`s, not by
+/// reading how Iced works them out (ADR-0018), so the look did not move
+/// when the theme went (plan for leaving Iced, phase 4, P3).
+pub const PANEL_FILL: loom_ui_core::Color = hex(0x22242A);
+
+/// The body text colour on the panels, `#E6E8EE`. Not to be confused with
+/// [`BODY_TEXT`], which is a size and a line height.
+pub const TEXT: loom_ui_core::Color = hex(0xE6E8EE);
+
+/// The accent colour, `#F5A623`: a chosen card's outline, a highlighted
+/// row's outline, a link, and a switch that is on.
+pub const ACCENT: loom_ui_core::Color = hex(0xF5A623);
+
+/// A raised fill on the panels, about `#393D48`: an open tab, a card, a
+/// dialog's box, a hovered menu item, the highlighted row, hover text.
+pub const RAISED: loom_ui_core::Color = loom_ui_core::Color::rgb(0.224_145_3, 0.238_989_3, 0.284_014_14);
+
+/// Rules between parts of the window and the borders of fields, tabs, and
+/// floating panels, about `#454A59`.
+pub const EDGE: loom_ui_core::Color = loom_ui_core::Color::rgb(0.272_034_94, 0.290_621_07, 0.347_204_1);
+
+/// A modulation card's fill: [`RAISED`] at half opacity.
+pub const CARD_FILL: loom_ui_core::Color = loom_ui_core::Color { a: 0.5, ..RAISED };
+
+/// A modulation card's border: [`EDGE`] at half opacity.
+pub const CARD_BORDER: loom_ui_core::Color = loom_ui_core::Color { a: 0.5, ..EDGE };
+
+/// A quieter accent, about `#C48526`: selected text in a field, and an
+/// inspector row lit as a drop target.
+pub const ACCENT_WEAK: loom_ui_core::Color = loom_ui_core::Color::rgb(0.770_022_3, 0.522_899_9, 0.148_859_05);
+
+/// The outline of a field whose text is refused, and the inspector's
+/// danger marks, about `#C4182A`.
+pub const DANGER_EDGE: loom_ui_core::Color = loom_ui_core::Color::rgb(0.768_626_8, 0.094_010_57, 0.163_463_77);
+
 /// Quiet text: details, IDs, and the title of a closed tab. Iced's own
 /// secondary text colour is 4.27:1 on the panels, under the 4.5:1 that
 /// WCAG asks for, so the app uses this instead (a test checks it).
-pub const QUIET: iced::Color = iced::Color::from_rgb(0.66, 0.69, 0.75);
+pub const QUIET: loom_ui_core::Color = loom_ui_core::Color::rgb(0.66, 0.69, 0.75);
 /// An unchecked switch's edge, and a choice's border on hover.
-pub const CONTROL_EDGE: iced::Color = QUIET;
+pub const CONTROL_EDGE: loom_ui_core::Color = QUIET;
 
 /// How a check box looks (visual-system.md, Check boxes): off, a 1 px edge
 /// in [`CONTROL_EDGE`]; on, filled in the canvas's control value colour,
@@ -198,19 +237,18 @@ pub const CONTROL_EDGE: iced::Color = QUIET;
 /// value, as #856 made it for #463's contrast. The runtime's boxes read it
 /// through `PanelStyle::check`; a test checks each pair for 3:1.
 pub fn check_look() -> loom_ui::paint::CheckLook {
-    use loom_canvas::iced_convert::ToCore as _;
     let palette = loom_canvas::Palette::default();
     loom_ui::paint::CheckLook {
-        edge: CONTROL_EDGE.to_core(),
+        edge: CONTROL_EDGE,
         fill: palette.control_value,
         mark: palette.background,
     }
 }
 
 /// Status bar text for a warning, with the word `Warning:` beside it.
-pub const WARNING_TEXT: iced::Color = iced::Color::from_rgb8(0xF5, 0xA6, 0x23);
+pub const WARNING_TEXT: loom_ui_core::Color = hex(0xF5A623);
 /// Status bar text for an error, with the word `Error:` beside it.
-pub const ERROR_TEXT: iced::Color = iced::Color::from_rgb8(0xEB, 0x6B, 0x6B);
+pub const ERROR_TEXT: loom_ui_core::Color = hex(0xEB6B6B);
 
 /// A button role's look in one state: its fill, or none, and its text
 /// (visual-system.md, Role tokens).
@@ -358,19 +396,18 @@ pub const SCROLLBAR_RADIUS: f32 = 3.0;
 /// The colour of a scroll container's thumb: the quiet text colour, which
 /// stands out at 3:1 or more against the panel it runs over, as no track is
 /// drawn (WCAG 2.2, 1.4.11). A test checks it.
-pub const SCROLLBAR_THUMB: iced::Color = QUIET;
+pub const SCROLLBAR_THUMB: loom_ui_core::Color = QUIET;
 
 /// How a scroll container of the app's own UI layer looks and moves: the
 /// scrollbar tokens, the focus ring's reach kept as room around the
 /// content, and one line of body text for its keys and the wheel.
 pub fn scroll() -> loom_ui::ScrollStyle {
-    use loom_canvas::iced_convert::ToCore as _;
     let ring = focus_ring();
     loom_ui::ScrollStyle {
         width: SCROLLBAR_WIDTH,
         inset: SCROLLBAR_INSET,
         radius: SCROLLBAR_RADIUS,
-        thumb: SCROLLBAR_THUMB.to_core(),
+        thumb: SCROLLBAR_THUMB,
         ring: ring.offset + ring.width,
         line: BODY_TEXT.size * BODY_TEXT.line_height,
     }
@@ -393,9 +430,9 @@ pub const CARD_RADIUS: f32 = 5.0;
 /// lights it.
 pub const DROP_ROW_RADIUS: f32 = 4.0;
 
-/// How a dialog over the canvas looks: help and Your patches. Today's
-/// look, the palette's weak background with a corner of 2, now a token so
-/// `loom-ui`'s panels take it (plan 3.2, rows 5b and 6).
+/// How a dialog over the canvas looks: help and Your patches. The
+/// [`RAISED`] fill with a corner of 2, a token so `loom-ui`'s panels take
+/// it (plan 3.2, rows 5b and 6).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DialogLook {
     /// The panel's fill.
@@ -406,16 +443,13 @@ pub struct DialogLook {
     pub radius: f32,
 }
 
-/// The dialog look in `theme`.
-pub fn dialog(theme: &Theme) -> DialogLook {
-    use loom_canvas::iced_convert::ToCore as _;
-    let palette = theme.extended_palette();
-    DialogLook {
-        fill: palette.background.weak.color.to_core(),
-        text: palette.background.weak.text.to_core(),
-        radius: 2.0,
-    }
-}
+/// The dialog look: help, Your patches, Preferences, the licence chooser,
+/// and the inspector's chips read it.
+pub const DIALOG: DialogLook = DialogLook {
+    fill: RAISED,
+    text: TEXT,
+    radius: 2.0,
+};
 
 /// How a text field `loom-ui` draws looks: a box in the window's base
 /// colour with a border in its strong colour and a corner of 2, as Iced's
@@ -430,22 +464,19 @@ pub struct FieldLook {
     pub radius: f32,
 }
 
-/// The text field look in `theme`.
-pub fn field(theme: &Theme) -> FieldLook {
-    use loom_canvas::iced_convert::ToCore as _;
-    let palette = theme.extended_palette();
-    FieldLook {
-        fill: palette.background.base.color.to_core(),
-        border: palette.background.strong.color.to_core(),
-        radius: 2.0,
-    }
-}
+/// The text field look: the inspector's, the matrix's, and the licence
+/// chooser's fields read it.
+pub const FIELD: FieldLook = FieldLook {
+    fill: PANEL_FILL,
+    border: EDGE,
+    radius: 2.0,
+};
 
 /// Help's backdrop: darker than the question's and Your patches'
 /// ([`SCRIM`]), as today, since help covers the whole canvas to be read.
 pub const HELP_SCRIM: loom_ui_core::Color = loom_ui_core::Color::rgba(0.0, 0.0, 0.0, 0.55);
 
-/// How a link in help's text looks: the theme's primary colour, as help
+/// How a link in help's text looks: the accent colour, as help
 /// shows links today, and an underline, since the colour alone is too
 /// close to the body text to tell a link apart (WCAG 2.2, 1.4.1).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -457,18 +488,14 @@ pub struct LinkLook {
     pub underline: bool,
 }
 
-/// The link look in `theme`.
-pub fn link(theme: &Theme) -> LinkLook {
-    use loom_canvas::iced_convert::ToCore as _;
-    LinkLook {
-        colour: theme.extended_palette().primary.base.color.to_core(),
-        underline: true,
-    }
-}
+/// The link look: help's links read it.
+pub const LINK: LinkLook = LinkLook {
+    colour: ACCENT,
+    underline: true,
+};
 
-/// How the module browser's floating panel looks: the palette's base
-/// background, a 1 px outline in its strong colour, and a corner of 6, as
-/// today.
+/// How the module browser's floating panel looks: the [`PANEL_FILL`], a
+/// 1 px outline in [`EDGE`], and a corner of 6.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FloatingLook {
     /// The panel's fill.
@@ -483,18 +510,15 @@ pub struct FloatingLook {
     pub radius: f32,
 }
 
-/// The floating panel look in `theme`.
-pub fn floating_panel(theme: &Theme) -> FloatingLook {
-    use loom_canvas::iced_convert::ToCore as _;
-    let palette = theme.extended_palette();
-    FloatingLook {
-        fill: palette.background.base.color.to_core(),
-        text: palette.background.base.text.to_core(),
-        border: palette.background.strong.color.to_core(),
-        border_width: 1.0,
-        radius: 6.0,
-    }
-}
+/// The floating panel look: the module browser reads it, and so does a
+/// select's open list ([`select`]).
+pub const FLOATING_PANEL: FloatingLook = FloatingLook {
+    fill: PANEL_FILL,
+    text: TEXT,
+    border: EDGE,
+    border_width: 1.0,
+    radius: 6.0,
+};
 
 /// How a browser's highlighted row looks: a lifted grey with a 1 px
 /// outline in the primary colour and a corner of 4, as today, so its
@@ -511,41 +535,35 @@ pub struct RowLook {
     pub radius: f32,
 }
 
-/// The highlighted row look in `theme`.
-pub fn highlighted_row(theme: &Theme) -> RowLook {
-    use loom_canvas::iced_convert::ToCore as _;
-    let palette = theme.extended_palette();
-    RowLook {
-        fill: palette.background.weak.color.to_core(),
-        border: palette.primary.base.color.to_core(),
-        border_width: 1.0,
-        radius: 4.0,
-    }
-}
+/// The highlighted row look: the module browser's and Your patches' rows
+/// read it, and a select's highlighted option takes its fill.
+pub const HIGHLIGHTED_ROW: RowLook = RowLook {
+    fill: RAISED,
+    border: ACCENT,
+    border_width: 1.0,
+    radius: 4.0,
+};
 
 /// How a select of the runtime's looks, and its open list (ui-layer.md,
-/// section 5, rule 18): the box in the palette's base background with a
-/// 1 px outline in its strong colour, as Iced's pick list was; the list in
+/// section 5, rule 18): the box in [`PANEL_FILL`] with a 1 px outline in
+/// [`EDGE`], as Iced's pick list was; the list in
 /// the floating panel's look with the menu's shadow, and the highlighted
 /// option in the highlighted row's fill. The mark is the text colour, so it
 /// keeps 3:1 against the box (WCAG 2.2, SC 1.4.11).
-pub fn select(theme: &Theme) -> loom_ui::SelectStyle {
-    use loom_canvas::iced_convert::ToCore as _;
-    let palette = theme.extended_palette();
-    let floating = floating_panel(theme);
+pub fn select() -> loom_ui::SelectStyle {
     loom_ui::SelectStyle {
         text: CONTROL_TEXT,
-        colour: palette.background.base.text.to_core(),
-        background: palette.background.base.color.to_core(),
-        border: palette.background.strong.color.to_core(),
+        colour: TEXT,
+        background: PANEL_FILL,
+        border: EDGE,
         border_width: 1.0,
         radius: 2.0,
         padding_x: 8.0,
         padding_y: 4.0,
-        mark: palette.background.base.text.to_core(),
-        list_background: floating.fill,
-        list_border: floating.border,
-        highlight: highlighted_row(theme).fill,
+        mark: TEXT,
+        list_background: FLOATING_PANEL.fill,
+        list_border: FLOATING_PANEL.border,
+        highlight: HIGHLIGHTED_ROW.fill,
         shadow: Some(MENU_SHADOW),
         scroll: scroll(),
     }

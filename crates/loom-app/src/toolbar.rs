@@ -6,7 +6,6 @@
 
 use crate::style::{self, Role as ButtonRole};
 use crate::{App, FileAction, Message, learn, settings};
-use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role, States, Value};
 use loom_ui::{Align, Element, Layer, Length, Padding, View};
 use loom_ui_core::{Color, UiId};
@@ -209,7 +208,7 @@ pub(crate) struct Panel {
     pub(crate) model: Model,
     /// The patch name it shows first, with `* ` while it is unsaved.
     pub(crate) title: String,
-    /// The rule under it, the theme's strong background, as Iced's was.
+    /// The rule under it, in `style::EDGE`, as Iced's was.
     pub(crate) rule: Color,
 }
 
@@ -220,7 +219,7 @@ impl App {
         let panel = Panel {
             model: self.toolbar_model(),
             title: format!("{}{}", if self.unsaved() { "* " } else { "" }, self.patch_name()),
-            rule: self.theme().extended_palette().background.strong.color.to_core(),
+            rule: crate::style::EDGE,
         };
         view.panel_with(toolbar_id(), Layer::Panels, &panel, toolbar);
     }

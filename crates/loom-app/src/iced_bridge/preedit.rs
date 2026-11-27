@@ -12,7 +12,8 @@
 use iced::advanced::input_method::{InputMethod, Preedit};
 use iced::advanced::text::{self, Paragraph as _, Renderer as _};
 use iced::advanced::{Renderer as _, renderer};
-use iced::{Color, Pixels, Point, Rectangle, Size, Theme};
+use iced::{Color, Pixels, Point, Rectangle, Size};
+use loom_canvas::iced_convert::ToIced as _;
 
 /// Room between the text and the box's edge, in logical pixels.
 const PADDING: f32 = 4.0;
@@ -90,14 +91,7 @@ fn text<T>(content: T, size: f32, bounds: Size) -> text::Text<T> {
 /// Draws `preedit` for a caret at `caret`, in a window of `window`, in a
 /// layer above what is drawn. `fallback` is the text size when the field
 /// reports none.
-pub(super) fn draw(
-    renderer: &mut crate::Renderer,
-    preedit: &Preedit,
-    caret: Rectangle,
-    window: Size,
-    theme: &Theme,
-    fallback: f32,
-) {
+pub(super) fn draw(renderer: &mut crate::Renderer, preedit: &Preedit, caret: Rectangle, window: Size, fallback: f32) {
     let size = preedit.text_size.map_or(fallback, |pixels| pixels.0);
     let line = text::LineHeight::default().to_absolute(Pixels(size)).0;
     let content = Size::new(width(&preedit.content, size), line);
@@ -106,7 +100,13 @@ pub(super) fn draw(
         Size::new(content.width + 2.0 * PADDING, content.height + 2.0 * PADDING),
         window,
     );
-    let palette = theme.extended_palette();
+    // The app's colours, converted for Iced, which draws this until P4.
+    let (edge, raised, accent, text_color) = (
+        crate::style::EDGE.to_iced(),
+        crate::style::RAISED.to_iced(),
+        crate::style::ACCENT.to_iced(),
+        crate::style::TEXT.to_iced(),
+    );
     let origin = Point::new(area.x + PADDING, area.y + PADDING);
     let window_bounds = Rectangle::new(Point::ORIGIN, window);
     renderer.with_layer(window_bounds, |renderer| {
@@ -117,13 +117,13 @@ pub(super) fn draw(
         renderer.fill_quad(
             renderer::Quad {
                 border: iced::Border {
-                    color: palette.background.strong.color,
+                    color: edge,
                     width: 1.0,
                     radius: 2.0.into(),
                 },
                 ..quad(area)
             },
-            palette.background.weak.color,
+            raised,
         );
         for marked in marked(&preedit.content, preedit.selection.as_ref(), size) {
             renderer.fill_quad(
@@ -131,13 +131,9 @@ pub(super) fn draw(
                     Point::new(origin.x + marked.x, origin.y + marked.y),
                     marked.size(),
                 )),
-                Color {
-                    a: 0.4,
-                    ..palette.primary.base.color
-                },
+                Color { a: 0.4, ..accent },
             );
         }
-        let text_color = palette.background.weak.text;
         renderer.fill_text(text(preedit.content.clone(), size, content), origin, text_color, area);
         let underline = Rectangle::new(
             Point::new(origin.x, origin.y + line - 1.0),

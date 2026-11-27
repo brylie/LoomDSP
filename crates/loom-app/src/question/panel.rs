@@ -9,7 +9,6 @@ use super::{Message, Question};
 use crate::App;
 use crate::overlays::access::{answer_id, question_id};
 use crate::style::{self, Role as ButtonRole};
-use loom_canvas::iced_convert::ToCore as _;
 use loom_ui::access::{Access, Action, Role};
 use loom_ui::{Align, Element, Layer, Length, View};
 use loom_ui_core::{Color, UiId};
@@ -40,8 +39,6 @@ impl App {
             return;
         };
         let model = question.model();
-        let theme = self.theme();
-        let palette = theme.extended_palette();
         let panel = Panel {
             title: model.title,
             text: model.text,
@@ -51,8 +48,8 @@ impl App {
                 .map(|answer| (answer.name(), answer.label(), answer.name() == model.primary))
                 .collect(),
             scrim: style::SCRIM,
-            fill: palette.background.weak.color.to_core(),
-            text_colour: palette.background.weak.text.to_core(),
+            fill: crate::style::RAISED,
+            text_colour: crate::style::TEXT,
         };
         view.panel_with(question_id(), Layer::Question, &panel, build);
     }

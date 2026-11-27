@@ -482,7 +482,7 @@ impl Ui {
     pub(crate) fn painted_texts(&mut self, layer: loom_ui::Layer) -> Vec<(String, Rect)> {
         use loom_ui::paint::{Align, Vertical, testing::Painted};
         self.lay_out_panels();
-        let style = crate::iced_bridge::paint::panel_style(&self.app().theme());
+        let style = crate::iced_bridge::paint::panel_style();
         let mut recorder = loom_ui::paint::testing::Recorder::default();
         let (_, _, mut panels) = self.bridge.runtime_mut().parts();
         panels.paint(layer, &mut recorder, &style);
@@ -514,7 +514,7 @@ impl Ui {
     pub(crate) fn painted_text_colours(&mut self, layer: loom_ui::Layer) -> Vec<(String, loom_ui_core::Color)> {
         use loom_ui::paint::testing::Painted;
         self.lay_out_panels();
-        let style = crate::iced_bridge::paint::panel_style(&self.app().theme());
+        let style = crate::iced_bridge::paint::panel_style();
         let mut recorder = loom_ui::paint::testing::Recorder::default();
         let (_, _, mut panels) = self.bridge.runtime_mut().parts();
         panels.paint(layer, &mut recorder, &style);
@@ -532,7 +532,7 @@ impl Ui {
     pub(crate) fn painted_quads(&mut self, layer: loom_ui::Layer) -> Vec<loom_ui::paint::Quad> {
         use loom_ui::paint::testing::Painted;
         self.lay_out_panels();
-        let style = crate::iced_bridge::paint::panel_style(&self.app().theme());
+        let style = crate::iced_bridge::paint::panel_style();
         let mut recorder = loom_ui::paint::testing::Recorder::default();
         let (_, _, mut panels) = self.bridge.runtime_mut().parts();
         panels.paint(layer, &mut recorder, &style);

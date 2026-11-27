@@ -4,27 +4,20 @@
 /// more (WCAG 1.4.3).
 #[test]
 fn quiet_text_meets_contrast() {
-    use loom_canvas::iced_convert::ToCore as _;
     use loom_canvas::{MIN_TEXT_CONTRAST, contrast_ratio};
-    let app = crate::tests::app();
-    let theme = app.theme();
-    let palette = theme.extended_palette();
     let secondary = super::QUIET;
-    let highlight = {
-        use loom_canvas::iced_convert::ToIced as _;
-        super::highlighted_row(&theme).fill.to_iced()
-    };
+    let highlight = super::HIGHLIGHTED_ROW.fill;
     // A closed tab's title is quiet text (`tabs.rs`).
     let closed_tab = super::QUIET;
     for (name, text, fill) in [
-        ("quiet text on the panel", secondary, palette.background.base.color),
-        ("quiet text on a card", secondary, palette.background.weak.color),
+        ("quiet text on the panel", secondary, super::PANEL_FILL),
+        ("quiet text on a card", secondary, super::RAISED),
         ("quiet text on the highlighted row", secondary, highlight),
-        ("a closed tab's title", closed_tab, palette.background.base.color),
+        ("a closed tab's title", closed_tab, super::PANEL_FILL),
         // A modulation card's quiet polarity select marks itself in the
         // quiet colour (plan 3.2, row 4d.2), which the card rows check.
     ] {
-        let ratio = contrast_ratio(text.to_core(), fill.to_core());
+        let ratio = contrast_ratio(text, fill);
         assert!(ratio >= MIN_TEXT_CONTRAST, "{name}: {ratio:.2}:1");
     }
 }
@@ -32,15 +25,12 @@ fn quiet_text_meets_contrast() {
 /// Marks that identify a control are readable on both panels and cards.
 #[test]
 fn active_control_marks_and_family_tints_meet_contrast() {
-    use loom_canvas::iced_convert::ToCore as _;
     use loom_canvas::{Palette, contrast_ratio};
-    let theme = crate::tests::app().theme();
-    let app = theme.extended_palette();
     let canvas = Palette::default();
-    for fill in [app.background.base.color, app.background.weak.color] {
+    for fill in [super::PANEL_FILL, super::RAISED] {
         for family in loom_core::Family::ALL {
             assert!(
-                contrast_ratio(crate::browser::family_swatch(family), fill.to_core()) >= 3.0,
+                contrast_ratio(crate::browser::family_swatch(family), fill) >= 3.0,
                 "{family:?}"
             );
         }
@@ -65,21 +55,17 @@ fn active_control_marks_and_family_tints_meet_contrast() {
 #[test]
 fn the_check_box_look_meets_contrast() {
     use loom_canvas::contrast_ratio;
-    use loom_canvas::iced_convert::ToCore as _;
-    let theme = crate::tests::app().theme();
-    let app = theme.extended_palette();
     let look = super::check_look();
     let ring = super::focus_ring().color;
     assert!(contrast_ratio(look.mark, look.fill) >= 3.0, "the mark on the fill");
-    for panel in [app.background.base.color, app.background.weak.color] {
-        let panel = panel.to_core();
+    for panel in [super::PANEL_FILL, super::RAISED] {
         for (what, colour) in [("edge", look.edge), ("fill", look.fill), ("ring", ring)] {
             let ratio = contrast_ratio(colour, panel);
             assert!(ratio >= 3.0, "{what} on {panel:?}: {ratio:.2}:1");
         }
     }
     // The runtime's boxes read the same look as Iced's.
-    assert_eq!(crate::iced_bridge::paint::panel_style(&theme).check, look);
+    assert_eq!(crate::iced_bridge::paint::panel_style().check, look);
 }
 
 /// The app's Rust files under `dir`, in every folder, with `style.rs` and
@@ -206,22 +192,14 @@ e.border(style::EDGE, style::LINE)
 #[test]
 fn the_focus_ring_stands_out() {
     use loom_canvas::contrast_ratio;
-    use loom_canvas::iced_convert::ToCore as _;
     let ring = super::focus_ring();
     assert!(ring.width >= 2.0, "{} px", ring.width);
-    let app = crate::tests::app();
-    let theme = app.theme();
-    let palette = theme.extended_palette();
-    let highlight = {
-        use loom_canvas::iced_convert::ToIced as _;
-        super::highlighted_row(&theme).fill.to_iced()
-    };
     for (name, fill) in [
-        ("the panel", palette.background.base.color),
-        ("a card", palette.background.weak.color),
-        ("the highlighted row", highlight),
+        ("the panel", super::PANEL_FILL),
+        ("a card", super::RAISED),
+        ("the highlighted row", super::HIGHLIGHTED_ROW.fill),
     ] {
-        let ratio = contrast_ratio(ring.color, fill.to_core());
+        let ratio = contrast_ratio(ring.color, fill);
         assert!(ratio >= 3.0, "on {name}: {ratio:.2}:1");
     }
     // The ring is drawn `offset` outside the element, so a strip of the
@@ -244,13 +222,9 @@ fn the_focus_ring_stands_out() {
 #[test]
 fn the_scrollbar_thumb_stands_out_against_the_panel() {
     use loom_canvas::contrast_ratio;
-    use loom_canvas::iced_convert::ToCore as _;
     let scroll = super::scroll();
     assert_eq!((scroll.width, scroll.inset, scroll.radius), (6.0, 2.0, 3.0));
-    let app = crate::tests::app();
-    let theme = app.theme();
-    let panel = theme.extended_palette().background.base.color;
-    let ratio = contrast_ratio(scroll.thumb, panel.to_core());
+    let ratio = contrast_ratio(scroll.thumb, super::PANEL_FILL);
     assert!(ratio >= 3.0, "{ratio:.2}:1");
 }
 
@@ -268,11 +242,8 @@ fn a_scroll_container_keeps_room_for_the_ring() {
 #[test]
 fn a_radio_note_and_mark_read_against_the_panel() {
     use loom_canvas::contrast_ratio;
-    use loom_canvas::iced_convert::ToCore as _;
-    let app = crate::tests::app();
-    let theme = app.theme();
-    let panel = theme.extended_palette().background.base.color.to_core();
-    let style = crate::iced_bridge::paint::panel_style(&theme);
+    let panel = super::PANEL_FILL;
+    let style = crate::iced_bridge::paint::panel_style();
     let note = contrast_ratio(style.quiet, panel);
     assert!(note >= 4.5, "the note: {note:.2}:1");
     let mark = contrast_ratio(style.mark, panel);
@@ -332,14 +303,11 @@ fn source_import_has_button(source: &str, n: usize) -> bool {
 /// `the_focus_ring_stands_out`.
 #[test]
 fn canvas_menu_contrast() {
-    use loom_canvas::iced_convert::ToCore as _;
     use loom_canvas::{MIN_TEXT_CONTRAST, Palette, contrast_ratio};
-    let theme = crate::tests::app().theme();
-    let palette = theme.extended_palette();
-    let fill = palette.background.base.color.to_core();
-    let hover = palette.background.weak.color.to_core();
-    let text = palette.background.base.text.to_core();
-    let edge = super::QUIET.to_core();
+    let fill = super::PANEL_FILL;
+    let hover = super::RAISED;
+    let text = super::TEXT;
+    let edge = super::QUIET;
     const { assert!(super::MENU_BORDER >= 1.0, "an edge one pixel wide at least") };
     for background in [Palette::default().background, Palette::default().tile, fill] {
         let ratio = contrast_ratio(edge, background);
@@ -453,9 +421,8 @@ fn the_role_tokens_meet_their_table() {
 #[test]
 fn help_links_read_and_stand_apart_from_the_text() {
     use loom_canvas::contrast_ratio;
-    let theme = crate::tests::app().theme();
-    let dialog = super::dialog(&theme);
-    let link = super::link(&theme);
+    let dialog = super::DIALOG;
+    let link = super::LINK;
     let on_dialog = contrast_ratio(link.colour, dialog.fill);
     assert!(on_dialog >= 4.5, "on the dialog: {on_dialog:.2}:1");
     let beside_text = contrast_ratio(link.colour, dialog.text);
@@ -463,7 +430,7 @@ fn help_links_read_and_stand_apart_from_the_text() {
         beside_text >= 3.0 || link.underline,
         "{beside_text:.2}:1 against the body text, and no underline"
     );
-    let quiet = contrast_ratio(loom_canvas::iced_convert::ToCore::to_core(super::QUIET), dialog.fill);
+    let quiet = contrast_ratio(super::QUIET, dialog.fill);
     assert!(quiet >= 4.5, "quiet text on the dialog: {quiet:.2}:1");
 }
 
@@ -473,13 +440,40 @@ fn help_links_read_and_stand_apart_from_the_text() {
 #[test]
 fn the_highlighted_row_reads_and_stands_out() {
     use loom_canvas::contrast_ratio;
-    let theme = crate::tests::app().theme();
-    let panel = super::floating_panel(&theme);
-    let row = super::highlighted_row(&theme);
+    let panel = super::FLOATING_PANEL;
+    let row = super::HIGHLIGHTED_ROW;
     let text = contrast_ratio(panel.text, row.fill);
     assert!(text >= 4.5, "text on the row: {text:.2}:1");
-    let quiet = contrast_ratio(loom_canvas::iced_convert::ToCore::to_core(super::QUIET), row.fill);
+    let quiet = contrast_ratio(super::QUIET, row.fill);
     assert!(quiet >= 4.5, "quiet text on the row: {quiet:.2}:1");
     let outline = contrast_ratio(row.border, panel.fill);
     assert!(outline >= 3.0, "the outline: {outline:.2}:1");
+}
+
+/// The palette tokens are the exact shades Iced's theme gives for the
+/// app's six palette colours, so nothing drawn changes as the panels move
+/// from the theme to the tokens (plan for leaving Iced, phase 4, P3).
+#[test]
+fn the_palette_tokens_are_the_theme_shades() {
+    use loom_canvas::iced_convert::ToCore as _;
+    let theme = crate::tests::app().theme();
+    let palette = theme.extended_palette();
+    let half = |c: iced::Color| c.scale_alpha(0.5).to_core();
+    for (name, token, shade) in [
+        ("PANEL_FILL", super::PANEL_FILL, palette.background.base.color.to_core()),
+        ("PANEL_FILL", super::PANEL_FILL, theme.palette().background.to_core()),
+        ("TEXT", super::TEXT, palette.background.base.text.to_core()),
+        ("TEXT", super::TEXT, palette.background.weak.text.to_core()),
+        ("TEXT", super::TEXT, theme.palette().text.to_core()),
+        ("ACCENT", super::ACCENT, palette.primary.base.color.to_core()),
+        ("ACCENT", super::ACCENT, theme.palette().primary.to_core()),
+        ("RAISED", super::RAISED, palette.background.weak.color.to_core()),
+        ("EDGE", super::EDGE, palette.background.strong.color.to_core()),
+        ("CARD_FILL", super::CARD_FILL, half(palette.background.weak.color)),
+        ("CARD_BORDER", super::CARD_BORDER, half(palette.background.strong.color)),
+        ("ACCENT_WEAK", super::ACCENT_WEAK, palette.primary.weak.color.to_core()),
+        ("DANGER_EDGE", super::DANGER_EDGE, palette.danger.strong.color.to_core()),
+    ] {
+        assert_eq!(token, shade, "{name}");
+    }
 }

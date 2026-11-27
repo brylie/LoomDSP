@@ -255,7 +255,7 @@ impl Surface {
             loom_ui_core::Point::ORIGIN,
             loom_ui_core::Size::new(size.width, size.height),
         );
-        let panel_style = super::paint::panel_style(&theme);
+        let panel_style = super::paint::panel_style();
         let panels = super::paint::paint_sides(whole, |layer, list| {
             panels.paint(layer, &mut ListPainter::new(&text, list), &panel_style);
         });
