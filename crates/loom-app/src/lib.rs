@@ -2655,7 +2655,7 @@ impl App {
 /// Inspector help text, shown with nothing selected. It lists every canvas
 /// gesture and shortcut (#16), so keep it in step with `PatchCanvas::handle`
 /// and the key handling in `loom-canvas/src/widget/input.rs` and `panel_input.rs`.
-pub(crate) const HELP: &str = "Double-click empty canvas to open the module browser there.\n\
+pub(crate) const HELP: &str = "Double-click or right-click empty canvas to open the module browser there.\n\
 Drag from a port to patch a cable. Drag a connected input to move or remove its cable.\n\
 Drag tiles to move them. Shift-click or drag a box to select several. Cmd/Ctrl+A selects all.\n\
 Delete or Backspace removes the selection.\n\

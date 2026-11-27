@@ -709,9 +709,17 @@ impl CanvasModel<'_> {
                             self.emit(out, CanvasEvent::ButtonReleased { module, widget });
                         }
                     }
+                    // A right-click that did not move: on empty canvas it
+                    // opens the module browser there, as a double-click does
+                    // (module-browser.md, Opening the browser); on an output,
+                    // a cable, or a tile, its menu. A right-drag panned.
                     Interaction::Panning { click: Some(_), .. } => {
                         if let (Some(world), Some(screen)) = (world, screen) {
-                            self.open_probe_menu(state, world, screen, bounds, out);
+                            if matches!(self.hit(state, world), Hit::Nothing) {
+                                self.open_browser(BrowserPlacement::Pointer(world), screen, bounds, out);
+                            } else {
+                                self.open_probe_menu(state, world, screen, bounds, out);
+                            }
                         }
                     }
                     // The pan is over: the app learns the view once, not on

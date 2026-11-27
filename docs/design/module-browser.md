@@ -28,6 +28,7 @@ Before the browser, the toolbar had a drop-down of module IDs and an Add button.
 | `A` with the pointer over the canvas | At the pointer | At the pointer, snapped to the grid |
 | `A` while the canvas has the keys and the pointer is elsewhere | At the centre of the canvas | Nearest free grid position to the centre of the visible canvas |
 | Double-click on empty canvas | At the pointer | At the click, snapped to the grid |
+| Right-click on empty canvas, with no move between press and release | At the pointer | At the click, snapped to the grid |
 | "Add module" button in the toolbar | At the centre of the canvas | Nearest free grid position to the centre of the visible canvas |
 
 The panel's corner goes at that point, moved in as needed so the whole panel stays inside the canvas. *Why:* the toolbar button opens it at the canvas centre, not under the button, because only the canvas knows its camera, and so where the centre is in the patch.
@@ -89,7 +90,7 @@ A screen reader finds the browser as a dialog named "Add module": the search fie
 
 ### Adding
 
-- When A or a double-click gives a pointer position, the tile’s top-left corner goes there, snapped to the grid, even when it overlaps another tile.
+- When A, a double-click, or a right-click gives a pointer position, the tile’s top-left corner goes there, snapped to the grid, even when it overlaps another tile.
 - **Toolbar placement (Agreed).** The toolbar supplies no pointer position. Put the tile’s top-left corner on the nearest free grid point to the visible canvas centre where the whole tile fits. Leave one grid step between tiles so the port jacks stay clear. Measure straight-line distance, breaking ties by top then left. If the view is full or too small, use the nearest free grid point even if the tile extends outside the view. This applies to every kind of browser row.
 - The new module becomes the only selection.
 - Adding is one undo step ([undo.md](undo.md)). Undo removes the module.
@@ -117,6 +118,7 @@ A screen reader finds the browser as a dialog named "Add module": the search fie
 - [x] With the pointer outside the canvas, `A` opens the browser and Enter adds the chosen module (`keys_add_connect_edit_and_save_with_the_pointer_outside`).
 - [ ] Typing a query and pressing Enter adds the highlighted module with its top-left at the snapped pointer position, selects it, and closes the browser. (test for placement; manual for the gesture)
 - [ ] Double-click on empty canvas opens the browser there. Double-click on a control still resets the control. (manual)
+- [x] A right-click on empty canvas opens the browser there, and the module added goes at the click, snapped to the grid; a right-drag pans and opens nothing (`right_click_on_empty_canvas_opens_the_browser_there`, `a_right_click_on_empty_canvas_opens_the_browser_and_adds_there`).
 - [ ] The toolbar button opens the browser and adds at the nearest free position to the centre of the visible canvas. (test)
 - [x] Escape and a click outside close the browser and change nothing (`browser::panel::tests::the_menu_key_opens_the_menu_and_escape_closes_it_first`, `a_press_outside_the_menu_closes_it_and_outside_both_closes_both`).
 - [ ] While the browser is open, typing `f`, Space, Backspace, or Delete edits the query and does not act on the canvas. (manual)
@@ -138,6 +140,7 @@ None. Settled when the spec was agreed:
 
 - **The open key is `A`.** Tab was suggested in the issue, but it already moves focus between a selected module's controls ([panels.md](panels.md)).
 - **Double-click on empty canvas opens the browser too.** It needs no keyboard. A double-click on a control still resets it.
+- **So does a right-click on empty canvas** (Brylie's decision, 2026-11-28: "Build it now"). One click, as a right-click opens the probe menu on an output; a right-drag still pans, by the same 4-pixel allowance ([panels](panels.md), Add scope and Add meter). It replaces the empty-canvas menu the canvas context menu planned (Add module here, Paste here, Select all): Paste and Select all keep their keys, Cmd+V at the pointer and Cmd+A.
 - **Auto-connect from a port** is left for a later issue.
 - **Every registered module is listed.** Hiding modules waits until one needs it.
 - **A library item's menu follows the menu keys** (settled 2026-11-12). Before, any key closed it, and Enter inserted a copy while the menu showed Insert linked, which a keyboard or screen reader user could not get past.

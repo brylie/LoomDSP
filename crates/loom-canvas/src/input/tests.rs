@@ -3602,6 +3602,48 @@ fn right_drag_pans_and_opens_no_menu() {
     assert!(events.is_empty(), "{events:?}");
 }
 
+/// A right-click on empty canvas, with no move, opens the module browser
+/// at the click, placed at the pointer as a double-click places it
+/// (module-browser.md, Opening the browser). A right-drag from the same
+/// place pans and opens nothing, even when it ends where it began.
+#[test]
+fn right_click_on_empty_canvas_opens_the_browser_there() {
+    let scene = chain();
+    let selected = BTreeSet::new();
+    let canvas = CanvasModel::new(&scene, &selected);
+    let empty = Point::new(300.0, 500.0);
+    let mut state = CanvasInput::default();
+    let events = right_click(&canvas, &mut state, empty);
+    let world = state.camera.to_world(empty);
+    assert!(
+        matches!(
+            events.as_slice(),
+            [CanvasEvent::OpenBrowser {
+                placement: BrowserPlacement::Pointer(at_world),
+                at,
+                ..
+            }] if *at == empty && *at_world == world
+        ),
+        "{events:?}"
+    );
+
+    let mut state = CanvasInput::default();
+    let mut events = drive(&canvas, &mut state, &click(PointerButton::Right), empty);
+    let moved = Event::Pointer(PointerEvent::Moved);
+    events.extend(drive(&canvas, &mut state, &moved, empty + Vector::new(30.0, 0.0)));
+    events.extend(drive(&canvas, &mut state, &moved, empty));
+    events.extend(drive(
+        &canvas,
+        &mut state,
+        &Event::Pointer(PointerEvent::Released(PointerButton::Right)),
+        empty,
+    ));
+    assert!(
+        !events.iter().any(|e| matches!(e, CanvasEvent::OpenBrowser { .. })),
+        "a right-drag pans: {events:?}"
+    );
+}
+
 /// Letting go of another button during a right click opens no menu and
 /// keeps the click, so the right release still opens it.
 #[test]
@@ -3634,7 +3676,8 @@ fn only_the_right_release_opens_the_menu() {
     assert!(matches!(right.as_slice(), [CanvasEvent::ProbeMenu { .. }]), "{right:?}");
 }
 
-/// A tile opens its menu; an input, empty canvas, and middle click do not.
+/// A tile opens its menu; an input and a middle click open nothing. Empty
+/// canvas opens the module browser instead (the next test).
 #[test]
 fn right_click_elsewhere_opens_no_menu() {
     let scene = chain();
@@ -3656,10 +3699,8 @@ fn right_click_elsewhere_opens_no_menu() {
             ..
         }]
     ));
-    for at in [input, Point::new(300.0, 500.0)] {
-        let events = right_click(&canvas, &mut CanvasInput::default(), at);
-        assert!(events.is_empty(), "{at:?}: {events:?}");
-    }
+    let events = right_click(&canvas, &mut CanvasInput::default(), input);
+    assert!(events.is_empty(), "{input:?}: {events:?}");
     let output = scene
         .port_position(PortRef {
             module: 1,

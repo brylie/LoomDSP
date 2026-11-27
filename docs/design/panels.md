@@ -304,7 +304,7 @@ The first display module that shows a signal over time.
 
 A one-step gesture on a cable or an output places a scope or a level meter next to it, already connected. *Why:* a probe should be as quick as a glance, but the result is an ordinary module you can keep, move into a sub-patch, or put on a front panel.
 
-- **Right-click** an output port or a cable to open a small menu with **Add scope** and **Add meter**. A right-drag still pans the canvas: the menu opens only if the pointer moved no more than 4 screen pixels between press and release, the same allowance as a double-click. Right-clicking anything else opens no menu.
+- **Right-click** an output port or a cable to open a small menu with **Add scope** and **Add meter**. A right-drag still pans the canvas: the menu opens only if the pointer moved no more than 4 screen pixels between press and release, the same allowance as a double-click. Right-clicking empty canvas opens the module browser there ([module browser](module-browser.md), Opening the browser). Right-clicking anything else opens no menu.
 - The menu closes when an item is chosen, on Escape, or on a click outside it. While it is open, the canvas takes no pointer or key input, as with the module browser, so it cannot pan or zoom away from the menu.
 - **What it connects:** a new cable from the output to the new module's `in`. On a cable, the output is the cable's source. The cable stays as it is. *Why:* the sound path does not change, and outputs can feed many inputs.
 - **Where it goes:** with its top-left corner 3 grid units right of the output port, or of the point clicked on the cable, and its `in` port as close to the same height as the grid allows. If that overlaps a tile, it moves down in steps of 2 grid units until it does not.
@@ -322,28 +322,28 @@ A right-click opens a menu for what is under the pointer. Right-clicking a tile 
 |---|---|
 | One tile | Copy, Duplicate, Delete, Help. A sub-patch adds Open, Dissolve, and Save to library ([sub-patches](sub-patches.md)). |
 | A tile in a selection of several | Copy, Duplicate, Delete, Make sub-patch |
-| Empty canvas | Add module here (opens the module browser and places the module at the point), Paste here, Select all |
+| Empty canvas | No menu: a right-click opens the module browser there, and the module goes at the point (Brylie's decision, 2026-11-28, [module browser](module-browser.md)). Paste and Select all keep their keys, Cmd+V at the pointer and Cmd+A. Was: Add module here, Paste here, Select all |
 | An output | Add scope, Add meter, Disconnect all |
 | An input with a cable | Disconnect |
 | A cable | Add scope, Add meter, Delete cable |
 
 - Each item shows its shortcut on the right. An item that cannot act now is shown dimmed, not hidden. *Why:* the menu teaches the shortcuts, and items that move around are hard to find.
-- **Keyboard:** Shift+F10, or the Menu key, opens the menu for the focused control's module, else the selection, else the canvas centre. Up and Down move, Enter acts, Escape closes (NFR-UX-01).
+- **Keyboard:** Shift+F10, the Menu key, or Alt+Enter ([UI layer](ui-layer.md), section 6, rule 13) opens the menu for the focused control's module, else the selection; with neither, nothing opens, since empty canvas has no menu. Up and Down move, Enter acts, Escape closes (NFR-UX-01).
 - It stays a pop-up over the window: while it is open, the canvas takes no input, as for the probe menu.
 - The control channel can open it and pick an item by name, as it does for the probe menu.
 
 ### Acceptance criteria: canvas context menu
 
 - [ ] Each target gets the items in the table, dimmed when they cannot act (`Ui` harness).
-- [ ] Paste here places the pasted modules at the pointer; Add module here places the new module there (`Ui` harness).
-- [ ] Shift+F10 opens the menu for the selection, and the arrows and Enter pick an item (`Ui` harness).
+- [ ] Cmd+V places the pasted modules at the pointer, and a right-click on empty canvas places the new module there (`Ui` harness). Was: Paste here and Add module here, before the empty-canvas menu gave way to the browser (2026-11-28).
+- [ ] Shift+F10 or Alt+Enter opens the menu for the selection, and the arrows and Enter pick an item (`Ui` harness).
 - [ ] The Add scope and Add meter tests still pass.
 
 ### Insert onto a cable
 
 **Status:** Draft ([#835](https://github.com/brylie/LoomDSP/issues/835), FR-CANVAS-08).
 
-Open **Insert module…** on one cable, or open the context menu of its focused connected input with Shift+F10 or the Menu key and choose the same action. The connected input identifies one cable even when its source feeds several destinations. Use the keyboard port navigation from [#524](https://github.com/brylie/LoomDSP/issues/524) to reach that input. Both paths open the module browser for the chosen cable.
+Open **Insert module…** on one cable, or open the context menu of its focused connected input with Shift+F10, the Menu key, or Alt+Enter and choose the same action. The connected input identifies one cable even when its source feeds several destinations. Use the keyboard port navigation from [#524](https://github.com/brylie/LoomDSP/issues/524) to reach that input. Both paths open the module browser for the chosen cable.
 
 Offer built-in processors with one matching input and one matching output. Match each port's declared signal type to the endpoint it faces and apply the ordinary graph checks, including bundle widths. This is a filter for insertion. Ordinary cable connections still follow their existing rules. Leave modules with several matching pairs out of this first slice. After the player picks a module, show its snapped position, both named ports, and the highlighted cable. Click to place the preview on that cable, or press Enter at the preview's default snapped position beside it. The preview's accessible name includes both endpoints and the proposed pair. Escape cancels.
 
@@ -359,7 +359,7 @@ At confirmation, recheck the chosen endpoints and port pair. If the cable change
 - [x] A patch that makes infinity at the output counts silenced samples and shows the error message for 10 seconds after the last one; clipping with safety Off shows the warning (test).
 - [x] Its parameters are `window`, `auto`, `level`, and `slope`, with the ranges above. Its panel has a knob, a toggle, and a knob for the first three, and `slope` is in the inspector.
 - [x] `ScopeTrace` with a fixed level triggers on that level, and runs free when nothing crosses it. With `auto` on it behaves as before.
-- [x] Right-clicking an output or a cable opens the menu. A right-drag pans and opens no menu. Right-clicking a tile opens its own menu, including Help. An input or empty canvas opens no menu.
+- [x] Right-clicking an output or a cable opens the menu. A right-drag pans and opens no menu. Right-clicking a tile opens its own menu, including Help. An input opens no menu, and empty canvas opens the module browser.
 - [x] Add scope and Add meter, on an output and on a cable, place a module whose `in` is connected to that output, next to it and overlapping no tile. The cable that was clicked stays. The new module is selected.
 - [x] Undo removes the new module and its cable in one step.
 - [x] Escape and a click outside close the menu and add nothing. While it is open, keys do not reach the canvas.
