@@ -716,6 +716,7 @@ where
         let key = event.key_without_modifiers();
         let converted = events::key(
             &key,
+            event.physical_key,
             event.state,
             event.repeat,
             event.text.as_deref(),

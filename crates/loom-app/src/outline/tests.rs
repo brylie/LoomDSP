@@ -1,8 +1,8 @@
 use super::*;
-use crate::ui_test::{Ui, key_press};
-use iced::keyboard::Modifiers;
+use crate::ui_test::Ui;
+use loom_ui_core::{Key, Modifiers};
 
-const NONE: Modifiers = Modifiers::empty();
+const NONE: Modifiers = Modifiers::NONE;
 
 /// The examples keep their saved module IDs.
 fn row(module: u32) -> UiId {
@@ -15,12 +15,17 @@ fn focused(ui: &mut Ui) -> UiId {
 }
 
 /// Pushes a key by position with the letter a particular layout gave it.
-fn physical(ui: &mut Ui, code: Code, letter: &str, modifiers: Modifiers) {
-    let mut press = key_press(Key::Character(letter.into()), modifiers, Some(letter), false);
-    if let iced::Event::Keyboard(keyboard::Event::KeyPressed { physical_key, .. }) = &mut press {
-        *physical_key = Physical::Code(code);
-    }
-    ui.step(&[press]);
+fn physical(ui: &mut Ui, code: Code, letter: char, modifiers: Modifiers) {
+    let press = KeyEvent::Pressed {
+        key: Key::Character(letter),
+        code,
+        modifiers,
+        repeat: false,
+        text: Some(letter.to_string()),
+    };
+    ui.step(&[iced::Event::Keyboard(loom_canvas::iced_convert::key_event_to_iced(
+        &press, modifiers,
+    ))]);
 }
 
 /// The subtractive patch reads in signal order, with monitors and Transport at the end.
@@ -86,21 +91,21 @@ fn physical_brackets_follow_a_cable_and_return_to_the_start() {
     let filter = tile_named(ui.app(), "SVF");
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![saw])));
     let initial = ui.app().session.edits.history.len();
-    physical(&mut ui, Code::BracketRight, "+", NONE);
+    physical(&mut ui, Code::BracketRight, '+', NONE);
     assert_eq!(ui.app().session.selection, [filter].into());
     ui.redraw();
     let canvas = ui.canvas();
     let centre = ui.app().session.scene.module(filter).unwrap().bounds().center();
     let offset = canvas.camera.visible(canvas.bounds.size()).center() - centre;
     assert!(offset.x.hypot(offset.y) < 0.01);
-    physical(&mut ui, Code::BracketRight, "+", NONE);
+    physical(&mut ui, Code::BracketRight, '+', NONE);
     assert!(ui.app().session.outline.has_jump());
     assert_eq!(ui.a11y_tree().focused().role(), accesskit::Role::ListBoxOption);
-    ui.tap(Key::Named(Named::Escape), NONE);
-    physical(&mut ui, Code::BracketLeft, "ü", Modifiers::COMMAND);
+    ui.tap(Key::Escape, NONE);
+    physical(&mut ui, Code::BracketLeft, 'ü', Modifiers::platform_shortcut());
     assert_eq!(ui.app().session.selection, [saw].into());
-    physical(&mut ui, Code::BracketRight, "+", NONE);
-    physical(&mut ui, Code::BracketLeft, "ü", NONE);
+    physical(&mut ui, Code::BracketRight, '+', NONE);
+    physical(&mut ui, Code::BracketLeft, 'ü', NONE);
     if ui.app().session.outline.has_jump() {
         let picked = ui
             .app()
@@ -114,9 +119,9 @@ fn physical_brackets_follow_a_cable_and_return_to_the_start() {
             .position(|choice| choice.target == Target::Tile(saw))
             .unwrap();
         for _ in 0..picked {
-            ui.tap(Key::Named(Named::ArrowDown), NONE);
+            ui.tap(Key::Down, NONE);
         }
-        ui.tap(Key::Named(Named::Enter), NONE);
+        ui.tap(Key::Enter, NONE);
     }
     assert_eq!(ui.app().session.selection, [saw].into());
     assert_eq!(ui.app().session.edits.history.len(), initial);
@@ -128,21 +133,21 @@ fn outline_keyboard_moves_and_expands_rows_without_editing() {
     let mut ui = Ui::open("subtractive.ron");
     let first_count = ui.app().session.scene.modules().len();
     let saw = tile_named(ui.app(), "Saw");
-    ui.tap(Key::Character("o".into()), NONE);
+    ui.tap(Key::Character('o'), NONE);
     assert_eq!(focused(&mut ui), row_id("summary".into()));
-    ui.tap(Key::Named(Named::ArrowDown), NONE);
+    ui.tap(Key::Down, NONE);
     assert_eq!(focused(&mut ui), row(tile_named(ui.app(), "MIDI Note")));
-    ui.tap(Key::Named(Named::ArrowUp), NONE);
+    ui.tap(Key::Up, NONE);
     assert_eq!(focused(&mut ui), row_id("summary".into()));
-    ui.tap(Key::Named(Named::End), NONE);
+    ui.tap(Key::End, NONE);
     let end = ui.app().outline_rows().last().unwrap().id.clone();
     assert_eq!(focused(&mut ui), end);
-    ui.tap(Key::Named(Named::Home), NONE);
+    ui.tap(Key::Home, NONE);
     assert_eq!(focused(&mut ui), row_id("summary".into()));
-    ui.tap(Key::Character("s".into()), NONE);
+    ui.tap(Key::Character('s'), NONE);
     assert_eq!(focused(&mut ui), row(saw));
-    ui.tap(Key::Named(Named::ArrowRight), NONE);
-    ui.tap(Key::Named(Named::ArrowRight), NONE);
+    ui.tap(Key::Right, NONE);
+    ui.tap(Key::Right, NONE);
     // On the Saw's first connection: a row of its own, one level in, with
     // the Saw as its parent (each row has one key under the list).
     let child = focused(&mut ui);
@@ -153,14 +158,14 @@ fn outline_keyboard_moves_and_expands_rows_without_editing() {
             .any(|r| r.id == child && r.parent.as_ref() == Some(&row(saw))),
         "{child}"
     );
-    ui.tap(Key::Named(Named::ArrowLeft), NONE);
+    ui.tap(Key::Left, NONE);
     assert_eq!(focused(&mut ui), row(saw));
-    ui.tap(Key::Named(Named::Space), NONE);
-    ui.tap(Key::Named(Named::Delete), NONE);
+    ui.tap(Key::Space, NONE);
+    ui.tap(Key::Delete, NONE);
     assert_eq!(ui.app().session.scene.modules().len(), first_count);
-    ui.tap(Key::Named(Named::Escape), NONE);
+    ui.tap(Key::Escape, NONE);
     assert_eq!(ui.app().right_tab, crate::matrix::Tab::Outline);
-    ui.tap(Key::Named(Named::Tab), Modifiers::CTRL);
+    ui.tap(Key::Tab, Modifiers::CONTROL);
     assert_eq!(focused(&mut ui), row(saw));
 }
 
@@ -185,7 +190,7 @@ fn map_visibility_and_clicks_use_the_live_camera() {
     camera.zoom_at(Point::new(view.bounds.width / 2.0, view.bounds.height / 2.0), 3.0);
     assert!(map.bounds(scene, camera, view.bounds).is_some());
 
-    ui.tap(Key::Character("m".into()), NONE);
+    ui.tap(Key::Character('m'), NONE);
     let canvas = ui.canvas();
     let area = ui
         .app()
@@ -203,11 +208,11 @@ fn map_visibility_and_clicks_use_the_live_camera() {
     ui.press();
     ui.release();
     assert_ne!(ui.canvas().camera.origin, canvas.camera.origin);
-    ui.tap(Key::Character("m".into()), NONE);
+    ui.tap(Key::Character('m'), NONE);
     assert_eq!(mode(&ui), MapMode::Hidden);
     assert_eq!(Store::open(Some(preferences)).0.saved().patch_map, MapMode::Hidden);
     assert!(ui.app().map_view().is_none());
-    ui.tap(Key::Character("m".into()), NONE);
+    ui.tap(Key::Character('m'), NONE);
     assert_eq!(mode(&ui), MapMode::Auto);
 }
 
@@ -289,18 +294,18 @@ fn the_map_viewport_can_be_dragged_to_pan() {
 /// Presses the next or previous region shortcut.
 fn region(ui: &mut Ui, backwards: bool) {
     let modifiers = if backwards {
-        Modifiers::CTRL | Modifiers::SHIFT
+        Modifiers::CONTROL | Modifiers::SHIFT
     } else {
-        Modifiers::CTRL
+        Modifiers::CONTROL
     };
-    ui.tap(Key::Named(Named::Tab), modifiers);
+    ui.tap(Key::Tab, modifiers);
 }
 
 /// Selects a tile, opens its multi-target jump list, and checks the spoken choice.
 fn open_branch(ui: &mut Ui) {
     let filter = tile_named(ui.app(), "SVF");
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![filter])));
-    physical(ui, Code::BracketRight, "]", NONE);
+    physical(ui, Code::BracketRight, ']', NONE);
     let jump = ui.app().session.outline.jump.as_ref().expect("two destinations");
     assert_eq!(
         jump.choices
@@ -322,9 +327,9 @@ fn the_jump_list_only_takes_its_navigation_keys_and_closes_on_click() {
 
     let _ = fake::asked();
     fake::answer_save(None);
-    ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('s'), Modifiers::platform_shortcut());
     assert!(matches!(fake::asked().as_slice(), [fake::Asked::Save(_)]));
-    let log = ui.tap(Key::Named(Named::Space), NONE);
+    let log = ui.tap(Key::Space, NONE);
     assert!(
         log.iter()
             .any(|message| matches!(message, Message::Canvas(loom_canvas::CanvasEvent::ToggleRun)))
@@ -337,7 +342,7 @@ fn the_jump_list_only_takes_its_navigation_keys_and_closes_on_click() {
     ui.release();
     assert!(!ui.app().session.outline.has_jump());
     fake::answer_save(None);
-    ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('s'), Modifiers::platform_shortcut());
     assert!(matches!(fake::asked().as_slice(), [fake::Asked::Save(_)]));
 }
 
@@ -355,7 +360,7 @@ fn leaving_a_tab_or_deleting_the_jump_source_dismisses_the_list() {
     let filter = tile_named(ui.app(), "SVF");
     let centre = ui.canvas().bounds.center();
     ui.move_to(centre);
-    ui.tap(Key::Named(Named::Delete), NONE);
+    ui.tap(Key::Delete, NONE);
     assert!(ui.app().session.scene.module(filter).is_none());
     assert!(!ui.app().session.outline.has_jump());
 }
@@ -365,9 +370,9 @@ fn leaving_a_tab_or_deleting_the_jump_source_dismisses_the_list() {
 fn ctrl_tab_restores_canvas_and_inspector_focus_in_both_directions() {
     let mut ui = Ui::open("subtractive.ron");
     let filter = tile_named(ui.app(), "SVF");
-    ui.tap(Key::Character("o".into()), NONE);
+    ui.tap(Key::Character('o'), NONE);
     ui.send(Message::OutlineRow(row(filter)));
-    ui.tap(Key::Named(Named::Enter), NONE);
+    ui.tap(Key::Enter, NONE);
     ui.redraw();
     let canvas = focused(&mut ui);
     assert!(canvas.is_under(&crate::a11y::tree::tile_id(filter)), "{canvas}");
@@ -395,8 +400,8 @@ fn ctrl_tab_restores_canvas_and_inspector_focus_in_both_directions() {
 #[test]
 fn region_keys_wrap_around_and_restore_the_outline_row() {
     let mut ui = Ui::open("subtractive.ron");
-    ui.tap(Key::Character("o".into()), NONE);
-    ui.tap(Key::Named(Named::ArrowDown), NONE);
+    ui.tap(Key::Character('o'), NONE);
+    ui.tap(Key::Down, NONE);
     let outline = focused(&mut ui);
     region(&mut ui, true);
     assert!(!focused(&mut ui).is_under(&tree_id()));
@@ -417,14 +422,14 @@ fn region_keys_wrap_around_and_restore_the_outline_row() {
 fn a_module_row_enters_the_canvas_and_o_returns_to_the_same_row() {
     let mut ui = Ui::open("subtractive.ron");
     let filter = tile_named(ui.app(), "SVF");
-    ui.tap(Key::Character("o".into()), NONE);
+    ui.tap(Key::Character('o'), NONE);
     ui.send(Message::OutlineRow(row(filter)));
-    ui.tap(Key::Named(Named::Enter), NONE);
+    ui.tap(Key::Enter, NONE);
     ui.redraw();
     assert!(ui.app().a11y.focus().is_some_and(|(id, _)| id == filter));
-    ui.tap(Key::Named(Named::Escape), NONE);
+    ui.tap(Key::Escape, NONE);
     assert!(!focused(&mut ui).is_under(&tree_id()));
-    ui.tap(Key::Character("o".into()), NONE);
+    ui.tap(Key::Character('o'), NONE);
     assert_eq!(focused(&mut ui), row(filter));
 }
 
@@ -637,7 +642,7 @@ fn drawing_changes_preserve_the_structure_and_a_cable_rebuilds_it() {
     let scope = tile_named(app, "Scope");
     let saw = tile_named(app, "Saw");
     let multiply = tile_named(app, "Multiply 6");
-    ui.tap(Key::Character("o".into()), NONE);
+    ui.tap(Key::Character('o'), NONE);
     ui.send(Message::OutlineRow(row(scope)));
     let mut camera = ui.canvas().camera;
     camera.origin += Vector::new(50.0, 10.0);
@@ -780,27 +785,27 @@ fn outline_cable_choices_reveal_a_destination_in_a_collapsed_section() {
     let saw = tile_named(ui.app(), "Saw");
     let filter = tile_named(ui.app(), "SVF");
     let scope = tile_named(ui.app(), "Scope");
-    ui.tap(Key::Character("o".into()), NONE);
+    ui.tap(Key::Character('o'), NONE);
     ui.send(Message::OutlineRow(row(saw)));
-    physical(&mut ui, Code::BracketRight, "]", NONE);
+    physical(&mut ui, Code::BracketRight, ']', NONE);
     assert_eq!(focused(&mut ui), row(filter));
-    physical(&mut ui, Code::BracketLeft, "[", Modifiers::COMMAND);
+    physical(&mut ui, Code::BracketLeft, '[', Modifiers::platform_shortcut());
     assert_eq!(focused(&mut ui), row(saw));
 
     let section = row_id("not-heard".into());
     ui.send(Message::OutlineRow(section.clone()));
-    ui.tap(Key::Named(Named::ArrowLeft), NONE);
+    ui.tap(Key::Left, NONE);
     assert!(!ui.app().outline_rows().iter().any(|r| r.id == row(scope)));
     ui.send(Message::OutlineRow(row(filter)));
-    ui.tap(Key::Named(Named::ArrowRight), NONE);
+    ui.tap(Key::Right, NONE);
     let output = row_id(format!("module-{filter}-output-lowpass"));
     ui.send(Message::OutlineRow(output));
-    ui.tap(Key::Named(Named::Enter), NONE);
+    ui.tap(Key::Enter, NONE);
     assert!(ui.app().session.outline.has_jump());
-    ui.tap(Key::Named(Named::ArrowDown), NONE);
-    ui.tap(Key::Named(Named::ArrowUp), NONE);
+    ui.tap(Key::Down, NONE);
+    ui.tap(Key::Up, NONE);
     assert_eq!(ui.a11y_tree().focused().name(), Some("Lowpass to Scope In"));
-    ui.tap(Key::Named(Named::Enter), NONE);
+    ui.tap(Key::Enter, NONE);
     assert_eq!(focused(&mut ui), row(scope));
     assert!(
         ui.app()
@@ -823,11 +828,11 @@ fn down_visits_every_tile_and_monitor_only_sections_survive_a_pan() {
     let mut ui = Ui::with_app(app);
     let heard = &ui.app().session.patch_map.structure.heard;
     assert!(!heard.contains(&scope) && !heard.contains(&monitor.0));
-    ui.tap(Key::Character("o".into()), NONE);
+    ui.tap(Key::Character('o'), NONE);
     let rows = ui.app().outline_rows();
     let mut visited = BTreeSet::new();
     for expected in rows.iter().skip(1) {
-        ui.tap(Key::Named(Named::ArrowDown), NONE);
+        ui.tap(Key::Down, NONE);
         assert_eq!(focused(&mut ui), expected.id);
         if let Some(Target::Tile(module)) = expected.target {
             assert_ne!(expected.expanded, Some(true));
@@ -879,7 +884,7 @@ fn tile_moves_reorder_independent_modules_only_at_the_end() {
     app.session.positions.insert(second.0, (0.0, 500.0));
     app.commit();
     let mut ui = Ui::with_app(app);
-    ui.tap(Key::Character("o".into()), NONE);
+    ui.tap(Key::Character('o'), NONE);
     ui.send(Message::OutlineRow(row(second.0)));
     let order = [Unit::Tile(first.0), Unit::Tile(second.0)];
     let moved_tiles = |ui: &Ui| {
@@ -910,7 +915,7 @@ fn region_keys_remember_a_later_inspector_field() {
     let mut ui = Ui::open("subtractive.ron");
     region(&mut ui, false);
     assert_eq!(focused(&mut ui), crate::patch_info::authors_part());
-    ui.tap(Key::Named(Named::Tab), NONE);
+    ui.tap(Key::Tab, NONE);
     assert_eq!(focused(&mut ui), crate::patch_info::tags_part());
     region(&mut ui, false);
     assert!(focused(&mut ui).is_under(&crate::a11y::tree::toolbar_id()));
@@ -935,23 +940,23 @@ fn toolbar_region_keys_move_the_runtime_focus() {
         "the first button the first time"
     );
     assert_eq!(focused(&mut ui), stops[0]);
-    ui.tap(Key::Named(Named::ArrowRight), NONE);
+    ui.tap(Key::Right, NONE);
     assert_eq!(ui.runtime().focused(), Some(&stops[1]));
-    ui.tap(Key::Named(Named::ArrowLeft), NONE);
-    ui.tap(Key::Named(Named::ArrowLeft), NONE);
+    ui.tap(Key::Left, NONE);
+    ui.tap(Key::Left, NONE);
     assert_eq!(ui.runtime().focused(), Some(&stops[0]), "Left stops at the first");
-    ui.tap(Key::Named(Named::End), NONE);
+    ui.tap(Key::End, NONE);
     let last = stops.last().unwrap();
     assert_eq!(ui.runtime().focused(), Some(last));
     assert_eq!(focused(&mut ui), *last);
-    ui.tap(Key::Named(Named::Home), NONE);
-    ui.tap(Key::Named(Named::ArrowRight), NONE);
+    ui.tap(Key::Home, NONE);
+    ui.tap(Key::Right, NONE);
     // Away to the right column and back: the toolbar remembers its button.
     region(&mut ui, true);
     assert!(!ui.app().toolbar_has_focus());
     region(&mut ui, false);
     assert_eq!(ui.runtime().focused(), Some(&stops[1]), "the button last focused");
-    ui.tap(Key::Named(Named::Escape), NONE);
+    ui.tap(Key::Escape, NONE);
     assert!(!ui.app().toolbar_has_focus(), "Escape leaves the toolbar");
     assert!(!focused(&mut ui).is_under(&crate::a11y::tree::toolbar_id()));
 }
@@ -1013,7 +1018,7 @@ fn ctrl_tab_from_the_toolbar_to_an_inspector_field_focuses_it() {
 #[test]
 fn a_reader_focus_on_the_toolbar_takes_it_from_the_outline() {
     let mut ui = Ui::open("subtractive.ron");
-    ui.tap(Key::Character("o".into()), NONE);
+    ui.tap(Key::Character('o'), NONE);
     assert!(focused(&mut ui).is_under(&tree_id()), "an outline row");
     let new = crate::a11y::tree::toolbar_id().with("new");
     ui.a11y_action(&new, accesskit::Action::Focus);

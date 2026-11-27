@@ -18,8 +18,8 @@ const FILTER: u32 = 4;
 /// Past the 500 ms an arrow group stays open after a release.
 const PAST_GROUP: Duration = Duration::from_millis(600);
 
-fn right() -> keyboard::Key {
-    keyboard::Key::Named(keyboard::key::Named::ArrowRight)
+fn right() -> Key {
+    Key::Right
 }
 
 /// Opens the patch and gives the filter's Cutoff knob the keys, as a click does.
@@ -67,7 +67,7 @@ fn steps(ui: &Ui) -> usize {
 fn undo_before_the_deadline_takes_the_arrow_step() {
     let mut ui = open_on_cutoff();
     let original = cutoff(&ui);
-    ui.tap(right(), keyboard::Modifiers::default());
+    ui.tap(right(), Modifiers::NONE);
     let arrowed = cutoff(&ui);
     assert_ne!(arrowed, original, "the arrow moved the knob");
 
@@ -84,7 +84,7 @@ fn undo_before_the_deadline_takes_the_arrow_step() {
 fn an_inspector_edit_after_a_release_is_its_own_step() {
     let mut ui = open_on_cutoff();
     let original = cutoff(&ui);
-    ui.tap(right(), keyboard::Modifiers::default());
+    ui.tap(right(), Modifiers::NONE);
     let arrowed = cutoff(&ui);
 
     slide_cutoff(&mut ui, 3_000.0);
@@ -104,8 +104,8 @@ fn two_quick_arrows_are_one_step() {
     let mut ui = open_on_cutoff();
     let original = cutoff(&ui);
     let before = steps(&ui);
-    ui.tap(right(), keyboard::Modifiers::default());
-    ui.tap(right(), keyboard::Modifiers::default());
+    ui.tap(right(), Modifiers::NONE);
+    ui.tap(right(), Modifiers::NONE);
     ui.redraw_at(ui.now() + PAST_GROUP);
     assert_eq!(steps(&ui), before + 1, "one step for both taps");
     assert!(!ui.app().session.edits.gesture_open(), "the deadline closed it");
@@ -119,10 +119,10 @@ fn two_quick_arrows_are_one_step() {
 fn an_arrow_after_the_deadline_is_a_new_step() {
     let mut ui = open_on_cutoff();
     let before = steps(&ui);
-    ui.tap(right(), keyboard::Modifiers::default());
+    ui.tap(right(), Modifiers::NONE);
     ui.redraw_at(ui.now() + PAST_GROUP);
     let first = cutoff(&ui);
-    ui.tap(right(), keyboard::Modifiers::default());
+    ui.tap(right(), Modifiers::NONE);
     ui.redraw_at(ui.now() + PAST_GROUP);
     assert_eq!(steps(&ui), before + 2, "a step for each tap");
 
@@ -138,11 +138,11 @@ fn an_arrow_right_after_undo_is_a_new_step() {
     let mut ui = open_on_cutoff();
     let original = cutoff(&ui);
     let place = ui.app().session.positions[&FILTER];
-    ui.tap(right(), keyboard::Modifiers::default());
+    ui.tap(right(), Modifiers::NONE);
     ui.click_text("Undo");
     assert_eq!(cutoff(&ui), original);
 
-    ui.tap(right(), keyboard::Modifiers::default());
+    ui.tap(right(), Modifiers::NONE);
     let moved = ui.app().session.positions[&FILTER];
     assert_ne!(moved, place, "the arrow moved the tile");
     assert_eq!(
@@ -364,7 +364,7 @@ fn patch_path() -> PathBuf {
 #[test]
 fn a_new_patch_ignores_an_old_arrow_group() {
     let mut ui = open_on_cutoff();
-    ui.tap(right(), keyboard::Modifiers::default());
+    ui.tap(right(), Modifiers::NONE);
     ui.click_text("Undo");
     assert!(!ui.app().unsaved(), "Undo made the patch saved, so no question opens");
     slide_after_replacing(ui, |ui| {
@@ -377,7 +377,7 @@ fn a_new_patch_ignores_an_old_arrow_group() {
 #[test]
 fn a_new_patch_after_the_question_ignores_an_old_arrow_group() {
     let mut ui = open_on_cutoff();
-    ui.tap(right(), keyboard::Modifiers::default());
+    ui.tap(right(), Modifiers::NONE);
     slide_after_replacing(ui, |ui| {
         ui.app_mut().after_discard(AfterDiscard::OpenPath(patch_path()));
         assert!(ui.app().overlays.question.is_some(), "the arrow edit is unsaved");
@@ -396,10 +396,7 @@ fn a_press_and_release_in_one_frame_still_close_the_group() {
     let mut ui = open_on_cutoff();
     let original = cutoff(&ui);
     let before = steps(&ui);
-    ui.step(&[
-        key_pressed(right(), false),
-        key_released(right(), keyboard::Modifiers::default()),
-    ]);
+    ui.step(&[key_pressed(right(), false), key_released(right(), Modifiers::NONE)]);
     assert_ne!(cutoff(&ui), original);
     ui.redraw_at(ui.now() + PAST_GROUP);
     assert!(!ui.app().session.edits.gesture_open(), "the deadline closed the group");

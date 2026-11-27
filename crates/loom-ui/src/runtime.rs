@@ -1083,7 +1083,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let Event::Key(key) = event else {
             return (false, false);
         };
-        if let KeyEvent::Released { key: Key::Space } = key
+        if let KeyEvent::Released { key: Key::Space, .. } = key
             && self.pointer.space.is_some()
         {
             if let Some(armed) = self.live_arm() {
@@ -1095,10 +1095,12 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if let KeyEvent::Pressed { key: Key::Escape, .. } = key {
             // Escape cancels a held Space and hides the hover text, both at
             // once, and goes no further when it did either (section 5,
-            // rule 11). A Space that could no longer click (the focus moved,
-            // or a layer rose above it) is dropped without taking Escape,
-            // which then goes where it goes, such as to a question.
-            let cancelled = self.live_arm();
+            // rule 11), except where cancelling is not all Escape means
+            // there: then it goes on too ([`Self::escape_goes_on`]). A
+            // Space that could no longer click (the focus moved, or a layer
+            // rose above it) is dropped without taking Escape, which then
+            // goes where it goes, such as to a question.
+            let armed = self.live_arm();
             self.pointer.space = None;
             let input = self.app.input().layer;
             let shown = self
@@ -1110,19 +1112,15 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 .pointer
                 .hint
                 .hide(shown.as_ref(), self.pointer.hover_moves, self.focus.moves);
-            // In a menu, Escape closes the menu at once, the one exception
-            // (section 5, rule 11): it cancels the Space held on an item and
-            // goes on, so one Escape closes the menu and picks nothing.
-            let menu_item = cancelled.as_ref().is_some_and(|armed| {
-                self.panels
-                    .access_of(armed)
-                    .is_some_and(|access| access.role() == crate::access::Role::MenuItem)
-            });
-            if menu_item {
-                return (false, true);
+            if hid {
+                return (true, true);
             }
-            if cancelled.is_some() || hid {
-                return (true, hid);
+            if let Some(armed) = armed {
+                return if self.escape_goes_on(&armed) {
+                    (false, true)
+                } else {
+                    (true, false)
+                };
             }
         }
         let Some(id) = self.focus.id().cloned() else {
@@ -1153,6 +1151,23 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             }
             _ => (false, false),
         }
+    }
+
+    /// Whether an Escape that cancelled a Space held on `armed` also goes
+    /// on, to close what `armed` sits in, as an Escape with no Space held
+    /// would. True for an answer of a question: one Escape cancels the
+    /// press and closes the question with its safe answer, as the
+    /// WAI-ARIA alertdialog pattern has Escape close the dialog (section 6,
+    /// rule 6, step 2; #926). True too for a menu item: in a menu, Escape
+    /// closes the menu at once (section 5, rule 11), so one Escape cancels
+    /// the press and closes the menu, picking nothing (#878). Anywhere
+    /// else, cancelling is all it does.
+    fn escape_goes_on(&self, armed: &UiId) -> bool {
+        self.panels.layer_of(armed) == Some(Layer::Question)
+            || self
+                .panels
+                .access_of(armed)
+                .is_some_and(|access| access.role() == crate::access::Role::MenuItem)
     }
 
     /// A key pressed while the focus is on or inside an element that takes

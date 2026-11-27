@@ -12,7 +12,7 @@
 use loom_ui::access::{Access, Action, Role, Value};
 use loom_ui::headless::Harness;
 use loom_ui::{App, Context, DriverEvent, Effects, Element, Layer, Length, NoTarget, View, WindowSpec, WindowState};
-use loom_ui_core::{Event, IdTable, Key, KeyEvent, Modifiers, Point, Size, TextMeasure, TextStyle, UiId, Weight};
+use loom_ui_core::{Code, Event, IdTable, Key, KeyEvent, Modifiers, Point, Size, TextMeasure, TextStyle, UiId, Weight};
 use std::time::Instant;
 
 /// How text is set in this example.
@@ -148,6 +148,7 @@ fn tab(back: bool) -> DriverEvent {
             },
             repeat: false,
             text: None,
+            code: Code::Other,
         }),
         pointer: None,
     }

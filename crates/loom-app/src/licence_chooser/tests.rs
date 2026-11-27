@@ -1,5 +1,6 @@
 use super::*;
 use crate::Message as AppMessage;
+use loom_ui_core::{Key, Modifiers};
 
 /// Answers the chooser with `messages`, in order, and returns the last
 /// outcome.
@@ -75,12 +76,10 @@ fn the_chooser_sets_its_target() {
     assert!(app.unsaved());
 
     let _ = app.send(AppMessage::PatchInfo(crate::patch_info::Message::ChooseLicence));
-    let escape = iced::keyboard::Event::KeyPressed {
-        key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
-        modified_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
-        physical_key: iced::keyboard::key::Physical::Code(iced::keyboard::key::Code::Escape),
-        location: iced::keyboard::Location::Standard,
-        modifiers: iced::keyboard::Modifiers::empty(),
+    let escape = loom_ui_core::KeyEvent::Pressed {
+        key: Key::Escape,
+        code: loom_ui_core::Code::Other,
+        modifiers: Modifiers::NONE,
         text: None,
         repeat: false,
     };

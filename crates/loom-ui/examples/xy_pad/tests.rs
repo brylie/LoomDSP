@@ -4,7 +4,7 @@
 use super::*;
 use loom_ui::headless::Harness;
 use loom_ui::{DriverEvent, WindowEvent, WindowState};
-use loom_ui_core::{Modifiers, TextMeasure};
+use loom_ui_core::{Code, Modifiers, TextMeasure};
 
 /// Measures every character 7 pixels wide, so the tests need no fonts.
 struct Monospace;
@@ -63,6 +63,7 @@ fn key_with(harness: &mut Harness<XyApp, Keys>, key: Key, modifiers: Modifiers) 
             modifiers,
             repeat: false,
             text: None,
+            code: Code::Other,
         }),
         pointer: None,
     });

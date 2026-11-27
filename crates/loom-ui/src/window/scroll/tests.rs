@@ -20,7 +20,8 @@ use crate::routing::{Routed, Target};
 use crate::view::{Layer, View};
 use accesskit::{ActionData, ActionRequest, NodeId};
 use loom_ui_core::{
-    Color, Event, IdTable, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, Rect, ScrollDelta, Size, UiId,
+    Code, Color, Event, IdTable, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, Rect, ScrollDelta, Size,
+    UiId,
 };
 use std::time::Instant;
 
@@ -259,6 +260,7 @@ pub(crate) fn key_with(key: Key, modifiers: Modifiers) -> DriverEvent {
             modifiers,
             repeat: false,
             text: None,
+            code: Code::Other,
         }),
         pointer: None,
     }

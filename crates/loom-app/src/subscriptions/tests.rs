@@ -7,8 +7,7 @@ use iced_runtime::futures::subscription::{Event as Runtime, into_recipes};
 /// them in no set order. The adapter's own event stream is left out: it
 /// waits on the adapter, not on window events.
 fn through_iced(app: &App, event: &iced::Event, status: Status) -> Vec<String> {
-    let close = iced::window::close_requests().map(|_| Message::File(FileAction::Close));
-    let subscriptions = [close, app.input_subscription(), always_subscription()];
+    let subscriptions = [app.input_subscription(), always_subscription()];
     let window = iced::window::Id::unique();
     let mut heard: Vec<String> = subscriptions
         .into_iter()
@@ -87,16 +86,68 @@ fn the_listeners_send_what_the_subscriptions_send() {
 }
 
 /// The close request becomes the app's close, so the window stays open
-/// until the app has asked about unsaved work (files.md).
+/// until the app has asked about unsaved work (files.md). It comes as the
+/// runtime's window event, as the shell hands it over; Iced's copy of it
+/// reaches no listener, so the app hears it once.
 #[test]
 fn the_close_request_is_the_apps_close() {
-    let app = crate::tests::app();
+    assert!(matches!(
+        window_message(&loom_ui::WindowEvent::CloseRequested),
+        Some(Message::File(FileAction::Close))
+    ));
     let close = iced::Event::Window(iced::window::Event::CloseRequested);
-    let messages = app.listeners().messages(&close, Status::Ignored);
+    let app = crate::tests::app();
     assert!(
-        matches!(messages.as_slice(), [Message::File(FileAction::Close)]),
+        app.listeners().messages(&close, Status::Ignored).is_empty(),
+        "not twice"
+    );
+}
+
+/// A close request through the runtime, with unsaved changes, asks first
+/// and keeps the window open.
+#[test]
+fn a_close_request_with_changes_asks_first() {
+    let mut app = crate::tests::app();
+    app.edit(|app| {
+        app.session.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+    });
+    let _ = crate::files::fake::asked();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let messages = ui.window_event(loom_ui::WindowEvent::CloseRequested);
+    assert!(
+        messages.iter().any(|m| matches!(m, Message::File(FileAction::Close))),
         "{messages:?}"
     );
+    assert!(ui.app().overlays.question.is_some(), "the unsaved-changes question");
+    assert!(!ui.app().quit);
+}
+
+/// A close request through the runtime, with nothing unsaved, quits.
+#[test]
+fn a_close_request_with_no_changes_quits() {
+    let mut ui = crate::ui_test::Ui::with_app(crate::tests::app());
+    assert!(!ui.app().unsaved());
+    let _ = ui.window_event(loom_ui::WindowEvent::CloseRequested);
+    assert!(ui.app().overlays.question.is_none());
+    assert!(ui.app().quit, "the app quits");
+}
+
+/// The other window events: a dropped file becomes its message, a new
+/// scale a redraw, and the rest nothing.
+#[test]
+fn window_events_become_their_messages() {
+    let path = std::path::PathBuf::from("/tmp/a.ron");
+    assert!(matches!(
+        window_message(&loom_ui::WindowEvent::FileDropped(path.clone())),
+        Some(Message::FileDropped(found)) if found == path
+    ));
+    assert!(matches!(
+        window_message(&loom_ui::WindowEvent::ScaleChanged(2.0)),
+        Some(Message::WindowRescaled)
+    ));
+    assert!(window_message(&loom_ui::WindowEvent::Focused(true)).is_none());
+    assert!(window_message(&loom_ui::WindowEvent::Hidden(true)).is_none());
 }
 
 /// The listeners are a snapshot: taken before a change of who listens,

@@ -281,13 +281,13 @@ fn descriptions_match_below_names() {
 /// visible space. Redo restores the position chosen by that add.
 #[test]
 fn toolbar_adds_two_tiles_without_covering_transport_or_each_other() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let mut ui = crate::ui_test::Ui::with_app(crate::tests::app());
     for _ in 0..2 {
         ui.click_text("Add module");
         ui.redraw();
         ui.typewrite("noise");
-        ui.tap(Key::Named(Named::Enter), Modifiers::default());
+        ui.tap(Key::Enter, Modifiers::NONE);
     }
     let visible = {
         let canvas = ui.canvas();
@@ -317,11 +317,8 @@ fn toolbar_adds_two_tiles_without_covering_transport_or_each_other() {
 /// the canvas under the browser opens no tile menu for its selected tile.
 #[test]
 fn the_menu_keys_open_a_library_rows_menu_from_the_field() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
-    for (key, modifiers) in [
-        (Key::Named(Named::F10), Modifiers::SHIFT),
-        (Key::Named(Named::ContextMenu), Modifiers::empty()),
-    ] {
+    use loom_ui_core::{Key, Modifiers};
+    for (key, modifiers) in [(Key::F10, Modifiers::SHIFT), (Key::ContextMenu, Modifiers::NONE)] {
         let mut ui = crate::ui_test::Ui::open("subtractive.ron");
         let _ = ui
             .app_mut()
@@ -331,7 +328,7 @@ fn the_menu_keys_open_a_library_rows_menu_from_the_field() {
         ui.send(crate::Message::Browser(Message::Library(library_items(2))));
         ui.send(crate::Message::Browser(Message::Query("zz-lib".into())));
         let _ = ui.redraw();
-        let _ = ui.tap(key.clone(), modifiers);
+        let _ = ui.tap(key, modifiers);
         let browser = ui.app().overlays.browser().expect("still open");
         assert_eq!(browser.model().menu, Some(0), "{key:?}: the first row's menu");
         assert_eq!(browser.model().menu_highlight, Some(0), "{key:?}: on its item");

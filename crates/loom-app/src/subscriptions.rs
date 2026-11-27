@@ -1,5 +1,6 @@
-//! Who hears the window's events: the close request and the input
-//! listeners, as plain calls ([`Listeners`]). The window's layers on the
+//! Who hears the window's events: the input listeners, as plain calls
+//! ([`Listeners`]), and the window events the runtime hands the app
+//! ([`window_message`]): the close request and a dropped file. The window's layers on the
 //! `winit` shell (`iced_bridge/window.rs`), the `Ui` harness, and the
 //! control channel's pointer hand each event on through them. The watcher
 //! threads are in `watching.rs`, and the timers and frames are deadlines
@@ -7,6 +8,7 @@
 //!
 //! The same listeners as Iced's subscriptions stay, for tests only, as the
 //! reference the plain calls are checked against (`subscriptions/tests.rs`).
+//! Plan step P4 deletes them with the bridge.
 
 use crate::input_owner::Listening;
 use crate::{App, FileAction, Message, lights};
@@ -14,15 +16,17 @@ use crate::{App, FileAction, Message, lights};
 use iced::Subscription;
 use iced::event::Status;
 use loom_core::ModuleId;
+use loom_ui_core::{Event, Key, KeyEvent};
 
 impl App {
-    /// What Iced's runtime ran for the app, as subscriptions. The window
-    /// on the shell hears the same through [`Listeners`]; this stays for
-    /// the tests that compare the two, until phase 3.
+    /// What Iced's runtime ran for the app, as subscriptions, less the
+    /// close request, which the runtime now hands the app as a window event
+    /// ([`window_message`]). The window on the shell hears the same through
+    /// [`Listeners`]; this stays for the tests that compare the two. Plan
+    /// step P4 deletes it.
     #[cfg(test)]
     pub(crate) fn subscription(&self) -> Subscription<Message> {
-        let close = iced::window::close_requests().map(|_| Message::File(FileAction::Close));
-        Subscription::batch([close, self.input_subscription(), always_subscription()])
+        Subscription::batch([self.input_subscription(), always_subscription()])
     }
 
     /// Who hears the window's events now, for [`Listeners::messages`].
@@ -38,7 +42,7 @@ impl App {
     /// was listening before the event (input_owner.rs).
     #[cfg(test)]
     pub(crate) fn input_subscription(&self) -> Subscription<Message> {
-        iced::event::listen_with(crate::input_owner::input_event)
+        iced::event::listen_with(iced_input_event)
             .with(self.listening())
             .map(|(listening, heard)| heard.message(listening))
     }
@@ -136,21 +140,51 @@ impl App {
 /// its identity never changes and it never restarts (input_owner.rs).
 #[cfg(test)]
 pub(crate) fn always_subscription() -> Subscription<Message> {
-    iced::event::listen_with(crate::input_owner::always_event)
+    iced::event::listen_with(iced_always_event)
+}
+
+/// [`crate::input_owner::input_event`] as Iced's listener, hearing Iced's
+/// event as ours. Plan step P4 deletes it.
+#[cfg(test)]
+fn iced_input_event(
+    event: iced::Event,
+    status: Status,
+    _window: iced::window::Id,
+) -> Option<crate::input_owner::Heard> {
+    crate::input_owner::input_event(&loom_canvas::iced_convert::event_to_core(&event)?, used(status))
+}
+
+/// [`crate::input_owner::always_event`] as Iced's listener, hearing Iced's
+/// event as ours. Plan step P4 deletes it.
+#[cfg(test)]
+fn iced_always_event(event: iced::Event, status: Status, _window: iced::window::Id) -> Option<Message> {
+    crate::input_owner::always_event(&loom_canvas::iced_convert::event_to_core(&event)?, used(status))
+}
+
+/// Whether a widget used an event, from Iced's word for it.
+fn used(status: Status) -> bool {
+    status == Status::Captured
 }
 
 /// F1 and Escape reach help even while a text field has focus.
-pub(crate) fn help_key(event: iced::Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<Message> {
-    use iced::keyboard::{Event, Key, key::Named};
+pub(crate) fn help_key(event: &Event, _used: bool) -> Option<Message> {
     match event {
-        iced::Event::Keyboard(Event::KeyPressed {
-            key: Key::Named(Named::F1),
-            ..
-        }) => Some(Message::ShowHelp),
-        iced::Event::Keyboard(Event::KeyPressed {
-            key: Key::Named(Named::Escape),
-            ..
-        }) => Some(Message::CloseHelp),
+        Event::Key(KeyEvent::Pressed { key: Key::F1, .. }) => Some(Message::ShowHelp),
+        Event::Key(KeyEvent::Pressed { key: Key::Escape, .. }) => Some(Message::CloseHelp),
+        _ => None,
+    }
+}
+
+/// The app's message for a window event the runtime hands it, if it wants
+/// one: the close request becomes the app's close, so the window stays open
+/// until the app has asked about unsaved work (files.md); a dropped file
+/// becomes a message, one per file, which the app collects for a moment;
+/// a new scale redraws.
+pub(crate) fn window_message(event: &loom_ui::WindowEvent) -> Option<Message> {
+    match event {
+        loom_ui::WindowEvent::CloseRequested => Some(Message::File(FileAction::Close)),
+        loom_ui::WindowEvent::FileDropped(path) => Some(Message::FileDropped(path.clone())),
+        loom_ui::WindowEvent::ScaleChanged(_) => Some(Message::WindowRescaled),
         _ => None,
     }
 }
@@ -166,16 +200,23 @@ pub(crate) struct Listeners {
 }
 
 impl Listeners {
-    /// The messages the listeners send for `event`, which a widget used or
-    /// not as `status` says: the close request, then the input listeners
-    /// (input_owner.rs).
+    /// The messages the listeners send for Iced's `event`, which a widget
+    /// used or not as `status` says (input_owner.rs). This is the one place
+    /// an event Iced delivers becomes ours, for the window, the `Ui`
+    /// harness, and the control channel's injector alike. An event with no
+    /// meaning to the listeners, such as a window event, sends nothing: the
+    /// runtime hands the app those itself ([`window_message`]). Plan step
+    /// P4 deletes it, when the runtime delivers every event.
     pub(crate) fn messages(self, event: &iced::Event, status: Status) -> Vec<Message> {
-        let mut messages = Vec::new();
-        if matches!(event, iced::Event::Window(iced::window::Event::CloseRequested)) {
-            messages.push(Message::File(FileAction::Close));
-        }
-        messages.extend(crate::input_owner::heard_messages(event, status, self.listening));
-        messages
+        loom_canvas::iced_convert::event_to_core(event)
+            .map(|event| self.heard(&event, used(status)))
+            .unwrap_or_default()
+    }
+
+    /// The messages the listeners send for `event`, which a widget used or
+    /// not as `used` says (input_owner.rs).
+    pub(crate) fn heard(self, event: &Event, used: bool) -> Vec<Message> {
+        crate::input_owner::heard_messages(event, used, self.listening)
     }
 }
 

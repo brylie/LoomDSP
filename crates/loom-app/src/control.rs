@@ -13,7 +13,6 @@ use crate::window_question::WindowQuestion;
 use crate::{App, Message, settings};
 use iced::advanced::widget::operation::Outcome;
 use iced::advanced::widget::{Id, Operation};
-use iced::keyboard;
 use loom_canvas::PanelValues;
 use loom_canvas::iced_convert::ToCore as _;
 use loom_canvas::{CanvasEvent, CanvasView, ControlPart, PortRef};

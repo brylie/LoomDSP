@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::ui_test::Ui;
-use iced::keyboard::{self, key::Named};
+use loom_ui_core::{Key, Modifiers};
 
 /// The nested example, with its Voice sub-patch (top-level ID 2) open.
 fn inside_voice() -> Ui {
@@ -109,12 +109,12 @@ fn tab_reaches_the_breadcrumb_after_the_toolbar_then_the_canvas() {
     assert_eq!(&top[1..], crumbs.as_slice());
     let button = ui.app().toolbar_stops().last().cloned().expect("a toolbar button");
     ui.a11y_action(&button, accesskit::Action::Focus);
-    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
+    ui.tap(Key::Tab, Modifiers::NONE);
     assert_eq!(ui.runtime().focused(), Some(&crumbs[0]), "from any toolbar button");
     let last = top.last().cloned().expect("a top run");
     ui.a11y_action(&last, accesskit::Action::Focus);
     assert_eq!(ui.runtime().focused(), Some(&last));
-    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
+    ui.tap(Key::Tab, Modifiers::NONE);
     assert_eq!(ui.runtime().focused(), None, "out of the top run");
     assert!(
         ui.app().a11y.focus().is_some() || !ui.app().session.selection.is_empty(),

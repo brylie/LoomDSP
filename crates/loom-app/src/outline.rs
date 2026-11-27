@@ -2,12 +2,8 @@
 
 use crate::patch_map::{PatchMap, Structure, Unit, names};
 use crate::{App, Message};
-use iced::keyboard::{
-    self, Key,
-    key::{Code, Named, Physical},
-};
 use loom_canvas::PortRef;
-use loom_ui_core::{Point, UiId};
+use loom_ui_core::{Code, Key, KeyEvent, Point, UiId};
 use serde::{Serialize, Serializer};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -558,10 +554,10 @@ impl App {
     }
 
     /// Handles the physical navigation keys and the outline's tree keys.
-    pub(crate) fn navigation_key(&mut self, event: &keyboard::Event, now: Instant) -> bool {
-        let keyboard::Event::KeyPressed {
+    pub(crate) fn navigation_key(&mut self, event: &KeyEvent, now: Instant) -> bool {
+        let KeyEvent::Pressed {
             key,
-            physical_key,
+            code,
             modifiers,
             repeat,
             ..
@@ -572,19 +568,19 @@ impl App {
         if !self.pointer_reaches_window() {
             return false;
         }
-        let key = key.as_ref();
-        if key == Key::Named(Named::Tab) && modifiers.control() && !modifiers.alt() {
-            self.cycle_region(modifiers.shift());
+        let key = *key;
+        if key == Key::Tab && modifiers.control && !modifiers.alt {
+            self.cycle_region(modifiers.shift);
             return true;
         }
-        if self.toolbar_has_focus() && self.toolbar_key(&key, modifiers.is_empty()) {
+        if self.toolbar_has_focus() && self.toolbar_key(&key, modifiers.none()) {
             return true;
         }
         let outline = self.session.outline.active && self.right_tab == crate::matrix::Tab::Outline;
-        if self.session.outline.has_jump() && modifiers.is_empty() && self.jump_key(&key) {
+        if self.session.outline.has_jump() && modifiers.none() && self.jump_key(&key) {
             return true;
         }
-        if self.session.outline.inspector_action.is_some() && modifiers.is_empty() {
+        if self.session.outline.inspector_action.is_some() && modifiers.none() {
             return self.inspector_action_key(&key);
         }
         // A row of the tree has the runtime's focus: the tree's own keys
@@ -596,39 +592,43 @@ impl App {
         if !outline
             && !self.session.outline.has_jump()
             && !self.toolbar_has_focus()
-            && modifiers.is_empty()
-            && let Key::Character(letter) = &key
+            && modifiers.none()
+            && let Key::Character(letter) = key
         {
-            if loom_canvas::shortcuts::CABLE.matches_letter(letter) {
+            let letter = letter.encode_utf8(&mut [0; 4]).to_owned();
+            if loom_canvas::shortcuts::CABLE.matches_letter(&letter) {
                 return self.open_cable_picker();
             }
             // The canvas uses the pointer when it has one over the patch.
             // Elsewhere only a key the window's widgets left reaches here.
-            if !repeat && loom_canvas::shortcuts::ADD.matches_letter(letter) {
+            if !repeat && loom_canvas::shortcuts::ADD.matches_letter(&letter) {
                 self.post(Message::OpenBrowser);
                 return true;
             }
         }
-        if !outline && matches!(key, Key::Character(c) if c.eq_ignore_ascii_case("o")) && modifiers.is_empty() {
+        if !outline && matches!(key, Key::Character(c) if c.eq_ignore_ascii_case(&'o')) && modifiers.none() {
             self.right_tab = crate::matrix::Tab::Outline;
             self.focus_outline();
             return true;
         }
-        if *physical_key == Physical::Code(Code::BracketLeft) && modifiers.command() && !modifiers.alt() {
+        // The brackets match where they sit, not what they type (ui-layer.md,
+        // section 1, Keys in `loom-ui-core`, rule 3): back and forward are
+        // side by side on every layout.
+        if *code == Code::BracketLeft && modifiers.shortcut() && !modifiers.alt {
             self.jump_back(outline);
             return true;
         }
-        if modifiers.is_empty() && matches!(physical_key, Physical::Code(Code::BracketLeft | Code::BracketRight)) {
+        if modifiers.none() && matches!(code, Code::BracketLeft | Code::BracketRight) {
             if let Some(from) = self.navigation_target(outline) {
-                self.follow(from, Some(*physical_key == Physical::Code(Code::BracketRight)), outline);
+                self.follow(from, Some(*code == Code::BracketRight), outline);
             }
             return true;
         }
         if outline {
-            if !modifiers.is_empty() && !(modifiers.command() && key == Key::Named(Named::Enter)) {
+            if !modifiers.none() && !(modifiers.shortcut() && key == Key::Enter) {
                 return false;
             }
-            self.outline_key(key, modifiers.command(), now);
+            self.outline_key(key, modifiers.shortcut(), now);
             if !self.session.outline.has_jump() {
                 self.reveal_outline_focus();
             }
@@ -795,21 +795,21 @@ impl App {
     }
 
     /// Activates an inspector stop that has no toolkit text field.
-    fn inspector_action_key(&mut self, key: &Key<&str>) -> bool {
+    fn inspector_action_key(&mut self, key: &Key) -> bool {
         use crate::a11y::items;
         use accesskit::Action;
         let panel = crate::inspector::access::items(&self.inspector_model());
         let id = self.session.outline.inspector_action.as_ref();
         let action = match key {
-            Key::Named(Named::Escape) => {
+            Key::Escape => {
                 self.session.outline.inspector_action = None;
                 self.a11y.request_control(self.session.outline.last_canvas);
                 self.effect(loom_ui::Effects::redraw());
                 return true;
             }
-            Key::Named(Named::Enter | Named::Space) => Action::Click,
-            Key::Named(Named::ArrowRight | Named::ArrowUp) => Action::Increment,
-            Key::Named(Named::ArrowLeft | Named::ArrowDown) => Action::Decrement,
+            Key::Enter | Key::Space => Action::Click,
+            Key::Right | Key::Up => Action::Increment,
+            Key::Left | Key::Down => Action::Decrement,
             _ => return false,
         };
         if let Some(item) = id.and_then(|id| items::find(&panel, id)) {
@@ -839,25 +839,18 @@ impl App {
 
     /// Carries out [`Message::OutlineKey`]: one of the tree keys the tree's
     /// list took first, through the same tree logic as before.
-    pub(crate) fn outline_panel_key_pressed(&mut self, key: loom_ui_core::Key, command: bool, now: Instant) {
-        use loom_ui_core::Key as Core;
-        let named = match key {
-            Core::Up => Named::ArrowUp,
-            Core::Down => Named::ArrowDown,
-            Core::Left => Named::ArrowLeft,
-            Core::Right => Named::ArrowRight,
-            Core::Home => Named::Home,
-            Core::End => Named::End,
-            Core::Enter => Named::Enter,
-            Core::Space => Named::Space,
-            Core::Escape => Named::Escape,
-            _ => return,
-        };
-        if self.session.outline.has_jump() {
-            self.jump_key(&Key::Named(named));
+    pub(crate) fn outline_panel_key_pressed(&mut self, key: Key, command: bool, now: Instant) {
+        if !matches!(
+            key,
+            Key::Up | Key::Down | Key::Left | Key::Right | Key::Home | Key::End | Key::Enter | Key::Space | Key::Escape
+        ) {
             return;
         }
-        self.outline_key(Key::Named(named), command, now);
+        if self.session.outline.has_jump() {
+            self.jump_key(&key);
+            return;
+        }
+        self.outline_key(key, command, now);
         // A jump list that Enter opened has the focus now, over the row.
         if self.session.outline.active && !self.session.outline.has_jump() {
             self.reveal_outline_focus();
@@ -888,8 +881,8 @@ impl App {
     /// keys stay here, so they cannot edit the canvas. The move is posted
     /// for a turn of its own, so a message the same key sent elsewhere
     /// (Escape also closes help) runs while the focus is still here.
-    fn toolbar_key(&mut self, key: &Key<&str>, plain: bool) -> bool {
-        if !plain || matches!(key, Key::Named(Named::Enter | Named::Space | Named::Tab)) {
+    fn toolbar_key(&mut self, key: &Key, plain: bool) -> bool {
+        if !plain || matches!(key, Key::Enter | Key::Space | Key::Tab) {
             return false;
         }
         let stops = self.toolbar_stops();
@@ -899,11 +892,11 @@ impl App {
             .and_then(|id| stops.iter().position(|stop| stop == id));
         let last = stops.len().saturating_sub(1);
         let to = match key {
-            Key::Named(Named::ArrowLeft) => at.map(|at| at.saturating_sub(1)),
-            Key::Named(Named::ArrowRight) => at.map(|at| (at + 1).min(last)),
-            Key::Named(Named::Home) => Some(0),
-            Key::Named(Named::End) => Some(last),
-            Key::Named(Named::Escape) => {
+            Key::Left => at.map(|at| at.saturating_sub(1)),
+            Key::Right => at.map(|at| (at + 1).min(last)),
+            Key::Home => Some(0),
+            Key::End => Some(last),
+            Key::Escape => {
                 self.post(Message::ToolbarFocus(None));
                 return true;
             }
@@ -932,24 +925,24 @@ impl App {
     }
 
     /// Visits, expands, and activates rows using the standard tree keys.
-    fn outline_key(&mut self, key: Key<&str>, command: bool, now: Instant) {
+    fn outline_key(&mut self, key: Key, command: bool, now: Instant) {
         let rows = self.outline_rows();
         let index = self.session.outline.focused_index(&rows);
         let row = &rows[index];
         let state = &mut self.session.outline;
         match key {
-            Key::Named(Named::ArrowDown) => state.select(&rows, (index + 1).min(rows.len() - 1)),
-            Key::Named(Named::ArrowUp) => state.select(&rows, index.saturating_sub(1)),
-            Key::Named(Named::Home) => state.select(&rows, 0),
-            Key::Named(Named::End) => state.select(&rows, rows.len() - 1),
-            Key::Named(Named::ArrowRight) => match row.expanded {
+            Key::Down => state.select(&rows, (index + 1).min(rows.len() - 1)),
+            Key::Up => state.select(&rows, index.saturating_sub(1)),
+            Key::Home => state.select(&rows, 0),
+            Key::End => state.select(&rows, rows.len() - 1),
+            Key::Right => match row.expanded {
                 Some(false) => {
                     state.set_expanded(row.id.clone(), true);
                 }
                 Some(true) => state.select(&rows, index + 1),
                 None => {}
             },
-            Key::Named(Named::ArrowLeft) => {
+            Key::Left => {
                 if row.expanded == Some(true) {
                     state.set_expanded(row.id.clone(), false);
                 } else if let Some(parent) = &row.parent
@@ -958,7 +951,7 @@ impl App {
                     state.select(&rows, index);
                 }
             }
-            Key::Named(Named::Escape) => {
+            Key::Escape => {
                 let level = &self.session.level;
                 if let Some(parent) = level.parent()
                     && let Some(instance) = self.session.hierarchy.id_at(&parent, level.last())
@@ -969,7 +962,7 @@ impl App {
                     self.leave_outline();
                 }
             }
-            Key::Named(Named::Enter) => match row.target {
+            Key::Enter => match row.target {
                 Some(Target::Tile(module)) if command && self.session.patch_map.structure.tiles[&module].instance => {
                     self.open_tile(module)
                 }
@@ -977,7 +970,7 @@ impl App {
                 Some(target) if !command => self.follow(target, None, true),
                 _ => {}
             },
-            Key::Named(Named::Space) => {
+            Key::Space => {
                 if let Some(module) = row
                     .target
                     .and_then(|target| target.module(&self.session.patch_map.structure))
@@ -985,13 +978,13 @@ impl App {
                     self.centre_tile(module);
                 }
             }
-            Key::Character(chars) if !command && chars.chars().all(char::is_alphanumeric) => {
+            Key::Character(letter) if !command && letter.is_alphanumeric() => {
                 let (at, search) = state.search.get_or_insert_with(|| (now, String::new()));
                 if now.saturating_duration_since(*at) >= Duration::from_secs(1) {
                     search.clear()
                 }
                 *at = now;
-                search.push_str(&chars.to_lowercase());
+                search.extend(letter.to_lowercase());
                 if let Some(found) = (1..=rows.len())
                     .map(|step| (index + step) % rows.len())
                     .find(|i| rows[*i].name.to_lowercase().starts_with(search.as_str()))
@@ -1075,18 +1068,18 @@ impl App {
     }
 
     /// Moves through jump choices without changing the underlying focus.
-    fn jump_key(&mut self, key: &Key<&str>) -> bool {
+    fn jump_key(&mut self, key: &Key) -> bool {
         let Some(jump) = self.session.outline.jump.as_mut() else {
             return false;
         };
         match key {
-            Key::Named(Named::ArrowDown) => jump.selected = (jump.selected + 1).min(jump.choices.len() - 1),
-            Key::Named(Named::ArrowUp) => jump.selected = jump.selected.saturating_sub(1),
-            Key::Named(Named::Enter) => {
+            Key::Down => jump.selected = (jump.selected + 1).min(jump.choices.len() - 1),
+            Key::Up => jump.selected = jump.selected.saturating_sub(1),
+            Key::Enter => {
                 let selected = jump.selected;
                 self.choose_jump(selected);
             }
-            Key::Named(Named::Escape) => self.session.outline.close_jump(),
+            Key::Escape => self.session.outline.close_jump(),
             _ => return false,
         }
         true

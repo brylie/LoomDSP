@@ -6,7 +6,7 @@ use super::*;
 use crate::files::fake::{self, Asked};
 use crate::recovery::tests::TempDir;
 use crate::ui_test::Ui;
-use iced::keyboard::{Key, Modifiers};
+use loom_ui_core::{Key, Modifiers};
 use std::fs;
 
 /// A temporary bundled examples folder holding `subtractive.ron`, which
@@ -56,7 +56,7 @@ fn app_with(patch: PathBuf) -> App {
 
 /// Presses Cmd/Ctrl+S.
 fn press_save(ui: &mut Ui) {
-    ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('s'), Modifiers::platform_shortcut());
 }
 
 /// Turns the filter's cutoff, as a slider would: one undo step.

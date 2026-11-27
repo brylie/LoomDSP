@@ -1001,6 +1001,7 @@ fn typed(key: Key, text: &str) -> Event {
         modifiers: Modifiers::default(),
         text: Some(text.into()),
         repeat: false,
+        code: loom_ui_core::Code::Other,
     })
 }
 
@@ -1357,6 +1358,7 @@ fn typed_key(key: Key, text: Option<&str>, modifiers: Modifiers, repeat: bool) -
         modifiers,
         text: text.map(Into::into),
         repeat,
+        code: loom_ui_core::Code::Other,
     })
 }
 
@@ -1834,6 +1836,7 @@ fn key_a(modifiers: Modifiers) -> Event {
         modifiers,
         text: None,
         repeat: false,
+        code: loom_ui_core::Code::Other,
     })
 }
 
@@ -1875,6 +1878,7 @@ fn command_zero_resets_the_zoom_to_100_percent() {
             modifiers,
             text: None,
             repeat: false,
+            code: loom_ui_core::Code::Other,
         })
     };
     let at = Point::new(300.0, 200.0);
@@ -1909,6 +1913,7 @@ fn paste_goes_to_the_pointer_or_the_centre_of_the_view() {
         modifiers: command(),
         text: None,
         repeat: false,
+        code: loom_ui_core::Code::Other,
     });
     let at = Point::new(100.0, 300.0);
     let events = drive(&canvas, &mut state, &paste, at);
@@ -2069,9 +2074,13 @@ fn key_event(named: Key, pressed: bool) -> Event {
             modifiers: Modifiers::default(),
             text: None,
             repeat: false,
+            code: loom_ui_core::Code::Other,
         })
     } else {
-        Event::Key(KeyEvent::Released { key })
+        Event::Key(KeyEvent::Released {
+            key,
+            code: loom_ui_core::Code::Other,
+        })
     }
 }
 
@@ -2228,6 +2237,7 @@ fn arrow_up() -> Event {
         modifiers: Modifiers::default(),
         text: None,
         repeat: false,
+        code: loom_ui_core::Code::Other,
     })
 }
 
@@ -2597,6 +2607,7 @@ fn learn_mode_keys_arm_and_never_change_a_value() {
             modifiers: Modifiers::default(),
             text: None,
             repeat: false,
+            code: loom_ui_core::Code::Other,
         })
     };
     let mut out = Reaction::default();
@@ -2805,6 +2816,7 @@ fn escape() -> Event {
         modifiers: Modifiers::default(),
         text: None,
         repeat: false,
+        code: loom_ui_core::Code::Other,
     })
 }
 
@@ -3473,6 +3485,7 @@ fn a_held_arrow_key_reports_each_step_and_the_release() {
         modifiers,
         text,
         repeat: true,
+        code: loom_ui_core::Code::Other,
     });
     let repeat = untimed(drive(&canvas, &mut state, &again, knob));
     assert_eq!(
@@ -3480,7 +3493,10 @@ fn a_held_arrow_key_reports_each_step_and_the_release() {
         Some(&CanvasEvent::ArrowStep { at: epoch() }),
         "{repeat:?}"
     );
-    let up = Event::Key(KeyEvent::Released { key });
+    let up = Event::Key(KeyEvent::Released {
+        key,
+        code: loom_ui_core::Code::Other,
+    });
     assert_eq!(
         untimed(drive(&canvas, &mut state, &up, knob)),
         vec![CanvasEvent::ArrowReleased { at: epoch() }]
@@ -4372,6 +4388,7 @@ fn the_menu_key_and_shift_f10_open_the_tile_menu() {
             modifiers,
             text: None,
             repeat: false,
+            code: loom_ui_core::Code::Other,
         })
     };
     let shift = Modifiers {

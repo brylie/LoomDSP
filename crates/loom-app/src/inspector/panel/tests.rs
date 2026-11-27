@@ -2,9 +2,8 @@ use super::*;
 use crate::Message;
 use crate::patch_info::{Message as Info, authors_part, tags_part};
 use crate::ui_test::Ui;
-use iced::keyboard::key::Named;
-use iced::keyboard::{Key, Modifiers};
 use loom_canvas::CanvasEvent;
+use loom_ui_core::{Key, Modifiers};
 
 /// The example patch with nothing selected, so the inspector shows patch
 /// info, drawn by the runtime.
@@ -117,7 +116,7 @@ fn a_tag_is_added_and_removed_once() {
     let mut ui = patch_info();
     ui.focus(&tags_part());
     let _ = ui.typewrite("drone, dark");
-    let _ = ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    let _ = ui.tap(Key::Enter, Modifiers::NONE);
     assert_eq!(ui.app().session.document.info().tags, ["drone", "dark"]);
     assert_eq!(ui.app().session.patch_info.tag_draft, "");
 
@@ -145,8 +144,8 @@ fn the_authors_box_keeps_its_draft_until_focus_leaves() {
     let steps = ui.app().session.edits.history.len();
     ui.focus(&authors_part());
     let _ = ui.typewrite("Ada");
-    let _ = ui.tap(Key::Named(Named::Enter), Modifiers::empty());
-    let _ = ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    let _ = ui.tap(Key::Enter, Modifiers::NONE);
+    let _ = ui.tap(Key::Enter, Modifiers::NONE);
     let _ = ui.typewrite("Sam");
     assert_eq!(ui.app().session.patch_info.authors, "Ada\n\nSam", "as typed");
     assert_eq!(ui.app().session.document.info().authors, ["Ada", "Sam"], "tidied");
@@ -253,8 +252,8 @@ fn focused(ui: &Ui) -> Option<UiId> {
 
 /// Presses Tab, or Shift+Tab when `back`.
 fn tab(ui: &mut Ui, back: bool) {
-    let shift = if back { Modifiers::SHIFT } else { Modifiers::empty() };
-    let _ = ui.tap(Key::Named(Named::Tab), shift);
+    let shift = if back { Modifiers::SHIFT } else { Modifiers::NONE };
+    let _ = ui.tap(Key::Tab, shift);
 }
 
 /// Every control of patch info is in the Tab order, top to bottom as it is
@@ -322,22 +321,22 @@ fn tab_walks_patch_info_top_to_bottom() {
 fn the_tags_are_one_toolbar_stop() {
     use crate::patch_info::{tag_remove_id, tags_toolbar_id};
     let mut ui = with_tags(&["drone", "dark", "slow"]);
-    let press = |ui: &mut Ui, named: Named| {
-        let _ = ui.tap(Key::Named(named), Modifiers::empty());
+    let press = |ui: &mut Ui, named: Key| {
+        let _ = ui.tap(named, Modifiers::NONE);
     };
     ui.focus(&authors_part());
     tab(&mut ui, false);
     assert_eq!(focused(&ui), Some(tag_remove_id("drone")));
-    press(&mut ui, Named::ArrowLeft);
+    press(&mut ui, Key::Left);
     assert_eq!(focused(&ui), Some(tag_remove_id("drone")), "Left stops at the first");
-    press(&mut ui, Named::ArrowRight);
+    press(&mut ui, Key::Right);
     assert_eq!(focused(&ui), Some(tag_remove_id("dark")));
-    press(&mut ui, Named::End);
+    press(&mut ui, Key::End);
     assert_eq!(focused(&ui), Some(tag_remove_id("slow")));
-    press(&mut ui, Named::ArrowRight);
+    press(&mut ui, Key::Right);
     assert_eq!(focused(&ui), Some(tag_remove_id("slow")), "Right stops at the last");
-    press(&mut ui, Named::Home);
-    press(&mut ui, Named::ArrowRight);
+    press(&mut ui, Key::Home);
+    press(&mut ui, Key::Right);
     tab(&mut ui, false);
     assert_eq!(focused(&ui), Some(tags_part()), "Tab leaves the tags");
     tab(&mut ui, true);
@@ -365,11 +364,11 @@ fn removing_the_focused_tag_keeps_the_keyboards_place() {
     use crate::patch_info::tag_remove_id;
     let mut ui = with_tags(&["drone", "dark", "slow"]);
     let enter = |ui: &mut Ui| {
-        let _ = ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+        let _ = ui.tap(Key::Enter, Modifiers::NONE);
     };
     ui.focus(&authors_part());
     tab(&mut ui, false);
-    let _ = ui.tap(Key::Named(Named::ArrowRight), Modifiers::empty());
+    let _ = ui.tap(Key::Right, Modifiers::NONE);
     enter(&mut ui);
     assert_eq!(ui.app().session.document.info().tags, ["drone", "slow"]);
     assert_eq!(focused(&ui), Some(tag_remove_id("slow")), "the next tag");
@@ -397,7 +396,7 @@ fn escape_on_a_button_returns_to_the_canvas() {
     tab(&mut ui, false);
     assert_eq!(focused(&ui), Some(tags_part()));
     tab(&mut ui, false);
-    let _ = ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    let _ = ui.tap(Key::Escape, Modifiers::NONE);
     assert_eq!(focused(&ui), None, "the column let the focus go");
 }
 
@@ -631,7 +630,7 @@ fn leaving_the_tags_field_adds_the_typed_tag_and_escape_drops_it() {
     let mut ui = patch_info();
     ui.focus(&tags_part());
     let _ = ui.typewrite("drone");
-    let _ = ui.tap(Key::Named(Named::Tab), Modifiers::empty());
+    let _ = ui.tap(Key::Tab, Modifiers::NONE);
     assert_eq!(ui.app().session.document.info().tags, ["drone"], "Tab adds it");
 
     ui.focus(&tags_part());
@@ -646,7 +645,7 @@ fn leaving_the_tags_field_adds_the_typed_tag_and_escape_drops_it() {
 
     ui.focus(&tags_part());
     let _ = ui.typewrite("slow");
-    let _ = ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    let _ = ui.tap(Key::Escape, Modifiers::NONE);
     assert_eq!(
         ui.app().session.document.info().tags,
         ["drone", "dark"],
@@ -743,10 +742,10 @@ fn the_sub_patch_name_and_authors_are_runtime_fields() {
     };
     let before = stored(&ui);
     ui.focus(&name);
-    let _ = ui.tap(Key::Named(Named::End), Modifiers::empty());
+    let _ = ui.tap(Key::End, Modifiers::NONE);
     let _ = ui.typewrite("X");
     assert_eq!(stored(&ui), before, "typing is only a draft");
-    let _ = ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    let _ = ui.tap(Key::Enter, Modifiers::NONE);
     assert_eq!(stored(&ui), format!("{before}X"), "Enter saved the name");
     let crate::inspector::Inspector::SubPatch(sub) = ui.app().inspector_model() else {
         panic!("a sub-patch's inspector");
@@ -982,7 +981,7 @@ fn tab_after_ctrl_tab_into_the_column_stays_in_it() {
         if focused(&ui) == Some(authors_part()) {
             break;
         }
-        let _ = ui.tap(Key::Named(Named::Tab), Modifiers::CTRL);
+        let _ = ui.tap(Key::Tab, Modifiers::CONTROL);
     }
     assert_eq!(focused(&ui), Some(authors_part()), "Ctrl+Tab reaches Authors");
     let before = selection(&ui);
@@ -1199,7 +1198,7 @@ fn a_wide_whole_number_slider_steps_one_value_by_key() {
     ui.focus(&slider);
     assert_eq!(focused(&ui), Some(slider), "the seed's slider has the focus");
     let before = seed(&ui);
-    let _ = ui.tap(Key::Named(Named::ArrowRight), Modifiers::empty());
+    let _ = ui.tap(Key::Right, Modifiers::NONE);
     assert_eq!(seed(&ui), before + 1.0, "one arrow, one seed");
 }
 
@@ -1215,7 +1214,7 @@ fn a_covered_rows_field_takes_no_screen_readers_value() {
     let opens: [Open; 2] = [
         ("help", |ui| ui.send(Message::ShowHelp)),
         ("Preferences", |ui| {
-            let _ = ui.tap(Key::Character(",".into()), Modifiers::COMMAND);
+            let _ = ui.tap(Key::Character(','), Modifiers::platform_shortcut());
         }),
     ];
     let cutoff = |ui: &Ui| {

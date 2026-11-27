@@ -25,7 +25,7 @@ use crate::routing::{Routed, Target};
 use crate::view::{Layer, View};
 use accesskit::Role as KitRole;
 use loom_ui_core::{
-    Color, Event, IdTable, ImeEvent, Key, KeyEvent, Modifiers, Platform, Point, Size, TextStyle, UiId, Weight,
+    Code, Color, Event, IdTable, ImeEvent, Key, KeyEvent, Modifiers, Platform, Point, Size, TextStyle, UiId, Weight,
 };
 use parley::{FontContext, LayoutContext};
 use std::time::{Duration, Instant};
@@ -92,6 +92,7 @@ fn press(key: Key, modifiers: Modifiers, text: Option<&str>) -> KeyEvent {
         modifiers,
         repeat: false,
         text: text.map(str::to_owned),
+        code: Code::Other,
     }
 }
 

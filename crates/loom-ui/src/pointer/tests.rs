@@ -10,7 +10,7 @@ use crate::headless::Harness;
 use crate::layout::tests::{Mono, STYLE};
 use crate::routing::{Routed, Target};
 use crate::view::{Layer, View};
-use loom_ui_core::{Event, Point, PointerButton, PointerEvent, Size, UiId};
+use loom_ui_core::{Code, Event, Point, PointerButton, PointerEvent, Size, UiId};
 use std::time::Instant;
 
 /// What the test app hears.
@@ -306,6 +306,7 @@ fn key() -> DriverEvent {
             modifiers: loom_ui_core::Modifiers::NONE,
             repeat: false,
             text: Some("k".into()),
+            code: Code::Other,
         }),
         pointer: None,
     }
@@ -526,6 +527,7 @@ fn tab_enters_from_nothing_only_while_the_panels_take_input() {
             modifiers: loom_ui_core::Modifiers::NONE,
             repeat: false,
             text: None,
+            code: Code::Other,
         }),
         pointer: None,
     };
@@ -554,6 +556,7 @@ fn tab_skips_the_stops_below_the_input_layer() {
             modifiers: loom_ui_core::Modifiers::NONE,
             repeat: false,
             text: None,
+            code: Code::Other,
         }),
         pointer: None,
     };
@@ -597,6 +600,7 @@ fn the_targets_field_taking_the_keyboard_ends_our_focus() {
             modifiers: loom_ui_core::Modifiers::NONE,
             repeat: false,
             text: None,
+            code: Code::Other,
         }),
         pointer: None,
     };
@@ -629,6 +633,7 @@ fn press_key(key: loom_ui_core::Key, repeat: bool) -> DriverEvent {
             modifiers: loom_ui_core::Modifiers::NONE,
             repeat,
             text: None,
+            code: Code::Other,
         }),
         pointer: None,
     }
@@ -637,7 +642,7 @@ fn press_key(key: loom_ui_core::Key, repeat: bool) -> DriverEvent {
 /// `key` coming up.
 fn release_key(key: loom_ui_core::Key) -> DriverEvent {
     DriverEvent::Input {
-        event: Event::Key(loom_ui_core::KeyEvent::Released { key }),
+        event: Event::Key(loom_ui_core::KeyEvent::Released { key, code: Code::Other }),
         pointer: None,
     }
 }
@@ -954,6 +959,7 @@ fn press_shifted(key: loom_ui_core::Key) -> DriverEvent {
             },
             repeat: false,
             text: None,
+            code: Code::Other,
         }),
         pointer: None,
     }
@@ -1170,6 +1176,7 @@ fn tab_key() -> DriverEvent {
             modifiers: loom_ui_core::Modifiers::NONE,
             repeat: false,
             text: None,
+            code: Code::Other,
         }),
         pointer: None,
     }

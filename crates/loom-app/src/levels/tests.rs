@@ -1,11 +1,10 @@
 use crate::inspector::Inspector;
 use crate::ui_test::Ui;
 use crate::{App, Loaded, Message, Source};
-use iced::keyboard::{self, Modifiers, key::Named};
 use iced::{Event, mouse};
 use loom_core::{EngineConfig, ModuleId};
 use loom_patch::{ModulePath, Patch};
-use loom_ui_core::Point;
+use loom_ui_core::{Key, Modifiers, Point};
 
 /// A patch with one sub-patch, Voice: a pitch port into a sine, out
 /// through an out port, into the audio output.
@@ -137,7 +136,7 @@ fn opening_a_sub_patch_shows_its_inside_and_the_breadcrumb() {
 
     // Escape, with nothing selected, goes up one level.
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(Vec::new())));
-    ui.tap(keyboard::Key::Named(Named::Escape), Modifiers::empty());
+    ui.tap(Key::Escape, Modifiers::NONE);
     assert_eq!(ui.app().session.level, ModulePath::root());
     assert!(ui.app().ui_snapshot().level.is_empty());
 
@@ -154,10 +153,10 @@ fn opening_a_sub_patch_shows_its_inside_and_the_breadcrumb() {
 fn ctrl_enter_opens_the_selected_sub_patch() {
     let mut ui = Ui::with_app(nested_app());
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![1])));
-    ui.tap(keyboard::Key::Named(Named::Enter), Modifiers::COMMAND);
+    ui.tap(Key::Enter, Modifiers::platform_shortcut());
     assert_eq!(ui.app().session.level, ModulePath::root());
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2])));
-    ui.tap(keyboard::Key::Named(Named::Enter), Modifiers::COMMAND);
+    ui.tap(Key::Enter, Modifiers::platform_shortcut());
     assert_eq!(ui.app().session.level, voice());
     assert!(
         ui.app().session.selection.is_empty(),
@@ -312,7 +311,7 @@ fn ctrl_g_makes_a_sub_patch_and_undo_brings_the_modules_back() {
     let before = graph_cables(ui.app());
     let saved = ui.app().current_patch();
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2, 3])));
-    ui.tap(keyboard::Key::Character("g".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('g'), Modifiers::platform_shortcut());
     let snapshot = ui.app().ui_snapshot();
     let tile = snapshot
         .tiles
@@ -357,12 +356,9 @@ fn dissolve_gives_the_modules_back_where_the_tile_was() {
     let mut ui = Ui::with_app(app_with(FLAT));
     let saved = ui.app().current_patch();
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2, 3])));
-    ui.tap(keyboard::Key::Character("g".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('g'), Modifiers::platform_shortcut());
     assert_eq!(ui.app().current_patch().subpatches.len(), 1);
-    ui.tap(
-        keyboard::Key::Character("g".into()),
-        Modifiers::COMMAND | Modifiers::SHIFT,
-    );
+    ui.tap(Key::Character('g'), Modifiers::platform_shortcut() | Modifiers::SHIFT);
     assert!(ui.app().session.hierarchy.is_flat());
     assert_eq!(ui.app().current_patch(), saved);
     let snapshot = ui.app().ui_snapshot();
@@ -371,10 +367,7 @@ fn dissolve_gives_the_modules_back_where_the_tile_was() {
     assert_eq!(snapshot.undo.as_deref(), Some("dissolve Sub-patch"));
     // With a plain module selected, there is nothing to dissolve.
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![1])));
-    ui.tap(
-        keyboard::Key::Character("g".into()),
-        Modifiers::COMMAND | Modifiers::SHIFT,
-    );
+    ui.tap(Key::Character('g'), Modifiers::platform_shortcut() | Modifiers::SHIFT);
     assert_eq!(ui.app().ui_snapshot().status, "Select one sub-patch to dissolve");
 }
 
@@ -1837,23 +1830,23 @@ fn outline_keyboard_enters_and_leaves_a_sub_patch() {
     let mut ui = Ui::with_app(nested_app());
     let outline = crate::outline::tree_id();
     let row = crate::outline::row_id("module-2".into());
-    let none = Modifiers::empty();
-    ui.tap(keyboard::Key::Character("o".into()), none);
+    let none = Modifiers::NONE;
+    ui.tap(Key::Character('o'), none);
     ui.send(Message::OutlineRow(row.clone()));
-    ui.tap(keyboard::Key::Named(Named::Enter), none);
+    ui.tap(Key::Enter, none);
     assert_eq!(ui.app().session.selection, [2].into());
     assert!(ui.app().session.level.is_root());
     assert!(!ui.a11y_tree().focused().ui_id().unwrap().is_under(&outline));
 
-    ui.tap(keyboard::Key::Character("o".into()), none);
+    ui.tap(Key::Character('o'), none);
     assert_eq!(ui.a11y_tree().focused().ui_id(), Some(&row));
-    ui.tap(keyboard::Key::Named(Named::Enter), Modifiers::COMMAND);
+    ui.tap(Key::Enter, Modifiers::platform_shortcut());
     assert_eq!(ui.app().session.level, voice());
     assert_eq!(
         ui.a11y_tree().focused().ui_id(),
         Some(&crate::outline::row_id("summary".into()))
     );
-    ui.tap(keyboard::Key::Named(Named::Escape), none);
+    ui.tap(Key::Escape, none);
     assert!(ui.app().session.level.is_root());
     assert_eq!(ui.a11y_tree().focused().ui_id(), Some(&row));
 }
@@ -1868,10 +1861,10 @@ fn ctrl_enter_in_a_focused_field_opens_nothing() {
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2])));
     ui.focus(&crate::patch_info::part_authors_id(2));
     assert!(ui.text_field_focused(), "the Authors box has focus");
-    ui.tap(keyboard::Key::Named(Named::Enter), Modifiers::COMMAND);
+    ui.tap(Key::Enter, Modifiers::platform_shortcut());
     assert_eq!(ui.app().session.level, ModulePath::root(), "typing, it opens nothing");
     ui.unfocus_all();
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![2])));
-    ui.tap(keyboard::Key::Named(Named::Enter), Modifiers::COMMAND);
+    ui.tap(Key::Enter, Modifiers::platform_shortcut());
     assert_eq!(ui.app().session.level, voice(), "with no field focused it opens");
 }

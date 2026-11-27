@@ -432,6 +432,7 @@ fn page_keys_step_a_page() {
             modifiers: Modifiers::NONE,
             repeat: false,
             text: None,
+            code: loom_ui_core::Code::Other,
         };
         ui.app().patches_panel_key(field, &press)
     };

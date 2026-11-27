@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::ui_test::Ui;
-use iced::keyboard::{self, Key as IcedKey, key::Named};
+use loom_ui_core::Key;
 
 /// The subtractive example with the runtime's focus on the open tab, as a
 /// keyboard user's Tab gives it.
@@ -30,8 +30,8 @@ fn the_filter(ui: &Ui) -> u32 {
 }
 
 /// Presses `named` with no modifier.
-fn press(ui: &mut Ui, named: Named) {
-    ui.tap(IcedKey::Named(named), keyboard::Modifiers::empty());
+fn press(ui: &mut Ui, named: Key) {
+    ui.tap(named, Modifiers::NONE);
     let _ = ui.redraw();
 }
 
@@ -58,12 +58,12 @@ fn arrows_choose_a_tab_and_the_panel_follows() {
     let mut ui = on_the_inspector_tab();
     let positions = ui.app().session.positions.clone();
     for (named, open) in [
-        (Named::ArrowRight, Tab::Matrix),
-        (Named::ArrowRight, Tab::Outline),
-        (Named::ArrowRight, Tab::Inspector),
-        (Named::ArrowLeft, Tab::Outline),
-        (Named::Home, Tab::Inspector),
-        (Named::End, Tab::Outline),
+        (Key::Right, Tab::Matrix),
+        (Key::Right, Tab::Outline),
+        (Key::Right, Tab::Inspector),
+        (Key::Left, Tab::Outline),
+        (Key::Home, Tab::Inspector),
+        (Key::End, Tab::Outline),
     ] {
         press(&mut ui, named);
         assert_eq!(ui.app().right_tab, open, "{named:?}");
@@ -71,7 +71,7 @@ fn arrows_choose_a_tab_and_the_panel_follows() {
         assert!(!ui.app().focus_in_matrix() && !ui.app().session.outline.active);
     }
     // Up and Down are not the tab list's, and reach no content.
-    press(&mut ui, Named::ArrowDown);
+    press(&mut ui, Key::Down);
     assert_eq!(ui.app().right_tab, Tab::Outline);
     assert_eq!(ui.app().session.positions, positions, "no tile moved");
 }
@@ -139,12 +139,12 @@ fn a_screen_reader_click_opens_a_tab() {
 #[test]
 fn tab_goes_from_the_tab_list_into_its_panel_and_back() {
     let mut ui = on_the_inspector_tab();
-    press(&mut ui, Named::Tab);
+    press(&mut ui, Key::Tab);
     assert_eq!(ui.runtime().focused(), Some(&crate::patch_info::authors_part()));
-    ui.tap(IcedKey::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    ui.tap(Key::Tab, Modifiers::SHIFT);
     let _ = ui.redraw();
     assert_eq!(ui.runtime().focused(), Some(&tab_id(Tab::Inspector)));
-    ui.tap(IcedKey::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    ui.tap(Key::Tab, Modifiers::SHIFT);
     let _ = ui.redraw();
     let toolbar = ui.app().toolbar_entry();
     assert_eq!(ui.runtime().focused(), toolbar.as_ref());
@@ -155,9 +155,9 @@ fn tab_goes_from_the_tab_list_into_its_panel_and_back() {
 #[test]
 fn tab_from_the_matrix_tab_enters_the_matrix() {
     let mut ui = on_the_inspector_tab();
-    press(&mut ui, Named::ArrowRight);
+    press(&mut ui, Key::Right);
     assert_eq!(ui.app().right_tab, Tab::Matrix);
-    press(&mut ui, Named::Tab);
+    press(&mut ui, Key::Tab);
     let _ = ui.redraw();
     let entry = ui.app().matrix_entry().unwrap_or_else(crate::matrix::filter_part);
     assert_eq!(ui.runtime().focused(), Some(&entry), "the matrix has the keys");
@@ -168,9 +168,9 @@ fn tab_from_the_matrix_tab_enters_the_matrix() {
 #[test]
 fn tab_from_the_outline_tab_enters_the_outline() {
     let mut ui = on_the_inspector_tab();
-    press(&mut ui, Named::End);
+    press(&mut ui, Key::End);
     assert_eq!(ui.app().right_tab, Tab::Outline);
-    press(&mut ui, Named::Tab);
+    press(&mut ui, Key::Tab);
     assert!(ui.app().session.outline.active, "the Outline has the keys");
     assert_eq!(ui.runtime().focused(), Some(&crate::outline::row_id("summary".into())));
 }
@@ -193,9 +193,9 @@ fn shift_tab_from_a_modules_first_stop_reaches_the_tab() {
         .expect("the module's rows have a stop");
     ui.focus(&tab_id(Tab::Inspector));
     let _ = ui.redraw();
-    press(&mut ui, Named::Tab);
+    press(&mut ui, Key::Tab);
     assert_eq!(ui.runtime().focused(), Some(&first), "into the panel");
-    ui.tap(IcedKey::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    ui.tap(Key::Tab, Modifiers::SHIFT);
     let _ = ui.redraw();
     assert_eq!(ui.runtime().focused(), Some(&tab_id(Tab::Inspector)), "back to the tab");
 }
@@ -208,7 +208,7 @@ fn ctrl_tab_from_the_canvas_still_lands_in_the_inspector() {
     let filter = the_filter(&ui);
     ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![filter])));
     let _ = ui.redraw();
-    ui.tap(IcedKey::Named(Named::Tab), keyboard::Modifiers::CTRL);
+    ui.tap(Key::Tab, Modifiers::CONTROL);
     let _ = ui.redraw();
     let focused = ui.runtime().focused().cloned().expect("a stop has the focus");
     assert!(focused.is_under(&crate::inspector::panel::inspector_id()), "{focused}");
@@ -239,12 +239,9 @@ fn ctrl_tab_back_gives_the_focus_to_the_selected_radio() {
     ui.focus(&radio);
     let _ = ui.redraw();
     assert_eq!(ui.runtime().focused(), Some(&radio));
-    ui.tap(IcedKey::Named(Named::Tab), keyboard::Modifiers::CTRL);
+    ui.tap(Key::Tab, Modifiers::CONTROL);
     let _ = ui.redraw();
-    ui.tap(
-        IcedKey::Named(Named::Tab),
-        keyboard::Modifiers::CTRL | keyboard::Modifiers::SHIFT,
-    );
+    ui.tap(Key::Tab, Modifiers::CONTROL | Modifiers::SHIFT);
     let _ = ui.redraw();
     assert_eq!(ui.runtime().focused(), Some(&radio), "back on the radio it left");
 }

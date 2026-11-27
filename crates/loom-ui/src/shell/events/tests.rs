@@ -215,7 +215,8 @@ fn named_keys_map_to_ours() {
         (NamedKey::AltGraph, Key::Modifier),
         (NamedKey::Meta, Key::Modifier),
         (NamedKey::Super, Key::Modifier),
-        (NamedKey::F1, Key::Other),
+        (NamedKey::F1, Key::F1),
+        (NamedKey::F3, Key::Other),
     ];
     for (named, expected) in cases {
         assert_eq!(core_key(&WinitKey::Named(named)), expected, "{named:?}");
@@ -235,31 +236,67 @@ fn character_keys_are_one_character() {
     );
 }
 
-/// A press carries its modifiers, repeat, and text; a release only its
-/// key; a press winit made up on focus gives nothing.
+/// A press carries its modifiers, repeat, text, and where the key sits; a
+/// release its key and where it sits; a press winit made up on focus gives
+/// nothing.
 #[test]
 fn presses_and_releases_carry_what_they_should() {
     let z = WinitKey::Character(SmolStr::new("z"));
-    let meta = Modifiers {
-        meta: true,
-        ..Modifiers::NONE
-    };
+    let at = PhysicalKey::Code(KeyCode::KeyZ);
+    let meta = Modifiers::META;
     assert_eq!(
-        key(&z, ElementState::Pressed, true, Some("z"), false, meta),
+        key(&z, at, ElementState::Pressed, true, Some("z"), false, meta),
         Some(Event::Key(KeyEvent::Pressed {
             key: Key::Character('z'),
+            code: Code::Other,
             modifiers: meta,
             repeat: true,
             text: Some("z".into()),
         }))
     );
     assert_eq!(
-        key(&z, ElementState::Released, false, None, false, meta),
+        key(&z, at, ElementState::Released, false, None, false, meta),
         Some(Event::Key(KeyEvent::Released {
-            key: Key::Character('z')
+            key: Key::Character('z'),
+            code: Code::Other,
         }))
     );
-    assert_eq!(key(&z, ElementState::Pressed, false, Some("z"), true, meta), None);
+    assert_eq!(key(&z, at, ElementState::Pressed, false, Some("z"), true, meta), None);
+}
+
+/// The keys right of P are their places whatever they type: a German
+/// layout types `ü` and `+` there. Every other key is `Code::Other`.
+#[test]
+fn the_bracket_keys_are_named_by_their_place() {
+    let u = WinitKey::Character(SmolStr::new("ü"));
+    let pressed = |physical| {
+        key(
+            &u,
+            physical,
+            ElementState::Pressed,
+            false,
+            Some("ü"),
+            false,
+            Modifiers::NONE,
+        )
+    };
+    let code_of = |event: Option<Event>| match event {
+        Some(Event::Key(KeyEvent::Pressed { code, .. })) => code,
+        other => panic!("not a press: {other:?}"),
+    };
+    assert_eq!(
+        code_of(pressed(PhysicalKey::Code(KeyCode::BracketLeft))),
+        Code::BracketLeft
+    );
+    assert_eq!(
+        code_of(pressed(PhysicalKey::Code(KeyCode::BracketRight))),
+        Code::BracketRight
+    );
+    assert_eq!(code_of(pressed(PhysicalKey::Code(KeyCode::Period))), Code::Other);
+    assert_eq!(
+        code(PhysicalKey::Unidentified(winit::keyboard::NativeKeyCode::Unidentified)),
+        Code::Other
+    );
 }
 
 /// Positions and sizes divide by the scale.

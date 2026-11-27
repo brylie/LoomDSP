@@ -3,7 +3,7 @@
 use super::*;
 use crate::places::{Collect, Places};
 use loom_core::ModuleNames;
-use loom_ui_core::{IdKey, UiId};
+use loom_ui_core::{Code, IdKey, Key, KeyEvent, Modifiers, UiId};
 
 /// The most moves a `drag` takes.
 pub(super) const MAX_DRAG_STEPS: u32 = 1000;
@@ -35,13 +35,13 @@ pub(super) fn drag_end(value: &Value, which: &str) -> Result<Aim, String> {
 
 /// The steps of a pointer command, between setting its modifier keys and
 /// letting go of them.
-pub(super) fn with_modifiers(modifiers: keyboard::Modifiers, steps: Vec<PointerStep>) -> Vec<PointerStep> {
-    if modifiers.is_empty() {
+pub(super) fn with_modifiers(modifiers: Modifiers, steps: Vec<PointerStep>) -> Vec<PointerStep> {
+    if modifiers.none() {
         return steps;
     }
     std::iter::once(PointerStep::Modifiers(modifiers))
         .chain(steps)
-        .chain(std::iter::once(PointerStep::Modifiers(keyboard::Modifiers::default())))
+        .chain(std::iter::once(PointerStep::Modifiers(Modifiers::NONE)))
         .collect()
 }
 
@@ -313,38 +313,58 @@ pub(super) fn fields(value: Value) -> Map<String, Value> {
     }
 }
 
-/// A key by name: one character, or a named key.
-pub(super) fn key(name: &str) -> Result<keyboard::Key, String> {
-    use keyboard::key::Named;
-    let named = match name.to_ascii_lowercase().as_str() {
-        "escape" => Named::Escape,
-        "enter" => Named::Enter,
-        "tab" => Named::Tab,
-        "space" => Named::Space,
-        "delete" => Named::Delete,
-        "backspace" => Named::Backspace,
-        "up" => Named::ArrowUp,
-        "down" => Named::ArrowDown,
-        "left" => Named::ArrowLeft,
-        "right" => Named::ArrowRight,
-        "home" => Named::Home,
-        "end" => Named::End,
-        "pageup" => Named::PageUp,
-        "pagedown" => Named::PageDown,
-        "f2" => Named::F2,
-        _ if name.chars().count() == 1 => return Ok(keyboard::Key::Character(name.to_lowercase().into())),
+/// A key by name: one character, or a named key. A letter is the key with
+/// no modifier applied, so `A` is the `a` key, as a keyboard gives it.
+pub(super) fn key(name: &str) -> Result<Key, String> {
+    let key = match name.to_ascii_lowercase().as_str() {
+        "escape" => Key::Escape,
+        "enter" => Key::Enter,
+        "tab" => Key::Tab,
+        "space" => Key::Space,
+        "delete" => Key::Delete,
+        "backspace" => Key::Backspace,
+        "up" => Key::Up,
+        "down" => Key::Down,
+        "left" => Key::Left,
+        "right" => Key::Right,
+        "home" => Key::Home,
+        "end" => Key::End,
+        "pageup" => Key::PageUp,
+        "pagedown" => Key::PageDown,
+        "f2" => Key::F2,
+        _ if name.chars().count() == 1 => {
+            let mut lower = name.chars().flat_map(char::to_lowercase);
+            match (lower.next(), lower.next()) {
+                (Some(only), None) => Key::Character(only),
+                _ => Key::Other,
+            }
+        }
         _ => return Err(format!("unknown key `{name}`")),
     };
-    Ok(keyboard::Key::Named(named))
+    Ok(key)
 }
 
-pub(super) fn modifiers(names: &[String]) -> Result<keyboard::Modifiers, String> {
-    names.iter().try_fold(keyboard::Modifiers::default(), |m, name| {
+/// Where a scripted key sits, as the US layout gives it, so a script does
+/// the same on every machine (ui-layer.md, section 1, Keys in
+/// `loom-ui-core`, rule 5): `[` and `]` are their places, which the
+/// Outline's cable following reads.
+pub(super) fn code(key: Key) -> Code {
+    match key {
+        Key::Character('[') => Code::BracketLeft,
+        Key::Character(']') => Code::BracketRight,
+        _ => Code::Other,
+    }
+}
+
+/// The modifier keys by name. `cmd` is the platform's shortcut key:
+/// Command on a Mac and Control elsewhere, as the app reads it.
+pub(super) fn modifiers(names: &[String]) -> Result<Modifiers, String> {
+    names.iter().try_fold(Modifiers::NONE, |m, name| {
         let add = match name.to_ascii_lowercase().as_str() {
-            "cmd" | "command" => keyboard::Modifiers::COMMAND,
-            "ctrl" | "control" => keyboard::Modifiers::CTRL,
-            "shift" => keyboard::Modifiers::SHIFT,
-            "alt" | "option" => keyboard::Modifiers::ALT,
+            "cmd" | "command" => Modifiers::platform_shortcut(),
+            "ctrl" | "control" => Modifiers::CONTROL,
+            "shift" => Modifiers::SHIFT,
+            "alt" | "option" => Modifiers::ALT,
             _ => return Err(format!("unknown modifier `{name}`")),
         };
         Ok(m | add)
@@ -355,11 +375,11 @@ pub(super) fn modifiers(names: &[String]) -> Result<keyboard::Modifiers, String>
 /// native, and would stop the app with nobody to answer (rule 9). The `open`
 /// and `save` commands do the same without a dialog. New raises the in-app
 /// question, which a script can answer.
-pub(super) fn refuse_dialog_keys(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Result<(), String> {
-    let keyboard::Key::Character(c) = key else {
+pub(super) fn refuse_dialog_keys(key: &Key, modifiers: Modifiers) -> Result<(), String> {
+    let Key::Character(c) = key else {
         return Ok(());
     };
-    if modifiers.command() && matches!(c.as_str(), "o" | "s") {
+    if modifiers.shortcut() && matches!(c, 'o' | 's') {
         Err(format!(
             "the {c} shortcut opens a dialog; use the `open` or `save` command instead"
         ))
@@ -433,24 +453,15 @@ pub(super) fn question_open_error(question: &crate::question::Question) -> Strin
 /// the Panic key, which works whatever is open (panic.md).
 pub(super) fn refuse_while_asking(
     question: Option<&crate::question::Question>,
-    key: &keyboard::Key,
-    modifiers: keyboard::Modifiers,
+    key: &Key,
+    modifiers: Modifiers,
 ) -> Result<(), String> {
-    use keyboard::key::Named;
     let Some(question) = question else {
         return Ok(());
     };
     let its_own = matches!(
         key,
-        keyboard::Key::Named(
-            Named::Tab
-                | Named::Enter
-                | Named::Escape
-                | Named::ArrowLeft
-                | Named::ArrowRight
-                | Named::ArrowUp
-                | Named::ArrowDown
-        )
+        Key::Tab | Key::Enter | Key::Escape | Key::Left | Key::Right | Key::Up | Key::Down
     );
     if its_own || crate::panic::is_panic_key(key, modifiers) {
         Ok(())
@@ -460,30 +471,22 @@ pub(super) fn refuse_while_asking(
 }
 
 /// The key press and release, as the input listener sends them.
-pub(super) fn key_events(key: keyboard::Key, modifiers: keyboard::Modifiers) -> [keyboard::Event; 2] {
-    let physical = keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified);
+pub(super) fn key_events(key: Key, modifiers: Modifiers) -> [KeyEvent; 2] {
+    let code = code(key);
     [
-        keyboard::Event::KeyPressed {
-            key: key.clone(),
-            modified_key: key.clone(),
-            physical_key: physical,
-            location: keyboard::Location::Standard,
+        KeyEvent::Pressed {
+            key,
+            code,
             modifiers,
             // A real keyboard sends a character's text, unless Command or Ctrl
             // makes it a shortcut. The typed field and type-ahead read it.
-            text: match key.as_ref() {
-                keyboard::Key::Character(c) if !modifiers.command() && !modifiers.control() => Some(c.into()),
+            text: match key {
+                Key::Character(c) if !modifiers.shortcut() && !modifiers.control => Some(c.to_string()),
                 _ => None,
             },
             repeat: false,
         },
-        keyboard::Event::KeyReleased {
-            key: key.clone(),
-            modified_key: key,
-            physical_key: physical,
-            location: keyboard::Location::Standard,
-            modifiers,
-        },
+        KeyEvent::Released { key, code },
     ]
 }
 
@@ -494,7 +497,7 @@ const MAX_TYPED: usize = 500;
 /// The key presses and releases that type `text`, one pair per character, or
 /// why it cannot be typed. Enter and Tab act on the field or the window, so
 /// a script sends those with `key`.
-pub(super) fn type_events(text: &str) -> Result<Vec<keyboard::Event>, String> {
+pub(super) fn type_events(text: &str) -> Result<Vec<KeyEvent>, String> {
     if text.is_empty() {
         return Err("no text to type".to_string());
     }
@@ -504,32 +507,25 @@ pub(super) fn type_events(text: &str) -> Result<Vec<keyboard::Event>, String> {
     if text.chars().any(char::is_control) {
         return Err("`type` takes text only; use `key` for Enter, Tab, and other keys".to_string());
     }
-    let physical = keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified);
-    let modifiers = keyboard::Modifiers::default();
     Ok(text
         .chars()
         .flat_map(|c| {
             let key = match c {
-                ' ' => keyboard::Key::Named(keyboard::key::Named::Space),
-                _ => keyboard::Key::Character(c.to_string().into()),
+                ' ' => Key::Space,
+                _ => Key::Character(c),
             };
+            // The same places as `key` gives, so `type "["` and `key "["`
+            // do the same.
+            let code = code(key);
             [
-                keyboard::Event::KeyPressed {
-                    key: key.clone(),
-                    modified_key: key.clone(),
-                    physical_key: physical,
-                    location: keyboard::Location::Standard,
-                    modifiers,
-                    text: Some(c.to_string().into()),
+                KeyEvent::Pressed {
+                    key,
+                    code,
+                    modifiers: Modifiers::NONE,
+                    text: Some(c.to_string()),
                     repeat: false,
                 },
-                keyboard::Event::KeyReleased {
-                    key: key.clone(),
-                    modified_key: key,
-                    physical_key: physical,
-                    location: keyboard::Location::Standard,
-                    modifiers,
-                },
+                KeyEvent::Released { key, code },
             ]
         })
         .collect())

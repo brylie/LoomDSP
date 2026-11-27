@@ -4,6 +4,7 @@ use crate::inspector::Inspector;
 use crate::preferences::FILE_NAME;
 use crate::recovery::tests::TempDir;
 use crate::{Args, FileAction, Message as AppMessage};
+use loom_ui_core::{Key, Modifiers};
 use std::path::Path;
 
 /// A folder for one test, emptied first.
@@ -251,7 +252,7 @@ fn metadata_edits_are_saved() {
 #[test]
 fn the_window_shows_patch_info_the_chooser_and_the_browser() {
     use crate::ui_test::Ui;
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let dir = folder("window");
     std::fs::write(
         dir.join("drone.ron"),
@@ -296,14 +297,14 @@ fn the_window_shows_patch_info_the_chooser_and_the_browser() {
     ui.send(AppMessage::Preferences(crate::settings::Message::Close));
     assert_eq!(ui.app().rig.store.saved().author, "Sam");
 
-    ui.tap(Key::Character("o".into()), Modifiers::COMMAND | Modifiers::SHIFT);
+    ui.tap(Key::Character('o'), Modifiers::platform_shortcut() | Modifiers::SHIFT);
     ui.redraw();
     assert!(ui.app().overlays.patches().is_some(), "Ctrl+Shift+O opens the browser");
     assert!(ui.text("Your patches").is_some());
     assert!(ui.text("Low Drone").is_some());
-    ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
+    ui.tap(Key::Down, Modifiers::NONE);
     ui.typewrite("drone");
-    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
     ui.redraw();
     assert!(ui.app().overlays.patches().is_none());
     // Unsaved changes are asked about first.
@@ -320,7 +321,7 @@ fn the_window_shows_patch_info_the_chooser_and_the_browser() {
 #[test]
 fn undo_keys_leave_a_focused_text_field_alone() {
     use crate::ui_test::Ui;
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let mut ui = Ui::with_app(App::new(crate::tests::app_args()));
     let sine = ui
         .app()
@@ -334,10 +335,10 @@ fn undo_keys_leave_a_focused_text_field_alone() {
     ui.redraw();
     let count = ui.app().session.controller.graph().nodes().count();
 
-    let z = || Key::Character("z".into());
+    let z = || Key::Character('z');
     ui.focus(&tags_part());
     ui.typewrite("drone");
-    ui.tap(z(), Modifiers::COMMAND);
+    ui.tap(z(), Modifiers::platform_shortcut());
     assert_eq!(
         ui.app().session.controller.graph().nodes().count(),
         count,
@@ -347,8 +348,8 @@ fn undo_keys_leave_a_focused_text_field_alone() {
     // 6): the typing goes, and the patch keeps its edit.
     assert_eq!(ui.app().session.patch_info.tag_draft, "");
 
-    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
-    ui.tap(z(), Modifiers::COMMAND);
+    ui.tap(Key::Escape, Modifiers::NONE);
+    ui.tap(z(), Modifiers::platform_shortcut());
     assert_eq!(
         ui.app().session.controller.graph().nodes().count(),
         count - 1,
@@ -357,14 +358,14 @@ fn undo_keys_leave_a_focused_text_field_alone() {
 
     // Redo waits for the field the same way.
     ui.focus(&tags_part());
-    ui.tap(z(), Modifiers::COMMAND | Modifiers::SHIFT);
+    ui.tap(z(), Modifiers::platform_shortcut() | Modifiers::SHIFT);
     assert_eq!(
         ui.app().session.controller.graph().nodes().count(),
         count - 1,
         "typing keeps redo too"
     );
-    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
-    ui.tap(z(), Modifiers::COMMAND | Modifiers::SHIFT);
+    ui.tap(Key::Escape, Modifiers::NONE);
+    ui.tap(z(), Modifiers::platform_shortcut() | Modifiers::SHIFT);
     assert_eq!(ui.app().session.controller.graph().nodes().count(), count);
 }
 
@@ -463,21 +464,12 @@ fn part_credits_follow_nested_definitions_and_author_edits() {
     // To the text's end, as the platform's keys go there in a multi-line
     // field (ui-layer.md, section 8, rule 7).
     let end = if cfg!(target_os = "macos") {
-        (
-            iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown),
-            iced::keyboard::Modifiers::COMMAND,
-        )
+        (Key::Down, Modifiers::platform_shortcut())
     } else {
-        (
-            iced::keyboard::Key::Named(iced::keyboard::key::Named::End),
-            iced::keyboard::Modifiers::CTRL,
-        )
+        (Key::End, Modifiers::CONTROL)
     };
     ui.tap(end.0, end.1);
-    ui.tap(
-        iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
-        iced::keyboard::Modifiers::empty(),
-    );
+    ui.tap(Key::Enter, Modifiers::NONE);
     ui.typewrite("Yara");
     assert!(ui.app().overlays.browser().is_none());
     assert!(ui.app().unsaved());
@@ -488,10 +480,7 @@ fn part_credits_follow_nested_definitions_and_author_edits() {
     assert_eq!(ui.a11y_tree().node_by_id(&authors).value(), Some("lena\nAda\nYara"));
     assert!(ui.app().session.edits.history.undo_step().is_none());
 
-    ui.tap(
-        iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
-        iced::keyboard::Modifiers::empty(),
-    );
+    ui.tap(Key::Escape, Modifiers::NONE);
     assert_eq!(ui.focused_field(), None);
     assert_eq!(ui.app().undo_hint().as_deref(), Ok("Undo: edit sub-patch authors"));
     assert!(ui.app().session.edits.history.undo_step().is_some());

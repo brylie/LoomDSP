@@ -6,8 +6,8 @@ use crate::session::{EngineLink, PatchSession};
 use crate::tests::{app, app_args};
 use crate::ui_test::Ui;
 use crate::{App, Source, alerts, control, controls, help, live, settings};
-use iced::keyboard::{Key, Modifiers};
 use loom_core::{OutputRef, OutputSafety, ProbeId};
+use loom_ui_core::{Key, Modifiers};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -317,9 +317,9 @@ fn a_canvas_menu_keeps_the_browser_shortcut_from_opening_your_patches() {
         let _ = ui.app_mut().rig.store.save(preferences);
         open_overlay(&mut ui, owner);
 
-        ui.tap(Key::Character("o".into()), Modifiers::COMMAND | Modifiers::SHIFT);
+        ui.tap(Key::Character('o'), Modifiers::platform_shortcut() | Modifiers::SHIFT);
         assert_eq!(ui.app().input_owner(), owner);
-        ui.tap(Key::Named(iced::keyboard::key::Named::Tab), Modifiers::empty());
+        ui.tap(Key::Tab, Modifiers::NONE);
         assert_eq!(ui.app().input_owner(), owner);
         assert_eq!(ui.focused_field(), None);
     }
@@ -373,7 +373,7 @@ fn a_failed_save_shows_the_reason_in_the_window() {
     let mut ui = Ui::with_app(app());
     let _ = fake::asked();
 
-    ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('s'), Modifiers::platform_shortcut());
 
     let status = ui.app().alerts.status().to_string();
     assert!(status.starts_with("Could not save \"patch.ron\""), "{status}");

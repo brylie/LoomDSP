@@ -58,10 +58,10 @@ pub enum Step {
     Wheel { dx: f32, dy: f32 },
     /// The modifier keys held from now on. Sent with the next event, not
     /// on a frame of its own.
-    Modifiers(keyboard::Modifiers),
+    Modifiers(loom_ui_core::Modifiers),
     /// A key press or release, at the pointer. What no widget takes goes to
     /// the app as the input listener would send it.
-    Key(keyboard::Event),
+    Key(loom_ui_core::KeyEvent),
 }
 
 /// A step and the command it belongs to.
@@ -282,10 +282,16 @@ impl Pointer {
             let event = match step {
                 Step::Modifiers(modifiers) => {
                     // A change of keys needs no frame of its own.
-                    events.push((Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)), at));
+                    events.push((
+                        Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers.to_iced())),
+                        at,
+                    ));
                     continue;
                 }
+                // Iced still hears a scripted key until the window leaves
+                // Iced (plan step P4), so it goes as Iced's here, once.
                 Step::Key(key) => {
+                    let key = loom_canvas::iced_convert::key_event_to_iced(&key, loom_ui_core::Modifiers::NONE);
                     events.push((Event::Keyboard(key), at));
                     break;
                 }

@@ -5,7 +5,7 @@ use crate::recovery::tests::TempDir;
 use crate::tests::{app, app_args};
 use crate::ui_test::Ui;
 use crate::{App, FileAction, Message as AppMessage};
-use iced::keyboard::{Key, Modifiers, key::Named};
+use loom_ui_core::{Key, Modifiers};
 
 /// `count` patch files in `dir`, as `0.ron`, `1.ron`, and so on.
 fn patches(dir: &Path, count: usize) -> Vec<PathBuf> {
@@ -188,7 +188,7 @@ fn the_button_opens_a_list_of_names() {
     assert!(!rows[0].missing);
     assert!(ui.text("0.ron").is_some());
 
-    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    ui.tap(Key::Escape, Modifiers::NONE);
     assert_eq!(ui.app().ui_snapshot().recent, None);
 }
 
@@ -343,20 +343,23 @@ fn a_drop_opens_the_first_patch() {
     assert_eq!(dropped(&[wav, PathBuf::from("/a/no-extension")]), Dropped::NoPatch);
 }
 
-/// The window's report of a dropped file becomes a message, and nothing else
-/// does.
+/// The window's report of a dropped file reaches the app as a window event
+/// (`App::window_event`) and becomes a message; the app collects a drop's
+/// files for a moment, then opens the patch among them.
 #[test]
 fn a_dropped_file_becomes_a_message() {
-    let path = PathBuf::from("/a/b.ron");
-    let status = iced::event::Status::Ignored;
-    let window = iced::window::Id::unique();
-    let event = iced::Event::Window(iced::window::Event::FileDropped(path.clone()));
-    assert!(matches!(
-        drop_event(event, status, window),
-        Some(AppMessage::FileDropped(found)) if found == path
-    ));
-    let event = iced::Event::Window(iced::window::Event::CloseRequested);
-    assert!(drop_event(event, status, window).is_none());
+    let dir = TempDir::new("recent-drop-event");
+    let files = patches(&dir.0, 1);
+    let mut ui = crate::ui_test::Ui::with_app(app());
+    let messages = ui.window_event(loom_ui::WindowEvent::FileDropped(files[0].clone()));
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, AppMessage::FileDropped(found) if *found == files[0])),
+        "{messages:?}"
+    );
+    ui.send(AppMessage::DropsDone);
+    assert_eq!(ui.app().session.document.file(), Some(files[0].as_path()));
 }
 
 /// Drops `files` on the window, as the window reports them, and lets the
@@ -564,8 +567,8 @@ fn clipboard_keys_do_nothing_behind_the_list() {
     let count = ui.app().session.controller.graph().nodes().count();
     ui.send(AppMessage::OpenRecent);
     ui.redraw();
-    for key in ["x", "d"] {
-        ui.tap(Key::Character(key.into()), Modifiers::COMMAND);
+    for key in ['x', 'd'] {
+        ui.tap(Key::Character(key), Modifiers::platform_shortcut());
         assert_eq!(ui.app().session.controller.graph().nodes().count(), count, "{key}");
     }
     assert!(ui.app().overlays.recent_rows().is_some(), "the list stays open");
@@ -587,9 +590,9 @@ fn the_list_takes_the_keys_from_a_focused_matrix() {
     ui.send(AppMessage::OpenRecent);
     ui.redraw();
     assert!(!ui.app().matrix_owns(), "the list has the input");
-    let _ = ui.tap(Key::Named(Named::Delete), Modifiers::empty());
+    let _ = ui.tap(Key::Delete, Modifiers::NONE);
     assert_eq!(ui.app().session.controller.graph().assignments().count(), count);
-    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    ui.tap(Key::Escape, Modifiers::NONE);
     assert!(ui.app().overlays.recent_rows().is_none(), "one Escape closes it");
 }
 
@@ -624,14 +627,14 @@ fn from_the_keyboard_the_list_starts_on_its_first_item_and_tab_leaves_it() {
     ui.a11y_action(&button, accesskit::Action::Focus);
     ui.redraw();
     assert_eq!(ui.runtime().focused(), Some(&button), "the Recent button has the keys");
-    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
     ui.redraw();
     let rows = ui.app().ui_snapshot().recent.expect("the list is open");
     let first = crate::menus::recent_row_id(&rows[0].path);
     assert_eq!(ui.runtime().focused(), Some(&first), "it starts on its first item");
     assert!(ui.runtime().focus_ring().is_some(), "with a ring, from the keyboard");
     assert!(ui.text(&rows[0].folder).is_some(), "the folder is a second line");
-    ui.tap(Key::Named(Named::Tab), Modifiers::empty());
+    ui.tap(Key::Tab, Modifiers::NONE);
     ui.redraw();
     assert_eq!(ui.app().ui_snapshot().recent, None, "Tab closed it");
     assert!(
@@ -661,7 +664,7 @@ fn in_a_short_window_the_list_scrolls_to_its_focused_row() {
     let list = crate::menus::recent_list_id();
     let menu = ui.runtime().bounds(&crate::menus::recent_id()).expect("the menu");
     assert!(menu.y + menu.height <= 240.0, "the menu fits the window: {menu:?}");
-    ui.tap(Key::Named(Named::End), Modifiers::empty());
+    ui.tap(Key::End, Modifiers::NONE);
     ui.redraw();
     let last = crate::menus::recent_row_id(&rows[MAX_FILES - 1].path);
     assert_eq!(ui.runtime().focused(), Some(&last), "End moved to the last row");
@@ -719,7 +722,7 @@ fn the_highlighted_item_has_the_weak_fill() {
     assert!(ui.app_mut().open_path(&files[1]));
     ui.send(AppMessage::OpenRecent);
     ui.redraw();
-    ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
+    ui.tap(Key::Down, Modifiers::NONE);
     ui.redraw();
     let rows = ui.app().ui_snapshot().recent.expect("the list is open");
     let id = |at: usize| crate::menus::recent_row_id(&rows[at].path);

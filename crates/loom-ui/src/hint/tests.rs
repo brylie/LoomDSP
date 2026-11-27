@@ -10,7 +10,7 @@ use crate::headless::Harness;
 use crate::layout::tests::{Mono, STYLE};
 use crate::routing::NoTarget;
 use crate::view::{Layer, View};
-use loom_ui_core::{Event, Key, KeyEvent, Modifiers, PointerButton, PointerEvent};
+use loom_ui_core::{Code, Event, Key, KeyEvent, Modifiers, PointerButton, PointerEvent};
 use std::time::Instant;
 
 /// A Chooser shows the hovered element's text after a pointer move and the
@@ -251,13 +251,14 @@ fn at(x: f32, y: f32, event: PointerEvent) -> DriverEvent {
 /// `key` going down, or coming up when `up`.
 fn key(key: Key, up: bool) -> DriverEvent {
     let event = if up {
-        KeyEvent::Released { key }
+        KeyEvent::Released { key, code: Code::Other }
     } else {
         KeyEvent::Pressed {
             key,
             modifiers: Modifiers::NONE,
             repeat: false,
             text: None,
+            code: Code::Other,
         }
     };
     DriverEvent::Input {

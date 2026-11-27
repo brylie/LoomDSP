@@ -3,6 +3,7 @@
 use super::*;
 use crate::tests::app;
 use loom_ui::Target as _;
+use loom_ui_core::{Key, Modifiers};
 
 /// An Iced message becomes one turn with one update. The bridge's own
 /// hand-off to the queue wakes nothing, so Iced gets no second message
@@ -228,18 +229,9 @@ fn a_queued_message_runs_before_a_focus_answer() {
     assert_eq!(bridge.runtime.target().focused, Some(field));
 }
 
-/// An Escape press, as Iced's listener hears it.
-fn escape() -> iced::Event {
-    use iced::keyboard::{Event, Key, Location, Modifiers, key};
-    iced::Event::Keyboard(Event::KeyPressed {
-        key: Key::Named(key::Named::Escape),
-        modified_key: Key::Named(key::Named::Escape),
-        physical_key: key::Physical::Unidentified(key::NativeCode::Unidentified),
-        location: Location::Standard,
-        modifiers: Modifiers::empty(),
-        text: None,
-        repeat: false,
-    })
+/// An Escape press, as the app's input listener hears it.
+fn escape() -> loom_ui_core::Event {
+    loom_ui_core::Event::Key(crate::ui_test::pressed(Key::Escape, Modifiers::NONE))
 }
 
 /// An input event is routed before `update`: each message it becomes is
@@ -253,13 +245,12 @@ fn an_input_event_is_routed_into_updates_after_what_waits() {
         .join()
         .unwrap();
     let listening = bridge.app().listening();
-    let status = iced::event::Status::Ignored;
-    let routed = listening.route(escape(), status);
+    let routed = listening.route(&escape(), false);
     assert!(!routed.is_empty(), "Escape is heard");
     let before = bridge.runtime.counts();
     let _ = bridge.update(Bridged::App(Message::Input {
         event: escape(),
-        status,
+        used: false,
         listening,
     }));
     let after = bridge.runtime.counts();
@@ -285,7 +276,7 @@ fn input_never_reaches_update() {
     let _ = app.update(
         Message::Input {
             event: escape(),
-            status: iced::event::Status::Ignored,
+            used: false,
             listening,
         },
         &cx,

@@ -5,8 +5,8 @@
 use crate::inspector::{Inspector, Message as Inspect};
 use crate::ui_test::Ui;
 use crate::{App, Message};
-use iced::keyboard::{self, Modifiers, key::Named};
 use loom_core::{ModuleId, ModuleNames};
+use loom_ui_core::{Key, Modifiers};
 
 /// A sub-patch, Amp, whose Multiply gain of 0.00041 is exposed at -0.01 to
 /// 0.01: the only way to get a range that fine until Voice spread is built.
@@ -122,7 +122,7 @@ fn a_one_percent_key_step_on_a_fine_knob_changes_its_text() {
     ui.release();
     let before = tile_text(ui.app());
     let value = gain_of(ui.app(), mul, gain);
-    ui.tap(keyboard::Key::Named(Named::ArrowUp), Modifiers::default());
+    ui.tap(Key::Up, Modifiers::NONE);
     let after = tile_text(ui.app());
     assert!(gain_of(ui.app(), mul, gain) > value, "the step moved the gain");
     assert_ne!(after, before, "{before} stays {after}");

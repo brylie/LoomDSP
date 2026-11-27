@@ -7,6 +7,7 @@ use super::run::{Region, crop, crop_region, save_screenshot, search};
 use super::transport::*;
 use super::*;
 use crate::recovery::tests::TempDir;
+use loom_ui_core::{Key, Modifiers};
 use std::cell::RefCell;
 
 thread_local! {
@@ -149,17 +150,14 @@ fn parses_commands_and_rejects_unknown_ones() {
 /// File shortcuts would open a dialog nobody can close (rule 9).
 #[test]
 fn file_shortcuts_are_refused() {
-    let cmd = keyboard::Modifiers::COMMAND;
-    for c in ["o", "s"] {
-        let key = keyboard::Key::Character(c.into());
+    let cmd = Modifiers::platform_shortcut();
+    for c in ['o', 's'] {
+        let key = Key::Character(c);
         assert!(refuse_dialog_keys(&key, cmd).is_err(), "{c}");
-        assert!(
-            refuse_dialog_keys(&key, cmd | keyboard::Modifiers::SHIFT).is_err(),
-            "{c}"
-        );
-        assert!(refuse_dialog_keys(&key, keyboard::Modifiers::default()).is_ok(), "{c}");
+        assert!(refuse_dialog_keys(&key, cmd | Modifiers::SHIFT).is_err(), "{c}");
+        assert!(refuse_dialog_keys(&key, Modifiers::NONE).is_ok(), "{c}");
     }
-    assert!(refuse_dialog_keys(&keyboard::Key::Character("z".into()), cmd).is_ok());
+    assert!(refuse_dialog_keys(&Key::Character('z'), cmd).is_ok());
 }
 
 /// A mistaken `--control` path that names a regular file is never
@@ -182,13 +180,95 @@ fn targets_split_into_module_and_name() {
 
 #[test]
 fn keys_and_modifiers_by_name() {
-    assert_eq!(key("z"), Ok(keyboard::Key::Character("z".into())));
-    assert_eq!(key("Escape"), Ok(keyboard::Key::Named(keyboard::key::Named::Escape)));
+    assert_eq!(key("z"), Ok(Key::Character('z')));
+    assert_eq!(key("Z"), Ok(Key::Character('z')), "a letter is its key, with no Shift");
+    assert_eq!(key("Escape"), Ok(Key::Escape));
     assert!(key("hyper").is_err());
+    for (name, named) in [
+        ("escape", Key::Escape),
+        ("enter", Key::Enter),
+        ("tab", Key::Tab),
+        ("space", Key::Space),
+        ("delete", Key::Delete),
+        ("backspace", Key::Backspace),
+        ("up", Key::Up),
+        ("down", Key::Down),
+        ("left", Key::Left),
+        ("right", Key::Right),
+        ("home", Key::Home),
+        ("end", Key::End),
+        ("pageup", Key::PageUp),
+        ("pagedown", Key::PageDown),
+        ("f2", Key::F2),
+    ] {
+        assert_eq!(key(name), Ok(named), "{name}");
+    }
     assert_eq!(
         modifiers(&["cmd".to_string(), "shift".to_string()]),
-        Ok(keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT)
+        Ok(Modifiers::platform_shortcut() | Modifiers::SHIFT)
     );
+    for (name, held) in [
+        ("command", Modifiers::platform_shortcut()),
+        ("ctrl", Modifiers::CONTROL),
+        ("control", Modifiers::CONTROL),
+        ("alt", Modifiers::ALT),
+        ("option", Modifiers::ALT),
+    ] {
+        assert_eq!(modifiers(&[name.to_string()]), Ok(held), "{name}");
+    }
+    assert!(modifiers(&["hyper".to_string()]).is_err());
+}
+
+/// A scripted `[` or `]` carries its place on a US layout, through `key`
+/// and through `type` alike, so a script follows a cable as a real bracket
+/// does on any layout (ui-layer.md, section 1, Keys in `loom-ui-core`,
+/// rule 5). Other keys sit at no place anything reads.
+#[test]
+fn scripted_brackets_carry_their_place() {
+    use loom_ui_core::{Code, KeyEvent};
+    let code_of = |event: &KeyEvent| match event {
+        KeyEvent::Pressed { code, .. } | KeyEvent::Released { code, .. } => *code,
+        KeyEvent::ModifiersChanged(_) => Code::Other,
+    };
+    for (name, place) in [("[", Code::BracketLeft), ("]", Code::BracketRight), ("a", Code::Other)] {
+        let events = resolve::key_events(key(name).unwrap(), Modifiers::NONE);
+        assert!(events.iter().all(|event| code_of(event) == place), "key {name}");
+    }
+    let typed = resolve::type_events("[a]").unwrap();
+    let places: Vec<Code> = typed.iter().map(code_of).collect();
+    assert_eq!(
+        places,
+        [
+            Code::BracketLeft,
+            Code::BracketLeft,
+            Code::Other,
+            Code::Other,
+            Code::BracketRight,
+            Code::BracketRight
+        ]
+    );
+}
+
+/// A scripted `]` with a tile selected follows its cable to the next tile,
+/// as the real key does (outline/tests.rs). Before P2 a scripted bracket
+/// carried no place and did nothing.
+#[test]
+fn a_scripted_bracket_follows_a_cable() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let named = |ui: &crate::ui_test::Ui, title: &str| {
+        let map = &ui.app().session.patch_map;
+        map.structure
+            .tiles
+            .iter()
+            .find(|(_, tile)| tile.name == title)
+            .map(|(id, _)| *id)
+            .expect("a tile with that name")
+    };
+    let (saw, filter) = (named(&ui, "Saw"), named(&ui, "SVF"));
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![saw])));
+    ui.redraw();
+    run_ui(&mut ui, r#"{"cmd": "key", "key": "]"}"#).unwrap();
+    assert_eq!(ui.app().session.selection, [filter].into());
 }
 
 /// Serves a script through a fake app thread that answers every call.
@@ -1628,18 +1708,14 @@ fn with_overlay(owner: crate::input_owner::InputOwner) -> crate::ui_test::Ui {
 #[test]
 fn a_scripted_key_routes_as_a_real_one_for_each_overlay() {
     use crate::input_owner::tests::OWNERS;
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     for owner in OWNERS {
-        for (name, key) in [
-            ("escape", Key::Named(Named::Escape)),
-            ("tab", Key::Named(Named::Tab)),
-            ("up", Key::Named(Named::ArrowUp)),
-        ] {
+        for (name, key) in [("escape", Key::Escape), ("tab", Key::Tab), ("up", Key::Up)] {
             let mut scripted = with_overlay(owner);
             let line = format!(r#"{{"cmd": "key", "key": "{name}"}}"#);
             let by_script = routed_names(channel_messages(&mut scripted, &line));
             let mut direct = with_overlay(owner);
-            let by_step = routed_names(direct.tap(key, Modifiers::empty()));
+            let by_step = routed_names(direct.tap(key, Modifiers::NONE));
             assert_eq!(by_script, by_step, "{owner:?}, {name}");
         }
         // A character carries its text, so a focused field can use it.
@@ -1713,19 +1789,19 @@ fn type_is_refused_while_a_question_is_open() {
 /// A `type` keeps case and spaces, and takes only text.
 #[test]
 fn typed_text_becomes_one_key_per_character() {
-    use iced::keyboard::{Event, Key, key::Named};
+    use loom_ui_core::{Key, KeyEvent};
     let events = resolve::type_events("A b").unwrap();
     assert_eq!(events.len(), 6, "a press and a release per character");
     let pressed: Vec<(Key, String)> = events
         .iter()
         .filter_map(|e| match e {
-            Event::KeyPressed { key, text, .. } => Some((key.clone(), text.as_ref().unwrap().to_string())),
+            KeyEvent::Pressed { key, text, .. } => Some((*key, text.as_ref().unwrap().to_string())),
             _ => None,
         })
         .collect();
-    assert_eq!(pressed[0], (Key::Character("A".into()), "A".to_string()));
-    assert_eq!(pressed[1], (Key::Named(Named::Space), " ".to_string()));
-    assert_eq!(pressed[2], (Key::Character("b".into()), "b".to_string()));
+    assert_eq!(pressed[0], (Key::Character('A'), "A".to_string()));
+    assert_eq!(pressed[1], (Key::Space, " ".to_string()));
+    assert_eq!(pressed[2], (Key::Character('b'), "b".to_string()));
 
     assert!(resolve::type_events("").is_err());
     assert!(resolve::type_events("one\ntwo").unwrap_err().contains("use `key`"));
@@ -2352,20 +2428,14 @@ fn a_scripted_save_answer_that_writes_replies_ok() {
 fn a_scripted_panic_key_works_over_a_question() {
     use crate::question::{AfterDiscard, Question};
     let question = Question::discard("a".into(), AfterDiscard::New);
-    let cmd = keyboard::Modifiers::COMMAND;
-    let refused = |key: keyboard::Key, m| refuse_while_asking(Some(&question), &key, m).is_err();
-    assert!(!refused(keyboard::Key::Character(".".into()), cmd), "Panic");
-    assert!(!refused(
-        keyboard::Key::Named(keyboard::key::Named::Tab),
-        keyboard::Modifiers::default()
-    ));
-    assert!(refused(keyboard::Key::Character("z".into()), cmd));
-    assert!(refused(
-        keyboard::Key::Character(".".into()),
-        keyboard::Modifiers::default()
-    ));
+    let cmd = Modifiers::platform_shortcut();
+    let refused = |key: Key, m| refuse_while_asking(Some(&question), &key, m).is_err();
+    assert!(!refused(Key::Character('.'), cmd), "Panic");
+    assert!(!refused(Key::Tab, Modifiers::NONE));
+    assert!(refused(Key::Character('z'), cmd));
+    assert!(refused(Key::Character('.'), Modifiers::NONE));
     // With no question open, nothing is refused here.
-    assert!(refuse_while_asking(None, &keyboard::Key::Character("z".into()), cmd).is_ok());
+    assert!(refuse_while_asking(None, &Key::Character('z'), cmd).is_ok());
 }
 
 /// `open` works as File > Open does, so a patch that loads differently from
@@ -3191,7 +3261,7 @@ fn a_named_drag_destination_is_resolved_after_resize() {
 /// A captured scripted press cancels the runtime's held Space.
 #[test]
 fn a_scripted_canvas_press_cancels_space_held_on_the_bar() {
-    use iced::keyboard::{Key, key::Named};
+    use loom_ui_core::Key;
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
     ui.redraw();
@@ -3199,9 +3269,9 @@ fn a_scripted_canvas_press_cancels_space_held_on_the_bar() {
     let point = ui.runtime().bounds(&id).unwrap().center();
     ui.move_to(point);
     ui.press();
-    ui.key_down(Key::Named(Named::Space), false);
+    ui.key_down(Key::Space, false);
     run_ui(&mut ui, r#"{"cmd":"press","target":"4:cutoff"}"#).unwrap();
-    ui.key_up(Key::Named(Named::Space));
+    ui.key_up(Key::Space);
     assert!(!ui.app().alerts.kept().is_empty());
 }
 
@@ -3236,10 +3306,7 @@ fn a_capture_uses_the_live_runtime_focus_ring() {
 #[test]
 fn a_scripted_tab_moves_the_focus_in_preferences() {
     let mut ui = typing_ui();
-    ui.tap(
-        iced::keyboard::Key::Character(",".into()),
-        iced::keyboard::Modifiers::COMMAND,
-    );
+    ui.tap(Key::Character(','), Modifiers::platform_shortcut());
     ui.redraw();
     let close = crate::settings::panel::close_id();
     assert_eq!(ui.runtime().focused(), Some(&close));
@@ -3254,7 +3321,7 @@ fn a_scripted_tab_moves_the_focus_in_preferences() {
 /// overlay needs a route of its own.
 #[test]
 fn a_scripted_tab_moves_the_focus_as_a_real_one_in_help_and_the_chooser() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     /// An overlay's name, and how to open it.
     type Open = (&'static str, fn(&mut crate::ui_test::Ui));
     let opens: [Open; 2] = [
@@ -3269,14 +3336,14 @@ fn a_scripted_tab_moves_the_focus_as_a_real_one_in_help_and_the_chooser() {
     ];
     for (name, open) in opens {
         for back in [false, true] {
-            let modifiers = if back { Modifiers::SHIFT } else { Modifiers::empty() };
+            let modifiers = if back { Modifiers::SHIFT } else { Modifiers::NONE };
             let mut real = typing_ui();
             open(&mut real);
             let _ = real.redraw();
             let start = real.runtime().focused().cloned();
             let mut seen = Vec::new();
             for _ in 0..3 {
-                real.tap(Key::Named(Named::Tab), modifiers);
+                real.tap(Key::Tab, modifiers);
                 let _ = real.redraw();
                 seen.push(real.runtime().focused().cloned());
             }

@@ -5,8 +5,7 @@
 use super::*;
 use crate::ui_test::Ui;
 use accesskit::{Action as KitAction, Role as KitRole, Toggled};
-use iced::keyboard::{self, key::Named};
-use loom_ui_core::{Point, UiId};
+use loom_ui_core::{Key, Modifiers, Point, UiId};
 
 /// The subtractive patch with module 4 selected, so the inspector shows
 /// its rows and no patch info fields, and an error kept in the bar.
@@ -24,8 +23,8 @@ fn id(text: &str) -> UiId {
 }
 
 /// A key going down and coming up.
-fn tap(ui: &mut Ui, key: Named) {
-    ui.tap(keyboard::Key::Named(key), keyboard::Modifiers::default());
+fn tap(ui: &mut Ui, key: Key) {
+    ui.tap(key, Modifiers::NONE);
 }
 
 /// The bar sits at the window's foot, as high as the token, and Iced's
@@ -116,13 +115,13 @@ fn the_x_dismisses_by_pointer_key_and_screen_reader() {
                 // holds the keys and walks its tiles (section 6, rule 1).
                 ui.app_mut().session.selection.clear();
                 ui.redraw();
-                ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+                ui.tap(Key::Tab, Modifiers::SHIFT);
                 assert_eq!(
                     ui.runtime().focused(),
                     Some(&dismiss),
                     "Shift+Tab from nothing reaches the ×, the last stop"
                 );
-                tap(&mut ui, if way == "enter" { Named::Enter } else { Named::Space });
+                tap(&mut ui, if way == "enter" { Key::Enter } else { Key::Space });
             }
             _ => ui.a11y_action(&dismiss, KitAction::Click),
         }
@@ -147,7 +146,7 @@ fn the_developer_switches_turn_with_space_and_a_screen_reader() {
     assert_eq!(tree.node_by_id(&id(bars::MOVE_CAMERA_ID)).name(), Some("Move camera"));
 
     let back = |ui: &mut Ui| {
-        ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+        ui.tap(Key::Tab, Modifiers::SHIFT);
     };
     // From nothing: no tile selected either (section 6, rule 1).
     ui.app_mut().session.selection.clear();
@@ -155,10 +154,10 @@ fn the_developer_switches_turn_with_space_and_a_screen_reader() {
     back(&mut ui);
     back(&mut ui);
     assert_eq!(ui.runtime().focused(), Some(&measure));
-    tap(&mut ui, Named::Space);
+    tap(&mut ui, Key::Space);
     ui.redraw();
     assert!(ui.app().measuring, "Space turned it on");
-    tap(&mut ui, Named::Enter);
+    tap(&mut ui, Key::Enter);
     ui.redraw();
     assert!(ui.app().measuring, "Enter does not turn a switch");
 
@@ -273,7 +272,7 @@ fn tab_reads_the_canvas_patch_info_the_bar_then_the_toolbar() {
     let x = id(bars::STATUS_DISMISS_ID);
     let new = crate::toolbar::toolbar_id().with("new");
     let mut from_nothing = ui_with_patch_info(true);
-    tap(&mut from_nothing, Named::Tab);
+    tap(&mut from_nothing, Key::Tab);
     assert_eq!(at(&mut from_nothing), (None, None), "from nothing, nothing of ours");
     assert!(
         !from_nothing.app().session.selection.is_empty(),
@@ -284,13 +283,13 @@ fn tab_reads_the_canvas_patch_info_the_bar_then_the_toolbar() {
     click_authors(&mut ui);
     assert_eq!(ui.runtime().focused(), Some(&authors));
     for stop in [tags, part("choose_licence"), part("shortcuts")] {
-        tap(&mut ui, Named::Tab);
+        tap(&mut ui, Key::Tab);
         assert_eq!(ui.runtime().focused(), Some(&stop));
     }
-    tap(&mut ui, Named::Tab);
+    tap(&mut ui, Key::Tab);
     assert_eq!(at(&mut ui), (None, Some(x.clone())), "past patch info, the bar");
     assert!(ui.runtime().focus_ring().is_some(), "from the keyboard, with a ring");
-    tap(&mut ui, Named::Tab);
+    tap(&mut ui, Key::Tab);
     assert_eq!(
         at(&mut ui),
         (None, Some(new.clone())),
@@ -301,10 +300,10 @@ fn tab_reads_the_canvas_patch_info_the_bar_then_the_toolbar() {
     // then the top run's last stop (plan 3.2, row 4e).
     let mut ui = ui_with_patch_info(true);
     click_authors(&mut ui);
-    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    ui.tap(Key::Tab, Modifiers::SHIFT);
     let inspector = crate::tabs::tab_id(crate::matrix::Tab::Inspector);
     assert_eq!(at(&mut ui), (None, Some(inspector)), "before patch info, the tab list");
-    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(at(&mut ui), (None, Some(new)), "before the tab list, the toolbar");
 }
 
@@ -315,9 +314,9 @@ fn shift_tab_from_nothing_enters_the_bar() {
     let x = id(bars::STATUS_DISMISS_ID);
     let shortcuts = crate::inspector::ids::part(&crate::inspector::ids::patch(), "shortcuts");
     let mut ui = ui_with_patch_info(true);
-    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(at(&mut ui), (None, Some(x)), "from nothing, the last stop");
-    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(
         at(&mut ui),
         (None, Some(shortcuts)),
@@ -335,10 +334,10 @@ fn with_no_stop_in_the_bar_the_fields_hand_on_to_the_toolbar() {
     assert!(ui.app().bar_stops().is_empty());
     click_authors(&mut ui);
     for _ in 0..3 {
-        tap(&mut ui, Named::Tab);
+        tap(&mut ui, Key::Tab);
     }
     assert_eq!(ui.runtime().focused(), Some(&shortcuts));
-    tap(&mut ui, Named::Tab);
+    tap(&mut ui, Key::Tab);
     assert_eq!(
         at(&mut ui),
         (None, Some(crate::toolbar::toolbar_id().with("new"))),
@@ -440,7 +439,7 @@ fn a_screen_readers_focus_moves_the_keyboard_to_the_x() {
     let node = ui.a11y_tree().node_by_id(&x).node_id();
     ui.a11y_action(&x, KitAction::Focus);
     assert_eq!(ui.runtime().focused(), Some(&x));
-    tap(&mut ui, Named::Enter);
+    tap(&mut ui, Key::Enter);
     ui.redraw();
     assert!(ui.app().alerts.kept().is_empty(), "Enter on the focused × dismissed it");
     assert!(!ui.app().bar_stops().contains(&x), "and the × is gone");
@@ -508,7 +507,7 @@ fn focus_on_the_x_takes_the_keyboard_from_the_canvas() {
     ui.a11y_action(&id(bars::STATUS_DISMISS_ID), KitAction::Focus);
     assert_eq!(ui.app().a11y.focus(), None, "the canvas let go");
     assert_eq!(ui.app().session.selection, selected, "nothing else selected");
-    tap(&mut ui, Named::Enter);
+    tap(&mut ui, Key::Enter);
     ui.redraw();
     assert!(ui.app().alerts.kept().is_empty(), "Enter on the × dismissed the error");
 }
@@ -575,7 +574,7 @@ fn focus_on_the_x_cancels_a_canvas_focus_still_on_its_way() {
     ui.redraw();
     assert_eq!(ui.app().a11y.focus(), None, "the canvas did not take the keys back");
     assert_eq!(ui.runtime().focused(), Some(&id(bars::STATUS_DISMISS_ID)));
-    tap(&mut ui, Named::Enter);
+    tap(&mut ui, Key::Enter);
     ui.redraw();
     assert!(ui.app().alerts.kept().is_empty(), "Enter on the × dismissed the error");
 }
@@ -588,7 +587,7 @@ fn focus_on_the_x_cancels_a_canvas_focus_still_on_its_way() {
 fn shift_tab_with_a_tile_selected_walks_the_canvas() {
     let mut ui = ui_with_error();
     assert!(ui.app().canvas_has_keys(), "tile 4 is selected");
-    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(ui.runtime().focused(), None, "the bar's × was not entered");
     assert_eq!(ui.app().session.selection.len(), 1, "the canvas selected a tile");
     assert_ne!(ui.app().session.selection, [4].into_iter().collect(), "another one");
@@ -601,9 +600,9 @@ fn shift_tab_with_a_tile_selected_walks_the_canvas() {
 fn the_x_is_reached_from_a_selected_tile_by_escape_then_shift_tab() {
     let mut ui = ui_with_error();
     let x = id(bars::STATUS_DISMISS_ID);
-    tap(&mut ui, Named::Escape);
+    tap(&mut ui, Key::Escape);
     ui.redraw();
     assert!(ui.app().session.selection.is_empty(), "Escape let the selection go");
-    ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::SHIFT);
+    ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(ui.runtime().focused(), Some(&x));
 }

@@ -6,7 +6,7 @@ use crate::effect::{Choice, Effects, FocusTarget, Selection};
 use crate::headless::{Harness, Headless};
 use crate::routing::{NoTarget, Routed};
 use crate::view::Layer;
-use loom_ui_core::{Key, KeyEvent, Modifiers, Point, Size, UiId};
+use loom_ui_core::{Code, Key, KeyEvent, Modifiers, Point, Size, UiId};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -224,6 +224,7 @@ fn key_press() -> DriverEvent {
             modifiers: Modifiers::default(),
             text: Some("a".into()),
             repeat: false,
+            code: Code::Other,
         }),
         pointer: None,
     }
@@ -1213,6 +1214,7 @@ fn press(key: Key) -> DriverEvent {
                 _ => None,
             },
             repeat: false,
+            code: Code::Other,
         }),
         pointer: None,
     }
@@ -1479,7 +1481,10 @@ fn escape_cancels_a_held_space_before_it_is_taken_first() {
     harness.step(press(Key::Space));
     harness.step(press(Key::Escape));
     harness.step(DriverEvent::Input {
-        event: Event::Key(KeyEvent::Released { key: Key::Space }),
+        event: Event::Key(KeyEvent::Released {
+            key: Key::Space,
+            code: Code::Other,
+        }),
         pointer: None,
     });
     harness.step(DriverEvent::Woken);
