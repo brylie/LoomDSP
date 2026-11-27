@@ -126,6 +126,11 @@ pub struct Runtime<A: App, T> {
     waker: Waker<A::Message>,
     queue: Receiver<A::Message>,
     pending: VecDeque<A::Message>,
+    /// The focus move the last turn ended with, for the app to hear first
+    /// in the next turn, unless that turn moves the focus again and
+    /// reports the newer move instead: the app never hears an older focus
+    /// after a newer one.
+    pending_focus: Option<A::Message>,
     window: WindowState,
     view: Option<View>,
     /// The app changed outside a turn ([`Runtime::mark_view_stale`], for
@@ -178,6 +183,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             waker: Waker::new(sender, wake.clone()),
             queue,
             pending: VecDeque::new(),
+            pending_focus: None,
             window,
             view: None,
             view_stale: false,
@@ -1712,7 +1718,15 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 deadline: None,
             };
         }
-        self.turn(DriverEvent::Woken, vec![message], now, driver)
+        // A focus report the last turn left waits too, for the next turn,
+        // unless this one ends with a newer report, which replaces it.
+        let waiting = self.pending_focus.take();
+        let mut next = self.turn(DriverEvent::Woken, vec![message], now, driver);
+        if self.pending_focus.is_none() && waiting.is_some() {
+            self.pending_focus = waiting;
+            next.again |= !self.exited;
+        }
+        next
     }
 
     /// One turn: routes `event`, runs `batch` and the messages routing
@@ -1843,6 +1857,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 // A focus the event moved is the first thing the app hears
                 // this turn, so no update reads a focus it was not told of.
                 if let Some(report) = self.panels().focus_report() {
+                    self.pending_focus = None;
                     batch.insert(0, report);
                 }
             }
@@ -1876,6 +1891,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             }
             DriverEvent::Presented => batch.append(&mut self.waiting_for_draw),
             DriverEvent::Woken | DriverEvent::DeadlineReached => {}
+        }
+        // The last turn's focus move, when this event did not move the
+        // focus again, is the first thing the app hears.
+        if let Some(older) = self.pending_focus.take() {
+            batch.insert(0, older);
         }
 
         // Tab, or a press the target handed back, may have moved focus off
@@ -1974,8 +1994,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.drain_queue();
         let sent = self.customs.take_sent();
         self.pending.extend(sent);
-        if let Some(report) = report {
-            self.pending.push_front(report);
+        if report.is_some() {
+            self.pending_focus = report;
         }
         // The custom elements' deadlines and frames, asked every turn: an
         // element's state changes with no update. A frame it asked for
@@ -1986,7 +2006,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let redraw_asked = self.customs.redraw_asked();
         Next {
             draw,
-            again: !self.exited && (!self.pending.is_empty() || !self.pasted.is_empty() || redraw_asked),
+            again: !self.exited
+                && (!self.pending.is_empty()
+                    || self.pending_focus.is_some()
+                    || !self.pasted.is_empty()
+                    || redraw_asked),
             frames: !self.exited && (self.app.animating() || custom.frames),
             deadline: if self.exited {
                 None
