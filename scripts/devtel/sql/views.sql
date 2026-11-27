@@ -225,7 +225,8 @@ from records left join turns using (session_id) left join tools using (session_i
 -- Checks run again with nothing changed in between. Two sources:
 -- "same tree": a check that ran on the same working tree as an earlier run
 --   of the same check: by hand, then in the commit hook, then again before
---   push, for example. Exact, from scripts/devtel/run.sh.
+--   push, for example. Exact, from scripts/devtel/run.sh. A pass reused
+--   from an earlier run is left out.
 -- "no change": the same check command ran again in a session with no tool
 --   call in between that may have changed the code (devtel_may_write).
 --   An estimate from the transcripts, for history before the task wrapper.
@@ -238,6 +239,9 @@ with step_spans as (
     nullif(attributes['gen_ai.conversation.id'], '') as session_id,
     to_timestamp(start_ns::double / 1e9) as start_ts, to_timestamp(end_ns::double / 1e9) as end_ts
   from spool_spans where service = 'checks' and coalesce(attributes['loom.devtel.tree'], '') <> ''
+    -- A reused pass (docs/dev/check-reuse.md) costs almost nothing, so it
+    -- is not a re-run.
+    and coalesce(attributes['loom.devtel.reused'], 'false') <> 'true'
 ),
 -- prek splits a hook's files into batches, run at the same time or one
 -- after another. A span that starts before the earlier spans of the same

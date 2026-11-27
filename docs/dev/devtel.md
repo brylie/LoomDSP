@@ -41,11 +41,11 @@ Claude Code session ──── SessionStart hook ── exports TRACEPARENT, L
 
 ### Writers
 
-Writers append spans to the spool. They print nothing and never change the exit code of the command they watch.
+Writers append spans to the spool. They print nothing and never change the exit code of the command they watch. The one exception is the check runner when it reuses a pass on the same tree: it does not run the check, prints one `reused:` line, and exits 0, as the check did on the same inputs ([check reuse](check-reuse.md), ADR-0049).
 
 | Writer | Where it hooks in | What it records | Cost |
 |---|---|---|---|
-| Check runner (`run.sh`) | Each check's `entry` in `prek.toml`, in the commit, push, and manual stages | Check name, command, exit code, duration, branch, commit, a hash of the working tree, and whether it ran in a git hook or before a push | About 150 ms per check: 90 ms for the tree hash, 45 ms for git, and the rest to start Python |
+| Check runner (`run.sh`) | Each check's `entry` in `prek.toml`, in the commit, push, and manual stages | Check name, command, exit code, duration, branch, commit, a hash of the working tree, whether it ran in a git hook or before a push, and whether it reused an earlier pass (`loom.devtel.reused`, with the reused run's time in `loom.devtel.reused_ms`) | About 150 ms per check: 90 ms for the tree hash, 45 ms for git, and the rest to start Python |
 | Git hooks (`devtel.py git`) | prek, in the `post-commit`, `post-checkout`, `post-merge`, `post-rewrite`, and `pre-push` stages | Commit size (files, insertions, deletions), parent count, whether Claude co-authored it, branch switches, rewrites, and the remote name and branch of a push | About 0.1 s to find the git process; the rest (about 0.4 s) runs in the background, so git does not wait |
 | Claude Code hook (`hook.sh`) | `SessionStart` in `.claude/settings.json` | The session's start, model, and source. Sets the trace context for the session and starts an import in the background | About 0.35 s, once per session |
 | Test runner (`scripts/test_run.py`) | The test runs of `mise run check`, `test`, and `coverage` ([test runs](test-runs.md)) | Service `tests`: the wait for the machine-wide test queue, and the run with its selection, crates, and exit code | Nothing measurable: two spans per test run |
@@ -92,7 +92,7 @@ Claude Code writes one transcript record per content block of a response, and ea
 
 | Command | What it shows |
 |---|---|
-| `mise run devtel-report` | Time by kind of work, re-runs, possible loops, models and tokens, commits, and the largest sessions |
+| `mise run devtel-report` | Time by kind of work, re-runs, reused passes and the time they saved, possible loops, models and tokens, commits, and the largest sessions |
 | `mise run devtel` | otel-desktop-viewer, with each session as a waterfall. It runs only while open, holds the spans in memory, and stops when you stop the task. Pick a wide time range: the page starts on the last hour. No Intel Mac build. |
 | `python3 scripts/devtel/devtel.py export FILE` | Every span as OTLP JSON lines, for any other OpenTelemetry tool |
 
@@ -127,7 +127,7 @@ A command that does several things counts as the first match in the order `views
 
 A re-run is a check that ran again when nothing had changed, so it could not tell anything new. `devtel_reruns` has three measures:
 
-- **same tree** is exact. `run.sh` hashes the working tree before each check, with `git add -A` into a temporary index and `git write-tree`. That leaves your index alone. It writes each new file version into `.git/objects` once, and `git gc` prunes them. Two runs of a check on the same tree count as one run and one re-run, whether by hand, in the commit hook, or before push. prek splits a check's files into batches. Batches that overlap in time, or follow each other within a second, count as one run, so two separate runs less than a second apart also count as one.
+- **same tree** is exact. `run.sh` hashes the working tree before each check, with `git add -A` into a temporary index and `git write-tree`. That leaves your index alone. It writes each new file version into `.git/objects` once, and `git gc` prunes them. Two runs of a check on the same tree count as one run and one re-run, whether by hand, in the commit hook, or before push. A run that reused an earlier pass ([check reuse](check-reuse.md)) is not a re-run: the report counts it under "reused a pass", with the time it saved. prek splits a check's files into batches. Batches that overlap in time, or follow each other within a second, count as one run, so two separate runs less than a second apart also count as one.
 - **no change** is an estimate from the transcripts: the same check command ran again in a session with no tool call in between that may have changed the code. Agents change code through Bash as often as through the Edit tool, so `devtel_may_write` also counts in-place editors, scripts on stdin, heredocs, redirects into files, git commands that change the tree, and formatters. That rule is broad, so this measure is a lower bound.
 - **hook after check** is an estimate from the transcripts: a `git commit` or `git push` that came right after the session ran a test or check, with no change in between, and that did not itself run a check. Its hooks re-checked code that had just been checked. The hooks run only some of the checks, so this is time spent re-checking, not all waste.
 
