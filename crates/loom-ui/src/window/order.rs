@@ -621,6 +621,21 @@ impl Window {
         self.part_owner(id).is_some()
     }
 
+    /// True when `id` names a part of a custom element whose last build
+    /// gave it a node that is no focus stop, as a turned-off part's is
+    /// (section 6, rule 2). A part with no node of its own is not known
+    /// here, and its element decides.
+    pub(crate) fn part_is_no_stop(&self, id: &UiId) -> bool {
+        self.custom_nodes
+            .iter()
+            .find(|(owner, _)| id.is_under(owner) && id.keys().len() > owner.keys().len())
+            .and_then(|(owner, parts)| {
+                let rest = &id.keys()[owner.keys().len()..];
+                parts.iter().find(|part| part.path() == rest)
+            })
+            .is_some_and(|part| !part.is_focusable())
+    }
+
     /// The custom element whose part `id` names, when its panel is drawn
     /// and its last build has a node for that part.
     fn part_owner(&self, id: &UiId) -> Option<&UiId> {

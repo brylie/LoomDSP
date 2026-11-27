@@ -704,6 +704,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // A part inside a custom element is the element's to focus: the
         // runtime's focus goes to the element when it found the part, and
         // the effect is dropped when it did not (section 9, rule 6).
+        // A part that is no stop, such as a turned-off one, takes no focus
+        // through its element either (section 6, rule 2).
+        if let FocusTarget::Element(id) = target
+            && self.panels.part_is_no_stop(id)
+        {
+            return false;
+        }
         if let FocusTarget::Element(id) = target
             && let Some(found) = self.panels().focus_inner(id)
         {

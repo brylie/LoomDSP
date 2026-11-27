@@ -339,6 +339,21 @@ fn a_turned_off_part_offers_no_focus() {
     assert!(harness.runtime().custom_access_problems().is_empty());
 }
 
+/// A focus effect on a turned-off part is dropped: its element does not
+/// take the focus for it, and reports no such part.
+#[test]
+fn a_focus_effect_on_a_turned_off_part_is_dropped() {
+    let mut app = grids();
+    app.cells = vec!["a", "off"];
+    let mut harness = harness(app);
+    harness.send(Message::FocusPart("off"));
+    harness.lay_out(&mut Mono::default());
+    assert_eq!(harness.runtime().focused(), None, "the grid took no focus for it");
+    harness.send(Message::FocusPart("a"));
+    harness.lay_out(&mut Mono::default());
+    assert_eq!(harness.runtime().focused(), Some(&grid()), "an enabled part still does");
+}
+
 /// A part that comes and goes keeps no node ID another part can take: the
 /// app's table never gives a number twice.
 #[test]
