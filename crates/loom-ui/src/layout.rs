@@ -152,6 +152,8 @@ struct Root {
     height: Length,
     /// Where the panel goes, when not over the whole window.
     placement: Option<crate::element::Placement>,
+    /// The most height the root element asks for, if it sets one.
+    max_height: Option<f32>,
     /// It hears a press outside it.
     closes_outside: bool,
 }
@@ -493,7 +495,7 @@ impl Layout {
         self.slots.clear();
         self.problems.clear();
         self.duplicates = 0;
-        let (width, height) = (root.width, root.height);
+        let (width, height, max_height) = (root.width, root.height, root.max.1);
         let (placement, closes_outside) = (root.placement.clone(), root.closes_outside);
         let scope = self.panel.clone();
         let node = self.add(root, None, &scope, Parent::Stack, false);
@@ -502,6 +504,7 @@ impl Layout {
             width,
             height,
             placement,
+            max_height,
             closes_outside,
         });
         // A container that takes its keys from a stop needs that stop in the
@@ -556,6 +559,20 @@ impl Layout {
             width: root_size(root.width, constraint.width),
             height: root_size(root.height, constraint.height),
         };
+        // A placed root is never taller than the window, as a native menu
+        // is cut to the screen: a scroll container inside it then shrinks
+        // and scrolls (ui-layer.md, section 5, rule 13).
+        if root.placement.is_some() {
+            let window = match constraint.height {
+                Space::Definite(height) => Some(height),
+                Space::MinContent | Space::MaxContent => None,
+            };
+            let cap = match (root.max_height, window) {
+                (Some(asked), Some(window)) => Some(asked.min(window)),
+                (asked, window) => asked.or(window),
+            };
+            style.max_size.height = limit(cap);
+        }
         if *self.tree.style(root.node).expect("the root is in the tree") != style {
             self.tree.set_style(root.node, style).expect("the root is in the tree");
         }

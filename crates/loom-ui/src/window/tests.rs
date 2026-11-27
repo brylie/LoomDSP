@@ -859,3 +859,37 @@ fn a_root_placed_under_a_placed_root_opens_under_its_element() {
         "just under its square"
     );
 }
+
+/// A menu of 30 rows, 10 px each, in a scroll, placed at (20, 40).
+fn tall_menu(_: &()) -> Element {
+    let rows = (0..30).map(|n| Element::space(Length::Fixed(50.0), Length::Fixed(10.0)).key(format!("row{n}")));
+    Element::column([
+        Element::scroll(Element::column(rows), crate::window::scroll::tests::SCROLL)
+            .key("list")
+            .access(crate::access::Access::new(crate::access::Role::ScrollView, "Rows"))
+            .min_height(0.0),
+    ])
+    .placed(crate::element::Placement::At(Point::new(20.0, 40.0)))
+}
+
+/// A placed root taller than the window is cut to the window's height and
+/// moved up to fit, as a native menu is cut to the screen, so the scroll
+/// inside it shrinks and its rows can be scrolled to (section 5, rule 13).
+/// In a window tall enough, it keeps its content size where it asked.
+#[test]
+fn a_placed_root_taller_than_the_window_is_cut_to_it() {
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(panel("menu"), Layer::Overlays, &(), tall_menu);
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    let menu = screen.at("menu").expect("placed");
+    assert_eq!((menu.y, menu.height), (0.0, 200.0), "cut to the window, moved up");
+    let list = screen.at("menu/list").expect("the list");
+    assert!(list.y + list.height <= 200.0, "the list fits: {list:?}");
+
+    screen.lay_out(Size::new(300.0, 600.0));
+    let menu = screen.at("menu").expect("placed");
+    assert_eq!(menu.y, 40.0, "where it asked");
+    assert!(menu.height > 300.0, "at its content size: {menu:?}");
+}
