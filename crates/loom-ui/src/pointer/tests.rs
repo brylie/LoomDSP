@@ -41,6 +41,8 @@ enum Message {
     /// This element's context menu, opened by a key or a screen reader
     /// (`true`) or by a right press (`false`).
     Menu(UiId, bool),
+    /// Turn the menu's item off, keeping it a stop.
+    OffItem,
 }
 
 /// An app that shows a bar of two buttons in the panels layer, across the
@@ -61,6 +63,9 @@ struct Layers {
     /// The overlay is a dialog, not the menu: an opaque panel with 30 px
     /// of room around its one button, room that is no stop.
     padded: bool,
+    /// The menu's item is turned off, and stays a focus stop as the APG
+    /// keeps a disabled menu item (`Element::focusable_while_off`).
+    off_item: bool,
     heard: Vec<Message>,
 }
 
@@ -73,6 +78,7 @@ impl App for Layers {
             Message::Input(layer) => self.input = *layer,
             Message::Reports(on) => self.reports = *on,
             Message::Canvas(on) => self.canvas = *on,
+            Message::OffItem => self.off_item = true,
             Message::Refocus(ids) => {
                 for id in ids {
                     effects = effects.and(Effects::focus(id.clone()));
@@ -96,8 +102,22 @@ impl App for Layers {
                     Element::column([button("ok", 20.0)]).padding(30.0).opaque()
                 });
             } else {
-                view.panel_with(UiId::panel("menu"), Layer::Overlays, &(), |_| {
-                    Element::row([menu_item("item", 20.0)]).closes_on_press_outside()
+                view.panel_with(UiId::panel("menu"), Layer::Overlays, &self.off_item, |off| {
+                    let item = if *off {
+                        let states = crate::access::States {
+                            disabled: true,
+                            ..crate::access::States::default()
+                        };
+                        Element::text("item", STYLE)
+                            .key("item")
+                            .width(Length::Fixed(20.0))
+                            .min_width(20.0)
+                            .focusable_while_off()
+                            .access(Access::new(Role::MenuItem, "item").action(Action::Click).states(states))
+                    } else {
+                        menu_item("item", 20.0)
+                    };
+                    Element::row([item]).closes_on_press_outside()
                 });
             }
         }
@@ -242,6 +262,7 @@ fn harness(overlay: bool, answer: Routed) -> Harness<Layers, Fake> {
         reports: false,
         stacked: false,
         padded: false,
+        off_item: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -924,6 +945,7 @@ fn the_app_decides_tab_at_the_end_of_a_run() {
         reports: false,
         stacked: false,
         padded: false,
+        off_item: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -1338,6 +1360,26 @@ fn hovering_a_menu_item_focuses_it_without_a_ring() {
     assert_eq!(bar.runtime().focused(), None, "a button takes no focus from hover");
 }
 
+/// A turned-off menu item that stays a stop (section 6, rule 2, as the
+/// APG keeps a disabled menu item focusable): the pointer moving over it
+/// focuses it, as over any menu item, and a click on it picks nothing.
+#[test]
+fn hovering_a_turned_off_menu_item_focuses_it_and_a_click_picks_nothing() {
+    let item = UiId::panel("menu").with("item");
+    let mut menu = harness(true, Routed::Passed);
+    menu.send(Message::OffItem);
+    menu.send(Message::Input(Layer::Overlays));
+    menu.lay_out(&mut Mono::default());
+    menu.step(at(5.0, 5.0, PointerEvent::Moved));
+    assert_eq!(menu.runtime().focused(), Some(&item), "it takes the focus");
+    assert_eq!(menu.runtime().focus_ring(), None, "no ring from the pointer");
+    click(&mut menu, 5.0, 5.0);
+    assert!(
+        !menu.app().heard.contains(&Message::Clicked(item)),
+        "a click on it picks nothing"
+    );
+}
+
 /// An app that shows one paragraph in the panels layer, "See Saw or
 /// Sine", with links on "Saw" and "Sine".
 struct Paragraph {
@@ -1520,6 +1562,7 @@ fn reporting() -> Harness<Layers, Fake> {
         reports: true,
         stacked: false,
         padded: false,
+        off_item: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -1689,6 +1732,7 @@ fn a_press_inside_the_lower_of_two_menus_closes_only_the_upper() {
         reports: false,
         stacked: true,
         padded: false,
+        off_item: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -1734,6 +1778,7 @@ fn a_press_on_no_stop_over_an_overlay_keeps_the_focus() {
         reports: false,
         stacked: false,
         padded: true,
+        off_item: false,
         heard: Vec::new(),
     };
     let target = Fake {
