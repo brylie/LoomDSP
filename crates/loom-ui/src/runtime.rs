@@ -1457,7 +1457,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let Some(to) = slider.after_key(from, *key, *modifiers) else {
             return (false, false);
         };
-        let reports = self.pointer.slide.key(&id, from, to, now);
+        let reports = self.pointer.slide.key(&id, from, to, slider.position(), now);
         self.panels().report_slid(reports);
         let ring = !self.focus.ring;
         self.focus.ring = true;
@@ -1490,7 +1490,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // From where an open group of its steps last left it, which the
         // app may not have laid out yet.
         let from = self.pointer.slide.key_base(&target, slider.position());
-        let reports = self.pointer.slide.step(&target, from, slider.after_step(from, up), now);
+        let reports = self
+            .pointer
+            .slide
+            .step(&target, from, slider.after_step(from, up), slider.position(), now);
         self.panels().report_slid(reports);
         Some(false)
     }

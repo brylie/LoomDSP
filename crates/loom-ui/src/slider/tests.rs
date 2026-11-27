@@ -104,10 +104,10 @@ fn a_screen_readers_steps_are_one_group() {
     assert!(near(slider.after_step(0.5, false), 0.4));
     let now = Instant::now();
     let mut sliding = Sliding::default();
-    let reports = sliding.step(&level(), 0.5, 0.6, now);
+    let reports = sliding.step(&level(), 0.5, 0.6, 0.5, now);
     assert_reports(&reports, &[(0.5, SlidePhase::Start), (0.6, SlidePhase::Move)]);
     let later = now + Duration::from_millis(300);
-    let reports = sliding.step(&level(), sliding.key_base(&level(), 0.5), 0.7, later);
+    let reports = sliding.step(&level(), sliding.key_base(&level(), 0.5), 0.7, 0.5, later);
     assert_reports(&reports, &[(0.7, SlidePhase::Move)]);
     assert!(
         sliding.close_keys_if(later, None).is_empty(),
@@ -115,7 +115,46 @@ fn a_screen_readers_steps_are_one_group() {
     );
     let reports = sliding.close_keys_if(later + KEY_GROUP, None);
     assert_reports(&reports, &[(0.7, SlidePhase::End)]);
-    assert!(sliding.step(&level(), 1.0, 1.0, later).is_empty(), "nothing at an end");
+    assert!(
+        sliding.step(&level(), 1.0, 1.0, 1.0, later).is_empty(),
+        "nothing at an end"
+    );
+}
+
+/// While a group of steps is open, the next step goes on from the last
+/// report, which the app may not have laid out yet; but when the slider
+/// shows a value that is neither that report nor what it showed at the
+/// last step, the app moved it, as a MIDI control does, and the next step
+/// goes on from what it shows.
+#[test]
+fn a_step_goes_on_from_a_value_the_app_set_meanwhile() {
+    let now = Instant::now();
+    let mut sliding = Sliding::default();
+    let _ = sliding.step(&level(), 0.5, 0.6, 0.5, now);
+    assert!(near(sliding.key_base(&level(), 0.5), 0.6), "not laid out yet");
+    assert!(near(sliding.key_base(&level(), 0.6), 0.6), "laid out");
+    assert!(near(sliding.key_base(&level(), 0.2), 0.2), "the app moved it to 0.2");
+    let other = UiId::panel("panel").with("other");
+    let _ = sliding.key(&other, 0.5, 0.6, 0.5, now);
+    assert!(near(sliding.key_base(&other, 0.5), 0.6), "keys: not laid out yet");
+    assert!(near(sliding.key_base(&other, 0.9), 0.9), "keys: the app moved it");
+}
+
+/// A layout that shows an earlier report of the open group, one or more
+/// behind, is the app lagging, not the app moving the slider: the next
+/// step still goes on from the last report, so no step is lost.
+#[test]
+fn a_layout_behind_by_a_report_is_no_app_move() {
+    let now = Instant::now();
+    let mut sliding = Sliding::default();
+    let _ = sliding.key(&level(), 0.5, 0.6, 0.5, now);
+    let base = sliding.key_base(&level(), 0.5);
+    let _ = sliding.key(&level(), base, 0.7, 0.5, now);
+    assert!(
+        near(sliding.key_base(&level(), 0.6), 0.7),
+        "0.6 is the group's own report"
+    );
+    assert!(near(sliding.key_base(&level(), 0.5), 0.7), "0.5 is where it started");
 }
 
 /// Section 5, rule 16: a press on the track jumps there and drags from
@@ -216,7 +255,7 @@ fn a_double_click_resets_to_the_default() {
 fn keys_group_until_500_ms_after_the_last() {
     let start = Instant::now();
     let mut sliding = Sliding::default();
-    let first = sliding.key(&level(), 0.5, 0.51, start);
+    let first = sliding.key(&level(), 0.5, 0.51, 0.5, start);
     assert_reports(&first, &[(0.5, SlidePhase::Start), (0.51, SlidePhase::Move)]);
     assert_eq!(sliding.deadline(), Some(start + KEY_GROUP));
     let at = start + Duration::from_millis(400);
@@ -224,7 +263,7 @@ fn keys_group_until_500_ms_after_the_last() {
         near(sliding.key_base(&level(), 0.5), 0.51),
         "keys step from the group's position"
     );
-    let second = sliding.key(&level(), 0.51, 0.52, at);
+    let second = sliding.key(&level(), 0.51, 0.52, 0.51, at);
     assert_reports(&second, &[(0.52, SlidePhase::Move)]);
     assert!(
         sliding
@@ -235,13 +274,13 @@ fn keys_group_until_500_ms_after_the_last() {
     assert_reports(&closed, &[(0.52, SlidePhase::End)]);
     assert_eq!(sliding.deadline(), None);
 
-    let _ = sliding.key(&level(), 0.5, 0.51, start);
+    let _ = sliding.key(&level(), 0.5, 0.51, 0.5, start);
     let closed = sliding.close_keys_if(start, None);
     assert_reports(&closed, &[(0.51, SlidePhase::End)]);
 
     let other = UiId::panel("list").with("other");
-    let _ = sliding.key(&level(), 0.5, 0.51, start);
-    let switched = sliding.key(&other, 0.2, 0.21, start);
+    let _ = sliding.key(&level(), 0.5, 0.51, 0.5, start);
+    let switched = sliding.key(&other, 0.2, 0.21, 0.2, start);
     assert_reports(
         &switched,
         &[
@@ -258,11 +297,11 @@ fn keys_group_until_500_ms_after_the_last() {
 fn a_key_that_moves_nothing_reports_nothing() {
     let start = Instant::now();
     let mut sliding = Sliding::default();
-    assert!(sliding.key(&level(), 1.0, 1.0, start).is_empty());
+    assert!(sliding.key(&level(), 1.0, 1.0, 1.0, start).is_empty());
     assert_eq!(sliding.deadline(), None);
-    let _ = sliding.key(&level(), 0.99, 1.0, start);
+    let _ = sliding.key(&level(), 0.99, 1.0, 0.99, start);
     let later = start + Duration::from_millis(300);
-    assert!(sliding.key(&level(), 1.0, 1.0, later).is_empty());
+    assert!(sliding.key(&level(), 1.0, 1.0, 1.0, later).is_empty());
     assert_eq!(sliding.deadline(), Some(later + KEY_GROUP), "the group stays open");
 }
 
@@ -270,7 +309,7 @@ fn a_key_that_moves_nothing_reports_nothing() {
 #[test]
 fn a_press_closes_the_keys_group() {
     let mut sliding = Sliding::default();
-    let _ = sliding.key(&level(), 0.5, 0.51, Instant::now());
+    let _ = sliding.key(&level(), 0.5, 0.51, 0.5, Instant::now());
     let reports = sliding.press(&level(), Slider::new(0.51), BOUNDS, over(0.51), false, None);
     assert_reports(&reports, &[(0.51, SlidePhase::End), (0.51, SlidePhase::Start)]);
 }
@@ -298,8 +337,8 @@ fn a_screen_readers_group_and_keys_never_join() {
     let soon = now + Duration::from_millis(100);
 
     let mut sliding = Sliding::default();
-    let _ = sliding.step(&level(), 0.5, 0.6, now);
-    let reports = sliding.key(&level(), 0.6, 0.7, soon);
+    let _ = sliding.step(&level(), 0.5, 0.6, 0.5, now);
+    let reports = sliding.key(&level(), 0.6, 0.7, 0.6, soon);
     assert_reports(
         &reports,
         &[
@@ -310,8 +349,8 @@ fn a_screen_readers_group_and_keys_never_join() {
     );
 
     let mut sliding = Sliding::default();
-    let _ = sliding.key(&level(), 0.5, 0.6, now);
-    let reports = sliding.step(&level(), 0.6, 0.7, soon);
+    let _ = sliding.key(&level(), 0.5, 0.6, 0.5, now);
+    let reports = sliding.step(&level(), 0.6, 0.7, 0.6, soon);
     assert_reports(
         &reports,
         &[
@@ -322,8 +361,8 @@ fn a_screen_readers_group_and_keys_never_join() {
     );
 
     let mut sliding = Sliding::default();
-    let _ = sliding.step(&level(), 0.5, 0.6, now);
-    let reports = sliding.step(&other, 0.2, 0.3, soon);
+    let _ = sliding.step(&level(), 0.5, 0.6, 0.5, now);
+    let reports = sliding.step(&other, 0.2, 0.3, 0.2, soon);
     assert_eq!(reports[0].0, level(), "the first slider's group ends");
     assert_eq!(reports[0].2, SlidePhase::End);
     assert_eq!(reports[1].0, other, "and the other's starts");
