@@ -1500,3 +1500,5 @@ fn escape_cancels_a_held_space_before_it_is_taken_first() {
         "the Escape cancelled it, and went to no element first"
     );
 }
+
+mod hooks;

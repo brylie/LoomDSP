@@ -88,6 +88,30 @@ pub trait App: 'static {
         None
     }
 
+    /// The message for a key press that is always heard, whoever has the
+    /// input, such as Panic (section 6, rule 6, step 1). The runtime asks
+    /// first, for every press, before any element, the Question layer and
+    /// a field that is composing text included. A press it answers goes no
+    /// further, and the routing target never hears it. A keyboard a plugin
+    /// host forwards to the window enters here too, as every key does.
+    /// `None`, the default, lets the key go on. It reads state and changes
+    /// none.
+    fn always_key(&self, key: &loom_ui_core::KeyEvent) -> Option<Self::Message> {
+        let _ = key;
+        None
+    }
+
+    /// The message for a key that nothing took: no element, panel, field,
+    /// or the window's home element, and the routing target passed it
+    /// (section 6, rule 6, step 6). The app's shortcuts are here: Save,
+    /// Undo, and the rest. It hears presses and releases. It reads focus
+    /// from the turn's context, through `update`, in this key's own turn.
+    /// `None`, the default, when the app has no use for the key.
+    fn unclaimed_key(&self, key: &loom_ui_core::KeyEvent) -> Option<Self::Message> {
+        let _ = key;
+        None
+    }
+
     /// The message for a press outside the panel `root`, whose root asks
     /// for it ([`Element::closes_on_press_outside`](crate::Element::closes_on_press_outside)),
     /// while its layer takes input: usually, close it (section 5, rule

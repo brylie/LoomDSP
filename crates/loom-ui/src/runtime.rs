@@ -1835,7 +1835,18 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 let composing = matches!(event, Event::Key(_)) && self.composing();
                 // A focused select's keys come first, so Tab from an open
                 // list chooses before it moves the focus (section 6, rule 12).
-                let (mut taken, changed) = if composing {
+                // Step 1: a key that is always heard, such as Panic, is
+                // asked first, before any element, the Question layer and a
+                // composing field included (section 6, rule 6).
+                let always = match &event {
+                    Event::Key(key @ KeyEvent::Pressed { .. }) => self.app.always_key(key),
+                    _ => None,
+                };
+                let heard = always.is_some();
+                batch.extend(always);
+                let (mut taken, changed) = if heard {
+                    (true, false)
+                } else if composing {
                     (false, false)
                 } else {
                     self.select_key(&event, now)
@@ -2144,9 +2155,19 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 let routed = self.target.input(event, pointer, now, batch);
                 // Step 5: a key the target left goes to the window's home
                 // element while nothing has focus (section 9, rule 2).
-                if routed != Routed::Taken && matches!(event, Event::Key(_)) {
+                if let Event::Key(key) = event
+                    && routed != Routed::Taken
+                {
                     let target_focus = self.target.focused().is_some();
-                    self.panels().key_to_home(event, target_focus);
+                    if self.panels().key_to_home(event, target_focus) {
+                        // A key the home element took is its alone, so a
+                        // toolkit that heard it first drops it too.
+                        self.target.kept(event);
+                    } else if routed == Routed::Passed {
+                        // Step 6: a key nothing took reaches the app's
+                        // shortcuts, in this turn.
+                        batch.extend(self.app.unclaimed_key(key));
+                    }
                 }
                 return false;
             }
