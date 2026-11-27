@@ -398,6 +398,43 @@ fn an_unset_variable_quits_even_when_stdout_is_closed() {
     assert_eq!(exit_status(), COULD_NOT_RUN);
 }
 
+/// `select` and `remove` take the tiles of the level the canvas shows, as
+/// clicks and Delete do: a sub-patch tile, which the engine's flattened
+/// graph does not hold, and inside a level its own tiles, but not a tile
+/// of another level.
+#[test]
+fn select_and_remove_take_the_tiles_of_the_level_shown() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/patches/nested-subtractive.ron");
+    let mut app = crate::tests::app_with_text(&std::fs::read_to_string(path).unwrap());
+
+    // The Voice is tile 2 at the top: a sub-patch tile.
+    assert_eq!(run(&mut app, r#"{"cmd": "select", "modules": [2]}"#), Ok(Map::new()));
+    assert_eq!(app.session.selection, [2].into());
+
+    // Inside the Voice, its Filter is a sub-patch tile too, and the
+    // Voice's own tile is not on the canvas there.
+    let _ = app.send(Message::OpenLevel(loom_patch::ModulePath::top(2)));
+    let filter = app
+        .session
+        .scene
+        .modules()
+        .iter()
+        .find(|tile| tile.title == "Filter")
+        .expect("the Voice shows its Filter")
+        .id;
+    let select = format!(r#"{{"cmd": "select", "modules": [{filter}]}}"#);
+    assert_eq!(run(&mut app, &select), Ok(Map::new()));
+    assert_eq!(app.session.selection, [filter].into());
+    assert_eq!(
+        run(&mut app, r#"{"cmd": "select", "modules": [2]}"#),
+        Err("no module 2 on the canvas".to_string())
+    );
+
+    let remove = format!(r#"{{"cmd": "remove", "modules": [{filter}]}}"#);
+    assert_eq!(run(&mut app, &remove), Ok(Map::new()));
+    assert!(app.session.scene.module(filter).is_none(), "the Filter tile is gone");
+}
+
 #[test]
 fn commands_change_the_app_as_the_ui_would() {
     let mut app = stepped_app();

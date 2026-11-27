@@ -759,12 +759,14 @@ impl App {
         })
     }
 
+    /// Refuses `modules` unless each is a tile on the level the canvas
+    /// shows, as `select` and `remove` act on tiles "as clicks would" and
+    /// "as Delete does". The engine's graph is not asked: it flattens
+    /// sub-patches, so a sub-patch tile is not in it, and a module inside
+    /// one is in it at every level.
     pub(super) fn check_modules(&self, modules: &[u32]) -> Result<(), String> {
-        match modules
-            .iter()
-            .find(|&&m| self.session.controller.graph().node(ModuleId(m)).is_none())
-        {
-            Some(m) => Err(format!("no module {m}")),
+        match modules.iter().find(|&&m| self.session.scene.module(m).is_none()) {
+            Some(m) => Err(format!("no module {m} on the canvas")),
             None => Ok(()),
         }
     }
