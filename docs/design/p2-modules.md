@@ -3,7 +3,7 @@
 The ports, parameters, ranges, defaults, and behaviour of the M2 modules that bring no new engine rules, so each can be built from its catalogue entry without guessing.
 
 - **Kind:** living specification.
-- **Status:** Implemented for Random, Chance, Phase reset, Phase shift and reverse, Macro, Euclidean rhythm, Selector, and Spectrum. Agreed for Pitch quantiser and Multi-lane sequencer (2026-11-01). Each of those sections is ready to build. Other M2 modules are added here as they are agreed.
+- **Status:** Implemented for Random, Chance, Phase reset, Phase shift and reverse, Macro, Euclidean rhythm, Selector, and Spectrum. Agreed, M3, for Pitch quantiser and Multi-lane sequencer (2026-11-01). Each of those sections is ready to build. Other M2 modules are added here as they are agreed.
 - **Decision behind it:** [ADR-0036](../adr/0036-a-seeded-route-keeps-both-sides-together.md) for Selector on a stereo cable. [ADR-0045](../adr/0045-a-seeded-value-of-a-voice-is-the-same-on-both-sides.md) for Voice spread's seed on a stereo voice (rule 1). Otherwise none. It follows [ADR-0007](../adr/0007-polymorphic-signal-model.md) (signals), [ADR-0014](../adr/0014-modulation-without-cables.md) (modulation without cables), [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md) (port and parameter text), and [ADR-0018](../adr/0018-clean-room-module-development.md) (clean room).
 - **Use case and requirements:** FR-LIB-01, FR-LIB-08, FR-LIB-12, FR-LIB-14, FR-LIB-19, FR-LIB-22, FR-LIB-29, FR-LIB-30, NFR-SND-04.
 - **Background:** [Phase and cycles](../learn/phase-and-cycles.md), [Repeatable randomness](../learn/repeatable-randomness.md), [Euclidean rhythms](../learn/euclidean-rhythms.md).
@@ -193,7 +193,7 @@ Two built forms of the Phase warp type (ADR-0017): small, cheap, and needed now 
 | Data | `pattern`: 4 lanes of up to 64 steps, with step attributes ([data kinds](panel-widgets.md#data-kinds)). `scale`: a one-lane gate pattern (Own only) |
 | Panel | A step grid (rows layout) for `pattern`, with the attribute picker; radio buttons for `read`; knobs for `division`, `length`, and `steps1` to `steps4`. `type1` to `type4`, `scale`, `root`, and `seed` in the inspector. |
 
-**Settled:** four fixed lanes, each with its own length, so lanes can run in polymeter. *Why four:* ports are static in a descriptor. *Why own lengths in M2:* a 5-step lane against a 16-step lane is one of the quickest ways to make a pattern that keeps changing; it moves forward from M3 (FR-LIB-14). Per-lane rate and direction stay in M3.
+**Settled:** four fixed lanes, each with its own length, so lanes can run in polymeter. *Why four:* ports are static in a descriptor. *Why own lengths from the start:* a 5-step lane against a 16-step lane is one of the quickest ways to make a pattern that keeps changing; it moves forward from M3 (FR-LIB-14). Per-lane rate and direction stay in M3.
 
 **Reading** (`read` is a setting, not chosen by a cable):
 

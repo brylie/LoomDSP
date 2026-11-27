@@ -392,7 +392,7 @@ The nested sub-patch test is deferred until sub-patch navigation exists. The mat
 
 ### Out of scope for M1
 
-- Modulating an assignment's depth (FR-MOD-02, M2).
+- Modulating an assignment's depth (FR-MOD-02, M3).
 - Per-voice modulation (with polyphony, M2).
 - Response curves on assignments (for example exponential depth).
 - Assignments across sub-patch boundaries. Not planned: expose the parameter instead.
@@ -400,5 +400,5 @@ The nested sub-patch test is deferred until sub-patch navigation exists. The mat
 
 ## Open points
 
-- Should an assignment be able to target another assignment's depth directly, or through a "depth" parameter on a gain module? Not needed for M1. Decide with FR-MOD-02 (M2).
+- Should an assignment be able to target another assignment's depth directly, or through a "depth" parameter on a gain module? Not needed for M1. Decide with FR-MOD-02 (M3).
 - Try the default depth of 0.25 with users once slice 1 is built.

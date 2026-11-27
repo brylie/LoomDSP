@@ -125,7 +125,7 @@ A screen reader finds the browser as a dialog named "Add module": the search fie
 
 ## Out of scope
 
-- Dropping a module onto a cable to insert it (FR-CANVAS-08, M2).
+- Dropping a module onto a cable to insert it (FR-CANVAS-08, Later).
 - Opening the browser from a port drag and auto-connecting the new module (see Open points).
 - Favourites, recently used modules, and user presets.
 - Searching parameter or port names.

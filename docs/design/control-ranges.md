@@ -103,7 +103,7 @@ The text that shows a linear parameter's value has enough decimals that one 1% s
 ## Out of scope
 
 - Ranges the player types in. A fixed list first; a custom range can come later if the list proves too small.
-- A range selector on the tile. The inspector is enough for now; a panel selector widget is part of FR-PANEL-02 (M2).
+- A range selector on the tile. The inspector is enough for now; a panel selector widget is part of FR-PANEL-02 (M3).
 - Ranges on logarithmic or whole-number parameters (rule 3).
 - Clamping or limiting signals on cables, and clipping at the output. Those are separate fixes, tracked in [#121](https://github.com/brylie/LoomDSP/issues/121).
 - Exposing a parameter's range from a sub-patch (FR-ENCAP-03, M2).

@@ -3,7 +3,7 @@
 How modules, sub-patches, and patches show controls and displays, and how users build them.
 
 - **Kind:** living specification. It changes as panels are built and used.
-- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-m1) and [Level meters and audio load](#level-meters-and-audio-load-m1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Scope module](#scope-module) is Implemented, with its trace ([#62](https://github.com/brylie/LoomDSP/issues/62)). [The panel editor](#the-panel-editor) and [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) are Agreed (M2, 2026-11-01). [Default panels](#default-panels) is Draft, except its flow and wrap rules, which are Agreed (2026-11-07).
+- **Status:** Draft, except [Module panels on tiles](#module-panels-on-tiles-m1) and [Level meters and audio load](#level-meters-and-audio-load-m1), which are Implemented. [Labels and hover text](#labels-and-hover-text) is Implemented. [Scope module](#scope-module) is Implemented, with its trace ([#62](https://github.com/brylie/LoomDSP/issues/62)). [The panel editor](#the-panel-editor) is Agreed (M3, 2026-11-01; moved from M2 on 2026-11-27). [Exposed controls in a sub-patch](#exposed-controls-in-a-sub-patch) is Agreed (M2, 2026-11-01). [Default panels](#default-panels) is Draft, except its flow and wrap rules, which are Agreed (2026-11-07).
 - **Decision behind it:** [ADR-0013](../adr/0013-modules-carry-their-own-panel.md) (modules carry their own panel), [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language, and panels derived from the declaration).
 - **Requirements:** FR-PANEL-*, FR-CANVAS-10, FR-CANVAS-11, FR-LIB-18, FR-VIS-01 to 04, FR-ENCAP-03, NFR-PERF-04, NFR-UX-01.
 - **Builds on:** [Telemetry](telemetry.md) for live data, [ADR-0010](../adr/0010-own-patch-canvas.md) for the canvas, [parameter mapping](modulation.md#parameter-mapping) for control values.
@@ -96,7 +96,7 @@ A panel reads from top to bottom as **what it does, how it behaves, what you pla
 
 ## The panel editor
 
-**Status:** Agreed, M2 ([#76](https://github.com/brylie/LoomDSP/issues/76)). The choices marked "Settled" were made with the maintainer on 2026-11-01. Requirements: FR-PANEL-01, 03, 05, 09, 10. Builds on [sub-patches](sub-patches.md) and [exposed controls](#exposed-controls-in-a-sub-patch).
+**Status:** Agreed, M3 ([#76](https://github.com/brylie/LoomDSP/issues/76); moved from M2 on 2026-11-27). The choices marked "Settled" were made with the maintainer on 2026-11-01. Requirements: FR-PANEL-01, 03, 05, 09, 10. Builds on [sub-patches](sub-patches.md) and [exposed controls](#exposed-controls-in-a-sub-patch).
 
 > Inside my Voice sub-patch I open the Panel pane. I drag the filter's cutoff knob onto it, then resonance, then the envelope's shape. I switch the pane to Edit, put a "Filter" frame around the two knobs, and line them up. I go back up a level: the Voice tile now shows exactly that panel.
 
@@ -158,7 +158,7 @@ In Edit mode:
 
 ### Built-in module panels
 
-**Settled:** a built-in module's panel cannot be changed in M2. *Why:* every Filter looks the same in every patch, tutorial, and help page. For a different layout, collapse the module into a sub-patch and design its panel.
+**Settled:** a built-in module's panel cannot be changed in M3. *Why:* every Filter looks the same in every patch, tutorial, and help page. For a different layout, collapse the module into a sub-patch and design its panel.
 
 ### Saved format
 
@@ -314,7 +314,7 @@ A one-step gesture on a cable or an output places a scope or a level meter next 
 
 ### Canvas context menu
 
-**Status:** Agreed, M2 ([#330](https://github.com/brylie/LoomDSP/issues/330), 2026-11-01). It grows the probe menu above into the one canvas menu.
+**Status:** Agreed, M3 ([#330](https://github.com/brylie/LoomDSP/issues/330), 2026-11-01). It grows the probe menu above into the one canvas menu.
 
 A right-click opens a menu for what is under the pointer. Right-clicking a tile that is not selected selects it first.
 
@@ -373,7 +373,7 @@ At confirmation, recheck the chosen endpoints and port pair. If the cable change
 **Status:** Implemented. Code: `Panel`, `Widget`, and `ModuleDescriptor::check_panel` in `loom-core/src/descriptor/panel.rs`.
 
 - A `ModuleDescriptor` has a `panel`: its size in grid units (width and height), and a list of widgets. A module with nothing on its tile has an empty panel.
-- Each widget has a kind, a grid position inside the panel, and a binding by name: a parameter for controls, a display value for lights. *Why names:* parameter names are stable IDs (AGENTS.md rule 5), and the M2 panel editor will save bindings the same way.
+- Each widget has a kind, a grid position inside the panel, and a binding by name: a parameter for controls, a display value for lights. *Why names:* parameter names are stable IDs (AGENTS.md rule 5), and the M3 panel editor will save bindings the same way.
 - M1 widgets. Most are 3 grid units wide. The button is wider, so a performance control can be large. Radio buttons are wider too, so their choice names fit ([#394](https://github.com/brylie/LoomDSP/issues/394)).
 
 | Widget | Size (grid units) | Binds to | Behaviour |
@@ -630,7 +630,7 @@ A user zooms in on Clock Divide. The knob says "Division", not `n`. They rest th
 
 ## M1 slice
 
-What M1 builds. The rest of this spec is M2.
+What M1 builds. The rest of this spec is M2 and M3: exposed controls and most widgets are M2, and the panel editor, front panels, and data widgets are M3.
 
 ### Acceptance criteria
 
@@ -644,9 +644,9 @@ What M1 builds. The rest of this spec is M2.
 
 ### Out of scope for M1
 
-- The panel editor, sub-patch panels, and front panels (M2, FR-PANEL-*).
-- Step grid and curve editing on the tile. They need module data (OQ-17, M2).
-- XY pad, themes, custom skins (M2).
+- The panel editor, sub-patch panels, and front panels (M3, FR-PANEL-*).
+- Step grid and curve editing on the tile. They need module data (OQ-17, M3).
+- XY pad (M2), themes (M3). Custom skins are ruled out by ADR-0025.
 - Restyling built-in panels.
 - Docked views at the window edge. Displays are modules.
 

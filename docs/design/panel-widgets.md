@@ -57,10 +57,10 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 | | XY scope | Two outputs | No | M2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
 | | Level history | An output | No ([#97](https://github.com/brylie/LoomDSP/issues/97)) | M2 |
 | | Spectrum | An output | No ([#109](https://github.com/brylie/LoomDSP/issues/109)) | M2 |
-| Shapes and data | Curve | Curve data, or a shape the module computes from its parameters | Read-only shape preview only | M2 |
-| | Step grid | Pattern data. Drawn as rows, a ring, or keys | No | M2 |
-| | Waveform | Buffer data, with markers bound to parameters. Whole, or as the frames of a wavetable | No | M2 |
-| Static | Label | Text written in the panel | No | M2 |
+| Shapes and data | Curve | Curve data, or a shape the module computes from its parameters | Read-only shape preview only | M3 |
+| | Step grid | Pattern data. Drawn as rows, a ring, or keys | No | M3 |
+| | Waveform | Buffer data, with markers bound to parameters. Whole, or as the frames of a wavetable | No | M3 |
+| Static | Label | Text written in the panel | No | M3 |
 
 [FR-PANEL-02](../product/requirements.md) lists this set, with these names, since ADR-0024 was accepted. Earlier names: "slider" is now the **fader**, "selector" the **select list**, and "graph" the **curve**. Each widget is still built only once its section here is Agreed.
 
