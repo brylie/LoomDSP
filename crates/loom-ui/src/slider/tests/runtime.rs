@@ -214,6 +214,20 @@ fn shift_while_dragging_is_finer() {
     assert_slid(&harness, &[(0.5, Start), (0.51, Move), (0.51, End)]);
 }
 
+/// A slider's element is 24 px tall, the WCAG 2.2 target size (SC 2.5.8),
+/// with its track centred in it: a press 9 px above the track's middle,
+/// outside the 14 px thumb's height, still hits it and moves it there.
+#[test]
+fn a_slider_is_a_24_px_target() {
+    let mut harness = showing(one);
+    let bounds = harness.runtime().bounds(&level()).expect("laid out");
+    assert_eq!(bounds.height, 24.0, "{bounds:?}");
+    let middle = bounds.y + bounds.height / 2.0;
+    step(&mut harness, press(Point::new(over(0.75).x, middle - 9.0)));
+    step(&mut harness, release(Point::new(over(0.75).x, middle - 9.0)));
+    assert_slid(&harness, &[(0.5, Start), (0.75, Move), (0.75, End)]);
+}
+
 /// A double-click resets it to its default as one Start, Move, and End.
 #[test]
 fn a_double_click_resets_it() {

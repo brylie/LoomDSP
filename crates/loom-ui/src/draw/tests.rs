@@ -745,11 +745,12 @@ fn a_slider_paints_its_track_fill_and_thumb() {
     // The thumb's centre travels from 7 to 193, inset by half the thumb so
     // it stays inside: at 0.25 it is at 53.5. The track runs from 0 to 200.
     assert_eq!(painted.len(), 3, "{painted:?}");
-    assert_eq!(painted[0].rect, rect(0.0, 5.0, 200.0, 4.0));
+    // In the 24 px element, the track and the thumb are centred.
+    assert_eq!(painted[0].rect, rect(0.0, 10.0, 200.0, 4.0));
     assert_eq!(painted[0].fill, PANEL.track);
-    assert_eq!(painted[1].rect, rect(0.0, 5.0, 53.5, 4.0));
+    assert_eq!(painted[1].rect, rect(0.0, 10.0, 53.5, 4.0));
     assert_eq!(painted[1].fill, PANEL.primary);
-    assert_eq!(painted[2].rect, rect(46.5, 0.0, 14.0, 14.0));
+    assert_eq!(painted[2].rect, rect(46.5, 5.0, 14.0, 14.0));
     assert_eq!((painted[2].fill, painted[2].radius), (PANEL.primary, 7.0));
 }
 
@@ -761,7 +762,7 @@ fn a_centred_slider_fills_from_the_middle() {
         Element::column([slider(crate::Slider::new(0.25).centred(), "depth")]).width(Length::FILL),
         Point::ORIGIN,
     ));
-    assert_eq!(painted[1].rect, rect(53.5, 5.0, 46.5, 4.0));
+    assert_eq!(painted[1].rect, rect(53.5, 10.0, 46.5, 4.0));
 }
 
 /// Section 5, rule 17: a check box paints a 14 px box with a 1 px border:
