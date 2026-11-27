@@ -518,6 +518,7 @@ fn every_colour_pair_the_app_draws_meets_its_minimum() {
             FLOATING_PANEL.fill,
             Mark,
         ),
+        ("the open right-column tab's border", FIELD_EDGE, PANEL_FILL, Mark),
         ("a developer switch's track while off", CONTROL_EDGE, PANEL_FILL, Mark),
         (
             "a developer switch's knob on its off track",

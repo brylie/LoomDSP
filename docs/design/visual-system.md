@@ -208,8 +208,8 @@ Kept problems survive opening another patch, except as the table says.
 | `QUIET` | Details, IDs, a closed tab's title, a switch's edge, the scroll thumb | `rgb(0.66, 0.69, 0.75)` | 7.12 on `PANEL_FILL`, 4.98 on `RAISED` (4.5 needed) |
 | `ACCENT` | Links, a highlighted row's outline, a chosen card, a switch that is on | `#F5A623` | 5.35 on a dialog (4.5 needed); 1.65 against `TEXT`, so links are underlined |
 | `RAISED` | Open tabs, cards, dialogs, hovered menu items, the highlighted row, hover text | about `#393D48` | |
-| `EDGE` | Rules, the borders of tabs and floating panels, and a slider's track | about `#454A59` | 1.76 on `PANEL_FILL`: never a control's only mark (a slider's thumb and fill show its value) |
-| `FIELD_EDGE` | The border of a text field, a select, and a browser's search and Author fields, and a switch's track while off: `QUIET` | `rgb(0.66, 0.69, 0.75)` | 7.12 on `PANEL_FILL` (3 needed, SC 1.4.11) |
+| `EDGE` | Rules, the borders of floating panels and the Outline's chosen row, and a slider's track | about `#454A59` | 1.76 on `PANEL_FILL`: never a control's only mark (a slider's thumb and fill show its value) |
+| `FIELD_EDGE` | The border of a text field, a select, a browser's search and Author fields, and the open right-column tab, and a switch's track while off: `QUIET` | `rgb(0.66, 0.69, 0.75)` | 7.12 on `PANEL_FILL` (3 needed, SC 1.4.11) |
 | `CARD_FILL`, `CARD_BORDER` | A modulation card's fill and border | `RAISED` and `EDGE` at 50% | |
 | `SELECTION` | The fill behind selected text in a field, and behind an inspector row lit as a drop target: a dark, muted amber | `#7A5520` | `TEXT` on it 5.45 (4.5 needed) |
 | `ERROR_TEXT` | An error in the stats bar, and the 2 px outline of a refused field | `#EB6B6B` | 5.06 on `PANEL_FILL` |

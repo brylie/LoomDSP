@@ -87,7 +87,10 @@ impl App {
             open: self.right_tab,
             looks: TabLooks {
                 fill: crate::style::RAISED,
-                border: crate::style::EDGE,
+                // The open tab's edge marks it at 3:1 or more against the
+                // panel (WCAG 2.2, SC 1.4.11; #463): its fill and its
+                // brighter title alone are under 2:1 against a closed tab.
+                border: crate::style::FIELD_EDGE,
                 text: crate::style::TEXT,
                 quiet: crate::style::QUIET,
             },
