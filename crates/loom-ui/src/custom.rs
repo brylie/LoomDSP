@@ -397,10 +397,14 @@ impl<A: App> Customs<A> {
     /// nothing.
     pub(crate) fn settle(&mut self, found: Vec<(UiId, CustomKind, Rect)>, app: &A) {
         let mut kept = BTreeMap::new();
+        // The elements this layout made a new state for. A capture or a
+        // hover on one of them belonged to a state that is gone.
+        let mut made = Vec::new();
         for (id, kind, bounds) in found {
             let hosted = match self.elements.remove(&id) {
                 Some(hosted) if hosted.kind == kind => Hosted { bounds, ..hosted },
                 _ => {
+                    made.push(id.clone());
                     let state = app.make_custom(&id, kind);
                     debug_assert!(
                         state.is_some(),
@@ -422,7 +426,7 @@ impl<A: App> Customs<A> {
         self.elements = kept;
         // An element that left the layout, or came back as another kind,
         // is dropped mid-gesture and hears nothing (section 9, rule 1).
-        let live = |id: &UiId| self.elements.contains_key(id);
+        let live = |id: &UiId| self.elements.contains_key(id) && !made.contains(id);
         if self.captured.as_ref().is_some_and(|capture| !live(&capture.id)) {
             self.captured = None;
         }

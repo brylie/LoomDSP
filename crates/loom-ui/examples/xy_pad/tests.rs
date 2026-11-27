@@ -3,7 +3,7 @@
 
 use super::*;
 use loom_ui::headless::Harness;
-use loom_ui::{DriverEvent, WindowState};
+use loom_ui::{DriverEvent, WindowEvent, WindowState};
 use loom_ui_core::{Modifiers, TextMeasure};
 
 /// Measures every character 7 pixels wide, so the tests need no fonts.
@@ -185,4 +185,22 @@ fn a_move_within_a_hundredth_keeps_the_nodes() {
     let after = harness.runtime().access_nodes(&mut IdTable::default());
     assert_eq!(dot(&harness), (50, 50));
     assert_eq!(format!("{:?}", before.nodes), format!("{:?}", after.nodes));
+}
+
+/// A drag the window cancels, here by losing the keys, puts the dot back
+/// where it was before the press (section 9: a cancel undoes what the
+/// gesture began). A drag that ends with a release keeps its place.
+#[test]
+fn a_cancelled_drag_puts_the_dot_back() {
+    let mut harness = harness();
+    let pad = bounds(&harness);
+    let quarter = Point::new(pad.x + pad.width / 4.0, pad.y + pad.height / 4.0);
+    pointer(&mut harness, PointerEvent::Pressed(PointerButton::Left), Some(quarter));
+    pointer(&mut harness, PointerEvent::Moved, Some(Point::new(500.0, -100.0)));
+    assert_eq!(dot(&harness), (100, 100));
+    harness.step(DriverEvent::Window(WindowEvent::Focused(false)));
+    harness.lay_out(&mut Monospace);
+    assert_eq!(dot(&harness), (50, 50), "the cancel undoes the drag");
+    pointer(&mut harness, PointerEvent::Moved, Some(quarter));
+    assert_eq!(dot(&harness), (50, 50), "after the cancel, a move moves nothing");
 }

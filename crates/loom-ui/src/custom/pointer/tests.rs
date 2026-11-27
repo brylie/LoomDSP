@@ -18,6 +18,9 @@ use std::time::Instant;
 /// The pad's kind.
 const PAD: CustomKind = CustomKind::new("pad");
 
+/// Another kind the pad's UI ID can come back as.
+const KNOB: CustomKind = CustomKind::new("knob");
+
 /// What the pad sends, and what the test app hears.
 #[derive(Debug, Clone, PartialEq)]
 enum Message {
@@ -37,6 +40,8 @@ enum Message {
     Release,
     /// Take the pad out of the view.
     Hide,
+    /// Show a knob under the pad's UI ID instead.
+    Knob,
 }
 
 /// The pad's state: what it heard, and how many messages the app had
@@ -50,6 +55,19 @@ struct PadState {
     at: Vec<Option<Point>>,
     /// Whether it takes the wheel.
     wheel: bool,
+}
+
+/// A knob's state: every event it heard, and it takes each one.
+#[derive(Default)]
+struct KnobState {
+    heard: Vec<CustomEvent>,
+}
+
+impl Custom<Drags> for KnobState {
+    fn event(&mut self, _app: &Drags, event: &CustomEvent, _moment: &Moment, _out: &mut Out<'_, Message>) -> Used {
+        self.heard.push(event.clone());
+        Used::Yes
+    }
 }
 
 impl Custom<Drags> for PadState {
@@ -95,6 +113,8 @@ struct Drags {
     overlay: bool,
     /// Whether the pad shows.
     pad: bool,
+    /// Whether a knob shows under the pad's UI ID instead.
+    knob: bool,
     /// Every message, in the order the app handled them.
     log: Vec<Message>,
 }
@@ -125,6 +145,10 @@ impl App for Drags {
                 self.pad = false;
                 Effects::none()
             }
+            Message::Knob => {
+                self.knob = true;
+                Effects::none()
+            }
             _ => Effects::none(),
         };
         self.log.push(message);
@@ -132,25 +156,30 @@ impl App for Drags {
     }
 
     fn view(&self, view: &mut View) {
-        view.panel_with(UiId::panel("main"), Layer::Panels, &self.pad, |&pad| {
-            let mut children = Vec::new();
-            if pad {
+        view.panel_with(
+            UiId::panel("main"),
+            Layer::Panels,
+            &(self.pad, self.knob),
+            |&(pad, knob)| {
+                let mut children = Vec::new();
+                if pad {
+                    children.push(
+                        Element::custom(if knob { KNOB } else { PAD })
+                            .key("pad")
+                            .width(Length::Fixed(200.0))
+                            .height(Length::Fixed(100.0)),
+                    );
+                }
+                children.push(Element::space(Length::Fixed(200.0), Length::Fixed(50.0)).key("label"));
                 children.push(
-                    Element::custom(PAD)
-                        .key("pad")
+                    Element::field("", STYLE)
+                        .key("name")
                         .width(Length::Fixed(200.0))
-                        .height(Length::Fixed(100.0)),
+                        .access(Access::new(Role::TextInput, "Name")),
                 );
-            }
-            children.push(Element::space(Length::Fixed(200.0), Length::Fixed(50.0)).key("label"));
-            children.push(
-                Element::field("", STYLE)
-                    .key("name")
-                    .width(Length::Fixed(200.0))
-                    .access(Access::new(Role::TextInput, "Name")),
-            );
-            Element::column(children)
-        });
+                Element::column(children)
+            },
+        );
         if self.overlay {
             view.panel_with(UiId::panel("dialog"), Layer::Overlays, &(), |_| {
                 Element::space(Length::Fixed(50.0), Length::Fixed(50.0)).key("box")
@@ -170,7 +199,11 @@ impl App for Drags {
     }
 
     fn make_custom(&self, _id: &UiId, kind: CustomKind) -> Option<Box<dyn Custom<Self>>> {
-        (kind == PAD).then(|| Box::new(PadState::default()) as Box<dyn Custom<Self>>)
+        match kind {
+            PAD => Some(Box::new(PadState::default())),
+            KNOB => Some(Box::new(KnobState::default())),
+            _ => None,
+        }
     }
 }
 
@@ -180,6 +213,7 @@ fn harness() -> Harness<Drags, NoTarget> {
     let app = Drags {
         overlay: false,
         pad: true,
+        knob: false,
         log: Vec::new(),
     };
     let window = WindowState::new(Size::new(400.0, 200.0));
@@ -382,6 +416,21 @@ fn an_element_that_leaves_mid_drag_hears_nothing() {
     assert_eq!(log(&harness), [Message::Began, Message::Hide]);
     assert!(harness.runtime().custom::<PadState>(&pad()).is_none());
     assert_eq!(harness.runtime().custom_bounds(&pad()), None);
+}
+
+/// An element that comes back as another kind mid-drag is dropped as one
+/// that leaves is: the new state hears nothing of a drag it never began,
+/// no cancel and no release, and no leave from the hover the pad had.
+#[test]
+fn an_element_that_changes_kind_mid_drag_hears_nothing() {
+    let mut harness = harness();
+    press_pad(&mut harness);
+    send(&mut harness, Message::Knob);
+    assert!(harness.runtime().custom::<KnobState>(&pad()).is_some());
+    step(&mut harness, 300.0, 150.0, PointerEvent::Moved);
+    step(&mut harness, 300.0, 150.0, PointerEvent::Released(PointerButton::Left));
+    let knob = harness.runtime().custom::<KnobState>(&pad()).expect("the knob");
+    assert_eq!(knob.heard, []);
 }
 
 /// The pad hears that the pointer left it once, when it moves off.

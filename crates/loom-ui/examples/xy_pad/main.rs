@@ -7,7 +7,9 @@
 //! and scissor and sets them back after it.
 //!
 //! - Press and drag on it: it captures the pointer, so the drag goes on
-//!   outside it and outside the window, until the button is up.
+//!   outside it and outside the window, until the button is up. If the
+//!   window cancels the drag, as when it loses the keys, the dot goes back
+//!   to where it was before the press.
 //! - Tab to it, and the keys follow the WAI-ARIA slider pattern on two
 //!   axes. The pad is one focus stop, so the axis is in the key: Left and
 //!   Right move X, and Up and Down move Y, a twentieth at a time; Page Up
@@ -235,11 +237,14 @@ const LABEL: TextStyle = TextStyle {
     weight: Weight::Regular,
 };
 
-/// The pad's state: whether a drag holds it, and its GPU data, built for
-/// one device and format and dropped when either changes.
+/// The pad's state: where the dot was when a drag began, while one holds
+/// it, and its GPU data, built for one device and format and dropped when
+/// either changes.
 #[derive(Default)]
 struct PadState {
-    dragging: bool,
+    /// The dot's place before the press, kept so a cancelled drag can put
+    /// it back (section 9: a cancel undoes what the gesture began).
+    drag_from: Option<(f32, f32)>,
     gpu: Option<PadGpu>,
 }
 
@@ -263,20 +268,28 @@ impl Custom<XyApp> for PadState {
     fn event(&mut self, app: &XyApp, event: &CustomEvent, moment: &Moment, out: &mut Out<'_, Message>) -> Used {
         match event {
             CustomEvent::Pointer(PointerEvent::Pressed(PointerButton::Left)) => {
+                self.drag_from = Some((app.x, app.y));
                 if let Some(at) = moment.pointer {
                     out.send(Self::place(at, moment.bounds));
                 }
-                self.dragging = true;
                 Used::Capture
             }
-            CustomEvent::Pointer(PointerEvent::Moved) if self.dragging => {
+            CustomEvent::Pointer(PointerEvent::Moved) if self.drag_from.is_some() => {
                 if let Some(at) = moment.pointer {
                     out.send(Self::place(at, moment.bounds));
                 }
                 Used::Yes
             }
-            CustomEvent::Pointer(PointerEvent::Released(PointerButton::Left)) | CustomEvent::CaptureLost => {
-                self.dragging = false;
+            // A release keeps where the drag ended.
+            CustomEvent::Pointer(PointerEvent::Released(PointerButton::Left)) => {
+                self.drag_from = None;
+                Used::Yes
+            }
+            // A cancel puts the dot back where it was before the press.
+            CustomEvent::CaptureLost => {
+                if let Some((x, y)) = self.drag_from.take() {
+                    out.send(Message::Set(x, y));
+                }
                 Used::Yes
             }
             CustomEvent::Key(KeyEvent::Pressed { key, modifiers, .. }) => {
