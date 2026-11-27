@@ -251,7 +251,7 @@ impl App {
             }
             files::Saving::Confirm(path) => {
                 self.used_folder_of(&path);
-                self.overlays.question = Some(Question::replace(path, next));
+                self.overlays.ask(Question::replace(path, next));
                 false
             }
         }
@@ -292,7 +292,7 @@ impl App {
     pub(crate) fn after_discard(&mut self, next: AfterDiscard) {
         self.finish_edits();
         if self.unsaved() {
-            self.overlays.question = Some(Question::discard(self.patch_name(), next));
+            self.overlays.ask(Question::discard(self.patch_name(), next));
         } else {
             self.proceed(next);
         }
@@ -515,7 +515,7 @@ impl App {
     /// rule 9). A question already open stays: the status bar has this too.
     pub(crate) fn show_error(&mut self, message: &str) {
         if self.control.is_empty() && self.overlays.question.is_none() {
-            self.overlays.question = Some(Question::error(message.to_string()));
+            self.overlays.ask(Question::error(message.to_string()));
         }
     }
 
@@ -759,7 +759,7 @@ impl App {
             // ask, as Save As does.
             files::Saving::Confirm(path) => {
                 if self.library_file_is_sound(&file, &path, &name) {
-                    self.overlays.question = Some(Question::replace_library(path, file, name));
+                    self.overlays.ask(Question::replace_library(path, file, name));
                 }
                 false
             }

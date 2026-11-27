@@ -169,6 +169,38 @@ fn a_failed_save_stays_and_says_why() {
     assert!(!ui.app().quit);
 }
 
+/// A question that replaces another in the same update takes the focus
+/// to its safe answer, with a ring, as one that opens where none was does:
+/// here a save to the patch's own file fails while the Discard question is
+/// answered. The focus is let go first, so only the new question's own
+/// focus effect can put it back: a layout's fallback to the first stop
+/// would not, and is not the safe answer for every question.
+#[test]
+fn a_question_that_replaces_another_takes_the_focus() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.app_mut().edit(|app| {
+        app.session.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+    });
+    // The patch's own file is now a folder, so the save cannot write it.
+    let path = ui.app().session.document.file().expect("a file").to_path_buf();
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    ui.send(AppMessage::File(FileAction::Close));
+    ui.redraw();
+    assert_eq!(model(&ui).highlight, "save");
+    let _ = ui.unfocus_all();
+    ui.redraw();
+    assert_eq!(ui.runtime().focused(), None, "the focus is let go");
+    answer(&mut ui, Answer::Save);
+    ui.redraw();
+    let error = model(&ui);
+    assert!(error.text.starts_with("Could not save"), "{}", error.text);
+    let ok = ui.app().overlays.question.as_ref().expect("the error").highlighted_id();
+    assert_eq!(ui.runtime().focused(), Some(&ok), "the new question's answer");
+    assert!(ui.runtime().focus_ring().is_some(), "with its ring");
+}
+
 /// A window on an untitled patch with changes, closing, having answered Save
 /// and typed `foo` where `foo.ron` already exists.
 fn asked_to_replace(dir: &TempDir) -> Ui {
