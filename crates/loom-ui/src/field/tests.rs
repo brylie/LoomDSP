@@ -1943,6 +1943,38 @@ fn select_all_over_a_composition_tells_the_app_its_text() {
     assert_eq!(harness.app().text, "にほ", "and the app heard it");
 }
 
+/// The edit a select-all commits over a composition reaches the app in
+/// the same turn, so a layout right after that turn builds the field from
+/// the committed text and keeps its undo step: undo then takes it away.
+#[test]
+fn select_all_over_a_composition_keeps_its_undo_step() {
+    let Some((mut harness, mut typesetter)) = form("", true) else {
+        return;
+    };
+    harness.send(Message::Focus(name()));
+    harness.lay_out(&mut typesetter);
+    harness.step(ime_in(preedit("にほ")));
+    harness.lay_out(&mut typesetter);
+    // One turn, then a layout, as a driver that draws between turns.
+    let mut driver = crate::headless::Headless::new();
+    harness.runtime().waker().send(Message::FocusAll(name()));
+    let _ = harness
+        .runtime_mut()
+        .handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    harness.lay_out(&mut typesetter);
+    harness.step(DriverEvent::Woken);
+    harness.lay_out(&mut typesetter);
+    assert_eq!(harness.app().text, "にほ", "the app holds the committed text");
+    let undo = shortcut(Platform::current(), false);
+    harness.step(key_in(Key::Character('z'), undo, None));
+    harness.lay_out(&mut typesetter);
+    assert_eq!(
+        harness.runtime().field_text(&name()),
+        Some(""),
+        "undo took the committed text away"
+    );
+}
+
 /// The plan's sequence: a preedit, an empty preedit, then the commit,
 /// leaves the committed text once, with the caret after it, as one undo
 /// step. While composing, the field shows the preedit, but its committed

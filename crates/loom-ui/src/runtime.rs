@@ -126,6 +126,11 @@ pub struct Runtime<A: App, T> {
     waker: Waker<A::Message>,
     queue: Receiver<A::Message>,
     pending: VecDeque<A::Message>,
+    /// Messages an update's effects made that the app must hear in the
+    /// same turn, right after that update and before the view is built
+    /// again: the edit a select-all commits over a composition, so the
+    /// view is built from the committed text.
+    now_after_update: Vec<A::Message>,
     /// The focus move the last turn ended with, for the app to hear first
     /// in the next turn, unless that turn moves the focus again and
     /// reports the newer move instead: the app never hears an older focus
@@ -184,6 +189,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             queue,
             pending: VecDeque::new(),
             pending_focus: None,
+            now_after_update: Vec::new(),
             window,
             view: None,
             view_stale: false,
@@ -2086,6 +2092,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             }
             *updates += 1;
             redraw |= self.update(message, now, driver);
+            // What the update's effects made for this turn, such as an edit
+            // a select-all committed, runs right after it.
+            while !self.exited && !self.now_after_update.is_empty() {
+                for made in std::mem::take(&mut self.now_after_update) {
+                    *updates += 1;
+                    redraw |= self.update(made, now, driver);
+                }
+            }
             // A focus an update's effects moved is the next thing the app
             // hears, before the turn's other messages, as a focus an event
             // moved is the first (`App::focus_moved`): the app's copy of the
@@ -2315,7 +2329,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                                 .get(id)
                                 .map(crate::field::FieldState::committed)
                                 .unwrap_or_default();
-                            self.pending.extend(self.app.field_event(id, &FieldEvent::Edited(text)));
+                            self.now_after_update
+                                .extend(self.app.field_event(id, &FieldEvent::Edited(text)));
                         }
                     }
                     self.field_left_after_focus(now);
