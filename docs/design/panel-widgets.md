@@ -53,10 +53,10 @@ Widgets are grouped by the **kind of value** they show or edit, not by the modul
 | Module state | Light | A display value | Yes | M1 |
 | | Readout | A display value | Yes | M2 |
 | | Meter | An output, or a display value | Yes | M1, display value in M2 |
-| Signals | Scope | An output | No ([#62](https://github.com/brylie/LoomDSP/issues/62)) | M1 |
-| | XY scope | Two outputs | No | M2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
-| | Level history | An output | No ([#97](https://github.com/brylie/LoomDSP/issues/97)) | M2 |
-| | Spectrum | An output | No ([#109](https://github.com/brylie/LoomDSP/issues/109)) | M2 |
+| Signals | Scope | An output | Yes | M1 |
+| | XY scope | Two outputs | Yes | M2 ([#280](https://github.com/brylie/LoomDSP/issues/280)) |
+| | Level history | An output | Yes | M2 |
+| | Spectrum | An output | Yes | M2 |
 | Shapes and data | Curve | Curve data, or a shape the module computes from its parameters | Read-only shape preview only | M3 |
 | | Step grid | Pattern data. Drawn as rows, a ring, or keys | No | M3 |
 | | Waveform | Buffer data, with markers bound to parameters. Whole, or as the frames of a wavetable | No | M3 |
