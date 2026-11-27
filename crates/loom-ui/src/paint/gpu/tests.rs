@@ -340,6 +340,7 @@ fn a_panel_draws_its_box_border_text_and_clip_on_the_gpu() {
             },
         },
         None,
+        &mut crate::custom::NoCustoms,
     );
     let pixels = draw(&device, &queue, list);
 

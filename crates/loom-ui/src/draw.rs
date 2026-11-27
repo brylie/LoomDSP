@@ -296,9 +296,16 @@ impl<A: App> Panels<'_, A> {
             layer,
             painter,
             style,
-            self.focus.id(),
-            (hovered.as_ref(), pressed.as_ref()),
-            self.scale,
+            crate::window::Shown {
+                focus: self.focus.id(),
+                hovered: hovered.as_ref(),
+                pressed: pressed.as_ref(),
+                scale: self.scale,
+            },
+            &mut crate::custom::Kept {
+                customs: self.customs,
+                app: self.app,
+            },
         );
         self.counts.panels_painted += painted.panels;
         self.counts.elements_painted += painted.elements;
@@ -382,6 +389,7 @@ impl Layout {
         painter: &mut dyn TextPainter,
         style: &PanelStyle,
         fields: Option<&PaintState<'_>>,
+        customs: &mut dyn crate::custom::PaintCustoms,
     ) -> u64 {
         let by = Vector::new(origin.x, origin.y);
         let records = self.records();
@@ -503,6 +511,14 @@ impl Layout {
                 } else {
                     painter.text_spans(&run, text.spans);
                 }
+            }
+            // A custom element paints its own, after its box, cut to its
+            // bounds and every clip around it (section 9, rule 4).
+            if let (Some(kind), Some(id)) = (record.custom, &record.id) {
+                let around = record.clip.map_or(clip, |inner| cut(clip, moved(inner, by)));
+                painter.begin_layer(cut(around, bounds));
+                customs.paint(id, kind, bounds, painter);
+                painter.end_layer();
             }
             if look.clip {
                 painter.begin_layer(bounds);
@@ -772,4 +788,4 @@ fn paint_field(
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

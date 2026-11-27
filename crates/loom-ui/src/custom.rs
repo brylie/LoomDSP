@@ -16,6 +16,7 @@
 //! [`Context::custom`](crate::Context::custom).
 
 use crate::app::App;
+use crate::paint::TextPainter;
 use crate::view::Layer;
 use loom_ui_core::{Cursor, IdKey, KeyEvent, Modifiers, Point, PointerEvent, Rect, UiId};
 use std::any::Any;
@@ -25,8 +26,11 @@ use std::time::Instant;
 
 mod keys;
 mod nodes;
+mod paint;
 mod pointer;
 mod ticks;
+
+pub(crate) use paint::{Fresh, Kept, NoCustoms, PaintCustoms};
 
 pub use nodes::{AccessRequest, AccessValue, CustomNode, CustomNodes};
 
@@ -164,6 +168,18 @@ pub trait Custom<A: App>: Any {
     ) -> bool {
         let _ = (app, rest, request, out);
         false
+    }
+
+    /// Paints boxes and text with `painter`, at its place in its panel's
+    /// paint order: over what was painted before it, its parent's
+    /// background included, and under what is painted after it (section 9,
+    /// rule 4). `bounds` is where it is in the window, and the painter is
+    /// cut to them and to every clip around it. It needs no GPU, so it
+    /// shows in captures, the headless recorder, and the web. It reads the
+    /// app and sends nothing: a frame paints and runs no update. By
+    /// default it paints nothing.
+    fn paint(&self, app: &A, bounds: Rect, painter: &mut dyn TextPainter) {
+        let _ = (app, bounds, painter);
     }
 }
 

@@ -105,6 +105,30 @@ pub(crate) struct Window {
     pub(crate) custom_problems: Vec<(UiId, crate::access::Problem)>,
 }
 
+/// What painting shows of the live state: which element has the focus,
+/// which is hovered and which pressed, and the window's scale.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Shown<'a> {
+    /// The element with focus.
+    pub(crate) focus: Option<&'a UiId>,
+    /// The element under the pointer.
+    pub(crate) hovered: Option<&'a UiId>,
+    /// The element that shows as pressed.
+    pub(crate) pressed: Option<&'a UiId>,
+    /// Physical pixels per logical pixel.
+    pub(crate) scale: f32,
+}
+
+impl Shown<'_> {
+    /// Nothing focused, hovered, or pressed, at scale 1: a still picture.
+    pub(crate) const STILL: Shown<'static> = Shown {
+        focus: None,
+        hovered: None,
+        pressed: None,
+        scale: 1.0,
+    };
+}
+
 /// One panel, as the window keeps it.
 struct Record {
     layout: Layout,
@@ -739,10 +763,15 @@ impl Window {
         layer: Layer,
         painter: &mut dyn crate::paint::TextPainter,
         style: &crate::paint::PanelStyle,
-        focus: Option<&UiId>,
-        (hovered, pressed): (Option<&UiId>, Option<&UiId>),
-        scale: f32,
+        shown: Shown<'_>,
+        customs: &mut dyn crate::custom::PaintCustoms,
     ) -> crate::draw::Painted {
+        let Shown {
+            focus,
+            hovered,
+            pressed,
+            scale,
+        } = shown;
         let mut painted = crate::draw::Painted::default();
         for key in &self.drawn {
             let record = &self.records[key];
@@ -759,7 +788,7 @@ impl Window {
             };
             painted.elements += record
                 .layout
-                .paint(record.origin, record.clip, painter, style, Some(&fields));
+                .paint(record.origin, record.clip, painter, style, Some(&fields), customs);
             painted.panels += 1;
             painter.end_layer();
         }
@@ -767,7 +796,14 @@ impl Window {
             && hint.layer == layer
         {
             painter.begin_layer(hint.rect);
-            painted.elements += hint.layout.paint(hint.rect.position(), hint.rect, painter, style, None);
+            painted.elements += hint.layout.paint(
+                hint.rect.position(),
+                hint.rect,
+                painter,
+                style,
+                None,
+                &mut crate::custom::NoCustoms,
+            );
             painter.end_layer();
         }
         painted

@@ -87,7 +87,14 @@ fn the_thumb_is_painted_after_its_clip_layer_ends() {
         },
     };
     let host = Rect::new(Point::ORIGIN, Size::new(1000.0, 1000.0));
-    layout.paint(Point::ORIGIN, host, &mut recorder, &style, None);
+    layout.paint(
+        Point::ORIGIN,
+        host,
+        &mut recorder,
+        &style,
+        None,
+        &mut crate::custom::NoCustoms,
+    );
     let last = recorder.painted.last().expect("something painted");
     let Painted::Quad(thumb) = last else {
         panic!("the thumb comes last, after the layer: {last:?}");
