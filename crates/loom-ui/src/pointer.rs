@@ -571,8 +571,13 @@ impl<A: App> Panels<'_, A> {
                     self.pointer.pressed = None;
                     false
                 }
-                PointerEvent::Pressed(_) => {
+                PointerEvent::Pressed(button) => {
                     self.pointer.space = None;
+                    // A new left press ends a pending click, on nothing
+                    // as on any element.
+                    if *button == PointerButton::Left {
+                        self.pointer.pressed = None;
+                    }
                     false
                 }
                 _ => false,

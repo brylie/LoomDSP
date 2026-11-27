@@ -1110,6 +1110,20 @@ fn pointer_above_target_reports_a_change_of_the_press() {
     assert!(above(PointerEvent::Released(PointerButton::Left)).redraw, "released");
 }
 
+/// A new left press on no element at all ends a click pressed before it,
+/// as a press on any element does: letting go back on the first button
+/// clicks nothing.
+#[test]
+fn a_press_on_nothing_ends_an_earlier_click() {
+    let mut harness = harness(false, Routed::Passed);
+    harness.step(at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    // Below the bar, on nothing, with no release between.
+    harness.step(at(5.0, 150.0, PointerEvent::Pressed(PointerButton::Left)));
+    harness.step(at(5.0, 5.0, PointerEvent::Released(PointerButton::Left)));
+    harness.step(DriverEvent::Woken);
+    assert!(clicks(&harness).is_empty(), "no click from the stale press");
+}
+
 /// When the other toolkit takes a pointer press, it cancels a held Space,
 /// so the button no longer looks pressed, and that asks for a frame, though
 /// the hover, over the other toolkit, did not change.
