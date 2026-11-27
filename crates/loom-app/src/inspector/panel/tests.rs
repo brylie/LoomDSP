@@ -952,7 +952,9 @@ fn tab_after_a_click_stays_in_the_column() {
     assert_eq!(focused(&ui), Some(tags_part()), "Tab goes on to Tags");
     assert_eq!(selection(&ui), before, "Tab selects no tile");
 
-    for part in ["field", "value"] {
+    // Each direction from a fresh click, so Shift+Tab starts from the
+    // clicked part, not from where Tab landed.
+    for (part, back) in [("field", false), ("field", true), ("value", false), ("value", true)] {
         let mut ui = Ui::open("subtractive.ron");
         ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
         let _ = ui.redraw();
@@ -961,15 +963,13 @@ fn tab_after_a_click_stays_in_the_column() {
         click(&mut ui, at);
         assert_eq!(focused(&ui), Some(id.clone()), "the click focuses {id}");
         let before = selection(&ui);
-        for back in [false, true] {
-            tab(&mut ui, back);
-            let now = focused(&ui).unwrap_or_else(|| panic!("Tab from {id} (back: {back}) dropped the focus"));
-            assert!(
-                now.is_under(&ids::panel(4)),
-                "Tab from {id} (back: {back}) left the column for {now}"
-            );
-            assert_eq!(selection(&ui), before, "Tab from {id} (back: {back}) selects no tile");
-        }
+        tab(&mut ui, back);
+        let now = focused(&ui).unwrap_or_else(|| panic!("Tab from {id} (back: {back}) dropped the focus"));
+        assert!(
+            now.is_under(&ids::panel(4)),
+            "Tab from {id} (back: {back}) left the column for {now}"
+        );
+        assert_eq!(selection(&ui), before, "Tab from {id} (back: {back}) selects no tile");
     }
 }
 
