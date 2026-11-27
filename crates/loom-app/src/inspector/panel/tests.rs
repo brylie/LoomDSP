@@ -1029,6 +1029,29 @@ fn leaving_a_row_that_went_clears_the_drop_row() {
     assert!(ui.app().inspector_hovered(&gone, true).is_none(), "it takes no drop");
 }
 
+/// On a sub-patch's exposed row the value field stays at the right of the
+/// label line, as on a module's row, and the Expose or Unexpose button
+/// goes on a line of its own under it (#901).
+#[test]
+fn an_exposed_rows_field_stays_on_its_label_line() {
+    let patch = include_str!("../../../../../examples/patches/nested-subtractive.ron");
+    let mut ui = Ui::with_app(crate::tests::app_with_text(patch));
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![2])));
+    let _ = ui.redraw();
+    let row = ids::row(2, ids::Kind::Exposed, "cutoff");
+    let bounds = |part: &'static str| ui.runtime().bounds(&ids::part(&row, part)).expect(part);
+    let (field, expose, slider) = (bounds("field"), bounds("expose"), bounds("value"));
+    assert_eq!(
+        field.x + field.width,
+        slider.x + slider.width,
+        "the field ends at the row's right edge"
+    );
+    assert!(
+        field.y + field.height <= expose.y,
+        "the button's line is under the field's: {field:?}, {expose:?}"
+    );
+}
+
 /// The column's content has equal margins left and right, with the
 /// scrollbar's gutter kept whether it scrolls or not, so nothing moves
 /// sideways when a short window makes it scroll (Brylie's decision,

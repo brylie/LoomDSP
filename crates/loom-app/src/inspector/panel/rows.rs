@@ -259,25 +259,6 @@ fn head(label: &str, p: &ParamRow, own: Option<&ExposureRow>, looks: Looks) -> E
             .colour(looks.text)
             .hover_text(hover),
     ];
-    let exposures: Vec<(&ExposureRow, bool)> = own
-        .map(|exposure| (exposure, true))
-        .into_iter()
-        .chain(p.exposure.as_ref().map(|exposure| (exposure, false)))
-        .collect();
-    if !exposures.is_empty() {
-        let buttons = exposures
-            .into_iter()
-            .map(|(exposure, own)| expose(exposure, own, looks));
-        // The buttons wrap too: two surfaces, each with the name it is
-        // exposed as, can be wider than the column on their own.
-        line.push(
-            Element::row(buttons)
-                .spacing(6.0)
-                .align_y(Align::Center)
-                .wrap()
-                .key("expose"),
-        );
-    }
     line.push(Element::space(Length::FILL, Length::Shrink));
     if let Some(unused) = &p.unused {
         line.push(Element::text(unused.clone(), style::SMALL_TEXT).colour(looks.quiet));
@@ -289,13 +270,32 @@ fn head(label: &str, p: &ParamRow, own: Option<&ExposureRow>, looks: Looks) -> E
             .key("shown")
             .access(Access::label(p.value.clone())),
     });
-    // It wraps, so a row inside a sub-patch with two Expose buttons and
-    // its value field still shows them all in the column's width.
-    Element::row(line)
+    // The value sits at the right of the label line, as on every row
+    // (#901), so the line never wraps it away.
+    let line = Element::row(line)
         .spacing(6.0)
         .align_y(Align::Center)
-        .width(Length::FILL)
+        .width(Length::FILL);
+    let exposures: Vec<(&ExposureRow, bool)> = own
+        .map(|exposure| (exposure, true))
+        .into_iter()
+        .chain(p.exposure.as_ref().map(|exposure| (exposure, false)))
+        .collect();
+    if exposures.is_empty() {
+        return line;
+    }
+    let buttons = exposures
+        .into_iter()
+        .map(|(exposure, own)| expose(exposure, own, looks));
+    // A sub-patch's Expose or Unexpose buttons go on their own line under
+    // it, and wrap: two surfaces, each with the name it is exposed as, can
+    // be wider than the column on their own.
+    let buttons = Element::row(buttons)
+        .spacing(6.0)
+        .align_y(Align::Center)
         .wrap()
+        .key("expose");
+    Element::column([line, buttons]).spacing(2.0).width(Length::FILL)
 }
 
 /// The Expose or Unexpose button for its surface, keyed by that role, with
