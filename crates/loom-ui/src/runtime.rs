@@ -1074,10 +1074,12 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if let KeyEvent::Pressed { key: Key::Escape, .. } = key {
             // Escape cancels a held Space and hides the hover text, both at
             // once, and goes no further when it did either (section 5,
-            // rule 11). A Space that could no longer click (the focus moved,
-            // or a layer rose above it) is dropped without taking Escape,
-            // which then goes where it goes, such as to a question.
-            let cancelled = self.live_arm().is_some();
+            // rule 11), except where cancelling is not all Escape means
+            // there: then it goes on too ([`Self::escape_goes_on`]). A
+            // Space that could no longer click (the focus moved, or a layer
+            // rose above it) is dropped without taking Escape, which then
+            // goes where it goes, such as to a question.
+            let armed = self.live_arm();
             self.pointer.space = None;
             let input = self.app.input().layer;
             let shown = self
@@ -1089,8 +1091,15 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 .pointer
                 .hint
                 .hide(shown.as_ref(), self.pointer.hover_moves, self.focus.moves);
-            if cancelled || hid {
-                return (true, hid);
+            if hid {
+                return (true, true);
+            }
+            if let Some(armed) = armed {
+                return if self.escape_goes_on(&armed) {
+                    (false, true)
+                } else {
+                    (true, false)
+                };
             }
         }
         let Some(id) = self.focus.id().cloned() else {
@@ -1121,6 +1130,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             }
             _ => (false, false),
         }
+    }
+
+    /// Whether an Escape that cancelled a Space held on `armed` also goes
+    /// on, to close what `armed` sits in, as an Escape with no Space held
+    /// would. True for an answer of a question: one Escape cancels the
+    /// press and closes the question with its safe answer, as the
+    /// WAI-ARIA alertdialog pattern has Escape close the dialog (section 6,
+    /// rule 6, step 2; #926). Anywhere else, cancelling is all it does.
+    fn escape_goes_on(&self, armed: &UiId) -> bool {
+        self.panels.layer_of(armed) == Some(Layer::Question)
     }
 
     /// A key pressed while the focus is on or inside an element that takes

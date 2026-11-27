@@ -357,6 +357,35 @@ fn a_second_close_is_ignored() {
     assert!(!ui.app().quit);
 }
 
+/// Space held on an answer, then Escape: one Escape cancels the held press
+/// and closes the question with the safe answer, and the Space release
+/// afterwards sends nothing (#926; the WAI-ARIA alertdialog pattern has
+/// Escape close the dialog). Before, the first Escape only cancelled the
+/// press and a second one was needed.
+#[test]
+fn escape_with_space_held_on_an_answer_closes_the_question_once() {
+    let mut ui = changed();
+    let before = modules(ui.app());
+    ui.send(AppMessage::File(FileAction::Close));
+    ui.redraw();
+    // Tab moves the focus off the safe answer, so the held Space is on an
+    // answer that would act: the release must not click it.
+    ui.tap(Key::Tab, Modifiers::NONE);
+    let armed_on = model(&ui).highlight;
+    assert_ne!(armed_on, "cancel", "Space is held on another answer");
+    ui.key_down(Key::Space, false);
+    ui.tap(Key::Escape, Modifiers::NONE);
+    assert!(ui.app().overlays.question.is_none(), "one Escape closed it");
+    let released = ui.key_up(Key::Space);
+    assert!(
+        !released.iter().any(|m| matches!(m, AppMessage::Question(_))),
+        "the release clicks nothing: {released:?}"
+    );
+    assert!(!ui.app().quit, "the window stays");
+    assert!(ui.app().unsaved(), "nothing was saved or dropped");
+    assert_eq!(modules(ui.app()), before);
+}
+
 /// The Panic key works over the question, which stays open.
 #[test]
 fn the_panic_key_works_over_the_question() {

@@ -123,6 +123,25 @@ fn step_2_a_question_has_every_other_key() {
     assert!(!ui.app().quit, "with the safe answer: the window stays");
 }
 
+/// Step 2: Escape under a question, with Space held on its safe answer,
+/// cancels the held press and closes the question at once; the release
+/// then clicks nothing (#926).
+#[test]
+fn step_2_escape_under_a_question_cancels_a_held_space_and_closes_it() {
+    let mut ui = asking();
+    let none = Modifiers::NONE;
+    ui.key_down(Key::Space, false);
+    assert!(ui.app().overlays.question.is_some(), "Space clicks on key up");
+    ui.tap(Key::Escape, none);
+    assert!(ui.app().overlays.question.is_none(), "one Escape closed it");
+    let released = ui.key_up(Key::Space);
+    assert!(
+        !released.iter().any(|m| matches!(m, Message::Question(_))),
+        "the release clicks nothing: {released:?}"
+    );
+    assert!(!ui.app().quit, "with the safe answer: the window stays");
+}
+
 /// Step 2b: an element around the focus takes its keys first. The module
 /// browser hears Up and Down before its search field, so they move the
 /// highlight and never the caret.
