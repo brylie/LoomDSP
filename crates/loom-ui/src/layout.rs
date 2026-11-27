@@ -1209,7 +1209,7 @@ impl Layout {
 /// (section 7, rule 23), and offers no Focus. A menu item that asks
 /// for it ([`Element::focusable_while_off`]) stays a stop while off, as
 /// the APG keeps a disabled menu item focusable.
-fn is_stop(focusable: bool, while_off: bool, access: Option<&Access>) -> bool {
+pub(crate) fn is_stop(focusable: bool, while_off: bool, access: Option<&Access>) -> bool {
     let off = access.is_some_and(Access::is_disabled);
     let menu_item = access.is_some_and(|access| access.role() == crate::access::Role::MenuItem);
     focusable && (!off || (while_off && menu_item))

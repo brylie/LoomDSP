@@ -76,9 +76,11 @@ impl CustomNode {
         self.bounds
     }
 
-    /// True when the focus can go on it.
+    /// True when the focus can go on it: it asked to be focusable and is
+    /// not turned off, by the same rule as any element (section 6, rule
+    /// 2), so a turned-off part offers no Focus.
     pub(crate) fn is_focusable(&self) -> bool {
-        self.focusable
+        crate::layout::is_stop(self.focusable, false, Some(&self.access))
     }
 }
 
@@ -206,7 +208,7 @@ impl<A: App> Panels<'_, A> {
                 let problem = if node.path.is_empty() {
                     Some(crate::access::Problem::NoKey)
                 } else {
-                    node.access.problem(node.focusable)
+                    node.access.problem(node.is_focusable())
                 };
                 if let Some(problem) = problem {
                     assert!(!panics, "a node {part} of a custom element breaks a rule: {problem}");
