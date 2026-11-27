@@ -158,6 +158,12 @@ impl App {
         if !self.matrix_ours() {
             return;
         }
+        view.panel_with(matrix_id(), Layer::Panels, &self.matrix_panel_model(), build);
+    }
+
+    /// What the matrix's panel is built from: its rows, the options of
+    /// their selects, and the colours of the style tokens.
+    fn matrix_panel_model(&self) -> Panel {
         let theme = self.theme();
         let palette = theme.extended_palette();
         let mut small = style::select(&theme);
@@ -211,7 +217,7 @@ impl App {
                 .and_then(|t| all_targets.iter().position(|o| o == t)),
             sources: base.iter().map(|pick| pick.label.clone()).collect(),
         });
-        let panel = Panel {
+        Panel {
             filter: model.filter.clone(),
             selected_only: model.selected_only,
             sort: model.sort,
@@ -221,8 +227,7 @@ impl App {
             selected: model.selected,
             edit: model.edit.as_ref().map(|edit| (edit.id.0, edit.depth.clone())),
             looks,
-        };
-        view.panel_with(matrix_id(), Layer::Panels, &panel, build);
+        }
     }
 
     /// The matrix's stops as Tab meets them, while its panel owns the
@@ -631,9 +636,11 @@ fn one_card(panel: &Panel, card: &Card, at: usize, count: usize) -> Element {
     let cell = |name: &'static str, options: Vec<String>, at: Option<usize>| {
         Element::select(Select::new(name, options, at, looks.cell).in_cell())
     };
-    let mut target = cell("Target", panel.targets.clone(), card.target)
-        .width(Length::FILL)
-        .key("target");
+    // Source and Target take the room left and may narrow below their
+    // label, which they cut, as Iced's pick lists did: a long name, or a
+    // wider system font, never pushes Polarity or × past the column.
+    let narrowing = |element: Element| element.width(Length::FILL).min_width(0.0).clip();
+    let mut target = narrowing(cell("Target", panel.targets.clone(), card.target)).key("target");
     if let Some(detail) = &row.target_detail {
         target = target.hover_text(detail.clone());
     }
@@ -657,9 +664,7 @@ fn one_card(panel: &Panel, card: &Card, at: usize, count: usize) -> Element {
     let mut lines = vec![
         Element::row([
             Element::checkbox("On", style::SMALL_TEXT, row.on).key("on"),
-            cell("Source", card.sources.clone(), card.source)
-                .width(Length::FILL)
-                .key("source"),
+            narrowing(cell("Source", card.sources.clone(), card.source)).key("source"),
             Element::text("×", style::CONTROL_TEXT)
                 .padding(Padding::symmetric(0.0, 6.0))
                 .looks(ButtonRole::Plain.looks())

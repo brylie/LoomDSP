@@ -559,3 +559,62 @@ fn entering_the_grid_keeps_the_canvas_selection() {
         "Down selects the new row's target"
     );
 }
+
+/// A card's cells end inside the right column whatever its names are and
+/// whatever the system font (WCAG 2.2, SC 1.4.10 Reflow): Source and
+/// Target narrow and cut their labels, so Polarity and × keep their place.
+/// The names are made long in the panel's model, so no font can make them
+/// fit; before the fix, Polarity crossed the edge on Linux's wider font.
+/// A screen reader still gets each whole name as the cell's value.
+#[test]
+fn long_names_keep_every_cell_inside_the_column() {
+    let ui = matrix_open();
+    let long = "A module with a name far too long for any column: Its parameter";
+    let mut panel = ui.app().matrix_panel_model();
+    for at in 0..panel.targets.len() {
+        panel.targets[at] = format!("{long} {at}");
+    }
+    for card in &mut panel.cards {
+        for source in &mut card.sources {
+            *source = format!("{long} {source}");
+        }
+    }
+    let ids: Vec<AssignmentId> = panel.cards.iter().map(|card| AssignmentId(card.row.id)).collect();
+    let mut layout = loom_ui::Layout::new(matrix_id());
+    layout.rebuild(build(&panel));
+    let column = loom_ui_core::Size::new(style::RIGHT_COLUMN_WIDTH, 800.0);
+    layout.compute(column, &mut loom_ui::paint::Typesetter::new());
+    let list = layout.bounds(&list_id()).expect("the card list");
+    assert!(list.x >= 0.0 && list.x + list.width <= column.width + 0.5, "{list:?}");
+    for id in ids {
+        let parts = Column::ALL.into_iter().map(|column| access::cell(id, column));
+        for part in parts.chain([access::remove(id)]) {
+            let at = layout.bounds(&part).unwrap_or_else(|| panic!("{part} is laid out"));
+            assert!(
+                at.x >= list.x - 0.5 && at.x + at.width <= list.x + list.width + 0.5,
+                "{part} {at:?} lies in {list:?}"
+            );
+        }
+    }
+}
+
+/// A screen reader reads each Source and Target as its whole name, the
+/// value the model gives the select, which no width or clip changes, so a
+/// cell cut short on screen is still announced in full (WCAG 2.2, SC 4.1.2).
+#[test]
+fn a_cut_name_is_read_out_whole() {
+    let mut ui = matrix_open();
+    let first = first(&ui);
+    let id = AssignmentId(1);
+    let names = crate::modulation::Names::new(ui.app().session.controller.graph(), &ui.app().session.hierarchy);
+    let (source, target) = (names.source(first.source), names.target(first.target, first.param));
+    let tree = ui.a11y_tree();
+    assert_eq!(
+        tree.node_by_id(&access::cell(id, Column::Source)).value(),
+        Some(source.as_str())
+    );
+    assert_eq!(
+        tree.node_by_id(&access::cell(id, Column::Target)).value(),
+        Some(target.as_str())
+    );
+}
