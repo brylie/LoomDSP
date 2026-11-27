@@ -142,6 +142,8 @@ impl Focus {
                 .panel_of(focus)
                 .cloned()
                 .and_then(|panel| window.first_stop_in(&panel));
+            // The old field's waiting caret request goes with the focus.
+            window.drop_caret_reveal_leaving(self.id.as_ref(), fallback.as_ref());
             self.set(fallback);
         }
         false
