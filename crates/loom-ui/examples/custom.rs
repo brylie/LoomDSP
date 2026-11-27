@@ -29,8 +29,11 @@ const METER: CustomKind = CustomKind::new("meter");
 /// The lowest level the meter shows, in dB.
 const FLOOR: f32 = -60.0;
 
-/// How fast the bar falls, in dB per second: slow enough to read a peak,
-/// fast enough to follow the music.
+/// How fast the bar falls, in dB per second, chosen for this example so
+/// the fall is easy to watch. It is not taken from a standard: a peak
+/// programme meter falls 20 dB in about 1.7 s (IEC 60268-10, Type I),
+/// about 12 dB a second, and a real meter module cites the standard it
+/// follows.
 const FALL: f32 = 20.0;
 
 /// The bar's colour.

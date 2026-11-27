@@ -35,7 +35,11 @@ impl Still {
     /// from a state `app` makes for this picture
     /// ([`App::make_custom`](crate::App::make_custom)), so a capture shows
     /// a meter. With no runtime, no element has a state it kept: each
-    /// paints as it is when new, from the app it reads.
+    /// paints as it is when new, from the app it reads, so a meter shows
+    /// its starting state, not where it was falling. A capture that must
+    /// show live elements, such as `--screenshot-window --frames N` once
+    /// the canvas is a custom element (plan step P4), paints from the
+    /// runtime's kept states instead ([`Runtime::paint`](crate::Runtime::paint)).
     pub fn paint_with<A: crate::App>(&self, app: &A, layer: Layer, painter: &mut dyn TextPainter, style: &PanelStyle) {
         let mut fresh = crate::custom::Fresh { app };
         let _ = self
