@@ -893,3 +893,31 @@ fn a_placed_root_taller_than_the_window_is_cut_to_it() {
     assert_eq!(menu.y, 40.0, "where it asked");
     assert!(menu.height > 300.0, "at its content size: {menu:?}");
 }
+
+/// A menu placed under the toolbar's label, holding a panel in a fixed
+/// slot, which never asks its child for a size.
+fn placed_fixed_holder(_: &()) -> Element {
+    Element::column([Element::slot(panel("inner"))
+        .width(Length::Fixed(50.0))
+        .height(Length::Fixed(20.0))])
+    .placed(crate::element::Placement::Under(
+        "toolbar/label".parse().expect("a UI ID"),
+    ))
+}
+
+/// A placed root whose anchor is missing still lays out the panels in its
+/// slots, at their slot sizes, so the window settles after one layout; none
+/// of it is drawn.
+#[test]
+fn a_hidden_placed_root_lays_out_its_slots_too() {
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(panel("toolbar"), Layer::Panels, &false, label_bar);
+    view.panel_with(panel("menu"), Layer::Overlays, &(), placed_fixed_holder);
+    view.panel_with(panel("inner"), Layer::Overlays, &(), inner_square);
+    screen.show_view(view);
+    let size = Size::new(300.0, 200.0);
+    screen.lay_out(size);
+    assert!(screen.window.is_settled(size), "settled after one layout");
+    assert_eq!(screen.at("inner/item"), None, "and nothing of it placed");
+}

@@ -451,8 +451,9 @@ impl Window {
             let Some(anchor) = anchor else {
                 // Under an element that is gone: not placed, so nothing
                 // of it is drawn or hit until the element comes back. It
-                // is still laid out, so the window settles.
-                self.compute(&root, size, text, &mut laid);
+                // is still laid out, panels in its slots too, so the window
+                // settles.
+                self.compute_hidden(&root, size, text, &mut laid);
                 continue;
             };
             self.compute(&root, size, text, &mut laid);
@@ -589,6 +590,27 @@ impl Window {
             record.slot = Some(size);
         }
         self.records.insert(key.clone(), record);
+    }
+
+    /// Lays the panel keyed `key` out at `size`, if it needs it, and the
+    /// panels in its slots at their slot sizes, as [`Window::place`] does,
+    /// but places none of them and adds none to what is drawn: for a root
+    /// placed under an element that is gone.
+    fn compute_hidden(&mut self, key: &UiId, size: Size, text: &mut dyn TextMeasure, laid: &mut Laid) {
+        self.compute(key, size, text, laid);
+        let Some(record) = self.records.get(key) else {
+            return;
+        };
+        let slots: Vec<(UiId, Size)> = record
+            .layout
+            .slots()
+            .map(|(child, at)| (child.clone(), at.size()))
+            .collect();
+        for (index, (child, at)) in slots.into_iter().enumerate() {
+            if self.records.get(&child).is_some_and(|held| held.held_by(key, index)) {
+                self.compute_hidden(&child, at, text, laid);
+            }
+        }
     }
 
     /// Lays the panel keyed `key` out at `size`, if it needs it, places it
