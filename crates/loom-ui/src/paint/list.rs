@@ -159,7 +159,7 @@ impl PaintList {
 
     /// The layer that holds the first box filled with `fill`, for a test
     /// that checks where something was painted.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "gpu"))]
     pub(crate) fn layer_of_fill(&self, fill: loom_ui_core::Color) -> Option<usize> {
         let index = self
             .boxes

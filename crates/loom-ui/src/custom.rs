@@ -137,7 +137,7 @@ pub trait Custom<A: App>: Any {
 
     /// Adds a node for each part inside it a user can reach, in its own
     /// focus order, with `bounds` where it is in the window (section 9,
-    /// rule 3). Its own node comes from the [`Access`](crate::Access) the
+    /// rule 3). Its own node comes from the [`Access`](crate::access::Access) the
     /// view gave it; these go under that one. The runtime asks after a
     /// layout that made it or moved it, after an event or tick that said
     /// its nodes changed ([`Out::nodes_changed`]), and after a turn in
@@ -562,7 +562,7 @@ impl<A: App> Customs<A> {
 
     /// The state of the element `id` as its own type `S`, to change for a
     /// test.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "gpu"))]
     pub(crate) fn state_mut<S: 'static>(&mut self, id: &UiId) -> Option<&mut S> {
         let state: &mut dyn Any = self.elements.get_mut(id)?.state.as_deref_mut()?;
         state.downcast_mut()
