@@ -1,10 +1,12 @@
 //! The inspector as a panel of `loom-ui`'s Panels layer (plan 3.2, row 4,
-//! part 4d), in a slot of the root panel below the right column's tabs,
-//! which Iced still draws until 4e. It draws the variants moved so far:
-//! patch info when nothing is selected, the count of a selection of
-//! several, a sub-patch's port tile, and nothing for a module that went.
-//! Every other variant is still Iced's ([`App::inspector_ours`]), and Iced
-//! keeps an empty space where this panel draws.
+//! part 4d), in the right column's slot of the root panel, below the
+//! column's tabs, while the Inspector tab is open and the Outline is not
+//! jumping ([`App::inspector_ours`]). It draws every variant: patch info
+//! when nothing is selected, the count of a selection of several, a
+//! module's, a slot's, a sub-patch's, and an unknown module's rows, a
+//! sub-patch's port tile, and nothing for a module that went. The tabs, the
+//! modulation matrix, and the Outline are `loom-ui` panels too (row 4e);
+//! of the window, Iced draws only the canvas.
 //!
 //! Each part keeps the UI ID it had: the scroll container is keyed by what
 //! the inspector shows (`inspector/patch`, `inspector/several`,
