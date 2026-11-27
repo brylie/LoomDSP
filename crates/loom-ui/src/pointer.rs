@@ -323,7 +323,11 @@ impl<A: App> Panels<'_, A> {
     /// closing menu is taken and told, and one on a dialog's scrim is held.
     pub fn pointer_above_target(&mut self, event: &Event, point: Point) -> Heard {
         let input = self.app.input();
-        let heard = self.pointer_above(input, event, point);
+        // A press or release that changes only the pressed look, on an
+        // element already hovered, still asks for a frame, as below.
+        let pressed = self.shown_pressed();
+        let mut heard = self.pointer_above(input, event, point);
+        heard.redraw |= self.shown_pressed() != pressed;
         self.report_focus();
         self.nudge_for_select();
         self.report_custom_left();

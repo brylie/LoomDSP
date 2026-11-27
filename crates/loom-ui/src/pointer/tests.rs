@@ -1035,6 +1035,24 @@ fn pointer_below_reports_a_change_of_the_press() {
     assert!(below(PointerEvent::Released(PointerButton::Left)).redraw, "released");
 }
 
+/// Above the target, as below it: a press on a menu item already hovered,
+/// which moves neither the hover nor the focus, asks for a frame for its
+/// pressed look, and so does its release.
+#[test]
+fn pointer_above_target_reports_a_change_of_the_press() {
+    let mut harness = harness(true, Routed::Later);
+    harness.send(Message::Input(Layer::Overlays));
+    let at = Point::new(5.0, 5.0);
+    let mut above = |event: PointerEvent| {
+        let (_, _, mut panels) = harness.parts();
+        panels.pointer_above_target(&Event::Pointer(event), at)
+    };
+    assert!(above(PointerEvent::Moved).redraw, "the hover moved");
+    assert!(!above(PointerEvent::Moved).redraw, "nothing changed");
+    assert!(above(PointerEvent::Pressed(PointerButton::Left)).redraw, "pressed");
+    assert!(above(PointerEvent::Released(PointerButton::Left)).redraw, "released");
+}
+
 /// When the other toolkit takes a pointer press, it cancels a held Space,
 /// so the button no longer looks pressed, and that asks for a frame, though
 /// the hover, over the other toolkit, did not change.
