@@ -2190,7 +2190,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     let quiet = !self.focus.by_key;
                     redraw |= self.focus_effect(&FocusTarget::Element(id.clone()), Selection::Keep);
                     if quiet {
-                        if self.focus.id() == Some(&id) {
+                        // A part inside a custom element puts the runtime's
+                        // focus on the element that owns it.
+                        let held = self.customs.owner_of(&id).cloned().unwrap_or_else(|| id.clone());
+                        if self.focus.id() == Some(&held) {
                             self.focus.ring = false;
                         } else if self.focus.wanted.as_ref() == Some(&id) {
                             self.focus.wanted_quiet = Some(id);

@@ -31,6 +31,8 @@ enum Message {
     Focus(Option<UiId>),
     /// Focus the roll's part with this name, by a focus effect.
     FocusPart(&'static str),
+    /// Focus the roll's part with this name as the latest input would.
+    FocusPartAsInput(&'static str),
     /// Open or close the overlay.
     Overlay(bool),
 }
@@ -107,6 +109,7 @@ impl App for Rolls {
     fn update(&mut self, message: Message, _cx: &Context<'_, Message>) -> Effects<Message> {
         let effects = match &message {
             Message::FocusPart(part) => Effects::focus(roll().with(*part)),
+            Message::FocusPartAsInput(part) => Effects::focus_as_input(roll().with(*part)),
             Message::Overlay(open) => {
                 self.overlay = *open;
                 Effects::none()
@@ -328,6 +331,24 @@ fn a_focus_on_a_part_is_reported_like_any_other() {
         data: None,
     })));
     assert_eq!(told(&harness), Some(Some(roll().with("b"))));
+}
+
+/// A focus effect that follows the latest input, onto a part inside the
+/// roll, shows no ring after a pointer press, as on any element (section
+/// 6, rule 3): the runtime's focus is the roll, which owns the part, and
+/// the quiet check looks there.
+#[test]
+fn a_focus_as_input_on_a_part_after_a_press_shows_no_ring() {
+    use loom_ui_core::{Point, PointerButton, PointerEvent};
+    let mut harness = harness();
+    harness.step(DriverEvent::Input {
+        event: Event::Pointer(PointerEvent::Pressed(PointerButton::Left)),
+        pointer: Some(Point::new(300.0, 290.0)),
+    });
+    send(&mut harness, Message::FocusPartAsInput("b"));
+    assert_eq!(harness.runtime().focused(), Some(&roll()));
+    assert_eq!(told(&harness), Some(Some(roll().with("b"))));
+    assert_eq!(harness.runtime().focus_ring(), None, "no ring after a press");
 }
 
 /// A focus effect on a part the roll does not have is dropped: the focus
