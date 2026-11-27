@@ -519,6 +519,32 @@ def nextest_threads(held, ci):
     return ["--test-threads", str(cores if held else (cores + 1) // 2)]
 
 
+# Arguments that change what cargo builds, so the build before the slot
+# takes them too. Any other argument (such as --no-fail-fast, which
+# nextest refuses beside --no-run) goes to the run only; an unlisted build
+# argument then builds inside the slot, which is slower but still right.
+BUILD_FLAGS = ("--release", "--all-features", "--no-default-features", "--locked", "--frozen", "--offline")
+BUILD_OPTIONS = ("--cargo-profile", "--features", "-F", "--target", "--config")
+
+
+def build_arguments(arguments):
+    """The arguments of a test run that the build before the slot needs too."""
+    kept = []
+    arguments = list(arguments)
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--":
+            break  # what follows is for the test binaries
+        if argument in BUILD_FLAGS or ("=" in argument and argument.split("=", 1)[0] in BUILD_OPTIONS):
+            kept.append(argument)
+        elif argument in BUILD_OPTIONS and index + 1 < len(arguments):
+            kept += arguments[index : index + 2]
+            index += 1
+        index += 1
+    return kept
+
+
 def run_tests(run_all, nextest_args):
     """The test step: select, build outside the queue, then run in it."""
     spans = Spans()
@@ -545,9 +571,10 @@ def run_tests(run_all, nextest_args):
     command += list(nextest_args)
     if queue_off_reason() is None:
         # Build before taking a slot, so only the run waits.
-        # The same extra arguments, so a `--release` or `--profile` run
+        # The extra arguments that change the build, so a `--release` run
         # builds what it then runs, and builds nothing while it holds a slot.
-        code = run_child(["cargo", "nextest", "run", "--workspace", "--no-run"] + list(nextest_args), dict(os.environ))
+        build = ["cargo", "nextest", "run", "--workspace", "--no-run"] + build_arguments(nextest_args)
+        code = run_child(build, dict(os.environ))
         if code != 0:
             return code
     what = "every test" if selection.kind == "all" else "the tests of %d crates" % len(selection.run)

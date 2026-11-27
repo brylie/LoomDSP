@@ -285,6 +285,20 @@ class QueueSettingsTests(CleanEnv):
 
 
 @unittest.skipIf(test_run.fcntl is None, "the queue needs flock")
+class BuildArgumentTests(unittest.TestCase):
+    """Which extra arguments the build before the slot takes."""
+
+    def test_build_arguments_are_kept(self):
+        """Release, features, and the cargo profile change the build, in either form."""
+        arguments = ["--release", "--features", "a,b", "--cargo-profile=ci", "-F", "c"]
+        self.assertEqual(test_run.build_arguments(arguments), arguments)
+
+    def test_run_arguments_are_left_to_the_run(self):
+        """--no-fail-fast, a thread count, a nextest profile, and test arguments are for the run."""
+        arguments = ["--no-fail-fast", "--test-threads", "2", "--profile", "ci", "--release", "--", "--features"]
+        self.assertEqual(test_run.build_arguments(arguments), ["--release"])
+
+
 class QueueTests(CleanEnv):
     """Real processes holding and waiting for a slot."""
 
