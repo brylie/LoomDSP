@@ -317,9 +317,11 @@ fn build(panel: &Panel) -> Element {
         Element::field(model.author.clone(), style::CONTROL_TEXT)
             .placeholder("Added as author of new patches", looks.quiet)
             .padding(loom_ui::Padding::symmetric(4.0, 6.0))
-            .border(looks.select.border_width, looks.select.border)
-            .radius(looks.radius)
-            .background(looks.select.background)
+            // A text field's look, an outline on the panel, not a
+            // select's raised fill.
+            .border(looks.select.border_width, style::FIELD.border)
+            .radius(style::FIELD.radius)
+            .background(style::FIELD.fill)
             .width(Length::FILL)
             .key("author")
             .access(Access::new(Role::TextInput, "Your name")),

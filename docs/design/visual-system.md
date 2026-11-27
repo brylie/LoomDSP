@@ -207,7 +207,7 @@ Kept problems survive opening another patch, except as the table says.
 | `TEXT` | Body text on the panels | `#E6E8EE` | 12.66 on `PANEL_FILL`, 8.85 on `RAISED` (4.5 needed) |
 | `QUIET` | Details, IDs, a closed tab's title, a switch's edge, the scroll thumb | `rgb(0.66, 0.69, 0.75)` | 7.12 on `PANEL_FILL`, 4.98 on `RAISED` (4.5 needed) |
 | `ACCENT` | Links, a highlighted row's outline, a chosen card, a switch that is on | `#F5A623` | 5.35 on a dialog (4.5 needed); 1.65 against `TEXT`, so links are underlined |
-| `RAISED` | Open tabs, cards, dialogs, hovered menu items, the highlighted row, hover text | about `#393D48` | |
+| `RAISED` | Open tabs, cards, dialogs, hovered menu items, the highlighted row, hover text, and a select's fill, so a select reads apart from a text field, an outline on the panel (#901) | about `#393D48` | `TEXT` on it 8.85 (4.5 needed) |
 | `EDGE` | Rules, the borders of floating panels, and a slider's track | about `#454A59` | 1.76 on `PANEL_FILL`: never a control's only mark (a slider's thumb and fill show its value) |
 | `FIELD_EDGE` | The border of a text field, a select, a browser's search and Author fields, the open right-column tab, and the Outline's chosen row, and a switch's track while off: `QUIET` | `rgb(0.66, 0.69, 0.75)` | 7.12 on `PANEL_FILL` (3 needed, SC 1.4.11) |
 | `CARD_FILL`, `CARD_BORDER` | A modulation card's fill and border | `RAISED` and `EDGE` at 50% | |

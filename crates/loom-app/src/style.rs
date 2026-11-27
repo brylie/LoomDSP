@@ -593,7 +593,9 @@ pub fn select() -> loom_ui::SelectStyle {
     loom_ui::SelectStyle {
         text: CONTROL_TEXT,
         colour: TEXT,
-        background: PANEL_FILL,
+        // A raised fill, so a select reads apart from a text field, which
+        // is an outline on the panel (#901).
+        background: RAISED,
         border: FIELD_EDGE,
         border_width: 1.0,
         radius: 2.0,

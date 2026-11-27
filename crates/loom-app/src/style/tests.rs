@@ -513,6 +513,18 @@ fn every_colour_pair_the_app_draws_meets_its_minimum() {
         ("a text field's border, its only edge", FIELD.border, FIELD.fill, Mark),
         ("a select's border, its only edge", select().border, PANEL_FILL, Mark),
         (
+            "a select's text on its raised fill (8.85:1)",
+            select().colour,
+            select().background,
+            Text,
+        ),
+        (
+            "a select's open mark on its raised fill",
+            select().mark,
+            select().background,
+            Mark,
+        ),
+        (
             "a browser field's edge, on the browser",
             FIELD_EDGE,
             FLOATING_PANEL.fill,
@@ -554,4 +566,20 @@ fn every_colour_pair_the_app_draws_meets_its_minimum() {
         })
         .collect();
     assert!(failing.is_empty(), "{}", failing.join("\n"));
+}
+
+/// A select has a raised fill, so it reads apart from a text field, which
+/// is an outline on the panel (#901): its text on that fill and its edge on
+/// the panel are pinned, so a token that drifts shows here first.
+#[test]
+fn a_select_reads_apart_from_a_text_field() {
+    use super::{FIELD, FIELD_EDGE, PANEL_FILL, RAISED, TEXT, select};
+    use loom_canvas::contrast_ratio;
+    assert_ne!(select().background, FIELD.fill, "a select is filled, a field is not");
+    assert_eq!(select().background, RAISED);
+    let near = |got: f32, want: f32| (got - want).abs() < 0.01;
+    let text = contrast_ratio(TEXT, RAISED);
+    assert!(near(text, 8.85), "the text on its fill: {text:.2}:1");
+    let edge = contrast_ratio(FIELD_EDGE, PANEL_FILL);
+    assert!(near(edge, 7.12), "its edge on the panel: {edge:.2}:1");
 }
