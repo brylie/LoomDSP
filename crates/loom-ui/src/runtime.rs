@@ -2092,14 +2092,6 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             }
             *updates += 1;
             redraw |= self.update(message, now, driver);
-            // What the update's effects made for this turn, such as an edit
-            // a select-all committed, runs right after it.
-            while !self.exited && !self.now_after_update.is_empty() {
-                for made in std::mem::take(&mut self.now_after_update) {
-                    *updates += 1;
-                    redraw |= self.update(made, now, driver);
-                }
-            }
             // A focus an update's effects moved is the next thing the app
             // hears, before the turn's other messages, as a focus an event
             // moved is the first (`App::focus_moved`): the app's copy of the
@@ -2273,6 +2265,21 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// Runs one update and its effects. Returns true when an effect asked
     /// for a draw.
     fn update(&mut self, message: A::Message, now: Instant, driver: &mut impl Driver<A::Message>) -> bool {
+        let mut redraw = self.update_one(message, now, driver);
+        // What the update's effects made for this turn, such as the edit a
+        // select-all commits over a composition, runs right after it,
+        // before the view is built again, whichever path ran the update: a
+        // batch, a focus report, or a screen reader's notice.
+        while !self.exited && !self.now_after_update.is_empty() {
+            for made in std::mem::take(&mut self.now_after_update) {
+                redraw |= self.update_one(made, now, driver);
+            }
+        }
+        redraw
+    }
+
+    /// One update for `message`, with its effects carried out.
+    fn update_one(&mut self, message: A::Message, now: Instant, driver: &mut impl Driver<A::Message>) -> bool {
         let focused = self.panels().focused_part().or_else(|| self.target.focused());
         let cx = Context {
             now,

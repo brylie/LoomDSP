@@ -497,6 +497,8 @@ enum Message {
     ReturnAndFocusAll,
     /// The same, then focus it again keeping the caret, in that update.
     ReturnAndFocusAllThenKeep,
+    /// The next notice selects all of the field's text.
+    SelectOnNotice,
     /// Focus the first UI ID, then the second, in one update.
     FocusTwice(UiId, UiId),
     /// What a field reports to a screen reader changed, with the text the
@@ -531,6 +533,9 @@ struct Form {
     log: Vec<String>,
     /// How many times the runtime asked where Tab goes (`App::tab_from`).
     tabs: std::cell::Cell<u32>,
+    /// The next notice that the field's reported text changed selects all
+    /// of it, from the notice's own update.
+    select_on_notice: bool,
 }
 
 impl App for Form {
@@ -553,6 +558,10 @@ impl App for Form {
             Message::Changed(text) => {
                 self.log.push("changed".to_owned());
                 self.noticed.push(text);
+                if self.select_on_notice {
+                    self.select_on_notice = false;
+                    return Effects::focus_and_select_all(name());
+                }
             }
             Message::TurnOff(off) => self.off = off,
             Message::Remove => self.removed = true,
@@ -560,6 +569,7 @@ impl App for Form {
                 self.removed = false;
                 return Effects::focus_and_select_all(name());
             }
+            Message::SelectOnNotice => self.select_on_notice = true,
             Message::ReturnAndFocusAllThenKeep => {
                 self.removed = false;
                 return Effects::focus_and_select_all(name()).and(Effects::focus(name()));
@@ -1967,6 +1977,36 @@ fn select_all_over_a_composition_keeps_its_undo_step() {
     assert_eq!(harness.app().text, "にほ", "the app holds the committed text");
     let undo = shortcut(Platform::current(), false);
     harness.step(key_in(Key::Character('z'), undo, None));
+    harness.lay_out(&mut typesetter);
+    assert_eq!(
+        harness.runtime().field_text(&name()),
+        Some(""),
+        "undo took the committed text away"
+    );
+}
+
+/// A select-all that an accessibility notice's update asks for, over a
+/// composition, delivers its committed edit in that turn too: the undo
+/// step survives a layout right after it, as on every update path.
+#[test]
+fn select_all_from_a_notice_over_a_composition_keeps_its_undo_step() {
+    let Some((mut harness, mut typesetter)) = form("", true) else {
+        return;
+    };
+    harness.send(Message::Focus(name()));
+    harness.lay_out(&mut typesetter);
+    harness.send(Message::SelectOnNotice);
+    // The preedit changes what the field reports; the notice's update
+    // selects all, which commits the composition, in this one turn.
+    let mut driver = crate::headless::Headless::new();
+    let _ = harness
+        .runtime_mut()
+        .handle(ime_in(preedit("にほ")), Instant::now(), &mut driver);
+    harness.lay_out(&mut typesetter);
+    harness.step(DriverEvent::Woken);
+    harness.lay_out(&mut typesetter);
+    assert_eq!(harness.app().text, "にほ", "the app holds the committed text");
+    harness.step(key_in(Key::Character('z'), shortcut(Platform::current(), false), None));
     harness.lay_out(&mut typesetter);
     assert_eq!(
         harness.runtime().field_text(&name()),
