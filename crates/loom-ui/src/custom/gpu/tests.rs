@@ -79,6 +79,9 @@ struct PadState {
     lost: u32,
     /// Input state, which a lost device must leave alone.
     dragged: u32,
+    /// The viewport it was last given to prepare its drawing above a
+    /// layer with.
+    above_viewport: Option<[f32; 4]>,
 }
 
 impl Custom<Pads> for PadState {
@@ -116,6 +119,10 @@ impl CustomGpu<Pads> for PadState {
 
     fn above(&self, app: &Pads) -> Option<Layer> {
         app.above.then_some(Layer::Panels)
+    }
+
+    fn prepare_above(&mut self, _app: &Pads, gpu: &Gpu<'_>) {
+        self.above_viewport = Some(gpu.viewport);
     }
 
     fn draw_above(&self, pass: &mut Pass<'_>) {
@@ -526,4 +533,37 @@ fn drawing_above_leaves_the_pass_for_the_host() {
     for (x, y) in [(0, 0), (WIDTH - 1, 0), (0, HEIGHT - 1), (WIDTH - 1, HEIGHT - 1)] {
         assert_eq!(colour(&pixels, x, y), Some('w'), "the host's fill at ({x}, {y})");
     }
+    // With no host fill after it, its drawing above shows in the corner it
+    // set its scissor to, over the blue box painted after the pad there,
+    // so the white above was the host drawing over a drawing that ran.
+    let pixels = draw(&mut harness, &device, &queue, FIRST);
+    assert_eq!(colour(&pixels, 0, 0), Some('g'), "its drawing above, over the box");
+    assert_eq!(colour(&pixels, 40, 10), Some('g'), "the pad itself");
+}
+
+/// An element prepares its drawing above a layer with the viewport it
+/// draws it with: the whole target's, not its own bounds.
+#[test]
+fn drawing_above_prepares_with_the_whole_targets_viewport() {
+    let Some((device, queue)) = device() else {
+        assert!(!gpu_required(), "LOOM_REQUIRE_GPU is set, but there is no GPU adapter");
+        eprintln!("skipped: no GPU adapter");
+        return;
+    };
+    let text = RefCell::new(Typesetter::new());
+    let mut harness = harness(
+        &text,
+        Pads {
+            broken: false,
+            above: true,
+        },
+    );
+    draw(&mut harness, &device, &queue, FIRST);
+    let pad = UiId::panel("main").with("pad");
+    let state = harness.runtime().custom::<PadState>(&pad).expect("the pad");
+    assert_eq!(
+        state.above_viewport,
+        Some([0.0, 0.0, WIDTH as f32, HEIGHT as f32]),
+        "the whole target, not the pad's 60 by 40"
+    );
 }

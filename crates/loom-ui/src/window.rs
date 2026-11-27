@@ -450,7 +450,10 @@ impl Window {
             };
             let Some(anchor) = anchor else {
                 // Under an element that is gone: not placed, so nothing
-                // of it is drawn or hit until the element comes back.
+                // of it is drawn or hit until the element comes back. It
+                // is still laid out, panels in its slots too, so the window
+                // settles.
+                self.compute_hidden(&root, size, text, &mut laid);
                 continue;
             };
             self.compute(&root, size, text, &mut laid);
@@ -589,6 +592,27 @@ impl Window {
         self.records.insert(key.clone(), record);
     }
 
+    /// Lays the panel keyed `key` out at `size`, if it needs it, and the
+    /// panels in its slots at their slot sizes, as [`Window::place`] does,
+    /// but places none of them and adds none to what is drawn: for a root
+    /// placed under an element that is gone.
+    fn compute_hidden(&mut self, key: &UiId, size: Size, text: &mut dyn TextMeasure, laid: &mut Laid) {
+        self.compute(key, size, text, laid);
+        let Some(record) = self.records.get(key) else {
+            return;
+        };
+        let slots: Vec<(UiId, Size)> = record
+            .layout
+            .slots()
+            .map(|(child, at)| (child.clone(), at.size()))
+            .collect();
+        for (index, (child, at)) in slots.into_iter().enumerate() {
+            if self.records.get(&child).is_some_and(|held| held.held_by(key, index)) {
+                self.compute_hidden(&child, at, text, laid);
+            }
+        }
+    }
+
     /// Lays the panel keyed `key` out at `size`, if it needs it, places it
     /// at `origin`, and then places the panels in its slots.
     fn place(
@@ -626,6 +650,23 @@ impl Window {
         }
     }
 
+    /// Drops a waiting caret request when the focus moves from the field
+    /// `from` it is for to `to`, another element or none: the next layout
+    /// then shows what took the focus, not the old field's caret. A
+    /// request for a field that never had the focus, from a screen
+    /// reader's action, stays (#879).
+    pub(crate) fn drop_caret_reveal_leaving(&mut self, from: Option<&UiId>, to: Option<&UiId>) {
+        if let Some(from) = from
+            && Some(from) != to
+            && self
+                .caret_reveal
+                .as_ref()
+                .is_some_and(|(requested, _)| requested == from)
+        {
+            self.caret_reveal = None;
+        }
+    }
+
     /// True when nothing changed since the last [`Window::lay_out`] in a
     /// window of `size`, so bounds and hits are current.
     pub(crate) fn is_settled(&self, size: Size) -> bool {
@@ -641,9 +682,11 @@ impl Window {
             .iter()
             .filter(|(key, _)| id == *key || id.is_under(key))
             .max_by_key(|(key, _)| key.keys().len())?;
-        // A placed panel whose anchor was gone at the last layout is
-        // nowhere (section 5, rule 13).
-        if record.layout.placement().is_some() && !self.drawn.contains(key) {
+        // A panel not drawn in the last layout is nowhere: a placed panel
+        // whose anchor was gone, and every panel in its slots, which have
+        // no placement of their own (section 5, rule 13). A panel placed
+        // earlier in the layout under way counts, as an anchor must.
+        if !self.drawn.contains(key) {
             return None;
         }
         // A panel's own key gives its place: its slot, the window, or, for

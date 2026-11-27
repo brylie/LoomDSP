@@ -603,13 +603,15 @@ impl Window {
         built
     }
 
-    /// True when the tree sent now holds a node for `id`: a laid-out
-    /// element with a node, or a part of a custom element in a drawn
-    /// panel. A relation to anything else is left out (section 7, rule 13).
+    /// True when the tree sent now holds a node for `id`: an element with
+    /// a node in a drawn panel, or a part of a custom element in a drawn
+    /// panel. A panel kept but not drawn, as one placed under an element
+    /// that is gone, gives no nodes. A relation to anything else is left
+    /// out (section 7, rule 13).
     pub(crate) fn emits(&self, id: &UiId) -> bool {
         let element = self
             .panel_of(id)
-            .is_some_and(|panel| self.records[panel].layout.has_node(id));
+            .is_some_and(|panel| self.drawn.contains(panel) && self.records[panel].layout.has_node(id));
         element || self.emits_part(id)
     }
 
@@ -617,6 +619,21 @@ impl Window {
     /// whose last build has a node for it.
     fn emits_part(&self, id: &UiId) -> bool {
         self.part_owner(id).is_some()
+    }
+
+    /// True when `id` names a part of a custom element whose last build
+    /// gave it a node that is no focus stop, as a turned-off part's is
+    /// (section 6, rule 2). A part with no node of its own is not known
+    /// here, and its element decides.
+    pub(crate) fn part_is_no_stop(&self, id: &UiId) -> bool {
+        self.custom_nodes
+            .iter()
+            .find(|(owner, _)| id.is_under(owner) && id.keys().len() > owner.keys().len())
+            .and_then(|(owner, parts)| {
+                let rest = &id.keys()[owner.keys().len()..];
+                parts.iter().find(|part| part.path() == rest)
+            })
+            .is_some_and(|part| !part.is_focusable())
     }
 
     /// The custom element whose part `id` names, when its panel is drawn

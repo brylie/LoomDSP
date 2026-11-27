@@ -59,6 +59,9 @@ pub(crate) struct Overlays {
     /// The question over everything else, while one is open. While it is,
     /// most messages are dropped (`Message::allowed_during_question`).
     pub question: Option<question::Question>,
+    /// How many questions [`Overlays::ask`] has put up, so an update can
+    /// tell a new one, even one that replaced another, from one that stayed.
+    asked: u64,
 }
 
 impl Overlays {
@@ -81,6 +84,17 @@ impl Overlays {
                 None => InputOwner::Canvas,
             }
         }
+    }
+
+    /// Puts up `question`, in place of one that is open.
+    pub fn ask(&mut self, question: question::Question) {
+        self.question = Some(question);
+        self.asked += 1;
+    }
+
+    /// How many questions have been put up: it moves with each new one.
+    pub fn questions_asked(&self) -> u64 {
+        self.asked
     }
 
     /// Opens a panel in place of the one that is open.

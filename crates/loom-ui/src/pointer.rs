@@ -158,11 +158,15 @@ impl<A: App> Panels<'_, A> {
     /// asks this first, and keeps the event from the toolkit when it is
     /// true (a move reaches it as the pointer leaving). A held press on a
     /// scroll container's bar keeps every pointer event until its release,
-    /// and a select's open list every press (section 5, rule 18).
+    /// and a select's open list every press (section 5, rule 18). A custom
+    /// element's capture keeps every pointer event but the wheel, which is
+    /// not captured (section 9, rule 1, "Host: pointer routing with
+    /// capture").
     pub fn over_target(&self, event: &Event, point: Point) -> bool {
         let input = self.app.input().layer;
+        let wheel = matches!(event, Event::Pointer(PointerEvent::Scrolled(_)));
         self.pointer.thumb.is_some()
-            || self.customs.captured().is_some()
+            || (self.customs.captured().is_some() && !wheel)
             || (self.window.select.is_some() && matches!(event, Event::Pointer(PointerEvent::Pressed(_))))
             || self.keeps_hint(event, point)
             || !self.pressed_outside(input, event, point).is_empty()
@@ -256,6 +260,9 @@ impl<A: App> Panels<'_, A> {
             self.pointer.space = None;
         }
         let hover = self.pointer.set_hover(None);
+        // A hover the app was told of ends now, outside a turn, so the
+        // pointer coming back onto that element is heard as a new hover.
+        self.report_unhover();
         Heard {
             taken: false,
             redraw: hover || self.shown_pressed() != pressed,
@@ -319,7 +326,11 @@ impl<A: App> Panels<'_, A> {
     /// closing menu is taken and told, and one on a dialog's scrim is held.
     pub fn pointer_above_target(&mut self, event: &Event, point: Point) -> Heard {
         let input = self.app.input();
-        let heard = self.pointer_above(input, event, point);
+        // A press or release that changes only the pressed look, on an
+        // element already hovered, still asks for a frame, as below.
+        let pressed = self.shown_pressed();
+        let mut heard = self.pointer_above(input, event, point);
+        heard.redraw |= self.shown_pressed() != pressed;
         self.report_focus();
         self.nudge_for_select();
         self.report_custom_left();
@@ -549,13 +560,24 @@ impl<A: App> Panels<'_, A> {
                 return Heard::default();
             }
             let redraw = match pointer {
-                PointerEvent::Moved => self.pointer.set_hover(None),
+                PointerEvent::Moved => {
+                    let changed = self.pointer.set_hover(None);
+                    // Off every element: a hover the app was told of ends,
+                    // as it does at the end of a turn.
+                    self.report_unhover();
+                    changed
+                }
                 PointerEvent::Released(PointerButton::Left) => {
                     self.pointer.pressed = None;
                     false
                 }
-                PointerEvent::Pressed(_) => {
+                PointerEvent::Pressed(button) => {
                     self.pointer.space = None;
+                    // A new left press ends a pending click, on nothing
+                    // as on any element.
+                    if *button == PointerButton::Left {
+                        self.pointer.pressed = None;
+                    }
                     false
                 }
                 _ => false,
@@ -591,6 +613,7 @@ impl<A: App> Panels<'_, A> {
                     && self.window.is_stop(id)
                     && self.focus.id() != Some(id)
                 {
+                    self.window.drop_caret_reveal_leaving(self.focus.id(), Some(id));
                     self.focus.wanted = None;
                     self.focus.set(Some(id.clone()));
                     self.focus.ring = false;
@@ -618,6 +641,12 @@ impl<A: App> Panels<'_, A> {
                 let modal = input.layer > Layer::Panels;
                 self.focus_in(point, modal, |layer| Side::of(layer) == side && layer >= input.layer);
                 redraw |= self.focus.id() != before.as_ref();
+                // A new left press starts a new click: one pressed before,
+                // with no release yet, is no longer pending, wherever this
+                // press lands.
+                if *button == PointerButton::Left {
+                    self.pointer.pressed = None;
+                }
                 if let Some((layer, id)) = &custom {
                     used = self.offer_custom(*layer, id, pointer, point);
                 } else if *button == PointerButton::Left {
@@ -797,6 +826,7 @@ impl<A: App> Panels<'_, A> {
         if modal && to.is_none() && self.focus.id().is_some() {
             return;
         }
+        self.window.drop_caret_reveal_leaving(self.focus.id(), to.as_ref());
         self.focus.wanted = None;
         self.focus.set(to);
         self.focus.ring = false;

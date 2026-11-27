@@ -14,7 +14,7 @@ use crate::headless::Harness;
 use crate::paint::{Typesetter, editing_contexts};
 use crate::view::{Layer, View};
 use accesskit::Role as KitRole;
-use loom_ui_core::{IdTable, Key, Modifiers, Platform, Size, UiId};
+use loom_ui_core::{Event, IdTable, Key, Modifiers, Platform, Point, Size, UiId};
 use std::time::Instant;
 
 /// A multi-line field showing `text`, wrapping at `width`, with the caret at
@@ -284,6 +284,34 @@ fn a_long_text_wraps_into_one_run_per_line() {
     assert_eq!(bench.field.scroll(), 0.0, "a text area never scrolls sideways");
 }
 
+/// A field switching from one line to many at the same width begins
+/// wrapping immediately, and switching back stops wrapping.
+#[test]
+fn changing_line_count_reapplies_the_editor_width() {
+    let Some(mut bench) = area_in("alpha beta gamma delta epsilon zeta eta theta", 80.0) else {
+        return;
+    };
+    bench.field.take(
+        "alpha beta gamma delta epsilon zeta eta theta",
+        STYLE,
+        Lines::One,
+        80.0,
+        &mut bench.fonts,
+        &mut bench.layouts,
+    );
+    assert_eq!(bench.field.runs().len(), 1, "a single-line field does not wrap");
+
+    bench.field.take(
+        "alpha beta gamma delta epsilon zeta eta theta",
+        STYLE,
+        Lines::Many,
+        80.0,
+        &mut bench.fonts,
+        &mut bench.layouts,
+    );
+    assert!(bench.field.runs().len() > 1, "the text area wraps at the same width");
+}
+
 /// A run never crosses a hard break, and the selection's ends are named by
 /// the run they are on: the caret at the end is on the last run.
 #[test]
@@ -313,10 +341,24 @@ fn runs_stop_at_a_hard_break_and_the_selection_finds_its_run() {
 struct Notes {
     /// The area sits in a scroll container 40 px high.
     scrolled: bool,
+    /// What follows the area, if anything: a stop for Tab or a press to
+    /// move to. None for the tests that measure the container's end.
+    next: Option<After>,
+    /// The area is turned off.
+    off: bool,
     text: String,
     heard: Vec<FieldEvent>,
     ids: IdTable,
     nodes: Option<AccessNodes>,
+}
+
+/// The stop after the notes' text area, keyed `next`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum After {
+    /// A button, which Tab reaches and a press does not focus.
+    Button,
+    /// A text field, which a press focuses.
+    Field,
 }
 
 /// What the notes app hears.
@@ -324,6 +366,8 @@ enum Note {
     Focus,
     Field(FieldEvent),
     Describe,
+    /// Turn the area off: it stays laid out, and is no stop.
+    TurnOff,
 }
 
 /// The text area's UI ID.
@@ -355,21 +399,44 @@ impl App for Notes {
                 self.heard.push(event);
             }
             Note::Describe => self.nodes = Some(cx.access_nodes(&mut self.ids)),
+            Note::TurnOff => self.off = true,
         }
         Effects::none()
     }
 
     fn view(&self, view: &mut View) {
-        let model = (self.text.clone(), self.scrolled);
+        let model = (self.text.clone(), self.scrolled, self.next, self.off);
         view.panel_with(
             UiId::panel("notes"),
             Layer::Panels,
             &model,
-            |(text, scrolled): &(String, bool)| {
-                let area = Element::column([Element::text_area(text.clone(), STYLE)
-                    .key("area")
-                    .width(Length::Fixed(160.0))
-                    .access(Access::new(Role::TextInput, "Authors, one per line"))]);
+            |(text, scrolled, next, off): &(String, bool, Option<After>, bool)| {
+                let states = crate::access::States {
+                    disabled: *off,
+                    ..crate::access::States::default()
+                };
+                let mut parts = vec![
+                    Element::text_area(text.clone(), STYLE)
+                        .key("area")
+                        .width(Length::Fixed(160.0))
+                        .access(Access::new(Role::TextInput, "Authors, one per line").states(states)),
+                ];
+                match next {
+                    Some(After::Button) => parts.push(
+                        Element::text("Next", STYLE)
+                            .key("next")
+                            .focusable()
+                            .access(Access::new(Role::Button, "Next").action(crate::access::Action::Click)),
+                    ),
+                    Some(After::Field) => parts.push(
+                        Element::field("", STYLE)
+                            .key("next")
+                            .width(Length::Fixed(160.0))
+                            .access(Access::new(Role::TextInput, "Next")),
+                    ),
+                    None => {}
+                }
+                let area = Element::column(parts);
                 if !*scrolled {
                     return area;
                 }
@@ -405,6 +472,11 @@ fn notes(text: &str) -> Option<(Harness<Notes, Keys>, Typesetter)> {
 
 /// The notes app with `text`, in a scroll container if `scrolled`.
 fn notes_in(text: &str, scrolled: bool) -> Option<(Harness<Notes, Keys>, Typesetter)> {
+    notes_with(text, scrolled, None)
+}
+
+/// The same, with `next` after the area.
+fn notes_with(text: &str, scrolled: bool, next: Option<After>) -> Option<(Harness<Notes, Keys>, Typesetter)> {
     let mut typesetter = Typesetter::new();
     if typesetter.measure("x", STYLE, None).width <= 0.0 {
         eprintln!("skipped: no system font");
@@ -413,6 +485,7 @@ fn notes_in(text: &str, scrolled: bool) -> Option<(Harness<Notes, Keys>, Typeset
     let app = Notes {
         text: text.to_owned(),
         scrolled,
+        next,
         ..Notes::default()
     };
     let window = WindowState::new(Size::new(400.0, 300.0));
@@ -554,6 +627,120 @@ fn assert_caret_shows(harness: &Harness<Notes, Keys>) {
         caret.y >= pane.y && caret.y + caret.height <= pane.y + pane.height,
         "the caret at {caret:?} is outside the container at {pane:?}"
     );
+}
+
+/// Tab after an edit, before layout, keeps the newly focused stop visible
+/// instead of following the text area's stale caret request.
+#[test]
+fn tab_after_edit_drops_the_old_caret_reveal() {
+    let Some((mut harness, mut text)) = notes_with("a", true, Some(After::Button)) else {
+        return;
+    };
+    for _ in 0..6 {
+        harness.step(key_in(Key::Enter, Modifiers::NONE, None));
+        harness.step(key_in(Key::Character('b'), Modifiers::NONE, Some("b")));
+    }
+    harness.step(key_in(Key::Tab, Modifiers::NONE, None));
+    let next = UiId::panel("notes").with("pane").with("next");
+    assert_eq!(harness.runtime().focused(), Some(&next));
+    let scrolled = scrolled_by(&mut harness, &mut text);
+    assert!(scrolled > 0.0, "the focused stop has been scrolled into view");
+    let pane = harness
+        .runtime()
+        .bounds(&UiId::panel("notes").with("pane"))
+        .expect("pane");
+    let stop = harness.runtime().bounds(&next).expect("next stop");
+    assert!(
+        stop.y >= pane.y && stop.y + stop.height <= pane.y + pane.height,
+        "{stop:?} outside {pane:?}"
+    );
+}
+
+/// A press on another stop after the caret moved, before the layout that
+/// would show the caret, keeps that stop in view: a pointer moving the
+/// focus drops the old field's caret request, as Tab does. A caret move
+/// changes no view, so the window stays laid out and the press can come
+/// before the next frame.
+#[test]
+fn a_press_after_a_caret_move_drops_the_old_caret_reveal() {
+    let Some((mut harness, mut text)) = notes_with("a", true, Some(After::Field)) else {
+        return;
+    };
+    for _ in 0..6 {
+        harness.step(key_in(Key::Enter, Modifiers::NONE, None));
+        harness.step(key_in(Key::Character('b'), Modifiers::NONE, Some("b")));
+    }
+    let _ = scrolled_by(&mut harness, &mut text);
+    // The wheel brings the field below the area into view; the caret
+    // stays in the area.
+    let pane = harness
+        .runtime()
+        .bounds(&UiId::panel("notes").with("pane"))
+        .expect("pane");
+    harness.step(DriverEvent::Input {
+        event: Event::Pointer(loom_ui_core::PointerEvent::Scrolled(loom_ui_core::ScrollDelta::Lines {
+            x: 0.0,
+            y: -10.0,
+        })),
+        pointer: Some(pane.center()),
+    });
+    let _ = scrolled_by(&mut harness, &mut text);
+    // Up to the first line: the caret's request waits for the next layout.
+    for _ in 0..6 {
+        harness.step(key_in(Key::Up, Modifiers::NONE, None));
+    }
+    let next = UiId::panel("notes").with("pane").with("next");
+    let at = harness.runtime().bounds(&next).expect("next stop");
+    harness.step(DriverEvent::Input {
+        event: Event::Pointer(loom_ui_core::PointerEvent::Pressed(loom_ui_core::PointerButton::Left)),
+        pointer: Some(Point::new(at.x + 2.0, at.y + at.height / 2.0)),
+    });
+    assert_eq!(harness.runtime().focused(), Some(&next));
+    let _ = scrolled_by(&mut harness, &mut text);
+    let pane = harness
+        .runtime()
+        .bounds(&UiId::panel("notes").with("pane"))
+        .expect("pane");
+    let stop = harness.runtime().bounds(&next).expect("next stop");
+    assert!(
+        stop.y >= pane.y && stop.y + stop.height <= pane.y + pane.height,
+        "{stop:?} outside {pane:?}"
+    );
+}
+
+/// A text area turned off while its caret's request waits gives the focus
+/// to its panel's first stop, and the request goes with the focus: the
+/// layout that falls back does not scroll back to the old caret.
+#[test]
+fn a_fallback_from_a_turned_off_area_drops_its_caret_reveal() {
+    let Some((mut harness, mut text)) = notes_with("a", true, Some(After::Field)) else {
+        return;
+    };
+    for _ in 0..6 {
+        harness.step(key_in(Key::Enter, Modifiers::NONE, None));
+        harness.step(key_in(Key::Character('b'), Modifiers::NONE, Some("b")));
+    }
+    let _ = scrolled_by(&mut harness, &mut text);
+    let pane = harness
+        .runtime()
+        .bounds(&UiId::panel("notes").with("pane"))
+        .expect("pane");
+    harness.step(DriverEvent::Input {
+        event: Event::Pointer(loom_ui_core::PointerEvent::Scrolled(loom_ui_core::ScrollDelta::Lines {
+            x: 0.0,
+            y: -10.0,
+        })),
+        pointer: Some(pane.center()),
+    });
+    let bottom = scrolled_by(&mut harness, &mut text);
+    for _ in 0..6 {
+        harness.step(key_in(Key::Up, Modifiers::NONE, None));
+    }
+    harness.send(Note::TurnOff);
+    let after = scrolled_by(&mut harness, &mut text);
+    let next = UiId::panel("notes").with("pane").with("next");
+    assert_eq!(harness.runtime().focused(), Some(&next), "the fallback");
+    assert_eq!(after, bottom, "no scroll back to the old caret");
 }
 
 /// Typing new lines in a text area taller than its scroll container keeps

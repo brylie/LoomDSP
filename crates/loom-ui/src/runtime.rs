@@ -126,6 +126,16 @@ pub struct Runtime<A: App, T> {
     waker: Waker<A::Message>,
     queue: Receiver<A::Message>,
     pending: VecDeque<A::Message>,
+    /// Messages an update's effects made that the app must hear in the
+    /// same turn, right after that update and before the view is built
+    /// again: the edit a select-all commits over a composition, so the
+    /// view is built from the committed text.
+    now_after_update: Vec<A::Message>,
+    /// The focus move the last turn ended with, for the app to hear first
+    /// in the next turn, unless that turn moves the focus again and
+    /// reports the newer move instead: the app never hears an older focus
+    /// after a newer one.
+    pending_focus: Option<A::Message>,
     window: WindowState,
     view: Option<View>,
     /// The app changed outside a turn ([`Runtime::mark_view_stale`], for
@@ -178,6 +188,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             waker: Waker::new(sender, wake.clone()),
             queue,
             pending: VecDeque::new(),
+            pending_focus: None,
+            now_after_update: Vec::new(),
             window,
             view: None,
             view_stale: false,
@@ -590,6 +602,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if self.target_seen.is_none() || self.focus.id().is_none() {
             return false;
         }
+        self.drop_caret_reveal_if_focus_leaves(None);
         self.focus.wanted = None;
         self.focus.set(None);
         self.focus.ring = false;
@@ -601,8 +614,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// started with. When the input layer rose above the element that had
     /// the focus, that element is saved. When the layer dropped, every
     /// overlay above it is gone: the focus saved from the layer it is now
-    /// takes the focus again, with the ring it had, if nothing of the input
-    /// layer has it. An element that has gone since is moved to its panel's
+    /// takes the focus again, with the ring it had, while the focus is
+    /// still on a closing overlay, on an element that went, or nowhere. A
+    /// focus an effect of this turn put on an element below is kept. An element that has gone since is moved to its panel's
     /// first stop by the next layout (`Focus::settle`). Returns true when
     /// the focus changed.
     fn keep_focus_across_overlays(&mut self, before: (Layer, Option<UiId>, bool)) -> bool {
@@ -631,16 +645,21 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let Some((_, id, ring)) = back else {
             return false;
         };
-        let held = self
+        // The layers that closed are the overlays above the input layer
+        // now: the canvas and the panels stay open under every overlay.
+        let closed_above = now.max(Layer::Panels);
+        // The focus is on the closing overlay, on an element that went,
+        // or nowhere. Anywhere else, an effect of this turn put it there.
+        let on_closing = self
             .focus
             .id()
-            .and_then(|focused| self.panels.layer_of(focused))
-            .is_some_and(|layer| layer == now);
-        if held || !self.panels.stops().contains(&id) && self.panels.panel_of(&id).is_none() {
+            .is_none_or(|focused| self.panels.layer_of(focused).is_none_or(|layer| layer > closed_above));
+        if !on_closing || !self.panels.stops().contains(&id) && self.panels.panel_of(&id).is_none() {
             return false;
         }
         self.release_target();
         let changed = self.focus.id() != Some(&id);
+        self.drop_caret_reveal_if_focus_leaves(Some(&id));
         self.focus.wanted = None;
         self.focus.set(Some(id));
         self.focus.ring = ring;
@@ -656,10 +675,18 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.pending.extend(later);
     }
 
+    /// Drops a pending caret reveal only when its field had keyboard focus
+    /// and that focus moves elsewhere. A screen reader can request a reveal
+    /// for a field that never had focus, which remains pending for layout.
+    fn drop_caret_reveal_if_focus_leaves(&mut self, to: Option<&UiId>) {
+        self.panels.drop_caret_reveal_leaving(self.focus.id(), to);
+    }
+
     /// Moves the runtime's focus to `to`, from the keyboard or an effect,
     /// so a ring shows, and brings it into view (section 5, rule 12).
     /// Returns true when it changed.
     fn focus_to(&mut self, to: Option<UiId>) -> bool {
+        self.drop_caret_reveal_if_focus_leaves(to.as_ref());
         self.focus.wanted = None;
         if to.is_some() {
             self.panels.reveal.clone_from(&to);
@@ -676,9 +703,20 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// end leaves it for the target. Everything else is the target's, as
     /// before. Returns true when the runtime's focus changed.
     fn focus_effect(&mut self, target: &FocusTarget, select: Selection) -> bool {
+        // Each focus effect decides afresh whether a field that waits for
+        // its layout selects all: the caller marks it again for one that
+        // asks.
+        self.focus.wanted_select = None;
         // A part inside a custom element is the element's to focus: the
         // runtime's focus goes to the element when it found the part, and
         // the effect is dropped when it did not (section 9, rule 6).
+        // A part that is no stop, such as a turned-off one, takes no focus
+        // through its element either (section 6, rule 2).
+        if let FocusTarget::Element(id) = target
+            && self.panels.part_is_no_stop(id)
+        {
+            return false;
+        }
         if let FocusTarget::Element(id) = target
             && let Some(found) = self.panels().focus_inner(id)
         {
@@ -1137,9 +1175,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// would. True for an answer of a question: one Escape cancels the
     /// press and closes the question with its safe answer, as the
     /// WAI-ARIA alertdialog pattern has Escape close the dialog (section 6,
-    /// rule 6, step 2; #926). Anywhere else, cancelling is all it does.
+    /// rule 6, step 2; #926). True too for a menu item: in a menu, Escape
+    /// closes the menu at once (section 5, rule 11), so one Escape cancels
+    /// the press and closes the menu, picking nothing (#878). Anywhere
+    /// else, cancelling is all it does.
     fn escape_goes_on(&self, armed: &UiId) -> bool {
         self.panels.layer_of(armed) == Some(Layer::Question)
+            || self
+                .panels
+                .access_of(armed)
+                .is_some_and(|access| access.role() == crate::access::Role::MenuItem)
     }
 
     /// A key pressed while the focus is on or inside an element that takes
@@ -1454,7 +1499,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let Some(to) = slider.after_key(from, *key, *modifiers) else {
             return (false, false);
         };
-        let reports = self.pointer.slide.key(&id, from, to, now);
+        let reports = self.pointer.slide.key(&id, from, to, slider.position(), now);
         self.panels().report_slid(reports);
         let ring = !self.focus.ring;
         self.focus.ring = true;
@@ -1462,7 +1507,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     }
 
     /// A screen reader's Increment or Decrement on a slider (section 7,
-    /// rules 5 and 30): one key step, as one Start, Move, and End. Taken
+    /// rules 5 and 30): one key step, joining the group of its steps in
+    /// quick turn, so a run of them is one Start, its Moves, and one End
+    /// (`Sliding::step`). Taken
     /// even on a slider that is turned off or below the input layer, where
     /// it does nothing. `None` for any other action, or another element,
     /// which goes on. Returns whether anything that shows changed.
@@ -1487,7 +1534,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // From where an open group of its steps last left it, which the
         // app may not have laid out yet.
         let from = self.pointer.slide.key_base(&target, slider.position());
-        let reports = self.pointer.slide.step(&target, from, slider.after_step(from, up), now);
+        let reports = self
+            .pointer
+            .slide
+            .step(&target, from, slider.after_step(from, up), slider.position(), now);
         self.panels().report_slid(reports);
         Some(false)
     }
@@ -1715,7 +1765,18 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 deadline: None,
             };
         }
-        self.turn(DriverEvent::Woken, vec![message], now, driver)
+        // A focus report the last turn left waits too, for the next turn,
+        // unless this one reports a newer move, in an update or at its end,
+        // which overtakes it.
+        let waiting = self.pending_focus.take();
+        let reported = self.focus.reported.clone();
+        let mut next = self.turn(DriverEvent::Woken, vec![message], now, driver);
+        let overtaken = self.pending_focus.is_some() || self.focus.reported != reported;
+        if !overtaken && waiting.is_some() {
+            self.pending_focus = waiting;
+            next.again |= !self.exited;
+        }
+        next
     }
 
     /// One turn: routes `event`, runs `batch` and the messages routing
@@ -1748,9 +1809,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let ringed = self.focus_ring().map(|(id, _)| id);
         // The input layer and the focus as the turn starts: an overlay that
         // opens in it moves the focus into itself in the same turn, so what
-        // to give back when it closes is read now.
-        let before = (self.app.input().layer, self.focus.id().cloned(), self.focus.ring);
+        // to give back when it closes is read now, once the runtime has
+        // heard that the target took the focus since the last turn, so an
+        // overlay never saves a focus the target already took.
         let mut redraw = self.follow_target();
+        let before = (self.app.input().layer, self.focus.id().cloned(), self.focus.ring);
         self.field_left(&mut batch, now);
         // A scroll since the last turn, by the pointer between turns or by
         // a layout's reveal, changed what the tree reports too.
@@ -1844,6 +1907,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 // A focus the event moved is the first thing the app hears
                 // this turn, so no update reads a focus it was not told of.
                 if let Some(report) = self.panels().focus_report() {
+                    self.pending_focus = None;
                     batch.insert(0, report);
                 }
             }
@@ -1877,6 +1941,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             }
             DriverEvent::Presented => batch.append(&mut self.waiting_for_draw),
             DriverEvent::Woken | DriverEvent::DeadlineReached => {}
+        }
+        // The last turn's focus move, when this event did not move the
+        // focus again, is the first thing the app hears.
+        if let Some(older) = self.pending_focus.take() {
+            batch.insert(0, older);
         }
 
         // Tab, or a press the target handed back, may have moved focus off
@@ -1975,8 +2044,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.drain_queue();
         let sent = self.customs.take_sent();
         self.pending.extend(sent);
-        if let Some(report) = report {
-            self.pending.push_front(report);
+        if report.is_some() {
+            self.pending_focus = report;
         }
         // The custom elements' deadlines and frames, asked every turn: an
         // element's state changes with no update. A frame it asked for
@@ -1987,7 +2056,11 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let redraw_asked = self.customs.redraw_asked();
         Next {
             draw,
-            again: !self.exited && (!self.pending.is_empty() || !self.pasted.is_empty() || redraw_asked),
+            again: !self.exited
+                && (!self.pending.is_empty()
+                    || self.pending_focus.is_some()
+                    || !self.pasted.is_empty()
+                    || redraw_asked),
             frames: !self.exited && (self.app.animating() || custom.frames),
             deadline: if self.exited {
                 None
@@ -2192,6 +2265,21 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// Runs one update and its effects. Returns true when an effect asked
     /// for a draw.
     fn update(&mut self, message: A::Message, now: Instant, driver: &mut impl Driver<A::Message>) -> bool {
+        let mut redraw = self.update_one(message, now, driver);
+        // What the update's effects made for this turn, such as the edit a
+        // select-all commits over a composition, runs right after it,
+        // before the view is built again, whichever path ran the update: a
+        // batch, a focus report, or a screen reader's notice.
+        while !self.exited && !self.now_after_update.is_empty() {
+            for made in std::mem::take(&mut self.now_after_update) {
+                redraw |= self.update_one(made, now, driver);
+            }
+        }
+        redraw
+    }
+
+    /// One update for `message`, with its effects carried out.
+    fn update_one(&mut self, message: A::Message, now: Instant, driver: &mut impl Driver<A::Message>) -> bool {
         let focused = self.panels().focused_part().or_else(|| self.target.focused());
         let cx = Context {
             now,
@@ -2209,7 +2297,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     let quiet = !self.focus.by_key;
                     redraw |= self.focus_effect(&FocusTarget::Element(id.clone()), Selection::Keep);
                     if quiet {
-                        if self.focus.id() == Some(&id) {
+                        // A part inside a custom element puts the runtime's
+                        // focus on the element that owns it.
+                        let held = self.customs.owner_of(&id).cloned().unwrap_or_else(|| id.clone());
+                        if self.focus.id() == Some(&held) {
                             self.focus.ring = false;
                         } else if self.focus.wanted.as_ref() == Some(&id) {
                             self.focus.wanted_quiet = Some(id);
@@ -2219,6 +2310,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 }
                 Effect::Focus { target, select } => {
                     redraw |= self.focus_effect(&target, select);
+                    // A field not laid out yet selects all when the layout
+                    // gives it the focus it waits for.
+                    if select == Selection::All
+                        && let FocusTarget::Element(id) = &target
+                        && self.focus.wanted.as_ref() == Some(id)
+                    {
+                        self.focus.wanted_select = Some(id.clone());
+                    }
                     // One of the runtime's fields that took the focus
                     // selects all of its text when asked, as the target's do.
                     if select == Selection::All
@@ -2228,6 +2327,18 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     {
                         let used = self.panels.fields.act(id, crate::field::FieldAction::SelectAll, now);
                         redraw |= used.changed;
+                        // Selecting all ends a composition, whose text it
+                        // keeps: an edit the app hears, as from a key.
+                        if used.edited {
+                            let text = self
+                                .panels
+                                .fields
+                                .get(id)
+                                .map(crate::field::FieldState::committed)
+                                .unwrap_or_default();
+                            self.now_after_update
+                                .extend(self.app.field_event(id, &FieldEvent::Edited(text)));
+                        }
                     }
                     self.field_left_after_focus(now);
                 }

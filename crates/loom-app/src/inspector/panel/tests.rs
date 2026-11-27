@@ -708,18 +708,18 @@ fn the_sub_patch_mode_rows_act() {
         panic!("a sub-patch's inspector");
     };
     assert_eq!(sub.copies, 3, "the third option is three copies");
-    if let Some(spread) = sub.spread.first() {
-        let id = ids::part(&panel, "spread").with(spread.name.as_str());
-        let steps = ui.app().session.edits.history.len();
-        let before = spread.amount;
-        ui.a11y_action(&id, accesskit::Action::Increment);
-        let _ = ui.wake_after(std::time::Duration::from_millis(600));
-        let crate::inspector::Inspector::SubPatch(sub) = ui.app().inspector_model() else {
-            panic!("a sub-patch's inspector");
-        };
-        assert!(sub.spread[0].amount > before, "the spread moved");
-        assert_eq!(ui.app().session.edits.history.len(), steps + 1, "one undo step");
-    }
+    // The fixture exposes the filter's cutoff, so stack mode spreads it.
+    let spread = sub.spread.first().expect("an exposed item to spread");
+    let id = ids::part(&panel, "spread").with(spread.name.as_str());
+    let steps = ui.app().session.edits.history.len();
+    let before = spread.amount;
+    ui.a11y_action(&id, accesskit::Action::Increment);
+    let _ = ui.wake_after(std::time::Duration::from_millis(600));
+    let crate::inspector::Inspector::SubPatch(sub) = ui.app().inspector_model() else {
+        panic!("a sub-patch's inspector");
+    };
+    assert!(sub.spread[0].amount > before, "the spread moved");
+    assert_eq!(ui.app().session.edits.history.len(), steps + 1, "one undo step");
 }
 
 /// A sub-patch's name field takes typing as a draft and Enter applies it,
@@ -732,10 +732,21 @@ fn the_sub_patch_name_and_authors_are_runtime_fields() {
     ui.app_mut().a11y_event(crate::a11y::Event::Activated);
     let _ = ui.redraw();
     let name = ids::part(&ids::panel(SUB_PATCH), "name");
+    // The name the patch holds, not the one being typed.
+    let stored = |ui: &Ui| {
+        ui.app()
+            .session
+            .hierarchy
+            .tile_name(loom_core::ModuleId(SUB_PATCH))
+            .unwrap_or_default()
+    };
+    let before = stored(&ui);
     ui.focus(&name);
     let _ = ui.tap(Key::End, Modifiers::NONE);
     let _ = ui.typewrite("X");
+    assert_eq!(stored(&ui), before, "typing is only a draft");
     let _ = ui.tap(Key::Enter, Modifiers::NONE);
+    assert_eq!(stored(&ui), format!("{before}X"), "Enter saved the name");
     let crate::inspector::Inspector::SubPatch(sub) = ui.app().inspector_model() else {
         panic!("a sub-patch's inspector");
     };
@@ -940,7 +951,9 @@ fn tab_after_a_click_stays_in_the_column() {
     assert_eq!(focused(&ui), Some(tags_part()), "Tab goes on to Tags");
     assert_eq!(selection(&ui), before, "Tab selects no tile");
 
-    for part in ["field", "value"] {
+    // Each direction from a fresh click, so Shift+Tab starts from the
+    // clicked part, not from where Tab landed.
+    for (part, back) in [("field", false), ("field", true), ("value", false), ("value", true)] {
         let mut ui = Ui::open("subtractive.ron");
         ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
         let _ = ui.redraw();
@@ -949,15 +962,13 @@ fn tab_after_a_click_stays_in_the_column() {
         click(&mut ui, at);
         assert_eq!(focused(&ui), Some(id.clone()), "the click focuses {id}");
         let before = selection(&ui);
-        for back in [false, true] {
-            tab(&mut ui, back);
-            let now = focused(&ui).unwrap_or_else(|| panic!("Tab from {id} (back: {back}) dropped the focus"));
-            assert!(
-                now.is_under(&ids::panel(4)),
-                "Tab from {id} (back: {back}) left the column for {now}"
-            );
-            assert_eq!(selection(&ui), before, "Tab from {id} (back: {back}) selects no tile");
-        }
+        tab(&mut ui, back);
+        let now = focused(&ui).unwrap_or_else(|| panic!("Tab from {id} (back: {back}) dropped the focus"));
+        assert!(
+            now.is_under(&ids::panel(4)),
+            "Tab from {id} (back: {back}) left the column for {now}"
+        );
+        assert_eq!(selection(&ui), before, "Tab from {id} (back: {back}) selects no tile");
     }
 }
 
@@ -997,6 +1008,71 @@ fn a_readers_focus_on_a_field_takes_the_keys_from_a_knob() {
     assert_eq!(focused(&ui), Some(field), "the field has the focus");
     assert_eq!(ui.app().a11y.focus(), None, "the knob let go");
     assert!(!ui.app().canvas_has_keys(), "the canvas has no keys");
+}
+
+/// The pointer leaving a row that has left the inspector's model, as one
+/// does when the selection changes mid-drag, still clears the lit drop
+/// row, so no row stays lit for a drop it cannot take.
+#[test]
+fn leaving_a_row_that_went_clears_the_drop_row() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.redraw();
+    let gone = ids::row(99, ids::Kind::Param, "cutoff");
+    assert!(
+        matches!(
+            ui.app().inspector_hovered(&gone, false),
+            Some(Message::Inspector(crate::inspector::Message::DropRow(None)))
+        ),
+        "leaving clears it"
+    );
+    assert!(ui.app().inspector_hovered(&gone, true).is_none(), "it takes no drop");
+}
+
+/// A double-click on a parameter's slider resets the parameter to its
+/// default, as the runtime's slider rule says (ui-layer.md, section 5,
+/// rule 16), from anywhere on the track.
+#[test]
+fn a_double_click_on_a_slider_resets_its_parameter() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.redraw();
+    let (index, default) = {
+        let graph = ui.app().session.controller.graph();
+        let node = graph.node(loom_core::ModuleId(4)).expect("the filter");
+        let index = loom_core::ModuleNames::parameter_index(node, "cutoff").expect("cutoff");
+        (index, node.spec(index).expect("its spec").default)
+    };
+    ui.app_mut().edit(|app| {
+        app.session
+            .controller
+            .set_param(loom_core::ModuleId(4), index, 5000.0)
+            .expect("set");
+        app.commit();
+    });
+    let _ = ui.redraw();
+    let slider = ids::part(&ids::row(4, ids::Kind::Param, "cutoff"), "value");
+    let track = ui.runtime().bounds(&slider).expect("the slider is laid out");
+    // Near the left end, far from both the value and the default.
+    let at = loom_ui_core::Point::new(track.x + track.width * 0.1, track.center().y);
+    ui.move_to(at);
+    for _ in 0..2 {
+        ui.press();
+        ui.release();
+    }
+    let _ = ui.redraw();
+    let stored = ui
+        .app()
+        .session
+        .controller
+        .graph()
+        .node(loom_core::ModuleId(4))
+        .unwrap()
+        .params[index];
+    assert!(
+        (stored - default).abs() < 1e-3,
+        "stored {stored}, the default {default}"
+    );
 }
 
 /// A slider on an exposed row stores the value the row shows: its

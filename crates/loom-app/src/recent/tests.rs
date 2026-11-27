@@ -630,7 +630,7 @@ fn from_the_keyboard_the_list_starts_on_its_first_item_and_tab_leaves_it() {
     ui.tap(Key::Enter, Modifiers::NONE);
     ui.redraw();
     let rows = ui.app().ui_snapshot().recent.expect("the list is open");
-    let first = crate::menus::recent_id().with(rows[0].path.display().to_string().as_str());
+    let first = crate::menus::recent_row_id(&rows[0].path);
     assert_eq!(ui.runtime().focused(), Some(&first), "it starts on its first item");
     assert!(ui.runtime().focus_ring().is_some(), "with a ring, from the keyboard");
     assert!(ui.text(&rows[0].folder).is_some(), "the folder is a second line");
@@ -643,6 +643,71 @@ fn from_the_keyboard_the_list_starts_on_its_first_item_and_tab_leaves_it() {
             .is_some_and(|focus| focus.is_under(&crate::menus::recent_id())),
         "and the focus moved on"
     );
+}
+
+/// In a window too short for the list, the menu is cut to the window and
+/// its rows scroll (ui-layer.md, section 5, rule 13): End focuses the last
+/// row and brings it inside the window, and the wheel scrolls the list.
+#[test]
+fn in_a_short_window_the_list_scrolls_to_its_focused_row() {
+    let dir = TempDir::new("recent-short");
+    let files = patches(&dir.0, MAX_FILES);
+    let mut ui = Ui::with_app(app());
+    for file in &files {
+        assert!(ui.app_mut().open_path(file));
+    }
+    ui.resize(1000.0, 240.0);
+    ui.send(AppMessage::OpenRecent);
+    ui.redraw();
+    let rows = ui.app().ui_snapshot().recent.expect("the list is open");
+    assert_eq!(rows.len(), MAX_FILES);
+    let list = crate::menus::recent_list_id();
+    let menu = ui.runtime().bounds(&crate::menus::recent_id()).expect("the menu");
+    assert!(menu.y + menu.height <= 240.0, "the menu fits the window: {menu:?}");
+    ui.tap(Key::End, Modifiers::NONE);
+    ui.redraw();
+    let last = crate::menus::recent_row_id(&rows[MAX_FILES - 1].path);
+    assert_eq!(ui.runtime().focused(), Some(&last), "End moved to the last row");
+    let shown = ui.runtime().bounds(&last).expect("laid out");
+    let box_ = ui.runtime().bounds(&list).expect("the list");
+    assert!(
+        shown.y >= box_.y && shown.y + shown.height <= box_.y + box_.height,
+        "the last row shows: {shown:?} in {box_:?}"
+    );
+    let (scrolled, _) = ui.runtime().scroll_offset(&list).expect("the list scrolls");
+    assert!(scrolled > 0.0, "the list scrolled to it");
+    // The wheel scrolls it back up.
+    ui.move_to(box_.center());
+    ui.step(&[iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
+        delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: 3.0 },
+    })]);
+    ui.redraw();
+    let (after, _) = ui.runtime().scroll_offset(&list).expect("the list scrolls");
+    assert!(after < scrolled, "the wheel scrolled it: {after} from {scrolled}");
+}
+
+/// In its scroll, a row keeps the width and the place it had before the
+/// list scrolled: the menu's padding gives way to the scroll's ring room,
+/// and the menu grows by the scrollbar's gutter (Brylie's decision,
+/// 2026-11-27).
+#[test]
+fn a_row_keeps_its_width_in_the_scroll() {
+    let dir = TempDir::new("recent-width");
+    let files = patches(&dir.0, 2);
+    let mut ui = Ui::with_app(app());
+    assert!(ui.app_mut().open_path(&files[0]));
+    assert!(ui.app_mut().open_path(&files[1]));
+    ui.send(AppMessage::OpenRecent);
+    ui.redraw();
+    let rows = ui.app().ui_snapshot().recent.expect("the list is open");
+    let row = ui
+        .runtime()
+        .bounds(&crate::menus::recent_row_id(&rows[0].path))
+        .expect("laid out");
+    let menu = ui.runtime().bounds(&crate::menus::recent_id()).expect("the menu");
+    let inside = 4.0 + crate::style::MENU_BORDER;
+    assert_eq!(row.width, LIST_WIDTH - 2.0 * inside, "the row's width without a scroll");
+    assert_eq!(row.x - menu.x, inside, "and its place");
 }
 
 /// The highlighted item, which is the focused one, has one look whichever
@@ -660,7 +725,7 @@ fn the_highlighted_item_has_the_weak_fill() {
     ui.tap(Key::Down, Modifiers::NONE);
     ui.redraw();
     let rows = ui.app().ui_snapshot().recent.expect("the list is open");
-    let id = |at: usize| crate::menus::recent_id().with(rows[at].path.display().to_string().as_str());
+    let id = |at: usize| crate::menus::recent_row_id(&rows[at].path);
     let first = ui.runtime().bounds(&id(0)).expect("laid out");
     let second = ui.runtime().bounds(&id(1)).expect("laid out");
     assert_eq!(ui.runtime().focused(), Some(&id(0)), "the keys highlighted the first");
@@ -701,7 +766,7 @@ fn a_hovered_item_has_the_weak_fill_and_no_ring() {
     ui.send(AppMessage::OpenRecent);
     ui.redraw();
     let rows = ui.app().ui_snapshot().recent.expect("the list is open");
-    let id = |at: usize| crate::menus::recent_id().with(rows[at].path.display().to_string().as_str());
+    let id = |at: usize| crate::menus::recent_row_id(&rows[at].path);
     let second = ui.runtime().bounds(&id(1)).expect("laid out");
     ui.move_to(second.center());
     ui.redraw();

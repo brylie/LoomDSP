@@ -41,6 +41,11 @@ enum Message {
     /// This element's context menu, opened by a key or a screen reader
     /// (`true`) or by a right press (`false`).
     Menu(UiId, bool),
+    /// Turn the menu's item off, keeping it a stop.
+    OffItem,
+    /// Close the overlay, back to the canvas's input layer, and focus this
+    /// element, in one update.
+    CloseAndFocus(UiId),
 }
 
 /// An app that shows a bar of two buttons in the panels layer, across the
@@ -61,6 +66,9 @@ struct Layers {
     /// The overlay is a dialog, not the menu: an opaque panel with 30 px
     /// of room around its one button, room that is no stop.
     padded: bool,
+    /// The menu's item is turned off, and stays a focus stop as the APG
+    /// keeps a disabled menu item (`Element::focusable_while_off`).
+    off_item: bool,
     heard: Vec<Message>,
 }
 
@@ -73,6 +81,11 @@ impl App for Layers {
             Message::Input(layer) => self.input = *layer,
             Message::Reports(on) => self.reports = *on,
             Message::Canvas(on) => self.canvas = *on,
+            Message::OffItem => self.off_item = true,
+            Message::CloseAndFocus(id) => {
+                self.input = Layer::Canvas;
+                effects = Effects::focus(id.clone());
+            }
             Message::Refocus(ids) => {
                 for id in ids {
                     effects = effects.and(Effects::focus(id.clone()));
@@ -96,8 +109,22 @@ impl App for Layers {
                     Element::column([button("ok", 20.0)]).padding(30.0).opaque()
                 });
             } else {
-                view.panel_with(UiId::panel("menu"), Layer::Overlays, &(), |_| {
-                    Element::row([menu_item("item", 20.0)]).closes_on_press_outside()
+                view.panel_with(UiId::panel("menu"), Layer::Overlays, &self.off_item, |off| {
+                    let item = if *off {
+                        let states = crate::access::States {
+                            disabled: true,
+                            ..crate::access::States::default()
+                        };
+                        Element::text("item", STYLE)
+                            .key("item")
+                            .width(Length::Fixed(20.0))
+                            .min_width(20.0)
+                            .focusable_while_off()
+                            .access(Access::new(Role::MenuItem, "item").action(Action::Click).states(states))
+                    } else {
+                        menu_item("item", 20.0)
+                    };
+                    Element::row([item]).closes_on_press_outside()
                 });
             }
         }
@@ -242,6 +269,7 @@ fn harness(overlay: bool, answer: Routed) -> Harness<Layers, Fake> {
         reports: false,
         stacked: false,
         padded: false,
+        off_item: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -773,6 +801,28 @@ fn the_pointer_leaving_keeps_a_held_space() {
     assert_eq!(clicks(&harness), [UiId::panel("bar").with("a")]);
 }
 
+/// In a menu, Escape closes the menu at once (section 5, rule 11): with a
+/// Space held on an item, one Escape cancels that Space and goes on to
+/// the target, which closes the menu, and the release clicks nothing.
+#[test]
+fn escape_with_space_held_on_a_menu_item_cancels_and_goes_on() {
+    use loom_ui_core::Key;
+    let item = UiId::panel("menu").with("item");
+    let mut harness = harness(true, Routed::Passed);
+    harness.send(Message::Input(Layer::Overlays));
+    harness.send(Message::Refocus(vec![item.clone()]));
+    assert_eq!(harness.runtime().focused(), Some(&item));
+    harness.step(press_key(Key::Space, false));
+    harness.step(press_key(Key::Escape, false));
+    assert!(
+        target_heard_press(&harness, Key::Escape),
+        "Escape went on, to close the menu"
+    );
+    harness.step(release_key(Key::Space));
+    harness.step(DriverEvent::Woken);
+    assert!(clicks(&harness).is_empty(), "Escape cancelled the Space");
+}
+
 /// Escape with a Space that could no longer click (a layer rose above its
 /// button) drops it without taking Escape, which goes on to the target.
 #[test]
@@ -930,6 +980,7 @@ fn the_app_decides_tab_at_the_end_of_a_run() {
         reports: false,
         stacked: false,
         padded: false,
+        off_item: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -1039,6 +1090,38 @@ fn pointer_below_reports_a_change_of_the_press() {
     assert!(!below(PointerEvent::Moved).redraw, "nothing changed");
     assert!(below(PointerEvent::Pressed(PointerButton::Left)).redraw, "pressed");
     assert!(below(PointerEvent::Released(PointerButton::Left)).redraw, "released");
+}
+
+/// Above the target, as below it: a press on a menu item already hovered,
+/// which moves neither the hover nor the focus, asks for a frame for its
+/// pressed look, and so does its release.
+#[test]
+fn pointer_above_target_reports_a_change_of_the_press() {
+    let mut harness = harness(true, Routed::Later);
+    harness.send(Message::Input(Layer::Overlays));
+    let at = Point::new(5.0, 5.0);
+    let mut above = |event: PointerEvent| {
+        let (_, _, mut panels) = harness.parts();
+        panels.pointer_above_target(&Event::Pointer(event), at)
+    };
+    assert!(above(PointerEvent::Moved).redraw, "the hover moved");
+    assert!(!above(PointerEvent::Moved).redraw, "nothing changed");
+    assert!(above(PointerEvent::Pressed(PointerButton::Left)).redraw, "pressed");
+    assert!(above(PointerEvent::Released(PointerButton::Left)).redraw, "released");
+}
+
+/// A new left press on no element at all ends a click pressed before it,
+/// as a press on any element does: letting go back on the first button
+/// clicks nothing.
+#[test]
+fn a_press_on_nothing_ends_an_earlier_click() {
+    let mut harness = harness(false, Routed::Passed);
+    harness.step(at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    // Below the bar, on nothing, with no release between.
+    harness.step(at(5.0, 150.0, PointerEvent::Pressed(PointerButton::Left)));
+    harness.step(at(5.0, 5.0, PointerEvent::Released(PointerButton::Left)));
+    harness.step(DriverEvent::Woken);
+    assert!(clicks(&harness).is_empty(), "no click from the stale press");
 }
 
 /// When the other toolkit takes a pointer press, it cancels a held Space,
@@ -1327,6 +1410,48 @@ fn hovering_a_menu_item_focuses_it_without_a_ring() {
     assert_eq!(bar.runtime().focused(), None, "a button takes no focus from hover");
 }
 
+/// An overlay that closes in the same update as a focus effect onto
+/// another element below it leaves the focus there: the focus it saved
+/// goes back only when the focus is still on the closing overlay (section
+/// 6, rule 4). The toolbar is in the Panels layer, above the canvas's
+/// input layer, and still counts as below the overlay.
+#[test]
+fn closing_an_overlay_keeps_a_focus_its_update_moved() {
+    let (a, b, item) = (
+        UiId::panel("bar").with("a"),
+        UiId::panel("bar").with("b"),
+        UiId::panel("menu").with("item"),
+    );
+    let mut menu = harness(true, Routed::Passed);
+    menu.step(tab_key());
+    menu.step(tab_key());
+    assert_eq!(menu.runtime().focused(), Some(&a));
+    menu.send(Message::Input(Layer::Overlays));
+    menu.send(Message::Refocus(vec![item]));
+    menu.send(Message::CloseAndFocus(b.clone()));
+    assert_eq!(menu.runtime().focused(), Some(&b), "the effect's focus is kept");
+}
+
+/// A turned-off menu item that stays a stop (section 6, rule 2, as the
+/// APG keeps a disabled menu item focusable): the pointer moving over it
+/// focuses it, as over any menu item, and a click on it picks nothing.
+#[test]
+fn hovering_a_turned_off_menu_item_focuses_it_and_a_click_picks_nothing() {
+    let item = UiId::panel("menu").with("item");
+    let mut menu = harness(true, Routed::Passed);
+    menu.send(Message::OffItem);
+    menu.send(Message::Input(Layer::Overlays));
+    menu.lay_out(&mut Mono::default());
+    menu.step(at(5.0, 5.0, PointerEvent::Moved));
+    assert_eq!(menu.runtime().focused(), Some(&item), "it takes the focus");
+    assert_eq!(menu.runtime().focus_ring(), None, "no ring from the pointer");
+    click(&mut menu, 5.0, 5.0);
+    assert!(
+        !menu.app().heard.contains(&Message::Clicked(item)),
+        "a click on it picks nothing"
+    );
+}
+
 /// An app that shows one paragraph in the panels layer, "See Saw or
 /// Sine", with links on "Saw" and "Sine".
 struct Paragraph {
@@ -1509,6 +1634,7 @@ fn reporting() -> Harness<Layers, Fake> {
         reports: true,
         stacked: false,
         padded: false,
+        off_item: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -1598,6 +1724,44 @@ fn a_reported_hover_ends_once_each_way() {
     assert_eq!(heard(&gone), start_and_end, "out of the layout");
 }
 
+/// Outside a turn, a hover that ends, because the other toolkit took the
+/// pointer or the pointer moved off every element, is heard ending before
+/// the pointer comes back onto the same element: the app hears the hover
+/// start, end, and start again, never start twice.
+#[test]
+fn a_hover_cleared_outside_a_turn_ends_before_it_starts_again() {
+    let b = UiId::panel("bar").with("b");
+    let back_and_forth = [
+        Message::Hovered(b.clone()),
+        Message::Unhovered(b.clone()),
+        Message::Hovered(b.clone()),
+    ];
+    let on_b = Point::new(60.0, 8.0);
+    let moved = Event::Pointer(PointerEvent::Moved);
+
+    // The other toolkit takes a move, then the pointer comes back.
+    let mut taken = reporting();
+    taken.step(at(on_b.x, on_b.y, PointerEvent::Moved));
+    {
+        let (_, _, mut panels) = taken.parts();
+        let _ = panels.pointer_taken(&moved);
+        let _ = panels.pointer_below(&moved, on_b);
+    }
+    taken.step(DriverEvent::Woken);
+    assert_eq!(reports(&taken), back_and_forth, "taken by the other toolkit");
+
+    // A late move off every element, then back.
+    let mut off = reporting();
+    off.step(at(on_b.x, on_b.y, PointerEvent::Moved));
+    {
+        let (_, _, mut panels) = off.parts();
+        let _ = panels.pointer_below(&moved, Point::new(60.0, 150.0));
+        let _ = panels.pointer_below(&moved, on_b);
+    }
+    off.step(DriverEvent::Woken);
+    assert_eq!(reports(&off), back_and_forth, "off every element");
+}
+
 /// Only the pointer's own move reports: a layout that leaves the hover on
 /// the same element tells the app nothing.
 #[test]
@@ -1678,6 +1842,7 @@ fn a_press_inside_the_lower_of_two_menus_closes_only_the_upper() {
         reports: false,
         stacked: true,
         padded: false,
+        off_item: false,
         heard: Vec::new(),
     };
     let target = Fake {
@@ -1723,6 +1888,7 @@ fn a_press_on_no_stop_over_an_overlay_keeps_the_focus() {
         reports: false,
         stacked: false,
         padded: true,
+        off_item: false,
         heard: Vec::new(),
     };
     let target = Fake {

@@ -42,6 +42,8 @@ enum Message {
     Hide,
     /// Show a knob under the pad's UI ID instead.
     Knob,
+    /// The label was clicked.
+    Clicked,
 }
 
 /// The pad's state: what it heard, and how many messages the app had
@@ -196,6 +198,10 @@ impl App for Drags {
             layer: if self.overlay { Layer::Overlays } else { Layer::Canvas },
             ..InputState::default()
         }
+    }
+
+    fn clicked(&self, id: &UiId) -> Option<Message> {
+        (*id == UiId::panel("main").with("label")).then_some(Message::Clicked)
     }
 
     fn make_custom(&self, _id: &UiId, kind: CustomKind) -> Option<Box<dyn Custom<Self>>> {
@@ -503,6 +509,46 @@ fn a_driver_outside_a_turn_reaches_the_pad() {
     assert_eq!(log(&harness), [Message::Began]);
 }
 
+/// While a drag holds the pointer, a driver that routes before the turn
+/// still gives the wheel to its toolkit: the wheel is not captured, so a
+/// scroll during a drag scrolls what is under the pointer.
+#[test]
+fn a_capture_leaves_the_wheel_to_the_target() {
+    let mut harness = harness();
+    let (_, _, mut panels) = harness.parts();
+    let _ = panels.pointer_below(
+        &Event::Pointer(PointerEvent::Pressed(PointerButton::Left)),
+        Point::new(50.0, 50.0),
+    );
+    let away = Point::new(300.0, 50.0);
+    assert!(
+        panels.over_target(&Event::Pointer(PointerEvent::Moved), away),
+        "a move is kept"
+    );
+    let wheel = Event::Pointer(PointerEvent::Scrolled(ScrollDelta::Lines { x: 0.0, y: 1.0 }));
+    assert!(!panels.over_target(&wheel, away), "the wheel goes to the target");
+}
+
+/// A left press on a custom element that takes it without a capture
+/// ends a click pressed before it: letting go back on the first element
+/// then clicks nothing, as a press and release must be on one element.
+#[test]
+fn a_press_on_a_custom_element_ends_an_earlier_click() {
+    let mut harness = harness();
+    send(&mut harness, Message::Knob);
+    let press = PointerEvent::Pressed(PointerButton::Left);
+    let release = PointerEvent::Released(PointerButton::Left);
+    // A press and release on the label clicks it.
+    step(&mut harness, 50.0, 125.0, press);
+    step(&mut harness, 50.0, 125.0, release);
+    assert_eq!(log(&harness), [Message::Knob, Message::Clicked]);
+    // Pressed on the label, then on the knob, then let go on the label.
+    step(&mut harness, 50.0, 125.0, press);
+    step(&mut harness, 50.0, 50.0, press);
+    step(&mut harness, 50.0, 125.0, release);
+    assert_eq!(log(&harness), [Message::Knob, Message::Clicked], "no second click");
+}
+
 /// The driver reporting the pointer lost cancels the drag, and the
 /// cancel's messages run in that same turn.
 #[test]
@@ -516,6 +562,25 @@ fn a_lost_pointer_cancels_the_drag_in_its_turn() {
     // The drag is over: a move is the pad's hover, not a drag.
     step(&mut harness, 60.0, 50.0, PointerEvent::Moved);
     assert_eq!(log(&harness), [Message::Began, Message::Undone]);
+}
+
+/// A lost pointer that ends a drag outside a turn asks for a frame when
+/// the hover the capture held back moves: here onto the label the drag
+/// ended over, so its look shows at once.
+#[test]
+fn a_lost_pointer_redraws_the_hover_it_settles() {
+    let mut harness = harness();
+    let label = Point::new(50.0, 125.0);
+    let (_, _, mut panels) = harness.parts();
+    let _ = panels.pointer_below(
+        &Event::Pointer(PointerEvent::Pressed(PointerButton::Left)),
+        Point::new(50.0, 50.0),
+    );
+    let _ = panels.pointer_below(&Event::Pointer(PointerEvent::Moved), label);
+    let heard = panels.pointer_below(&Event::Pointer(PointerEvent::Lost), label);
+    assert!(heard.taken);
+    assert!(heard.redraw, "the hover moved to the label");
+    assert_eq!(harness.runtime().hovered(), Some(&UiId::panel("main").with("label")));
 }
 
 /// A lost pointer with no capture does nothing: no element hears it.

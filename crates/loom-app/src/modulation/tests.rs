@@ -63,7 +63,14 @@ fn depths_read_as_signed_percentages() {
     assert_eq!(depth_text(0.25), "+25%");
     assert_eq!(depth_text(-0.1), "-10%");
     assert_eq!(depth_text(0.0), "0%");
-    assert_eq!(depth_text(-0.001), "0%");
+    assert_eq!(depth_text(-0.0004), "0%");
+    // Shift and an arrow key move a depth by a tenth of a percent, and
+    // the text shows it.
+    assert_eq!(depth_text(0.253), "+25.3%");
+    assert_eq!(depth_text(-0.001), "-0.1%");
+    assert_eq!(percent_text(0.5), "50%");
+    assert_eq!(percent_text(0.501), "50.1%");
+    assert!((percent_value(0.253) - 25.3).abs() < 1e-9);
 }
 
 #[test]

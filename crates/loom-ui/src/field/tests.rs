@@ -492,6 +492,13 @@ enum Message {
     TurnOff(bool),
     /// Take the field out of the form, keeping the panel.
     Remove,
+    /// Put the field back, and focus it with all of its text selected, in
+    /// one update, before the layout that makes it.
+    ReturnAndFocusAll,
+    /// The same, then focus it again keeping the caret, in that update.
+    ReturnAndFocusAllThenKeep,
+    /// The next notice selects all of the field's text.
+    SelectOnNotice,
     /// Focus the first UI ID, then the second, in one update.
     FocusTwice(UiId, UiId),
     /// What a field reports to a screen reader changed, with the text the
@@ -526,6 +533,9 @@ struct Form {
     log: Vec<String>,
     /// How many times the runtime asked where Tab goes (`App::tab_from`).
     tabs: std::cell::Cell<u32>,
+    /// The next notice that the field's reported text changed selects all
+    /// of it, from the notice's own update.
+    select_on_notice: bool,
 }
 
 impl App for Form {
@@ -548,9 +558,22 @@ impl App for Form {
             Message::Changed(text) => {
                 self.log.push("changed".to_owned());
                 self.noticed.push(text);
+                if self.select_on_notice {
+                    self.select_on_notice = false;
+                    return Effects::focus_and_select_all(name());
+                }
             }
             Message::TurnOff(off) => self.off = off,
             Message::Remove => self.removed = true,
+            Message::ReturnAndFocusAll => {
+                self.removed = false;
+                return Effects::focus_and_select_all(name());
+            }
+            Message::SelectOnNotice => self.select_on_notice = true,
+            Message::ReturnAndFocusAllThenKeep => {
+                self.removed = false;
+                return Effects::focus_and_select_all(name()).and(Effects::focus(name()));
+            }
             Message::SetText(text) => self.text = text,
             Message::Reader(action) => self.log.push(format!("reader {action:?}")),
             Message::AskField => self.log.push(format!("field focus {}", cx.field_has_focus())),
@@ -1868,6 +1891,128 @@ fn preedit(text: &str) -> ImeEvent {
         text: text.to_owned(),
         cursor: Some((text.len(), text.len())),
     }
+}
+
+/// A focus effect that selects all of a field's text, sent in the same
+/// update that makes the field, waits for the layout that lays it out,
+/// and still selects it all then: typing replaces the whole text.
+#[test]
+fn select_all_waits_for_the_layout_that_makes_the_field() {
+    let Some((mut harness, mut typesetter)) = form("440", true) else {
+        return;
+    };
+    harness.send(Message::Remove);
+    harness.lay_out(&mut typesetter);
+    harness.send(Message::ReturnAndFocusAll);
+    harness.lay_out(&mut typesetter);
+    assert_eq!(harness.runtime().focused(), Some(&name()));
+    type_in(&mut harness, "8");
+    assert_eq!(
+        harness.runtime().field_text(&name()),
+        Some("8"),
+        "typing replaced all of it"
+    );
+}
+
+/// The last focus effect on a field that waits for its layout decides
+/// whether it selects all: a plain focus after a select-all keeps the
+/// caret, so typing adds to the text.
+#[test]
+fn a_later_plain_focus_cancels_a_waiting_select_all() {
+    let Some((mut harness, mut typesetter)) = form("440", true) else {
+        return;
+    };
+    harness.send(Message::Remove);
+    harness.lay_out(&mut typesetter);
+    harness.send(Message::ReturnAndFocusAllThenKeep);
+    harness.lay_out(&mut typesetter);
+    assert_eq!(harness.runtime().focused(), Some(&name()));
+    type_in(&mut harness, "8");
+    assert_eq!(
+        harness.runtime().field_text(&name()),
+        Some("4408"),
+        "typing added to it"
+    );
+}
+
+/// A focus effect that selects all of a field that is composing ends the
+/// composition, keeping its text, and the app hears that edit, as it hears
+/// one from a key.
+#[test]
+fn select_all_over_a_composition_tells_the_app_its_text() {
+    let Some((mut harness, mut typesetter)) = form("", true) else {
+        return;
+    };
+    harness.send(Message::Focus(name()));
+    harness.lay_out(&mut typesetter);
+    harness.step(ime_in(preedit("にほ")));
+    harness.lay_out(&mut typesetter);
+    harness.send(Message::FocusAll(name()));
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.runtime().field_text(&name()), Some("にほ"), "the field kept it");
+    assert_eq!(harness.app().text, "にほ", "and the app heard it");
+}
+
+/// The edit a select-all commits over a composition reaches the app in
+/// the same turn, so a layout right after that turn builds the field from
+/// the committed text and keeps its undo step: undo then takes it away.
+#[test]
+fn select_all_over_a_composition_keeps_its_undo_step() {
+    let Some((mut harness, mut typesetter)) = form("", true) else {
+        return;
+    };
+    harness.send(Message::Focus(name()));
+    harness.lay_out(&mut typesetter);
+    harness.step(ime_in(preedit("にほ")));
+    harness.lay_out(&mut typesetter);
+    // One turn, then a layout, as a driver that draws between turns.
+    let mut driver = crate::headless::Headless::new();
+    harness.runtime().waker().send(Message::FocusAll(name()));
+    let _ = harness
+        .runtime_mut()
+        .handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    harness.lay_out(&mut typesetter);
+    harness.step(DriverEvent::Woken);
+    harness.lay_out(&mut typesetter);
+    assert_eq!(harness.app().text, "にほ", "the app holds the committed text");
+    let undo = shortcut(Platform::current(), false);
+    harness.step(key_in(Key::Character('z'), undo, None));
+    harness.lay_out(&mut typesetter);
+    assert_eq!(
+        harness.runtime().field_text(&name()),
+        Some(""),
+        "undo took the committed text away"
+    );
+}
+
+/// A select-all that an accessibility notice's update asks for, over a
+/// composition, delivers its committed edit in that turn too: the undo
+/// step survives a layout right after it, as on every update path.
+#[test]
+fn select_all_from_a_notice_over_a_composition_keeps_its_undo_step() {
+    let Some((mut harness, mut typesetter)) = form("", true) else {
+        return;
+    };
+    harness.send(Message::Focus(name()));
+    harness.lay_out(&mut typesetter);
+    harness.send(Message::SelectOnNotice);
+    // The preedit changes what the field reports; the notice's update
+    // selects all, which commits the composition, in this one turn.
+    let mut driver = crate::headless::Headless::new();
+    let _ = harness
+        .runtime_mut()
+        .handle(ime_in(preedit("にほ")), Instant::now(), &mut driver);
+    harness.lay_out(&mut typesetter);
+    harness.step(DriverEvent::Woken);
+    harness.lay_out(&mut typesetter);
+    assert_eq!(harness.app().text, "にほ", "the app holds the committed text");
+    harness.step(key_in(Key::Character('z'), shortcut(Platform::current(), false), None));
+    harness.lay_out(&mut typesetter);
+    assert_eq!(
+        harness.runtime().field_text(&name()),
+        Some(""),
+        "undo took the committed text away"
+    );
 }
 
 /// The plan's sequence: a preedit, an empty preedit, then the commit,

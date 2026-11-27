@@ -188,6 +188,27 @@ fn a_move_within_a_hundredth_keeps_the_nodes() {
     assert_eq!(format!("{:?}", before.nodes), format!("{:?}", after.nodes));
 }
 
+/// A drag that moves the dot by less than a hundredth still draws a
+/// frame: the panel's model shows only hundredths, so without the pad's
+/// own redraw the dot would lag behind the pointer.
+#[test]
+fn a_move_within_a_hundredth_draws_the_dot() {
+    let mut harness = harness();
+    let pad = bounds(&harness);
+    let middle = Point::new(pad.x + pad.width / 2.0, pad.y + pad.height / 2.0);
+    pointer(&mut harness, PointerEvent::Pressed(PointerButton::Left), Some(middle));
+    let before = harness.driver().redraws();
+    // A tenth of a pixel on a 240 pixel pad: well within a hundredth.
+    pointer(
+        &mut harness,
+        PointerEvent::Moved,
+        Some(Point::new(middle.x + 0.1, middle.y)),
+    );
+    assert_eq!(dot(&harness), (50, 50), "the shown hundredths did not move");
+    assert!(harness.app().x > 0.5, "the dot itself moved");
+    assert!(harness.driver().redraws() > before, "the move drew a frame");
+}
+
 /// A drag the window cancels, here by losing the keys, puts the dot back
 /// where it was before the press (section 9: a cancel undoes what the
 /// gesture began). A drag that ends with a release keeps its place.

@@ -1738,11 +1738,14 @@ impl App {
         if matches!(message, Message::ControlFrame(_)) {
             self.control_frame_asked = false;
         }
-        let asked = self.overlays.question.is_some();
+        let asked = self.overlays.questions_asked();
         self.apply_at(message, now);
         // A question that opened takes the focus to its safe answer, with a
-        // ring (ui-layer.md, section 6, rule 4; plan 3.2, row 3b).
-        if !asked && let Some(question) = &self.overlays.question {
+        // ring (ui-layer.md, section 6, rule 4; plan 3.2, row 3b), and so
+        // does one that replaced another in this update.
+        if self.overlays.questions_asked() != asked
+            && let Some(question) = &self.overlays.question
+        {
             let answer = question.highlighted_id();
             self.effect(loom_ui::Effects::focus(answer));
         }

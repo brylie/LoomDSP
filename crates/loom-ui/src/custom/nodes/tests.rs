@@ -74,6 +74,13 @@ impl Custom<Grids> for GridState {
         for (at, cell) in app.cells.iter().enumerate() {
             let place = Rect::new(Point::new(bounds.x + 50.0 * at as f32, bounds.y), Size::new(50.0, 50.0));
             let mut access = Access::new(Role::Button, format!("Cell {cell}")).action(Action::Click);
+            // A cell named "off" is turned off, and still asks for focus.
+            if *cell == "off" {
+                access = access.states(crate::access::States {
+                    disabled: true,
+                    ..crate::access::States::default()
+                });
+            }
             if *cell == "a" {
                 access = access.controlling(UiId::panel("main").with("inspector"));
             }
@@ -311,6 +318,40 @@ fn the_parts_go_under_the_element() {
     assert_eq!((bounds.x0, bounds.y0, bounds.x1, bounds.y1), (100.0, 0.0, 200.0, 100.0));
     assert!(b_node.supports_action(accesskit::Action::Focus));
     assert!(harness.runtime().custom_access_problems().is_empty());
+}
+
+/// A turned-off part that asks to be focusable is no focus stop, as any
+/// turned-off element (section 6, rule 2): its node offers no Focus, and
+/// no action at all, and that breaks no rule.
+#[test]
+fn a_turned_off_part_offers_no_focus() {
+    let mut app = grids();
+    app.cells = vec!["a", "off"];
+    let harness = harness(app);
+    let nodes = tree(&harness);
+    let off = node(&nodes, number(&harness, &grid().with("off")));
+    assert!(off.is_disabled());
+    assert!(
+        !off.supports_action(accesskit::Action::Focus),
+        "no Focus on a turned-off part"
+    );
+    assert!(!off.supports_action(accesskit::Action::Click));
+    assert!(harness.runtime().custom_access_problems().is_empty());
+}
+
+/// A focus effect on a turned-off part is dropped: its element does not
+/// take the focus for it, and reports no such part.
+#[test]
+fn a_focus_effect_on_a_turned_off_part_is_dropped() {
+    let mut app = grids();
+    app.cells = vec!["a", "off"];
+    let mut harness = harness(app);
+    harness.send(Message::FocusPart("off"));
+    harness.lay_out(&mut Mono::default());
+    assert_eq!(harness.runtime().focused(), None, "the grid took no focus for it");
+    harness.send(Message::FocusPart("a"));
+    harness.lay_out(&mut Mono::default());
+    assert_eq!(harness.runtime().focused(), Some(&grid()), "an enabled part still does");
 }
 
 /// A part that comes and goes keeps no node ID another part can take: the

@@ -694,3 +694,230 @@ fn a_root_placed_under_an_element_follows_it() {
     assert_eq!(screen.at("menu/square"), None, "its anchor is gone");
     assert!(screen.window.hit(Point::new(5.0, 20.0)).is_none());
 }
+
+/// A toolbar whose button controls the menu's square, with the label the
+/// menu is placed under when `anchored`.
+fn controlling_bar(anchored: &bool) -> Element {
+    let button = Element::text("Open", STYLE).key("open").access(
+        crate::access::Access::new(crate::access::Role::Button, "Open")
+            .action(crate::access::Action::Click)
+            .controlling("menu/square".parse().expect("a UI ID")),
+    );
+    let mut children = vec![button];
+    if *anchored {
+        children.push(Element::text("Label", STYLE).key("label"));
+    }
+    Element::row(children)
+}
+
+/// The menu's square, placed under the toolbar's label, with a node.
+fn square_with_node(_: &()) -> Element {
+    placed_square(&(20, None)).access(crate::access::Access::new(crate::access::Role::Group, "Square"))
+}
+
+/// A relation to a node in a panel that is kept but not drawn, here a
+/// menu placed under a label that is gone, is left out: the tree holds no
+/// node for it (section 7, rule 13). While the menu is drawn, the
+/// relation is there.
+#[test]
+fn a_relation_into_a_panel_not_drawn_is_left_out() {
+    let controls = |screen: &Screen| {
+        let mut ids = loom_ui_core::IdTable::new();
+        let nodes = screen.window.access_nodes(&mut ids, 1.0, None);
+        let open = accesskit::NodeId(ids.number(&"toolbar/open".parse().expect("a UI ID")));
+        let node = &nodes
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == open)
+            .expect("the button's node")
+            .1;
+        node.controls().to_vec()
+    };
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(panel("toolbar"), Layer::Panels, &true, controlling_bar);
+    view.panel_with(panel("menu"), Layer::Overlays, &(), square_with_node);
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    assert_eq!(controls(&screen).len(), 1, "the menu is drawn: the relation is there");
+
+    let mut view = View::new();
+    view.panel_with(panel("toolbar"), Layer::Panels, &false, controlling_bar);
+    view.panel_with(panel("menu"), Layer::Overlays, &(), square_with_node);
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    assert_eq!(screen.at("menu/square"), None, "its anchor is gone");
+    assert!(controls(&screen).is_empty(), "no relation to a node not sent");
+}
+
+/// A root placed under an element that is not there still counts as laid
+/// out, so the window settles after one layout, but it is not drawn: it
+/// has no bounds (section 5, rule 13).
+#[test]
+fn a_root_placed_under_a_missing_element_settles() {
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(panel("menu"), Layer::Overlays, &(20u8, None), placed_square);
+    screen.show_view(view);
+    let size = Size::new(300.0, 200.0);
+    screen.lay_out(size);
+    assert!(screen.window.is_settled(size), "laid out once, it is settled");
+    assert_eq!(screen.at("menu/square"), None, "and it is not placed");
+}
+
+/// A toolbar with its label when `anchored`, and nothing in it when not.
+fn label_bar(anchored: &bool) -> Element {
+    if *anchored {
+        shrink_label(&"Open".to_string())
+    } else {
+        Element::row([])
+    }
+}
+
+/// A menu placed under the toolbar's label, holding a panel in a slot.
+fn placed_holder(_: &()) -> Element {
+    Element::column([Element::slot(panel("inner"))]).placed(crate::element::Placement::Under(
+        "toolbar/label".parse().expect("a UI ID"),
+    ))
+}
+
+/// The slotted panel's one keyed square.
+fn inner_square(_: &()) -> Element {
+    Element::space(Length::Fixed(20.0), Length::Fixed(20.0)).key("item")
+}
+
+/// A second menu, placed under the slotted panel's square.
+fn placed_under_inner(_: &()) -> Element {
+    Element::space(Length::Fixed(10.0), Length::Fixed(10.0))
+        .key("square")
+        .placed(crate::element::Placement::Under("inner/item".parse().expect("a UI ID")))
+}
+
+/// A panel in a slot of a placed root that is hidden, its anchor gone,
+/// has no bounds, as the root has none, and a root placed under one of
+/// its elements is not placed either (section 5, rule 13).
+#[test]
+fn a_hidden_placed_root_hides_the_panels_in_its_slots() {
+    let shown = |anchored: bool| {
+        let mut view = View::new();
+        view.panel_with(panel("toolbar"), Layer::Panels, &anchored, label_bar);
+        view.panel_with(panel("menu"), Layer::Overlays, &(), placed_holder);
+        view.panel_with(panel("inner"), Layer::Overlays, &(), inner_square);
+        view.panel_with(panel("sub"), Layer::Overlays, &(), placed_under_inner);
+        view
+    };
+    let mut screen = Screen::new();
+    screen.show_view(shown(true));
+    screen.lay_out(Size::new(300.0, 200.0));
+    let item = screen.at("inner/item").expect("the slotted panel is placed");
+    assert_eq!(
+        screen.at("sub/square"),
+        Some(rect(item.x, item.y + item.height, 10.0, 10.0)),
+        "the second menu opens under it"
+    );
+
+    screen.show_view(shown(false));
+    screen.lay_out(Size::new(300.0, 200.0));
+    assert_eq!(screen.at("menu"), None, "the anchor is gone");
+    assert_eq!(screen.at("inner/item"), None, "nor is the panel in its slot anywhere");
+    assert_eq!(screen.at("sub/square"), None, "nor the menu placed under it");
+}
+
+/// A second menu, placed under the first menu's square.
+fn placed_under_menu(_: &()) -> Element {
+    Element::space(Length::Fixed(10.0), Length::Fixed(10.0))
+        .key("square")
+        .placed(crate::element::Placement::Under(
+            "menu/square".parse().expect("a UI ID"),
+        ))
+}
+
+/// A placed root's bounds are its box at its content size, not the
+/// window, so a root placed under one of its elements opens just under
+/// that element (section 5, rule 13).
+#[test]
+fn a_root_placed_under_a_placed_root_opens_under_its_element() {
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(
+        panel("menu"),
+        Layer::Overlays,
+        &(20u8, Some((40.0, 30.0))),
+        placed_square,
+    );
+    view.panel_with(panel("sub"), Layer::Overlays, &(), placed_under_menu);
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    assert_eq!(
+        screen.at("menu"),
+        Some(rect(40.0, 30.0, 20.0, 20.0)),
+        "the menu, at its size"
+    );
+    assert_eq!(
+        screen.at("sub/square"),
+        Some(rect(40.0, 50.0, 10.0, 10.0)),
+        "just under its square"
+    );
+}
+
+/// A menu of 30 rows, 10 px each, in a scroll, placed at (20, 40).
+fn tall_menu(_: &()) -> Element {
+    let rows = (0..30).map(|n| Element::space(Length::Fixed(50.0), Length::Fixed(10.0)).key(format!("row{n}")));
+    Element::column([
+        Element::scroll(Element::column(rows), crate::window::scroll::tests::SCROLL)
+            .key("list")
+            .access(crate::access::Access::new(crate::access::Role::ScrollView, "Rows"))
+            .min_height(0.0),
+    ])
+    .placed(crate::element::Placement::At(Point::new(20.0, 40.0)))
+}
+
+/// A placed root taller than the window is cut to the window's height and
+/// moved up to fit, as a native menu is cut to the screen, so the scroll
+/// inside it shrinks and its rows can be scrolled to (section 5, rule 13).
+/// In a window tall enough, it keeps its content size where it asked.
+#[test]
+fn a_placed_root_taller_than_the_window_is_cut_to_it() {
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(panel("menu"), Layer::Overlays, &(), tall_menu);
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    let menu = screen.at("menu").expect("placed");
+    assert_eq!((menu.y, menu.height), (0.0, 200.0), "cut to the window, moved up");
+    let list = screen.at("menu/list").expect("the list");
+    assert!(list.y + list.height <= 200.0, "the list fits: {list:?}");
+
+    screen.lay_out(Size::new(300.0, 600.0));
+    let menu = screen.at("menu").expect("placed");
+    assert_eq!(menu.y, 40.0, "where it asked");
+    assert!(menu.height > 300.0, "at its content size: {menu:?}");
+}
+
+/// A menu placed under the toolbar's label, holding a panel in a fixed
+/// slot, which never asks its child for a size.
+fn placed_fixed_holder(_: &()) -> Element {
+    Element::column([Element::slot(panel("inner"))
+        .width(Length::Fixed(50.0))
+        .height(Length::Fixed(20.0))])
+    .placed(crate::element::Placement::Under(
+        "toolbar/label".parse().expect("a UI ID"),
+    ))
+}
+
+/// A placed root whose anchor is missing still lays out the panels in its
+/// slots, at their slot sizes, so the window settles after one layout; none
+/// of it is drawn.
+#[test]
+fn a_hidden_placed_root_lays_out_its_slots_too() {
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(panel("toolbar"), Layer::Panels, &false, label_bar);
+    view.panel_with(panel("menu"), Layer::Overlays, &(), placed_fixed_holder);
+    view.panel_with(panel("inner"), Layer::Overlays, &(), inner_square);
+    screen.show_view(view);
+    let size = Size::new(300.0, 200.0);
+    screen.lay_out(size);
+    assert!(screen.window.is_settled(size), "settled after one layout");
+    assert_eq!(screen.at("inner/item"), None, "and nothing of it placed");
+}

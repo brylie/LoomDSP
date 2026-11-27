@@ -459,9 +459,11 @@ pub(super) fn refuse_while_asking(
     let Some(question) = question else {
         return Ok(());
     };
+    // Space gives the focused answer when it comes up, as on any button
+    // (ui-layer.md, section 3, rule 4).
     let its_own = matches!(
         key,
-        Key::Tab | Key::Enter | Key::Escape | Key::Left | Key::Right | Key::Up | Key::Down
+        Key::Tab | Key::Enter | Key::Space | Key::Escape | Key::Left | Key::Right | Key::Up | Key::Down
     );
     if its_own || crate::panic::is_panic_key(key, modifiers) {
         Ok(())

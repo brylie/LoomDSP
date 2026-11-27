@@ -656,24 +656,13 @@ impl Widget<Message, iced::Theme, crate::Renderer> for Injector<'_> {
                 self.resolve(&mut tree.children[0], layout, renderer, target)
             });
             for (injected, at) in events {
-                // Under an open question a key press is the question's,
-                // as the runtime makes a real one (ui-layer.md, section 6,
-                // rule 6, step 2): it never reaches Iced's widgets or the
-                // listeners. Its release goes on, as a real one's does.
-                if self.app.overlays.question.is_some()
-                    && let Event::Keyboard(keyboard::Event::KeyPressed { .. }) = &injected
-                {
-                    if let Some(loom_ui_core::Event::Key(key)) = loom_canvas::iced_convert::event_to_core(&injected)
-                        && let Some(message) = crate::question::key_of(&key)
-                    {
-                        shell.publish(message);
-                    }
-                    continue;
-                }
                 // A scripted key goes as a real one: the bridge gives it to
                 // the window, where Iced keeps its copy and the runtime's
                 // turn routes it (its Tab, an element's keys, a field), so
-                // what the runtime takes never reaches Iced. Modifier
+                // what the runtime takes never reaches Iced. Under an open
+                // question that is every key: Space and Enter on the
+                // focused answer first, then the question's own keys
+                // (ui-layer.md, section 6, rule 6, step 2). Modifier
                 // changes still reach the view only, below.
                 if let Event::Keyboard(keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. }) =
                     &injected

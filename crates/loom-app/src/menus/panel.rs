@@ -19,6 +19,9 @@ use loom_ui_core::{Color, IdKey, Key, KeyEvent, UiId};
 /// menu's padding, as Iced drew it.
 const TILE_MENU_WIDTH: f32 = 208.0;
 
+/// The room inside a placed menu's border, around its rows.
+const MENU_PADDING: f32 = 4.0;
+
 /// The width of the cable picker, in logical pixels, as Iced drew it.
 const CABLE_MENU_WIDTH: f32 = 270.0;
 
@@ -66,6 +69,10 @@ pub(crate) struct Panel {
     placement: Option<Placement>,
     /// Its name over its items, in a centred menu.
     heading: Option<String>,
+    /// A placed menu's rows go in a scroll keyed `list`, as Recent's do: a
+    /// list long enough to be cut to the window then scrolls (ui-layer.md,
+    /// section 5, rule 13).
+    scrolls: bool,
     /// How wide it is.
     width: f32,
     /// Its fill.
@@ -99,12 +106,17 @@ impl App {
             // lists ports from across the level.
             MenuKind::Cable => (None, CABLE_MENU_WIDTH),
         };
-        // The cable picker's rows are keyed under its list, which keeps
-        // the scroll's offset.
+        // The cable picker's rows and Recent's are keyed under their list,
+        // which keeps the scroll's offset.
         let base = match menu.kind {
             MenuKind::Cable => crate::cable_picker::list_id(),
+            MenuKind::Recent => super::recent_list_id(),
             _ => menu.id.clone(),
         };
+        // With rows, which are all menu items and focus stops, the list is
+        // never a stop itself, so the menu still holds only its items (the
+        // WAI-ARIA menu pattern); with none there is nothing to scroll.
+        let scrolls = menu.kind == MenuKind::Recent && !menu.items.is_empty();
         let missing: Vec<bool> = match menu.kind {
             MenuKind::Recent => self
                 .overlays
@@ -129,6 +141,7 @@ impl App {
                 })
                 .collect(),
             heading: placement.is_none().then(|| menu.label.clone()),
+            scrolls,
             placement,
             width,
             fill: crate::style::PANEL_FILL,
@@ -183,18 +196,23 @@ impl App {
         }
     }
 
-    /// The message for Up, Down, Home, End, Page Up, or Page Down inside
-    /// the cable picker's list, which takes them before its scroll would:
-    /// the focus moves to the next item, the one before, the first, or the
-    /// last, as on any menu, or a page on, stopping at the ends, as the
-    /// module browser's list does (section 6, rule 8). `None` for any
-    /// other element or key.
+    /// The message for Up, Down, Home, or End inside the cable picker's
+    /// list or Recent's, or Page Up or Page Down inside the cable picker's,
+    /// which take them before their scroll would: the focus moves to the next item, the one before, the
+    /// first, or the last, as on any menu, or a page on, stopping at the
+    /// ends, as the module browser's list does (section 6, rule 8). `None`
+    /// for any other element or key.
     pub(crate) fn menu_panel_key(&self, id: &UiId, key: &KeyEvent) -> Option<Message> {
-        let menu = self.runtime_menu().filter(|menu| menu.kind == MenuKind::Cable)?;
+        let menu = self.runtime_menu()?;
+        let list = match menu.kind {
+            MenuKind::Cable => crate::cable_picker::list_id(),
+            MenuKind::Recent => super::recent_list_id(),
+            _ => return None,
+        };
         let KeyEvent::Pressed { key, .. } = key else {
             return None;
         };
-        if *id != crate::cable_picker::list_id() {
+        if *id != list {
             return None;
         }
         let last = menu.items.len().checked_sub(1)?;
@@ -248,9 +266,24 @@ fn build(panel: &Panel) -> Element {
     let Some(placement) = &panel.placement else {
         return centred(panel, &items);
     };
-    Element::column(rows(panel, &items, 0))
-        .padding(4.0)
-        .width(Length::Fixed(panel.width))
+    // In a scroll, the rows keep the size and place they have without one
+    // (Brylie's decision, 2026-11-27): the scroll's ring room takes the
+    // place of the menu's padding, and the menu grows by the scrollbar's
+    // gutter, which stays when nothing scrolls.
+    let (rows, padding, width) = if panel.scrolls {
+        let scroll = style::scroll();
+        let gutter = scroll.width + 2.0 * scroll.inset;
+        (
+            vec![list(Element::column(rows(panel, &items, 0)).width(Length::FILL), false)],
+            (MENU_PADDING - scroll.ring).max(0.0),
+            panel.width + gutter,
+        )
+    } else {
+        (rows(panel, &items, 0), MENU_PADDING, panel.width)
+    };
+    Element::column(rows)
+        .padding(padding)
+        .width(Length::Fixed(width))
         .background(panel.fill)
         .border(style::MENU_BORDER, crate::style::QUIET)
         .radius(style::MENU_RADIUS)
@@ -266,18 +299,11 @@ fn build(panel: &Panel) -> Element {
 /// its items (the WAI-ARIA menu pattern).
 fn centred(panel: &Panel, items: &[&Item]) -> Element {
     let heading = panel.heading.clone().unwrap_or_default();
-    let list = Element::scroll(
+    let list = list(
         Element::column(rows(panel, items, 0)).spacing(2.0).width(Length::FILL),
-        style::scroll(),
+        true,
     )
-    .key("list")
-    // Its own arrows would scroll it; in a menu they move the focus among
-    // the items, so the list asks the app first (section 6, rule 6, step
-    // 2b; the WAI-ARIA menu pattern).
-    .takes_first([Key::Up, Key::Down, Key::Home, Key::End, Key::PageUp, Key::PageDown])
-    .height(Length::FILL)
-    .min_height(0.0)
-    .width(Length::FILL);
+    .height(Length::FILL);
     Element::column([Element::text(heading, style::HEADING_TEXT).colour(panel.text), list])
         .spacing(6.0)
         .padding(8.0)
@@ -291,6 +317,24 @@ fn centred(panel: &Panel, items: &[&Item]) -> Element {
         .opaque()
         .placed(Placement::Centred)
         .closes_on_press_outside()
+}
+
+/// A menu's rows in a scroll keyed `list`, which shrinks when the menu is
+/// cut to the window or to its own most height, and scrolls. With `pages`,
+/// Page Up and Page Down move the focus a page, as in the cable picker
+/// (section 6, rule 8); without, they scroll the list, as any scroll
+/// container's do.
+fn list(rows: Element, pages: bool) -> Element {
+    let list = Element::scroll(rows, style::scroll()).key("list");
+    // Its own arrows would scroll it; in a menu they move the focus among
+    // the items, so the list asks the app first (section 6, rule 6, step
+    // 2b; the WAI-ARIA menu pattern).
+    let list = if pages {
+        list.takes_first([Key::Up, Key::Down, Key::Home, Key::End, Key::PageUp, Key::PageDown])
+    } else {
+        list.takes_first([Key::Up, Key::Down, Key::Home, Key::End])
+    };
+    list.min_height(0.0).width(Length::FILL)
 }
 
 /// True when `rows` can key every row with its whole UI ID and no two

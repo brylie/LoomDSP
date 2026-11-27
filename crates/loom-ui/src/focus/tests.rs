@@ -563,6 +563,37 @@ fn a_toolkit_focus_is_left_alone_after_the_layout() {
     assert_eq!(harness.runtime().focused(), None);
 }
 
+/// Rule 4: an overlay saves the focus the turn it opens in starts with,
+/// after the runtime heard that the target took the focus since the last
+/// turn. So it saves nothing of the runtime's, and closing it takes no
+/// focus from the target.
+#[test]
+fn an_overlay_never_saves_a_focus_the_target_took() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let mut harness = Harness::new(Panels::default(), Toolkit::default(), window, Instant::now());
+    harness.send(Message::Show(vec![
+        panel("bar", row(&["a"])),
+        (UiId::panel("menu"), Layer::Overlays, row(&["item"])),
+    ]));
+    harness.lay_out(&mut Mono::default());
+    harness.send(Message::Focus(id("bar", "a")));
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "a")));
+    // Between turns, the toolkit's own field takes the focus, as a press
+    // on it does.
+    let field = UiId::panel("inspector").with("name");
+    harness.runtime_mut().target_mut().focused = Some(field.clone());
+    // An overlay that leaves the focus where it is opens, then closes.
+    harness.send(Message::Input(Layer::Overlays));
+    harness.send(Message::Input(Layer::Canvas));
+    harness.lay_out(&mut Mono::default());
+    assert_ne!(
+        harness.runtime().focused(),
+        Some(&id("bar", "a")),
+        "the focus the target took is not given back"
+    );
+    assert_eq!(harness.runtime().target().focused, Some(field), "the toolkit keeps it");
+}
+
 /// Rule 2, as Brylie decided 2026-11-16: Tab passes over a turned-off
 /// element, as macOS and Windows controls do. Its node stays in the tree
 /// with its description, offering nothing, not even Focus.
@@ -1292,6 +1323,116 @@ fn a_report_runs_between_two_messages_of_one_turn() {
             Heard::Moved(Some(id("bar", "b"))),
             Heard::Key
         ]
+    );
+}
+
+/// A focus move a turn ends with is heard first in the next turn, unless
+/// that turn's event moves the focus again: then the app hears only the
+/// newer move, never the older one after it.
+#[test]
+fn an_older_focus_report_never_follows_a_newer_one() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let app = Panels {
+        reports: true,
+        ..Panels::default()
+    };
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
+    harness.send(Message::Show(vec![
+        panel("bar", row(&["a", "b"])),
+        (UiId::panel("menu"), Layer::Overlays, row(&["item"])),
+    ]));
+    harness.lay_out(&mut Mono::default());
+    harness.send(Message::Focus(id("bar", "a")));
+    harness.send(Message::Input(Layer::Overlays));
+    harness.send(Message::Focus(id("menu", "item")));
+    let heard = harness.app().moves.len();
+    // One turn at a time, as a driver that hands over each event as it
+    // comes: the overlay closes and gives `a` its focus back, which the
+    // turn reports at its end; then Tab, before that report ran.
+    let mut driver = crate::headless::Headless::new();
+    harness.runtime().waker().send(Message::Input(Layer::Canvas));
+    let _ = harness
+        .runtime_mut()
+        .handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "a")), "given back");
+    let _ = harness.runtime_mut().handle(tab(false), Instant::now(), &mut driver);
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "b")));
+    assert_eq!(
+        harness.app().moves[heard..],
+        [Some(id("bar", "b"))],
+        "only the newer move is heard, never the older after it"
+    );
+}
+
+/// `Runtime::deliver` runs its message alone: a focus report the last
+/// turn left waits for the next turn, as queued messages do, and the app
+/// hears it then.
+#[test]
+fn deliver_leaves_a_waiting_focus_report_for_the_next_turn() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let app = Panels {
+        reports: true,
+        ..Panels::default()
+    };
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
+    harness.send(Message::Show(vec![
+        panel("bar", row(&["a", "b"])),
+        (UiId::panel("menu"), Layer::Overlays, row(&["item"])),
+    ]));
+    harness.lay_out(&mut Mono::default());
+    harness.send(Message::Focus(id("bar", "a")));
+    harness.send(Message::Input(Layer::Overlays));
+    harness.send(Message::Focus(id("menu", "item")));
+    let mut driver = crate::headless::Headless::new();
+    harness.runtime().waker().send(Message::Input(Layer::Canvas));
+    let _ = harness
+        .runtime_mut()
+        .handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    let heard = harness.app().moves.len();
+    let next = harness
+        .runtime_mut()
+        .deliver(Message::Mark, Instant::now(), &mut driver);
+    assert_eq!(harness.app().moves.len(), heard, "deliver ran its message alone");
+    assert!(next.again, "the report waits for the next turn");
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.app().moves[heard..], [Some(id("bar", "a"))], "heard then");
+}
+
+/// A message `Runtime::deliver` runs that moves the focus reports the
+/// newer move in its turn, so the report the last turn left is dropped,
+/// never heard after it.
+#[test]
+fn deliver_drops_a_waiting_report_its_turn_overtook() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let app = Panels {
+        reports: true,
+        ..Panels::default()
+    };
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
+    harness.send(Message::Show(vec![
+        panel("bar", row(&["a", "b"])),
+        (UiId::panel("menu"), Layer::Overlays, row(&["item"])),
+    ]));
+    harness.lay_out(&mut Mono::default());
+    harness.send(Message::Focus(id("bar", "a")));
+    harness.send(Message::Input(Layer::Overlays));
+    harness.send(Message::Focus(id("menu", "item")));
+    let mut driver = crate::headless::Headless::new();
+    harness.runtime().waker().send(Message::Input(Layer::Canvas));
+    let _ = harness
+        .runtime_mut()
+        .handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    let heard = harness.app().moves.len();
+    let _ = harness
+        .runtime_mut()
+        .deliver(Message::Focus(id("bar", "b")), Instant::now(), &mut driver);
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "b")));
+    assert_eq!(
+        harness.app().moves[heard..],
+        [Some(id("bar", "b"))],
+        "the newer move alone"
     );
 }
 

@@ -95,6 +95,26 @@ fn the_keyed_tile_menu_moves_the_focus_and_closes_on_escape() {
     assert!(ui.app().canvas_has_keys(), "the selected tile has the keys again");
 }
 
+/// One Escape with a Space held on a menu item cancels that Space and
+/// closes the menu, as Escape in a menu does at once (ui-layer.md,
+/// section 5, rule 11), and the release then picks nothing: the patch is
+/// as it was.
+#[test]
+fn escape_with_space_held_on_an_item_closes_the_menu() {
+    use crate::ui_test::{key_press, key_released};
+    let mut ui = tile_menu_open(true);
+    let before = ui.app().current_patch();
+    let none = loom_ui_core::Modifiers::NONE;
+    let space = Key::Space;
+    ui.step(&[key_press(space, none, Some(" "), false)]);
+    ui.tap(Key::Escape, none);
+    ui.redraw();
+    assert!(ui.app().overlays.tile_menu().is_none(), "one Escape closed it");
+    ui.step(&[key_released(space, none)]);
+    ui.redraw();
+    assert_eq!(ui.app().current_patch(), before, "nothing was picked");
+}
+
 /// Row 3d: a press outside the tile menu closes it, and goes no further, so
 /// the canvas under it neither selects nor drags (section 5, rule 14).
 #[test]

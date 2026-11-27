@@ -298,6 +298,12 @@ impl App {
     /// output, or leaving it (`None`): the row lights while the drag is
     /// over it (modulation.md).
     pub(crate) fn inspector_hovered(&self, id: &UiId, on: bool) -> Option<crate::Message> {
+        // Leaving a row clears the lit row even when that row has left the
+        // model mid-drag, as when the selection changes under the pointer,
+        // so no row stays lit for a drop it can no longer take.
+        if !on && id.is_under(&super::inspector_id()) {
+            return Some(crate::Message::Inspector(super::super::Message::DropRow(None)));
+        }
         let model = self.inspector_model();
         let (module, p) = rows(&model).into_iter().find(|(_, p)| p.ui == *id && p.accepts_drop)?;
         let row = on.then_some((module, p.index));

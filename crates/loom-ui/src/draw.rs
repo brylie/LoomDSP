@@ -125,7 +125,14 @@ impl<A: App> Panels<'_, A> {
         // An element the layout made or moved builds its nodes again; the
         // app hears of a change on the next turn (section 9, rule 3).
         self.build_custom_nodes_later();
-        self.focus.settle(self.window);
+        // A field that takes a waiting focus effect with all of its text
+        // selected selects it now, as one already laid out does at once.
+        if self.focus.settle(self.window)
+            && let (Some(id), Some(now)) = (self.focus.id().cloned(), self.pointer.now)
+            && self.window.fields.has(&id)
+        {
+            let _ = self.window.fields.act(&id, crate::field::FieldAction::SelectAll, now);
+        }
         // A reveal scrolls a container in place, which moves the custom
         // elements inside it: settle them again, so their bounds, their
         // GPU viewports, and their nodes follow the scroll.

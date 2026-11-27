@@ -105,9 +105,11 @@ fn click(ui: &mut Ui, at: Point) -> Vec<Message> {
     heard
 }
 
-/// The plan's test: with a question open, a click on the toolbar and one
-/// on the bar each reach only the question, and the bar is neither
-/// hovered nor focused. With the question gone, the bar's click is the
+/// The plan's test: with a question open, a click on the toolbar, one on
+/// the bar, and one on a canvas tile, Iced's, each reach only the
+/// question: the bar is neither hovered nor focused, and the tile is not
+/// selected. With the question gone, the tile's click selects it, and the
+/// bar's click is the
 /// bar's: its message runs, and its button takes no focus from the press
 /// (section 6, rule 3; Brylie's decision, 2026-11-19). That message opens
 /// help, which takes the focus to its Close button, with no ring, since
@@ -122,12 +124,26 @@ fn a_question_holds_presses_on_both_toolkits() {
     assert!(!heard.iter().any(|m| matches!(m, Message::File(_))), "{heard:?}");
     let heard = click(&mut ui, on_go());
     assert!(!heard.iter().any(|m| matches!(m, Message::ShowHelp)), "{heard:?}");
+    // A tile of the canvas, the one part Iced still draws.
+    let tile = ui.app().session.scene.module(4).expect("the filter's tile").bounds();
+    let on_tile = ui
+        .canvas()
+        .to_window(loom_ui_core::Point::new(tile.center().x, tile.y + 10.0));
+    let selected = ui.app().session.selection.clone();
+    assert!(!selected.contains(&4), "the tile starts unselected");
+    click(&mut ui, on_tile);
+    assert_eq!(ui.app().session.selection, selected, "Iced heard no press under it");
     let runtime = ui.runtime();
     assert_eq!(runtime.hovered(), None);
     assert_eq!(runtime.focused(), None);
 
     ui.app_mut().overlays.question = None;
     ui.redraw();
+    click(&mut ui, on_tile);
+    assert!(
+        ui.app().session.selection.contains(&4),
+        "with it gone, the press selects"
+    );
     let heard = click(&mut ui, on_go());
     assert!(heard.iter().any(|m| matches!(m, Message::ShowHelp)), "{heard:?}");
     let _ = ui.redraw();

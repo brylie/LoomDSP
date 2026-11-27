@@ -242,9 +242,11 @@ pub enum CustomEvent {
     Frame,
 }
 
-/// What a custom element did with an event.
+/// What a custom element did with an event. More answers may come, so a
+/// match on it outside `loom-ui` needs a `_` arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[must_use]
+#[non_exhaustive]
 pub enum Used {
     /// It left the event, which goes on as if nothing of the runtime's
     /// were there. The element is still hovered.
@@ -262,8 +264,10 @@ pub enum Used {
 
 /// The moment an event reaches a custom element: where the pointer and the
 /// element are, the time, and the modifier keys. The runtime never reads
-/// the clock: `now` is the driver's moment for the turn.
+/// the clock: `now` is the driver's moment for the turn. It may gain
+/// fields, so code outside `loom-ui` builds one with [`Moment::new`].
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct Moment {
     /// The pointer in window logical pixels, or `None` outside the window.
     pub pointer: Option<Point>,
@@ -274,6 +278,32 @@ pub struct Moment {
     pub now: Instant,
     /// The modifier keys held, as last reported.
     pub modifiers: Modifiers,
+}
+
+impl Moment {
+    /// A moment with the pointer at `pointer`, the element at `bounds`,
+    /// the time `now`, and `modifiers` held. The runtime builds every
+    /// moment an element hears; outside `loom-ui`, a test that calls
+    /// [`Custom::event`] or [`Custom::cursor`] directly builds one with
+    /// this, as does a host that drives an element without the runtime.
+    ///
+    /// ```
+    /// use loom_ui::Moment;
+    /// use loom_ui_core::{Modifiers, Point, Rect, Size};
+    /// use std::time::Instant;
+    ///
+    /// let bounds = Rect::new(Point::ORIGIN, Size::new(240.0, 240.0));
+    /// let moment = Moment::new(Some(Point::new(120.0, 60.0)), bounds, Instant::now(), Modifiers::NONE);
+    /// assert_eq!(moment.bounds, bounds);
+    /// ```
+    pub fn new(pointer: Option<Point>, bounds: Rect, now: Instant, modifiers: Modifiers) -> Self {
+        Self {
+            pointer,
+            bounds,
+            now,
+            modifiers,
+        }
+    }
 }
 
 /// Where a custom element sends its messages from one call, and asks for

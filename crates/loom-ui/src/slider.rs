@@ -296,6 +296,11 @@ struct Dragging {
     position: f32,
 }
 
+/// How close a shown position must be to one the open group knows to be
+/// that one: an app stores a report in its own units and shows it back,
+/// which can change the last bits, far less than the finest key step.
+const SAME_POSITION: f32 = 1e-5;
+
 /// A group of keys on one slider, until it closes.
 #[derive(Debug, Clone, PartialEq)]
 struct KeyRun {
@@ -305,6 +310,10 @@ struct KeyRun {
     last: Instant,
     /// The position its last key reported.
     position: f32,
+    /// Every position the group can leave the slider showing while the app
+    /// lays its reports out, one or more behind: where it showed at each
+    /// key, and each position it reported.
+    known: Vec<f32>,
     /// A screen reader's steps, not keys: the group stays open whatever
     /// has the focus, since a screen reader acts on a node without moving
     /// the focus there (section 7, rule 6).
@@ -422,9 +431,10 @@ impl Sliding {
     /// its last key came less than [`KEY_GROUP`] ago; otherwise the open
     /// group closes, a screen reader's steps on this slider too, and a new
     /// one starts, so a key and a screen reader's step are never one undo
-    /// step. Returns what to report: nothing when the key
-    /// moved nothing and no group is open for it.
-    pub(crate) fn key(&mut self, id: &UiId, from: f32, to: f32, now: Instant) -> Vec<Slid> {
+    /// step. `shown` is the position the slider shows now. Returns what to
+    /// report: nothing when the key moved nothing and no group is open for
+    /// it.
+    pub(crate) fn key(&mut self, id: &UiId, from: f32, to: f32, shown: f32, now: Instant) -> Vec<Slid> {
         let joins = self
             .keys
             .as_ref()
@@ -433,8 +443,12 @@ impl Sliding {
         if joins {
             let run = self.keys.as_mut().expect("the group it joins");
             run.last = now;
-            if to != run.position {
-                run.position = to;
+            run.known.extend([shown, to]);
+            run.position = to;
+            // Whether this key moved the slider is from where it stepped,
+            // which is the value the app set when it moved it meanwhile,
+            // not the group's last report.
+            if to != from {
                 out.push((id.clone(), to, SlidePhase::Move));
             }
             return out;
@@ -449,6 +463,7 @@ impl Sliding {
             id: id.clone(),
             last: now,
             position: to,
+            known: vec![shown, from, to],
             reader: false,
         });
         out
@@ -456,12 +471,15 @@ impl Sliding {
 
     /// Where keys on the slider `id` step from: the position its open
     /// group last reported, which the app may not have laid out yet, or
-    /// `shown`, the one it shows, with no group open for it.
+    /// `shown`, the one it shows, with no group open for it. When the
+    /// slider shows a position the group neither started from, showed, nor
+    /// reported, the app moved it since, as a MIDI control does, and the
+    /// next step goes on from there.
     pub(crate) fn key_base(&self, id: &UiId, shown: f32) -> f32 {
-        self.keys
-            .as_ref()
-            .filter(|run| &run.id == id)
-            .map_or(shown, |run| run.position)
+        self.keys.as_ref().filter(|run| &run.id == id).map_or(shown, |run| {
+            let moved_by_app = !run.known.iter().any(|known| (known - shown).abs() <= SAME_POSITION);
+            if moved_by_app { shown } else { run.position }
+        })
     }
 
     /// One step of the slider `id` from `from` to `to`, as a screen
@@ -470,8 +488,8 @@ impl Sliding {
     /// or a screen reader's steps on another slider, close first, so they are
     /// one undo step (section 7, rule 6): Start and Move for the first,
     /// Move for each after, and End when the group closes. Nothing when it
-    /// did not move.
-    pub(crate) fn step(&mut self, id: &UiId, from: f32, to: f32, now: Instant) -> Vec<Slid> {
+    /// did not move. `shown` is the position the slider shows now.
+    pub(crate) fn step(&mut self, id: &UiId, from: f32, to: f32, shown: f32, now: Instant) -> Vec<Slid> {
         let joins = self
             .keys
             .as_ref()
@@ -479,10 +497,12 @@ impl Sliding {
         if joins {
             let run = self.keys.as_mut().expect("the group it joins");
             run.last = now;
-            if to == run.position {
+            run.known.extend([shown, to]);
+            run.position = to;
+            // As for a key: whether it moved is from where it stepped.
+            if to == from {
                 return Vec::new();
             }
-            run.position = to;
             return vec![(id.clone(), to, SlidePhase::Move)];
         }
         let mut out = self.close_keys();
@@ -495,6 +515,7 @@ impl Sliding {
             id: id.clone(),
             last: now,
             position: to,
+            known: vec![shown, from, to],
             reader: true,
         });
         out
@@ -509,8 +530,10 @@ impl Sliding {
             .collect()
     }
 
-    /// Closes the open group of keys when its time is up at `now`, or when
-    /// `focus` is not its slider any more.
+    /// Closes the open group of keys when its time is up at `now`, or, for
+    /// keys, when `focus` is not its slider any more. A screen reader's
+    /// group stays open whatever has the focus, since a screen reader acts
+    /// on a node without moving the focus there (section 7, rule 30).
     pub(crate) fn close_keys_if(&mut self, now: Instant, focus: Option<&UiId>) -> Vec<Slid> {
         let over = self.keys.as_ref().is_some_and(|run| {
             now.saturating_duration_since(run.last) >= KEY_GROUP || (!run.reader && focus != Some(&run.id))
