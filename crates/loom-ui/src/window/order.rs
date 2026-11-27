@@ -603,13 +603,15 @@ impl Window {
         built
     }
 
-    /// True when the tree sent now holds a node for `id`: a laid-out
-    /// element with a node, or a part of a custom element in a drawn
-    /// panel. A relation to anything else is left out (section 7, rule 13).
+    /// True when the tree sent now holds a node for `id`: an element with
+    /// a node in a drawn panel, or a part of a custom element in a drawn
+    /// panel. A panel kept but not drawn, as one placed under an element
+    /// that is gone, gives no nodes. A relation to anything else is left
+    /// out (section 7, rule 13).
     pub(crate) fn emits(&self, id: &UiId) -> bool {
         let element = self
             .panel_of(id)
-            .is_some_and(|panel| self.records[panel].layout.has_node(id));
+            .is_some_and(|panel| self.drawn.contains(panel) && self.records[panel].layout.has_node(id));
         element || self.emits_part(id)
     }
 

@@ -694,3 +694,58 @@ fn a_root_placed_under_an_element_follows_it() {
     assert_eq!(screen.at("menu/square"), None, "its anchor is gone");
     assert!(screen.window.hit(Point::new(5.0, 20.0)).is_none());
 }
+
+/// A toolbar whose button controls the menu's square, with the label the
+/// menu is placed under when `anchored`.
+fn controlling_bar(anchored: &bool) -> Element {
+    let button = Element::text("Open", STYLE).key("open").access(
+        crate::access::Access::new(crate::access::Role::Button, "Open")
+            .action(crate::access::Action::Click)
+            .controlling("menu/square".parse().expect("a UI ID")),
+    );
+    let mut children = vec![button];
+    if *anchored {
+        children.push(Element::text("Label", STYLE).key("label"));
+    }
+    Element::row(children)
+}
+
+/// The menu's square, placed under the toolbar's label, with a node.
+fn square_with_node(_: &()) -> Element {
+    placed_square(&(20, None)).access(crate::access::Access::new(crate::access::Role::Group, "Square"))
+}
+
+/// A relation to a node in a panel that is kept but not drawn, here a
+/// menu placed under a label that is gone, is left out: the tree holds no
+/// node for it (section 7, rule 13). While the menu is drawn, the
+/// relation is there.
+#[test]
+fn a_relation_into_a_panel_not_drawn_is_left_out() {
+    let controls = |screen: &Screen| {
+        let mut ids = loom_ui_core::IdTable::new();
+        let nodes = screen.window.access_nodes(&mut ids, 1.0, None);
+        let open = accesskit::NodeId(ids.number(&"toolbar/open".parse().expect("a UI ID")));
+        let node = &nodes
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == open)
+            .expect("the button's node")
+            .1;
+        node.controls().to_vec()
+    };
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(panel("toolbar"), Layer::Panels, &true, controlling_bar);
+    view.panel_with(panel("menu"), Layer::Overlays, &(), square_with_node);
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    assert_eq!(controls(&screen).len(), 1, "the menu is drawn: the relation is there");
+
+    let mut view = View::new();
+    view.panel_with(panel("toolbar"), Layer::Panels, &false, controlling_bar);
+    view.panel_with(panel("menu"), Layer::Overlays, &(), square_with_node);
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    assert_eq!(screen.at("menu/square"), None, "its anchor is gone");
+    assert!(controls(&screen).is_empty(), "no relation to a node not sent");
+}
