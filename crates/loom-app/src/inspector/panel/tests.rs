@@ -1000,6 +1000,52 @@ fn a_readers_focus_on_a_field_takes_the_keys_from_a_knob() {
     assert!(!ui.app().canvas_has_keys(), "the canvas has no keys");
 }
 
+/// A double-click on a parameter's slider resets the parameter to its
+/// default, as the runtime's slider rule says (ui-layer.md, section 5,
+/// rule 16), from anywhere on the track.
+#[test]
+fn a_double_click_on_a_slider_resets_its_parameter() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.redraw();
+    let (index, default) = {
+        let graph = ui.app().session.controller.graph();
+        let node = graph.node(loom_core::ModuleId(4)).expect("the filter");
+        let index = loom_core::ModuleNames::parameter_index(node, "cutoff").expect("cutoff");
+        (index, node.spec(index).expect("its spec").default)
+    };
+    ui.app_mut().edit(|app| {
+        app.session
+            .controller
+            .set_param(loom_core::ModuleId(4), index, 5000.0)
+            .expect("set");
+        app.commit();
+    });
+    let _ = ui.redraw();
+    let slider = ids::part(&ids::row(4, ids::Kind::Param, "cutoff"), "value");
+    let track = ui.runtime().bounds(&slider).expect("the slider is laid out");
+    // Near the left end, far from both the value and the default.
+    let at = loom_ui_core::Point::new(track.x + track.width * 0.1, track.center().y);
+    ui.move_to(at);
+    for _ in 0..2 {
+        ui.press();
+        ui.release();
+    }
+    let _ = ui.redraw();
+    let stored = ui
+        .app()
+        .session
+        .controller
+        .graph()
+        .node(loom_core::ModuleId(4))
+        .unwrap()
+        .params[index];
+    assert!(
+        (stored - default).abs() < 1e-3,
+        "stored {stored}, the default {default}"
+    );
+}
+
 /// A slider on an exposed row stores the value the row shows: its
 /// position is over the surface's range, here 200 to 2000 Hz, not the
 /// filter's whole range (sub-patches.md; CodeRabbit on #900).

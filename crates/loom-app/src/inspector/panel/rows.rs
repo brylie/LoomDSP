@@ -370,7 +370,11 @@ fn value_control(
             // the step: a seed spans 1 to 65535, so its step is far under
             // 0.001 and still one value (CodeRabbit on #900).
             let whole = p.spec.options.integer && p.spec.max > p.spec.min;
-            let slider = Slider::new(position).ghost(ghost);
+            // A double-click resets it to the parameter's default, placed
+            // on the travel this row shows: the knob's, or the exposed
+            // range on a sub-patch row (ui-layer.md, section 5, rule 16).
+            let default = p.spec.normalize(p.spec.default).clamp(0.0, 1.0);
+            let slider = Slider::new(position).ghost(ghost).default(default);
             let slider = if whole {
                 slider.key_step(step).fine_key_step(step).drag(Drag::Step(step))
             } else {
