@@ -764,3 +764,61 @@ fn a_root_placed_under_a_missing_element_settles() {
     assert!(screen.window.is_settled(size), "laid out once, it is settled");
     assert_eq!(screen.at("menu/square"), None, "and it is not placed");
 }
+
+/// A toolbar with its label when `anchored`, and nothing in it when not.
+fn label_bar(anchored: &bool) -> Element {
+    if *anchored {
+        shrink_label(&"Open".to_string())
+    } else {
+        Element::row([])
+    }
+}
+
+/// A menu placed under the toolbar's label, holding a panel in a slot.
+fn placed_holder(_: &()) -> Element {
+    Element::column([Element::slot(panel("inner"))]).placed(crate::element::Placement::Under(
+        "toolbar/label".parse().expect("a UI ID"),
+    ))
+}
+
+/// The slotted panel's one keyed square.
+fn inner_square(_: &()) -> Element {
+    Element::space(Length::Fixed(20.0), Length::Fixed(20.0)).key("item")
+}
+
+/// A second menu, placed under the slotted panel's square.
+fn placed_under_inner(_: &()) -> Element {
+    Element::space(Length::Fixed(10.0), Length::Fixed(10.0))
+        .key("square")
+        .placed(crate::element::Placement::Under("inner/item".parse().expect("a UI ID")))
+}
+
+/// A panel in a slot of a placed root that is hidden, its anchor gone,
+/// has no bounds, as the root has none, and a root placed under one of
+/// its elements is not placed either (section 5, rule 13).
+#[test]
+fn a_hidden_placed_root_hides_the_panels_in_its_slots() {
+    let shown = |anchored: bool| {
+        let mut view = View::new();
+        view.panel_with(panel("toolbar"), Layer::Panels, &anchored, label_bar);
+        view.panel_with(panel("menu"), Layer::Overlays, &(), placed_holder);
+        view.panel_with(panel("inner"), Layer::Overlays, &(), inner_square);
+        view.panel_with(panel("sub"), Layer::Overlays, &(), placed_under_inner);
+        view
+    };
+    let mut screen = Screen::new();
+    screen.show_view(shown(true));
+    screen.lay_out(Size::new(300.0, 200.0));
+    let item = screen.at("inner/item").expect("the slotted panel is placed");
+    assert_eq!(
+        screen.at("sub/square"),
+        Some(rect(item.x, item.y + item.height, 10.0, 10.0)),
+        "the second menu opens under it"
+    );
+
+    screen.show_view(shown(false));
+    screen.lay_out(Size::new(300.0, 200.0));
+    assert_eq!(screen.at("menu"), None, "the anchor is gone");
+    assert_eq!(screen.at("inner/item"), None, "nor is the panel in its slot anywhere");
+    assert_eq!(screen.at("sub/square"), None, "nor the menu placed under it");
+}

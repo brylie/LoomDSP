@@ -643,9 +643,11 @@ impl Window {
             .iter()
             .filter(|(key, _)| id == *key || id.is_under(key))
             .max_by_key(|(key, _)| key.keys().len())?;
-        // A placed panel whose anchor was gone at the last layout is
-        // nowhere (section 5, rule 13).
-        if record.layout.placement().is_some() && !self.drawn.contains(key) {
+        // A panel not drawn in the last layout is nowhere: a placed panel
+        // whose anchor was gone, and every panel in its slots, which have
+        // no placement of their own (section 5, rule 13). A panel placed
+        // earlier in the layout under way counts, as an anchor must.
+        if !self.drawn.contains(key) {
             return None;
         }
         // A panel's own key gives its place: its slot, the window, or, for
