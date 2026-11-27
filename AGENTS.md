@@ -89,7 +89,7 @@ For independent builds, run `scripts/setup-worktree-target.sh TARGET_ROOT` once 
 
 ## Reading code
 
-Read code in stages, so you keep only what you need in context: find the files, outline them, then read just the lines that answer the question. `ast-grep` (installed by mise) understands Rust syntax, so it finds code by its shape and skips hits in comments and strings. Use grep for plain text: messages, names in docs, configuration.
+Read code in stages, so you keep only what you need in context: find the files, outline them, then read just the lines that answer the question. `ast-grep` (installed by mise; in Claude Code sessions and their subagents, a SessionStart hook, `scripts/claude/session-env.sh`, puts mise's shims on `PATH`, so it and the other mise tools run by name) understands Rust syntax, so it finds code by its shape and skips hits in comments and strings. Use grep for plain text: messages, names in docs, configuration.
 
 ```sh
 ast-grep outline crates/loom-app/src/undo.rs --view expanded                  # every item and member, each with its line number
