@@ -271,7 +271,9 @@ pub trait App: 'static {
     /// The window's home element: the custom element that hears the keys
     /// while nothing has focus, at section 6, rule 6, step 5, after the
     /// open overlay's keys (section 9, rule 2). The patch canvas is
-    /// LoomDSP's. `None`, the default, when the window has none.
+    /// LoomDSP's. `None`, the default, when the window has none. Until P4
+    /// it hears a key the routing target passed on; from P4 it takes the
+    /// target's place.
     fn home(&self) -> Option<UiId> {
         None
     }

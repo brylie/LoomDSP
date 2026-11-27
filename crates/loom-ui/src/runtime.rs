@@ -1632,6 +1632,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         {
             batch.push(deadline.message);
         }
+        // Custom elements whose deadline came tick now; what they send runs
+        // in this turn, after the batch (section 9, rule 4).
+        self.pointer.now = Some(now);
+        self.panels().tick_deadlines(now);
         self.turn(event, batch, now, driver)
     }
 
@@ -1802,6 +1806,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             DriverEvent::Frame => {
                 self.counts.frames += 1;
                 redraw = true;
+                // A frame runs no update: what an element sent from its
+                // frame's tick waits for the next turn (section 9, rule 4).
+                let sent = self.panels().tick_frames();
+                self.pending.extend(sent);
             }
             DriverEvent::Presented => batch.append(&mut self.waiting_for_draw),
             DriverEvent::Woken | DriverEvent::DeadlineReached => {}
@@ -1843,6 +1851,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             }
             redraw |= self.run_batch(sent, now, driver, &mut updates);
         }
+        // An element that asked for a frame gets one, once, whatever else
+        // the turn did.
+        redraw |= self.customs.take_redraw();
         // An overlay an update opened closes a select's list under it, and
         // a list that opened, closed, or moved its highlight changes what
         // the tree reports: its expanded state and active descendant.
@@ -1900,20 +1911,27 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         if let Some(report) = report {
             self.pending.push_front(report);
         }
+        // The custom elements' deadlines and frames, asked every turn: an
+        // element's state changes with no update. A frame it asked for
+        // after the draw was decided, by hearing the pointer left, gets
+        // the next turn.
+        let custom = self.customs.schedule(&self.app);
+        self.customs.plan(custom);
+        let redraw_asked = self.customs.redraw_asked();
         Next {
             draw,
-            again: !self.exited && (!self.pending.is_empty() || !self.pasted.is_empty()),
-            frames: !self.exited && self.app.animating(),
+            again: !self.exited && (!self.pending.is_empty() || !self.pasted.is_empty() || redraw_asked),
+            frames: !self.exited && (self.app.animating() || custom.frames),
             deadline: if self.exited {
                 None
             } else {
-                // The app's deadline, or a slider's group of keys closing,
-                // whichever is sooner.
+                // The app's deadline, a slider's group of keys closing, or
+                // a custom element's deadline, whichever is soonest.
                 let app = self.deadline.as_ref().map(|deadline| deadline.at);
-                match (app, self.pointer.slide.deadline()) {
-                    (Some(app), Some(keys)) => Some(app.min(keys)),
-                    (app, keys) => app.or(keys),
-                }
+                [app, self.pointer.slide.deadline(), custom.deadline]
+                    .into_iter()
+                    .flatten()
+                    .min()
             },
         }
     }

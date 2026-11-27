@@ -25,6 +25,7 @@ use std::time::Instant;
 
 mod keys;
 mod pointer;
+mod ticks;
 
 /// Which kind of custom element a view placed, so the app knows which
 /// state to make for it ([`App::make_custom`]). An app with a meter and a
@@ -95,6 +96,26 @@ pub trait Custom<A: App>: Any {
         let _ = app;
         None
     }
+
+    /// When it next needs a tick ([`CustomEvent::Deadline`]), worked out
+    /// from the moments it was given, as a caret's next blink or a held
+    /// key's next repeat. The runtime asks after each turn and wakes at the
+    /// soonest deadline any element or the app gives (section 9, rule 4).
+    /// The tick must move the deadline on, or it is due again at once and
+    /// the loop never sleeps. `None`, the default, when it needs none.
+    fn next_deadline(&self, app: &A) -> Option<Instant> {
+        let _ = app;
+        None
+    }
+
+    /// True while it moves and needs a tick each display refresh
+    /// ([`CustomEvent::Frame`]), as a meter does while its level falls
+    /// (section 9, rule 4). The runtime asks after each turn. By default it
+    /// never animates.
+    fn animating(&self, app: &A) -> bool {
+        let _ = app;
+        false
+    }
 }
 
 /// What a custom element hears.
@@ -123,6 +144,16 @@ pub enum CustomEvent {
     /// gesture began, where a release would finish it (section 9, rule 1,
     /// "when a capture ends").
     CaptureLost,
+    /// Its deadline came ([`Custom::next_deadline`]). It may send messages,
+    /// which run in this turn, and must move its deadline on.
+    Deadline,
+    /// An animation frame, while it animates ([`Custom::animating`]). It
+    /// may change its own state and ask for nothing else: a frame draws
+    /// and runs no update, so it sends no message. A debug build panics on
+    /// one. An element that needs a message from its animation asks for a
+    /// deadline instead and sends it from the turn that deadline wakes. A
+    /// release build runs what it sent on the next turn.
+    Frame,
 }
 
 /// What a custom element did with an event.
@@ -159,9 +190,11 @@ pub struct Moment {
     pub modifiers: Modifiers,
 }
 
-/// Where a custom element sends its messages from one call.
+/// Where a custom element sends its messages from one call, and asks for
+/// a frame.
 pub struct Out<'a, M> {
     sent: &'a mut Vec<M>,
+    redraw: &'a mut bool,
 }
 
 impl<M> Out<'_, M> {
@@ -170,6 +203,24 @@ impl<M> Out<'_, M> {
     pub fn send(&mut self, message: M) {
         self.sent.push(message);
     }
+
+    /// Asks for a frame, because what it draws changed and no message
+    /// says so: a hover that lights it, or a drag that moves its knob.
+    /// The turn draws once, however many times it was asked (section 9,
+    /// rule 4).
+    pub fn redraw(&mut self) {
+        *self.redraw = true;
+    }
+}
+
+/// When the custom elements next need a tick: their soonest deadline, and
+/// whether one animates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct Schedule {
+    /// The soonest deadline any element gives.
+    pub(crate) deadline: Option<Instant>,
+    /// True when an element animates.
+    pub(crate) frames: bool,
 }
 
 /// The custom elements' state, by UI ID, with where each was last laid out.
@@ -182,6 +233,12 @@ pub(crate) struct Customs<A: App> {
     /// The custom element last told of the pointer over it, until it is
     /// told the pointer left ([`CustomEvent::PointerLeft`]).
     hovered: Option<UiId>,
+    /// True when an element asked for a frame ([`Out::redraw`]) and no
+    /// turn has taken it yet.
+    redraw: bool,
+    /// The schedule the last turn gave the driver, so a call outside a
+    /// turn that changes it wakes the loop for a turn that gives it again.
+    planned: Schedule,
 }
 
 /// A held capture of the pointer.
@@ -212,6 +269,8 @@ impl<A: App> Default for Customs<A> {
             sent: Vec::new(),
             captured: None,
             hovered: None,
+            redraw: false,
+            planned: Schedule::default(),
         }
     }
 }
@@ -263,7 +322,10 @@ impl<A: App> Customs<A> {
         let Some(state) = self.elements.get_mut(id).and_then(|hosted| hosted.state.as_deref_mut()) else {
             return Used::No;
         };
-        let mut out = Out { sent: &mut self.sent };
+        let mut out = Out {
+            sent: &mut self.sent,
+            redraw: &mut self.redraw,
+        };
         state.event(app, event, moment, &mut out)
     }
 
@@ -300,6 +362,34 @@ impl<A: App> Customs<A> {
     /// The messages elements sent since the last call, in order.
     pub(crate) fn take_sent(&mut self) -> Vec<A::Message> {
         std::mem::take(&mut self.sent)
+    }
+
+    /// True when an element asked for a frame since the last call, which
+    /// forgets it.
+    pub(crate) fn take_redraw(&mut self) -> bool {
+        std::mem::take(&mut self.redraw)
+    }
+
+    /// True when an element asked for a frame that no turn has taken yet.
+    pub(crate) fn redraw_asked(&self) -> bool {
+        self.redraw
+    }
+
+    /// When the elements next need a tick, asked of each now.
+    pub(crate) fn schedule(&self, app: &A) -> Schedule {
+        let mut schedule = Schedule::default();
+        for state in self.elements.values().filter_map(|hosted| hosted.state.as_deref()) {
+            if let Some(at) = state.next_deadline(app) {
+                schedule.deadline = Some(schedule.deadline.map_or(at, |soonest| soonest.min(at)));
+            }
+            schedule.frames |= state.animating(app);
+        }
+        schedule
+    }
+
+    /// Notes `schedule` as what the turn gave the driver.
+    pub(crate) fn plan(&mut self, schedule: Schedule) {
+        self.planned = schedule;
     }
 
     /// Takes away the state of the element `id`, as a release build leaves

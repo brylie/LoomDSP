@@ -7,6 +7,10 @@
 //! Tab moves inside it until it lets Tab go. While nothing has focus, the
 //! element the app names as the window's home hears the key at step 5. A
 //! key the element used goes no further.
+//!
+//! Until P4, home hears a key only after the routing target passed it on,
+//! since Iced still draws most of the window. From P4 there is no target,
+//! and home takes its place at step 5.
 
 use super::{CustomEvent, Used};
 use crate::app::App;

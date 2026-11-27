@@ -201,12 +201,14 @@ impl<A: App> Panels<'_, A> {
 
     /// Sends what elements sent, outside a turn, through the waker, so it
     /// runs on the next turn: a driver that offers an event itself, as one
-    /// whose toolkit answers late does, has no turn to run it in.
+    /// whose toolkit answers late does, has no turn to run it in. A frame
+    /// an element asked for, or a deadline it changed, wakes the loop too.
     pub(crate) fn send_custom_later(&mut self) {
         let sent = self.customs.take_sent();
         if !sent.is_empty() {
             self.waker.send_all(sent);
         }
+        self.wake_if_rescheduled();
     }
 }
 
