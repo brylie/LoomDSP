@@ -1399,6 +1399,43 @@ fn deliver_leaves_a_waiting_focus_report_for_the_next_turn() {
     assert_eq!(harness.app().moves[heard..], [Some(id("bar", "a"))], "heard then");
 }
 
+/// A message `Runtime::deliver` runs that moves the focus reports the
+/// newer move in its turn, so the report the last turn left is dropped,
+/// never heard after it.
+#[test]
+fn deliver_drops_a_waiting_report_its_turn_overtook() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let app = Panels {
+        reports: true,
+        ..Panels::default()
+    };
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
+    harness.send(Message::Show(vec![
+        panel("bar", row(&["a", "b"])),
+        (UiId::panel("menu"), Layer::Overlays, row(&["item"])),
+    ]));
+    harness.lay_out(&mut Mono::default());
+    harness.send(Message::Focus(id("bar", "a")));
+    harness.send(Message::Input(Layer::Overlays));
+    harness.send(Message::Focus(id("menu", "item")));
+    let mut driver = crate::headless::Headless::new();
+    harness.runtime().waker().send(Message::Input(Layer::Canvas));
+    let _ = harness
+        .runtime_mut()
+        .handle(DriverEvent::Woken, Instant::now(), &mut driver);
+    let heard = harness.app().moves.len();
+    let _ = harness
+        .runtime_mut()
+        .deliver(Message::Focus(id("bar", "b")), Instant::now(), &mut driver);
+    harness.step(DriverEvent::Woken);
+    assert_eq!(harness.runtime().focused(), Some(&id("bar", "b")));
+    assert_eq!(
+        harness.app().moves[heard..],
+        [Some(id("bar", "b"))],
+        "the newer move alone"
+    );
+}
+
 /// A message that waited in the queue while a turn moved the focus runs
 /// after the app hears of the move, never with the app's copy of the
 /// focus behind the runtime's. Found in plan 3.2, row 4d: a file dialog's

@@ -1753,10 +1753,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             };
         }
         // A focus report the last turn left waits too, for the next turn,
-        // unless this one ends with a newer report, which replaces it.
+        // unless this one reports a newer move, in an update or at its end,
+        // which overtakes it.
         let waiting = self.pending_focus.take();
+        let reported = self.focus.reported.clone();
         let mut next = self.turn(DriverEvent::Woken, vec![message], now, driver);
-        if self.pending_focus.is_none() && waiting.is_some() {
+        let overtaken = self.pending_focus.is_some() || self.focus.reported != reported;
+        if !overtaken && waiting.is_some() {
             self.pending_focus = waiting;
             next.again |= !self.exited;
         }
