@@ -19,7 +19,7 @@ Propose a change as a token diff, by name, not as new values in a mockup.
 | The rules for all of them, with measured contrast | [Visual system](visual-system.md): type scale, button roles, role tokens, palette tokens, [signal colours and shapes](visual-system.md#signal-colours-and-shapes), [module anatomy](visual-system.md#module-anatomy) |
 | Module faces | [Module faces](module-faces.md) |
 
-The text sizes are five: `SMALL` 11, `BODY` 12, `CONTROL` 13, `HEADING` 15, `TITLE` 18. Nothing is smaller than 11 px.
+The text sizes are five: `SMALL` 11, `BODY` 12, `CONTROL` 13, `HEADING` 15, `TITLE` 18. The app's panels use nothing smaller than 11 px. On canvas tiles the same floor is planned for 100% zoom ([ADR-0053](../adr/0053-module-anatomy-and-face-archetypes.md), after #683); today tile port labels are 9 units and badges 7.
 
 **Planned, not built:** a JSON export of the tokens, with a CI check that keeps it in sync with the code, for design tools. It is code, so it waits for M3.
 

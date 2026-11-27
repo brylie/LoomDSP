@@ -1,7 +1,7 @@
 # UI Redesign Canvas
 
 - **Kind:** Research snapshot. Non-normative.
-- **Date:** 2026-11-27. The canvas and both reviews were read on this date.
+- **Date:** 2026-11-27. The canvas and both reviews were read on this date. Brylie's decisions while the pull request was open are recorded with their own dates, the last on 2026-11-28.
 - **Source:** the "LoomDSP UI redesign" design canvas, a private Design artifact: <https://claude.ai/artifact/A54rM33EepzzEpxt55dgQ3>, version `1795814958-894b`. An AI design agent made it, and the project's navigator session reviewed it twice for Brylie.
 - **Used by:** [ADR-0052](../adr/0052-signal-colour-and-shape.md) (signal colour and shape), [ADR-0053](../adr/0053-module-anatomy-and-face-archetypes.md) (module anatomy and face archetypes), the [visual system](../design/visual-system.md#signal-colours-and-shapes), [module faces](../design/module-faces.md), and the [module catalogue](../product/module-catalogue.md).
 

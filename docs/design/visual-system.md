@@ -174,7 +174,7 @@ Rules:
 7. **Measured.** Every pair of role colours is at least ΔE 14 (CIE76) apart in normal vision and in protanopia, deuteranopia, and tritanopia (Machado 2009, severity 1, linear sRGB); the smallest today is 15.5. Every role colour drawn as a mark is at least 3:1 on the canvas and the tile, and text in a role colour at least 4.5:1, through a tint where needed.
 
 8. **Orange is a handle or an editable value.** On a face, only what can be dragged or typed is orange (`control_value`).
-9. **A port carrying signal has a ring in `light_on` green** (8.34:1 on the tile), filled or hollow alike ([panels](panels.md#signal-activity-on-ports)).
+9. **A patched port carrying signal has a ring in `light_on` green** (8.34:1 on the tile), measured as [panels](panels.md#signal-activity-on-ports) measures activity today: an output by its own signal, an input by the output that feeds it. An unpatched input reads its normal (ADR-0043) and shows no ring, even when the normal moves, such as a bar phase; its hover text names the normal.
 
 *Why:* audio and warning shared a red, Pitch sat beside the value orange, and family headers competed with cables for the same hues. A player asks first what a cable carries, and the family is easy to find by name.
 
@@ -189,7 +189,7 @@ Every module tile has, from top to bottom:
 3. **The face,** one of the archetypes in [module faces](module-faces.md).
 4. **The controls,** in one knob style, with values in display units (ADR-0016).
 
-Text on a tile uses the five tokens of the [type scale](#type-scale): `SMALL` for port labels, the family word, badges, knob labels and values, and face readouts; `BODY` for captions under faces, lane names, and voice rows; `CONTROL` for the module name and button text; `HEADING` for an inspector section and the docked editor's title; `TITLE` for the inspector's title. Nothing on a module is smaller than 11 px at 100% zoom, and a port row is at least 26 px there. The canvas keeps its sizes in world units, because tile text scales with zoom, but they take these values at 100%: today `LABEL_SIZE` is 9, `BADGE_TEXT_SIZE` 7, and `ROW` 16 (`loom-canvas`). So tiles grow in world units, and a patch opens at a default zoom that keeps tiles about as large on screen as today (ADR-0053, Consequences). How it is built: a patch's saved positions scale by the same factor as the tiles, rounded to the snap grid, so a layout keeps its shape and no tiles overlap.
+Text on a tile uses the five tokens of the [type scale](#type-scale): `SMALL` for port labels, the family word, badges, knob labels and values, and face readouts; `BODY` for captions under faces, lane names, and voice rows; `CONTROL` for the module name and button text; `HEADING` for an inspector section and the docked editor's title; `TITLE` for the inspector's title. Nothing on a module is smaller than 11 px at 100% zoom, and a port row is at least 26 px there. The canvas keeps its sizes in world units, because tile text scales with zoom, but they take these values at 100%: today `LABEL_SIZE` is 9, `BADGE_TEXT_SIZE` 7, and `ROW` 16 (`loom-canvas`). So tiles grow in world units, and a patch opens at a default zoom that keeps tiles about as large on screen as today (ADR-0053, Consequences). How it is built: the change that grows the tiles rewrites the saved positions of every example and test patch once, in the same pull request, by the same factor as the tiles, rounded to the snap grid, so each layout keeps its shape and no tiles overlap. The loader never scales positions, so a patch saved and opened again does not grow. The patch format stays at version 1; a patch from outside the repository keeps its positions and may open crowded until it is moved (AGENTS.md, early alpha).
 
 Buttons on and around a module take the [button roles](#button-roles):
 
@@ -349,7 +349,7 @@ Signal colours and shapes, and module anatomy (ADR-0052, ADR-0053; after #683):
 - [ ] A selected module or cable has a white outline, and no knob or handle is white (test on the scene).
 - [ ] Each port row is at least 26 px high at 100% zoom and is the port's pointer target (headless `Ui` test).
 - [ ] At 100% zoom no text on a tile is smaller than `SMALL`, and a patch opens at a default zoom where tiles are about as large on screen as before (test over the canvas text sizes and the camera).
-- [ ] A port that carries signal shows a `light_on` ring, whether it is filled or hollow (test on the scene; panels.md, Signal activity on ports).
+- [ ] A patched port that carries signal shows a `light_on` ring, and an unpatched input shows none (test on the scene; panels.md, Signal activity on ports).
 
 Colour pairs ([#463](https://github.com/brylie/LoomDSP/issues/463)):
 
