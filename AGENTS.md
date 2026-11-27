@@ -92,10 +92,10 @@ For independent builds, run `scripts/setup-worktree-target.sh TARGET_ROOT` once 
 Read code in stages, so you keep only what you need in context: find the files, outline them, then read just the lines that answer the question. `ast-grep` (installed by mise) understands Rust syntax, so it finds code by its shape and skips hits in comments and strings. Use grep for plain text: messages, names in docs, configuration.
 
 ```sh
-ast-grep outline crates/loom-app/src/undo.rs                                  # every item and its members, with line numbers
+ast-grep outline crates/loom-app/src/undo.rs --view expanded                  # every item and member, each with its line number
 ast-grep outline crates/loom-app/src/undo.rs --match '^impl Snapshot' --view expanded   # one impl's methods, each with its first line
 ast-grep outline crates/loom-core/src --items exports                         # a crate's public surface: about 1% of its source
-ast-grep outline crates/loom-modules/src --match '^impl Module for' --view signatures   # every module type, one line each
+ast-grep outline crates/loom-modules/src --items structure --match '^impl Module for' --view signatures   # every module type, one line each (a folder lists only exports by default, and an impl is not one)
 ast-grep run -l rust -p 'io.split::<$$$N>($$$)' crates/loom-modules/src       # calls, by shape
 git diff --stat main...HEAD && git diff -W main...HEAD -- FILE                # what changed, then each changed function whole
 ```
