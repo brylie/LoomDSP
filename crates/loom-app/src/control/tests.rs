@@ -181,12 +181,42 @@ fn targets_split_into_module_and_name() {
 #[test]
 fn keys_and_modifiers_by_name() {
     assert_eq!(key("z"), Ok(Key::Character('z')));
+    assert_eq!(key("Z"), Ok(Key::Character('z')), "a letter is its key, with no Shift");
     assert_eq!(key("Escape"), Ok(Key::Escape));
     assert!(key("hyper").is_err());
+    for (name, named) in [
+        ("escape", Key::Escape),
+        ("enter", Key::Enter),
+        ("tab", Key::Tab),
+        ("space", Key::Space),
+        ("delete", Key::Delete),
+        ("backspace", Key::Backspace),
+        ("up", Key::Up),
+        ("down", Key::Down),
+        ("left", Key::Left),
+        ("right", Key::Right),
+        ("home", Key::Home),
+        ("end", Key::End),
+        ("pageup", Key::PageUp),
+        ("pagedown", Key::PageDown),
+        ("f2", Key::F2),
+    ] {
+        assert_eq!(key(name), Ok(named), "{name}");
+    }
     assert_eq!(
         modifiers(&["cmd".to_string(), "shift".to_string()]),
         Ok(Modifiers::platform_shortcut() | Modifiers::SHIFT)
     );
+    for (name, held) in [
+        ("command", Modifiers::platform_shortcut()),
+        ("ctrl", Modifiers::CONTROL),
+        ("control", Modifiers::CONTROL),
+        ("alt", Modifiers::ALT),
+        ("option", Modifiers::ALT),
+    ] {
+        assert_eq!(modifiers(&[name.to_string()]), Ok(held), "{name}");
+    }
+    assert!(modifiers(&["hyper".to_string()]).is_err());
 }
 
 /// A scripted `[` or `]` carries its place on a US layout, through `key`
