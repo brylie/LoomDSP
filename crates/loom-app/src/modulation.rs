@@ -260,13 +260,40 @@ fn module_kind(node: &loom_core::Node) -> &str {
         .map_or(node.descriptor.id, |unknown| unknown.kind.as_str())
 }
 
-/// A depth as a signed percentage: "+25%", "-10%", "0%".
-pub fn depth_text(depth: f32) -> String {
-    let percent = (depth * 100.0).round() as i32;
-    if percent > 0 {
-        format!("+{percent}%")
+/// A share as a percentage to a tenth, the finest step Shift and an arrow
+/// key move it: "25%", "25.3%", "-10%", "0%". A whole percentage shows no
+/// tenths, so most depths read as they always did.
+pub fn percent_text(share: f32) -> String {
+    let tenths = percent_tenths(share);
+    if tenths == 0.0 {
+        // Never "-0%".
+        "0%".to_string()
+    } else if tenths % 10.0 == 0.0 {
+        format!("{}%", (tenths / 10.0) as i32)
     } else {
-        format!("{percent}%")
+        format!("{:.1}%", tenths / 10.0)
+    }
+}
+
+/// A share as a percentage, rounded to a tenth, for a screen reader's
+/// value: 0.253 is 25.3.
+pub fn percent_value(share: f32) -> f64 {
+    f64::from(percent_tenths(share)) / 10.0
+}
+
+/// A share in tenths of a percent, rounded.
+fn percent_tenths(share: f32) -> f32 {
+    (share * 1000.0).round()
+}
+
+/// A depth as a signed percentage to a tenth: "+25%", "+25.3%", "-10%",
+/// "0%".
+pub fn depth_text(depth: f32) -> String {
+    let text = percent_text(depth);
+    if percent_tenths(depth) > 0.0 {
+        format!("+{text}")
+    } else {
+        text
     }
 }
 

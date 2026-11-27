@@ -709,7 +709,7 @@ fn card(a: &AssignmentRow, looks: Looks) -> Element {
                 Access::new(Role::Slider, "Depth")
                     .description(a.depth_text.clone())
                     .value(Value::Number {
-                        value: f64::from((a.depth * 100.0).round()),
+                        value: crate::modulation::percent_value(a.depth),
                         min: -100.0,
                         max: 100.0,
                         step: Some(1.0),
@@ -1093,7 +1093,9 @@ fn mode_rows(s: &super::super::SubPatchRows, looks: Looks) -> Vec<Element> {
         if !s.spread.is_empty() {
             let mut spreads = vec![Element::text("Spread", style::BODY_TEXT).colour(looks.quiet)];
             for spread in &s.spread {
-                let percent = (spread.amount * 100.0).round();
+                // To a tenth of a percent, the step Shift and an arrow key
+                // move it.
+                let percent = crate::modulation::percent_text(spread.amount);
                 spreads.push(
                     Element::row([
                         Element::text(spread.name.clone(), style::BODY_TEXT).colour(looks.text),
@@ -1101,9 +1103,9 @@ fn mode_rows(s: &super::super::SubPatchRows, looks: Looks) -> Vec<Element> {
                             .key(spread.name.as_str())
                             .access(
                                 Access::new(Role::Slider, format!("Spread of {}", spread.name))
-                                    .description(format!("{percent:.0}%"))
+                                    .description(percent.clone())
                                     .value(Value::Number {
-                                        value: f64::from(percent),
+                                        value: crate::modulation::percent_value(spread.amount),
                                         min: 0.0,
                                         max: 100.0,
                                         step: Some(1.0),
@@ -1112,7 +1114,7 @@ fn mode_rows(s: &super::super::SubPatchRows, looks: Looks) -> Vec<Element> {
                                     .action(Action::Decrement)
                                     .action(Action::SetValue),
                             ),
-                        Element::text(format!("{percent:.0}%"), style::BODY_TEXT).colour(looks.text),
+                        Element::text(percent, style::BODY_TEXT).colour(looks.text),
                     ])
                     .spacing(8.0)
                     .align_y(Align::Center)
