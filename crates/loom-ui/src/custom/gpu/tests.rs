@@ -30,15 +30,43 @@ const HEIGHT: u32 = 80;
 /// The format drawn into.
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-/// A shader that fills its whole viewport green: one triangle over it.
-const FILL: &str = "
-@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
-    let x = f32(i32(i & 1u) * 4 - 1);
-    let y = f32(i32(i >> 1u) * 4 - 1);
-    return vec4<f32>(x, y, 0.0, 1.0);
+/// A pipeline that fills its whole viewport, inside the scissor, with
+/// `colour`: one triangle over it.
+fn fill(device: &wgpu::Device, format: wgpu::TextureFormat, [red, green, blue]: [f32; 3]) -> wgpu::RenderPipeline {
+    let source = format!(
+        "@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {{
+            let x = f32(i32(i & 1u) * 4 - 1);
+            let y = f32(i32(i >> 1u) * 4 - 1);
+            return vec4<f32>(x, y, 0.0, 1.0);
+        }}
+        @fragment fn fs() -> @location(0) vec4<f32> {{ return vec4<f32>({red:?}, {green:?}, {blue:?}, 1.0); }}"
+    );
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("fill"),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("fill"),
+        layout: None,
+        vertex: wgpu::VertexState {
+            module: &module,
+            entry_point: Some("vs"),
+            buffers: &[],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some("fs"),
+            targets: &[Some(format.into())],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+        cache: None,
+    })
 }
-@fragment fn fs() -> @location(0) vec4<f32> { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }
-";
 
 /// The pad's state: its pipeline, built lazily for each device, and what
 /// it was told.
@@ -72,34 +100,9 @@ impl CustomGpu<Pads> for PadState {
         }
         let [x, y, width, height] = gpu.scissor;
         self.narrow = [x, y, width * 3 / 4, height];
-        if self.pipeline.is_some() {
-            return;
+        if self.pipeline.is_none() {
+            self.pipeline = Some(fill(gpu.device, gpu.format, [0.0, 1.0, 0.0]));
         }
-        let module = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pad fill"),
-            source: wgpu::ShaderSource::Wgsl(FILL.into()),
-        });
-        self.pipeline = Some(gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("pad fill"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs"),
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs"),
-                targets: &[Some(gpu.format.into())],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        }));
     }
 
     fn draw(&self, pass: &mut Pass<'_>) {
@@ -107,6 +110,19 @@ impl CustomGpu<Pads> for PadState {
         // It narrows its scissor, which the host must set back after.
         let [x, y, width, height] = self.narrow;
         pass.set_scissor_rect(x, y, width, height);
+        pass.set_pipeline(pipeline);
+        pass.draw(0..3, 0..1);
+    }
+
+    fn above(&self, app: &Pads) -> Option<Layer> {
+        app.above.then_some(Layer::Panels)
+    }
+
+    fn draw_above(&self, pass: &mut Pass<'_>) {
+        let Some(pipeline) = &self.pipeline else { return };
+        // It narrows the scissor to a corner, which the host must set back
+        // before it draws on in the same pass.
+        pass.set_scissor_rect(0, 0, 4, 4);
         pass.set_pipeline(pipeline);
         pass.draw(0..3, 0..1);
     }
@@ -128,6 +144,8 @@ const BLUE: Color = Color::rgb(0.0, 0.0, 1.0);
 struct Pads {
     /// True when the pad prepares nothing, as one whose pipeline failed.
     broken: bool,
+    /// True when the pad draws above the Panels layer too.
+    above: bool,
 }
 
 impl App for Pads {
@@ -204,9 +222,9 @@ fn target(height: u32) -> Target {
 }
 
 /// The pad app, laid out.
-fn harness(text: &RefCell<Typesetter>, broken: bool) -> Harness<Pads, NoTarget> {
+fn harness(text: &RefCell<Typesetter>, app: Pads) -> Harness<Pads, NoTarget> {
     let window = WindowState::new(Size::new(WIDTH as f32, HEIGHT as f32));
-    let mut harness = Harness::new(Pads { broken }, NoTarget, window, Instant::now());
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
     harness.lay_out(&mut *text.borrow_mut());
     harness
 }
@@ -224,12 +242,16 @@ fn paint(harness: &mut Harness<Pads, NoTarget>, text: &RefCell<Typesetter>, heig
     (list, plan)
 }
 
-/// What one frame is drawn on: which device, in which format, how tall.
+/// What one frame is drawn on: which device, in which format, how tall,
+/// and whether the host draws on after the frame in the same pass.
 #[derive(Clone, Copy)]
 struct On {
     generation: u64,
     format: wgpu::TextureFormat,
     height: u32,
+    /// The host fills the whole target white after the frame, setting no
+    /// scissor, as a host that draws in the same pass would.
+    host_after: bool,
 }
 
 /// The first device, in the test's format, at the window's height.
@@ -237,6 +259,7 @@ const FIRST: On = On {
     generation: 1,
     format: FORMAT,
     height: HEIGHT,
+    host_after: false,
 };
 
 /// Draws one frame of the pad app over black, as a host does, and reads
@@ -246,7 +269,9 @@ fn draw(harness: &mut Harness<Pads, NoTarget>, device: &wgpu::Device, queue: &wg
         generation,
         format,
         height,
+        host_after,
     } = on;
+    let host = host_after.then(|| fill(device, format, [1.0, 1.0, 1.0]));
     let text = RefCell::new(Typesetter::new());
     let (list, plan) = paint(harness, &text, height);
     let frame = GpuFrame {
@@ -295,6 +320,10 @@ fn draw(harness: &mut Harness<Pads, NoTarget>, device: &wgpu::Device, queue: &wg
             occlusion_query_set: None,
         });
         panels.draw_frame(&plan, &renderer, &mut pass, &frame);
+        if let Some(host) = &host {
+            pass.set_pipeline(host);
+            pass.draw(0..3, 0..1);
+        }
     }
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("custom gpu test read-back"),
@@ -337,6 +366,7 @@ fn colour(pixels: &[u8], x: u32, y: u32) -> Option<char> {
         [255, 0, 0] => Some('r'),
         [0, 255, 0] => Some('g'),
         [0, 0, 255] => Some('b'),
+        [255, 255, 255] => Some('w'),
         _ => None,
     }
 }
@@ -353,7 +383,13 @@ fn gpu_drawing_goes_in_paint_order_and_leaves_the_pass_as_it_was() {
         return;
     };
     let text = RefCell::new(Typesetter::new());
-    let mut harness = harness(&text, false);
+    let mut harness = harness(
+        &text,
+        Pads {
+            broken: false,
+            above: false,
+        },
+    );
     let pixels = draw(&mut harness, &device, &queue, FIRST);
     // The box painted after it is over it.
     assert_eq!(colour(&pixels, 10, 10), Some('b'));
@@ -378,7 +414,13 @@ fn an_element_that_prepares_nothing_leaves_the_rest() {
         return;
     };
     let text = RefCell::new(Typesetter::new());
-    let mut harness = harness(&text, true);
+    let mut harness = harness(
+        &text,
+        Pads {
+            broken: true,
+            above: false,
+        },
+    );
     let pixels = draw(&mut harness, &device, &queue, FIRST);
     assert_eq!(colour(&pixels, 40, 10), Some('r'), "the background where it would draw");
     assert_eq!(colour(&pixels, 10, 10), Some('b'));
@@ -396,7 +438,13 @@ fn a_new_device_or_format_is_told_once_and_keeps_input_state() {
         return;
     };
     let text = RefCell::new(Typesetter::new());
-    let mut harness = harness(&text, false);
+    let mut harness = harness(
+        &text,
+        Pads {
+            broken: false,
+            above: false,
+        },
+    );
     let pad = UiId::panel("main").with("pad");
     let lost = |harness: &Harness<Pads, NoTarget>| {
         let state = harness.runtime().custom::<PadState>(&pad).expect("the pad");
@@ -446,4 +494,36 @@ fn a_new_device_or_format_is_told_once_and_keeps_input_state() {
     let pixels = draw(&mut harness, &device, &queue, second);
     assert_eq!(lost(&harness), (2, 7), "a new device: lost once more, input kept");
     assert_eq!(colour(&pixels, 40, 10), Some('g'), "it built its pipeline again");
+}
+
+/// After an element draws above a layer, the host sets the whole target's
+/// viewport and scissor back, so what a host draws next in the same pass,
+/// with no scissor of its own, reaches every corner.
+#[test]
+fn drawing_above_leaves_the_pass_for_the_host() {
+    let Some((device, queue)) = device() else {
+        assert!(!gpu_required(), "LOOM_REQUIRE_GPU is set, but there is no GPU adapter");
+        eprintln!("skipped: no GPU adapter");
+        return;
+    };
+    let text = RefCell::new(Typesetter::new());
+    let mut harness = harness(
+        &text,
+        Pads {
+            broken: false,
+            above: true,
+        },
+    );
+    let pixels = draw(
+        &mut harness,
+        &device,
+        &queue,
+        On {
+            host_after: true,
+            ..FIRST
+        },
+    );
+    for (x, y) in [(0, 0), (WIDTH - 1, 0), (0, HEIGHT - 1), (WIDTH - 1, HEIGHT - 1)] {
+        assert_eq!(colour(&pixels, x, y), Some('w'), "the host's fill at ({x}, {y})");
+    }
 }
