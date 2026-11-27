@@ -495,6 +495,8 @@ enum Message {
     /// Put the field back, and focus it with all of its text selected, in
     /// one update, before the layout that makes it.
     ReturnAndFocusAll,
+    /// The same, then focus it again keeping the caret, in that update.
+    ReturnAndFocusAllThenKeep,
     /// Focus the first UI ID, then the second, in one update.
     FocusTwice(UiId, UiId),
     /// What a field reports to a screen reader changed, with the text the
@@ -557,6 +559,10 @@ impl App for Form {
             Message::ReturnAndFocusAll => {
                 self.removed = false;
                 return Effects::focus_and_select_all(name());
+            }
+            Message::ReturnAndFocusAllThenKeep => {
+                self.removed = false;
+                return Effects::focus_and_select_all(name()).and(Effects::focus(name()));
             }
             Message::SetText(text) => self.text = text,
             Message::Reader(action) => self.log.push(format!("reader {action:?}")),
@@ -1895,6 +1901,27 @@ fn select_all_waits_for_the_layout_that_makes_the_field() {
         harness.runtime().field_text(&name()),
         Some("8"),
         "typing replaced all of it"
+    );
+}
+
+/// The last focus effect on a field that waits for its layout decides
+/// whether it selects all: a plain focus after a select-all keeps the
+/// caret, so typing adds to the text.
+#[test]
+fn a_later_plain_focus_cancels_a_waiting_select_all() {
+    let Some((mut harness, mut typesetter)) = form("440", true) else {
+        return;
+    };
+    harness.send(Message::Remove);
+    harness.lay_out(&mut typesetter);
+    harness.send(Message::ReturnAndFocusAllThenKeep);
+    harness.lay_out(&mut typesetter);
+    assert_eq!(harness.runtime().focused(), Some(&name()));
+    type_in(&mut harness, "8");
+    assert_eq!(
+        harness.runtime().field_text(&name()),
+        Some("4408"),
+        "typing added to it"
     );
 }
 

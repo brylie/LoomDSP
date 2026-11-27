@@ -697,6 +697,10 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// end leaves it for the target. Everything else is the target's, as
     /// before. Returns true when the runtime's focus changed.
     fn focus_effect(&mut self, target: &FocusTarget, select: Selection) -> bool {
+        // Each focus effect decides afresh whether a field that waits for
+        // its layout selects all: the caller marks it again for one that
+        // asks.
+        self.focus.wanted_select = None;
         // A part inside a custom element is the element's to focus: the
         // runtime's focus goes to the element when it found the part, and
         // the effect is dropped when it did not (section 9, rule 6).
