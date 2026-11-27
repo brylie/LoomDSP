@@ -526,4 +526,10 @@ fn drawing_above_leaves_the_pass_for_the_host() {
     for (x, y) in [(0, 0), (WIDTH - 1, 0), (0, HEIGHT - 1), (WIDTH - 1, HEIGHT - 1)] {
         assert_eq!(colour(&pixels, x, y), Some('w'), "the host's fill at ({x}, {y})");
     }
+    // With no host fill after it, its drawing above shows in the corner it
+    // set its scissor to, over the blue box painted after the pad there,
+    // so the white above was the host drawing over a drawing that ran.
+    let pixels = draw(&mut harness, &device, &queue, FIRST);
+    assert_eq!(colour(&pixels, 0, 0), Some('g'), "its drawing above, over the box");
+    assert_eq!(colour(&pixels, 40, 10), Some('g'), "the pad itself");
 }
