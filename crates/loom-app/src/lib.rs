@@ -45,6 +45,8 @@ mod input_owner;
 mod input_session;
 mod input_watch;
 mod inspector;
+#[cfg(test)]
+mod key_order_tests;
 mod layout;
 mod learn;
 mod levels;
