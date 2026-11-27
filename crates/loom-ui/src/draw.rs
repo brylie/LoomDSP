@@ -332,6 +332,8 @@ impl<A: App> Panels<'_, A> {
             }
             painter.end_layer();
         }
+        // What an element draws above this layer goes here.
+        painter.mark(crate::paint::Mark::LayerEnd(layer));
     }
 }
 
@@ -517,6 +519,8 @@ impl Layout {
             if let (Some(kind), Some(id)) = (record.custom, &record.id) {
                 let around = record.clip.map_or(clip, |inner| cut(clip, moved(inner, by)));
                 painter.begin_layer(cut(around, bounds));
+                // A host that draws the element with the GPU cuts here.
+                painter.mark(crate::paint::Mark::Custom(id.clone()));
                 customs.paint(id, kind, bounds, painter);
                 painter.end_layer();
             }

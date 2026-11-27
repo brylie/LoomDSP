@@ -24,11 +24,18 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::time::Instant;
 
+mod frame;
+#[cfg(feature = "gpu")]
+mod gpu;
 mod keys;
 mod nodes;
 mod paint;
 mod pointer;
 mod ticks;
+
+pub use frame::{FramePlan, FrameStep};
+#[cfg(feature = "gpu")]
+pub use gpu::{CustomGpu, Gpu, Pass};
 
 pub(crate) use paint::{Fresh, Kept, NoCustoms, PaintCustoms};
 
@@ -180,6 +187,20 @@ pub trait Custom<A: App>: Any {
     /// default it paints nothing.
     fn paint(&self, app: &A, bounds: Rect, painter: &mut dyn TextPainter) {
         let _ = (app, bounds, painter);
+    }
+
+    /// Its GPU half, when it draws with its own pipelines too
+    /// ([`CustomGpu`]). An element that does returns itself. By default it
+    /// paints only.
+    #[cfg(feature = "gpu")]
+    fn gpu(&self) -> Option<&dyn CustomGpu<A>> {
+        None
+    }
+
+    /// Its GPU half, to prepare: the same as [`Custom::gpu`].
+    #[cfg(feature = "gpu")]
+    fn gpu_mut(&mut self) -> Option<&mut dyn CustomGpu<A>> {
+        None
     }
 }
 
@@ -501,6 +522,35 @@ impl<A: App> Customs<A> {
     pub(crate) fn empty(&mut self, id: &UiId) {
         if let Some(hosted) = self.elements.get_mut(id) {
             hosted.state = None;
+        }
+    }
+
+    /// True when the element `id` draws with the GPU too.
+    pub(crate) fn uses_gpu(&self, id: &UiId) -> bool {
+        #[cfg(feature = "gpu")]
+        {
+            self.state(id).is_some_and(|state| state.gpu().is_some())
+        }
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = id;
+            false
+        }
+    }
+
+    /// True when the element `id` draws with the GPU above the panels of
+    /// `layer` too.
+    pub(crate) fn above(&self, app: &A, id: &UiId, layer: Layer) -> bool {
+        #[cfg(feature = "gpu")]
+        {
+            self.state(id)
+                .and_then(|state| state.gpu())
+                .is_some_and(|gpu| gpu.above(app) == Some(layer))
+        }
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = (app, id, layer);
+            false
         }
     }
 

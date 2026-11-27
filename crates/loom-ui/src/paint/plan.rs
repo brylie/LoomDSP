@@ -137,6 +137,11 @@ pub(crate) struct PaintPlan {
     pub(crate) glyphs: Vec<GlyphQuad>,
     /// The draw calls, back to front.
     pub(crate) steps: Vec<Step>,
+    /// For each of the list's layers, the index of its first step, and
+    /// one more at the end: a layer clipped away has no steps, so the
+    /// layers from `a` to `b` draw the steps from `layer_steps[a]` to
+    /// `layer_steps[b]`.
+    pub(crate) layer_steps: Vec<usize>,
     /// Glyphs left out because the atlas was full at its largest size.
     pub(crate) skipped: u64,
 }
@@ -167,6 +172,7 @@ impl PaintPlan {
         'frame: loop {
             let mut plan = PaintPlan::default();
             for layer in &list.layers {
+                plan.layer_steps.push(plan.steps.len());
                 let Some(scissor) = scissor(layer.clip, target) else {
                     continue;
                 };
@@ -223,6 +229,7 @@ impl PaintPlan {
                     }
                 }
             }
+            plan.layer_steps.push(plan.steps.len());
             return plan;
         }
     }

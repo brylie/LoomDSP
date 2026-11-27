@@ -13,8 +13,10 @@
 //!    API (decision of 2026-11-14).
 //! 2. **No source file names a window toolkit** (`winit`, `wgpu`, or Iced),
 //!    test files included, except the window shell, `shell.rs` and the
-//!    files under `shell/`, and the paint renderer, `paint/gpu.rs` and the
-//!    files under `paint/gpu/`, which name `wgpu` only. `accesskit_winit` counts as `winit`, so only
+//!    files under `shell/`, and the GPU halves, which name `wgpu` only:
+//!    the paint renderer, `paint/gpu.rs` and the files under `paint/gpu/`,
+//!    and a custom element's, `custom/gpu.rs` and the files under
+//!    `custom/gpu/`. `accesskit_winit` counts as `winit`, so only
 //!    the shell names the screen reader adapter; the tree's types
 //!    (`accesskit`) may be named anywhere. Iced is named nowhere.
 //! 3. **No source file reads the clock,** test files aside. Every call
@@ -167,10 +169,14 @@ fn is_shell(path: &Path) -> bool {
     path == Path::new("shell.rs") || path.starts_with("shell")
 }
 
-/// True for the paint renderer's files: `paint/gpu.rs` and those under
-/// `paint/gpu/`.
-fn is_paint_gpu(path: &Path) -> bool {
-    path == Path::new("paint/gpu.rs") || path.starts_with("paint/gpu")
+/// True for the GPU halves' files: the paint renderer's, `paint/gpu.rs`
+/// and those under `paint/gpu/`, and a custom element's, `custom/gpu.rs`
+/// and those under `custom/gpu/`.
+fn is_gpu_half(path: &Path) -> bool {
+    path == Path::new("paint/gpu.rs")
+        || path.starts_with("paint/gpu")
+        || path == Path::new("custom/gpu.rs")
+        || path.starts_with("custom/gpu")
 }
 
 /// The line in `manifest` that declares `name` as a dependency.
@@ -239,18 +245,18 @@ fn only_the_clipboard_names_its_crates() {
 }
 
 /// No source file names a window toolkit, except the shell, which names
-/// winit and wgpu and never Iced, and the paint renderer, which names wgpu
+/// winit and wgpu and never Iced, and the GPU halves, which name wgpu
 /// alone.
 #[test]
 fn no_source_file_names_a_window_toolkit() {
-    let (scanned, found) = scan(&TOOLKITS, |path| !is_shell(path) && !is_paint_gpu(path));
+    let (scanned, found) = scan(&TOOLKITS, |path| !is_shell(path) && !is_gpu_half(path));
     assert!(scanned >= 1, "the scan found the crate's files, not {scanned}");
     assert_eq!(found, Vec::<String>::new());
     let (shell, found) = scan(&ICED, is_shell);
     assert!(shell >= 1, "the scan found the shell's files, not {shell}");
     assert_eq!(found, Vec::<String>::new());
-    let (paint, found) = scan(&WINDOW, is_paint_gpu);
-    assert!(paint >= 1, "the scan found the paint renderer's files, not {paint}");
+    let (paint, found) = scan(&WINDOW, is_gpu_half);
+    assert!(paint >= 1, "the scan found the GPU halves' files, not {paint}");
     assert_eq!(found, Vec::<String>::new());
 }
 
@@ -332,7 +338,7 @@ let due = now + delay;
         ("paint/plan.rs", false),
         ("paint.rs", false),
     ] {
-        assert_eq!(is_paint_gpu(Path::new(path)), paint, "{path}");
+        assert_eq!(is_gpu_half(Path::new(path)), paint, "{path}");
     }
     assert_eq!(
         dependency_line("winit = { workspace = true, optional = true }", "winit"),

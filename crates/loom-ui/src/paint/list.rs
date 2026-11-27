@@ -103,6 +103,9 @@ pub struct PaintList {
     pub(crate) layers: Vec<Layer>,
     /// The clips of the layers begun and not ended, outermost first.
     open: Vec<Rect>,
+    /// The marks, each with the index of the layer it cuts before: the
+    /// layers before it are drawn before what goes there.
+    pub(crate) marks: Vec<(usize, super::Mark)>,
 }
 
 impl PaintList {
@@ -136,6 +139,38 @@ impl PaintList {
             clip,
             batches: Vec::new(),
         });
+    }
+
+    /// The marks noted while painting, each with the index of the layer it
+    /// cuts before.
+    pub fn marks(&self) -> &[(usize, super::Mark)] {
+        &self.marks
+    }
+
+    /// How many layers it holds.
+    pub fn layer_count(&self) -> usize {
+        self.layers.len()
+    }
+
+    /// The clip of layer `index`, in the host's logical pixels.
+    pub fn layer_clip(&self, index: usize) -> Option<Rect> {
+        self.layers.get(index).map(|layer| layer.clip)
+    }
+
+    /// The layer that holds the first box filled with `fill`, for a test
+    /// that checks where something was painted.
+    #[cfg(test)]
+    pub(crate) fn layer_of_fill(&self, fill: loom_ui_core::Color) -> Option<usize> {
+        let index = self
+            .boxes
+            .iter()
+            .position(|shape| matches!(shape, PaintBox::Quad(quad) if quad.fill == fill))? as u32;
+        self.layers.iter().position(|layer| {
+            layer
+                .batches
+                .iter()
+                .any(|batch| matches!(batch, Batch::Boxes(range) if range.contains(&index)))
+        })
     }
 
     /// True when nothing was painted.
@@ -312,6 +347,28 @@ impl Painter for ListPainter<'_> {
         if let Some(&clip) = self.list.open.last() {
             self.list.start_layer(clip);
         }
+    }
+
+    fn mark(&mut self, mark: super::Mark) {
+        let at = match &mark {
+            // An element marks the layer it just began, which holds only
+            // its own painting.
+            super::Mark::Custom(_) => self.list.layers.len().saturating_sub(1),
+            // The end of a window layer cuts before a fresh layer, so what
+            // is painted after goes after the cut.
+            super::Mark::LayerEnd(_) => {
+                let at = self.list.layers.len();
+                let clip = self
+                    .list
+                    .open
+                    .last()
+                    .copied()
+                    .unwrap_or(Rect::new(Point::ORIGIN, Size::new(f32::MAX, f32::MAX)));
+                self.list.start_layer(clip);
+                at
+            }
+        };
+        self.list.marks.push((at, mark));
     }
 }
 

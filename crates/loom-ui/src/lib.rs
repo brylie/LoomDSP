@@ -87,8 +87,11 @@ mod window;
 
 pub use app::{App, Context, Deadline, InputState, TabStep, WindowSpec};
 pub use custom::{
-    AccessRequest, AccessValue, Custom, CustomEvent, CustomKind, CustomNode, CustomNodes, Moment, Out, Used,
+    AccessRequest, AccessValue, Custom, CustomEvent, CustomKind, CustomNode, CustomNodes, FramePlan, FrameStep, Moment,
+    Out, Used,
 };
+#[cfg(feature = "gpu")]
+pub use custom::{CustomGpu, Gpu, Pass};
 pub use draw::Panels;
 pub use driver::{Driver, Paste};
 pub use effect::{ClipboardText, Effect, Effects};
