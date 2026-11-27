@@ -38,6 +38,9 @@ python = "3.13.11"
 # same dependencies (scripts/rustc-wrapper.sh). A command-line tool only,
 # never linked into the crates (Apache-2.0).
 "aqua:mozilla/sccache" = "latest"
+# Structural code search and file outlines for agents and people
+# (AGENTS.md, "Reading code"). A command-line tool only (MIT).
+"aqua:ast-grep/ast-grep" = "latest"
 
 [env]
 # Minimum line coverage, in percent. It must match the "Restrict code
