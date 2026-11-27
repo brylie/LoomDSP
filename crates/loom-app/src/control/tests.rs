@@ -2432,10 +2432,35 @@ fn a_scripted_panic_key_works_over_a_question() {
     let refused = |key: Key, m| refuse_while_asking(Some(&question), &key, m).is_err();
     assert!(!refused(Key::Character('.'), cmd), "Panic");
     assert!(!refused(Key::Tab, Modifiers::NONE));
+    assert!(!refused(Key::Space, Modifiers::NONE), "Space gives the focused answer");
     assert!(refused(Key::Character('z'), cmd));
     assert!(refused(Key::Character('.'), Modifiers::NONE));
     // With no question open, nothing is refused here.
     assert!(refuse_while_asking(None, &Key::Character('z'), cmd).is_ok());
+}
+
+/// A script's Space on the question's focused answer gives that answer, as
+/// a real Space does, through the runtime's key path; Tab moves one answer
+/// on, once, on the way (#878).
+#[test]
+fn a_scripted_space_gives_the_focused_answer() {
+    let mut ui = typing_ui();
+    ui.app_mut().edit(|app| {
+        app.session.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+    });
+    run_ui(&mut ui, r#"{"cmd": "toolbar", "button": "new"}"#).unwrap();
+    ui.redraw();
+    let answer = |ui: &crate::ui_test::Ui| ui.app().overlays.question.as_ref().map(|q| q.highlighted_id());
+    let save = answer(&ui).expect("the question");
+    assert_eq!(ui.runtime().focused(), Some(&save), "on its safe answer, Save");
+    run_ui(&mut ui, r#"{"cmd": "key", "key": "tab"}"#).unwrap();
+    let dont_save = answer(&ui).expect("still asking");
+    assert_ne!(dont_save, save, "Tab moved one answer on");
+    assert_eq!(ui.runtime().focused(), Some(&dont_save));
+    run_ui(&mut ui, r#"{"cmd": "key", "key": "space"}"#).unwrap();
+    assert!(ui.app().overlays.question.is_none(), "Space gave Don't Save");
+    assert!(!ui.app().unsaved(), "the new patch, with nothing saved");
 }
 
 /// `open` works as File > Open does, so a patch that loads differently from
