@@ -126,8 +126,14 @@ impl<A: App> Panels<'_, A> {
         // app hears of a change on the next turn (section 9, rule 3).
         self.build_custom_nodes_later();
         self.focus.settle(self.window);
-        self.reveal();
-        self.reveal_caret();
+        // A reveal scrolls a container in place, which moves the custom
+        // elements inside it: settle them again, so their bounds, their
+        // GPU viewports, and their nodes follow the scroll.
+        let scrolled = self.reveal() | self.reveal_caret();
+        if scrolled {
+            self.customs.settle(self.window.customs(), self.app);
+            self.build_custom_nodes_later();
+        }
         self.place_hint(text);
         self.report_focus();
         self.report_hidden_anchors();

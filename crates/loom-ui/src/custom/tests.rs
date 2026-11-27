@@ -6,7 +6,7 @@ use crate::app::{App, Context, WindowSpec};
 use crate::custom::{Custom, CustomKind};
 use crate::effect::Effects;
 use crate::element::{Element, Length};
-use crate::event::WindowState;
+use crate::event::{DriverEvent, WindowEvent, WindowState};
 use crate::headless::Harness;
 use crate::layout::Layout;
 use crate::layout::tests::Mono;
@@ -227,6 +227,7 @@ fn update_reads_the_state() {
 /// A custom element with no key has no UI ID to keep its state by, which
 /// a debug build refuses at layout.
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(expected = "an element in panel p breaks a rule: it has no key")]
 fn a_custom_element_needs_a_key() {
     let mut layout = Layout::new(UiId::panel("p"));
@@ -236,8 +237,92 @@ fn a_custom_element_needs_a_key() {
 /// A kind the app does not know gets no state, which a debug build
 /// refuses.
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(expected = "the app made no state for the custom element")]
 fn an_unknown_kind_panics_in_a_debug_build() {
     let mut harness = harness();
     send(&mut harness, Message::Kind(CustomKind::new("unknown")));
+}
+
+/// A scroll container 50 tall around a space and a pad 40 tall, which
+/// starts half out of view. Each message asks to scroll the pad into view.
+struct Scrolled;
+
+impl App for Scrolled {
+    type Message = ();
+
+    fn update(&mut self, _message: (), _cx: &Context<'_, ()>) -> Effects<()> {
+        Effects::scroll_into_view(scrolled_pad())
+    }
+
+    fn view(&self, view: &mut View) {
+        view.panel_with(UiId::panel("main"), Layer::Panels, &(), |_| {
+            let content = Element::column([
+                Element::space(Length::Fixed(10.0), Length::Fixed(30.0)),
+                Element::custom(PAD)
+                    .key("pad")
+                    .width(Length::Fixed(100.0))
+                    .height(Length::Fixed(40.0)),
+            ]);
+            Element::scroll(content, crate::window::scroll::tests::SCROLL)
+                .key("list")
+                .height(Length::Fixed(50.0))
+                .access(crate::access::Access::new(crate::access::Role::ScrollView, "List"))
+        });
+    }
+
+    fn window(&self) -> WindowSpec {
+        WindowSpec::default()
+    }
+
+    fn make_custom(&self, _id: &UiId, _kind: CustomKind) -> Option<Box<dyn Custom<Self>>> {
+        Some(Box::new(ScrolledPad))
+    }
+}
+
+/// The pad's state in [`Scrolled`], which needs none of its own.
+struct ScrolledPad;
+
+impl Custom<Scrolled> for ScrolledPad {}
+
+/// The pad's UI ID in [`Scrolled`].
+fn scrolled_pad() -> UiId {
+    UiId::panel("main").with("list").with("pad")
+}
+
+/// A reveal the layout carries out, because the turn that asked for it
+/// found the layout out of date, scrolls the container in place. The pad's
+/// bounds
+/// follow that scroll in the same layout, so its drawing, its viewport,
+/// and its node are where it shows, not where it was before the scroll.
+#[test]
+fn the_bounds_follow_a_reveal_in_the_same_layout() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let mut harness = Harness::new(Scrolled, NoTarget, window, Instant::now());
+    harness.lay_out(&mut Mono::default());
+    let before = harness
+        .runtime()
+        .custom_bounds(&scrolled_pad())
+        .expect("the pad is laid out");
+    assert!(
+        before.y + before.height > 50.0,
+        "the pad starts partly below the view: {before:?}"
+    );
+    // A resize leaves the layout out of date, so the turn that asks for
+    // the scroll leaves it to the next layout.
+    harness.step(DriverEvent::Window(WindowEvent::Resized(Size::new(400.0, 210.0))));
+    harness.send(());
+    harness.lay_out(&mut Mono::default());
+    let after = harness
+        .runtime()
+        .custom_bounds(&scrolled_pad())
+        .expect("the pad is laid out");
+    assert!(
+        after.y < before.y,
+        "the pad moved up with the scroll: {before:?} to {after:?}"
+    );
+    assert!(
+        after.y + after.height <= 50.0,
+        "the pad shows in the container: {after:?}"
+    );
 }

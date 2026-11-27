@@ -170,3 +170,19 @@ fn a_screen_reader_moves_the_dot_through_its_sliders() {
         .and_then(|(_, node)| node.numeric_value());
     assert!(value.is_some_and(|value| (value - 0.55).abs() < 1e-6));
 }
+
+/// A move too small to change the hundredths leaves the nodes as they
+/// were: they show the hundredths `access_version` keys on, so a debug
+/// build's check that skipped nodes are unchanged holds.
+#[test]
+fn a_move_within_a_hundredth_keeps_the_nodes() {
+    let mut harness = harness();
+    let before = harness.runtime().access_nodes(&mut IdTable::default());
+    harness.send(Message::Set(0.501, 0.5));
+    harness.lay_out(&mut Monospace);
+    harness.step(DriverEvent::Woken);
+    harness.lay_out(&mut Monospace);
+    let after = harness.runtime().access_nodes(&mut IdTable::default());
+    assert_eq!(dot(&harness), (50, 50));
+    assert_eq!(format!("{:?}", before.nodes), format!("{:?}", after.nodes));
+}

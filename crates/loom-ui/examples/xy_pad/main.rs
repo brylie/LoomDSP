@@ -310,9 +310,12 @@ impl Custom<XyApp> for PadState {
 
     fn access(&self, app: &XyApp, bounds: Rect, nodes: &mut CustomNodes) {
         for (key, name, value) in [("x", "X", app.x), ("y", "Y", app.y)] {
+            // The same hundredths `access_version` keys on, so a move too
+            // small to change the version never changes a node.
+            let value = f64::from(rounded(value)) / 100.0;
             let slider = Access::new(Role::Slider, name)
                 .value(Value::Number {
-                    value: f64::from(value),
+                    value,
                     min: 0.0,
                     max: 1.0,
                     step: Some(f64::from(STEP)),
