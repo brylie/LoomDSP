@@ -68,7 +68,7 @@ The suite is broad and mostly fast: 4,450 tests in 29 binaries, a median test of
 - **Where:** test helpers that name a folder after the process ID and never remove it. The largest: `folder` at `crates/loom-app/src/settings/tests.rs:13` (`loom-settings-<name>-<pid>`, about 1,470 folders for each test that uses it) and `crates/loom-app/src/control/tests.rs:1890` (`loom-control-<name>-<pid>`, about 1,510 each). 164 distinct name prefixes are in the temp folder. Each helper removes an old folder of the same name first, but the name has a new process ID every run, so nothing is ever removed. The static check (test files that make temp folders and remove none) found only two files, so it cannot see this pattern; the probe can.
 - **The problem:** 108,531 of the 113,647 entries in this machine's temp folder are `loom-*` folders. None of the 82 tests the probe picked left anything; a positive control, `a_learned_panic_trigger_is_saved_and_runs_panic` run alone with an empty temp folder, left 1.0 folder per run, so the probe does count leaks.
 - **The consequence:** the folder grows with every test run on every developer machine. With finding 1 that was a slowdown; without it, it is still disk, and a trap for the next sweep.
-- **Direction:** a session started on 2026-11-26 is making the tests clean up their temp folders, on branch `claude/agitated-galileo-5bda90`, not yet pushed, with no issue or pull request. The usual pattern is a guard that removes the folder on drop, or one folder per run that the run removes. When it lands, rerun the probe with `--repeat 1` over all binaries to confirm. Purging the existing folders is the owner's call, because other agents' runs use live folders there.
+- **Direction:** a session started on 2026-11-26 is making the tests clean up their temp folders, in #920 (open at the time of writing). The usual pattern is a guard that removes the folder on drop, or one folder per run that the run removes. When it lands, rerun the probe with `--repeat 1` over all binaries to confirm. Purging the existing folders is the owner's call, because other agents' runs use live folders there.
 
 ### 3. Negative waits sleep through their whole budget
 
@@ -153,10 +153,10 @@ The lowest files of 50 lines or more are the window shell (`crates/loom-ui/src/s
 ## Already filed or in flight
 
 - Finding 1: fixed by #917, merged during this review.
-- Finding 2: branch `claude/agitated-galileo-5bda90`, not pushed, no issue or pull request.
+- Finding 2: #920, open.
 - Finding 3 has a precedent: #814 (closed) moved two wall-clock tests that failed under load to counted work. The negative waits are the same kind of problem, for speed instead of failures.
-- A machine-wide queue for test runs and test selection by affected crate: branch `claude/gifted-khorana-ee8ad6` (ADR-0050, ADR-0051), not merged. It cuts how many full runs agents start, which matters for finding 7.
-- Reuse of a check that passed on the same tree in git hooks: branch `devtel-check-reuse` (ADR-0049), not merged.
+- A machine-wide queue for test runs and test selection by affected crate: #918 (ADR-0050, ADR-0051), open. It cuts how many full runs agents start, which matters for finding 7.
+- Reuse of a check that passed on the same tree in git hooks: #919 (ADR-0049), open.
 - Shared fixtures for WAV writing, temp folders, and offline rendering: #627 (open). The script found 28 groups of helpers with the same body in two or more test files; the largest repeat three times (`style` in the text tests, `is_test_file` and `is_user_dependency` in the purity tests). Add those to #627 rather than filing them apart.
 - `loom-modules`' integration tests as one binary: #889 (open). The binary is already one at `db63db4c` (`loom-modules::integration`, 492 tests). Its "Done when" looks met by #904, which merged every crate's integration tests and recorded build times before and after, but #904 does not mention #889. Check it and close it.
 
