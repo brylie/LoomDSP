@@ -491,6 +491,9 @@ enum Message {
     TurnOff(bool),
     /// Take the field out of the form, keeping the panel.
     Remove,
+    /// Put the field back, and focus it with all of its text selected, in
+    /// one update, before the layout that makes it.
+    ReturnAndFocusAll,
     /// Focus the first UI ID, then the second, in one update.
     FocusTwice(UiId, UiId),
     /// What a field reports to a screen reader changed, with the text the
@@ -550,6 +553,10 @@ impl App for Form {
             }
             Message::TurnOff(off) => self.off = off,
             Message::Remove => self.removed = true,
+            Message::ReturnAndFocusAll => {
+                self.removed = false;
+                return Effects::focus_and_select_all(name());
+            }
             Message::SetText(text) => self.text = text,
             Message::Reader(action) => self.log.push(format!("reader {action:?}")),
             Message::AskField => self.log.push(format!("field focus {}", cx.field_has_focus())),
@@ -1867,6 +1874,27 @@ fn preedit(text: &str) -> ImeEvent {
         text: text.to_owned(),
         cursor: Some((text.len(), text.len())),
     }
+}
+
+/// A focus effect that selects all of a field's text, sent in the same
+/// update that makes the field, waits for the layout that lays it out,
+/// and still selects it all then: typing replaces the whole text.
+#[test]
+fn select_all_waits_for_the_layout_that_makes_the_field() {
+    let Some((mut harness, mut typesetter)) = form("440", true) else {
+        return;
+    };
+    harness.send(Message::Remove);
+    harness.lay_out(&mut typesetter);
+    harness.send(Message::ReturnAndFocusAll);
+    harness.lay_out(&mut typesetter);
+    assert_eq!(harness.runtime().focused(), Some(&name()));
+    type_in(&mut harness, "8");
+    assert_eq!(
+        harness.runtime().field_text(&name()),
+        Some("8"),
+        "typing replaced all of it"
+    );
 }
 
 /// A focus effect that selects all of a field that is composing ends the

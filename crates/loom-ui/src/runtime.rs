@@ -2245,6 +2245,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 }
                 Effect::Focus { target, select } => {
                     redraw |= self.focus_effect(&target, select);
+                    // A field not laid out yet selects all when the layout
+                    // gives it the focus it waits for.
+                    if select == Selection::All
+                        && let FocusTarget::Element(id) = &target
+                        && self.focus.wanted.as_ref() == Some(id)
+                    {
+                        self.focus.wanted_select = Some(id.clone());
+                    }
                     // One of the runtime's fields that took the focus
                     // selects all of its text when asked, as the target's do.
                     if select == Selection::All

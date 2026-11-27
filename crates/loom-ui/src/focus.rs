@@ -77,6 +77,10 @@ pub(crate) struct Focus {
     /// that follows a pointer press asked for ([`Effects::focus_as_input`](crate::Effects::focus_as_input)).
     /// Kept by its UI ID, so another wanted focus never inherits it.
     pub(crate) wanted_quiet: Option<UiId>,
+    /// The wanted focus that selects all of its field's text when taken:
+    /// one a focus effect asked for with [`Selection::All`](crate::Selection::All).
+    /// Kept by its UI ID, as the quiet mark is.
+    pub(crate) wanted_select: Option<UiId>,
     /// The latest input that pressed something was a key, not the pointer:
     /// what [`Effects::focus_as_input`](crate::Effects::focus_as_input) reads.
     pub(crate) by_key: bool,
@@ -113,22 +117,25 @@ impl Focus {
     /// a focus whose element is gone to the first stop of the panel that
     /// held it, or to none when that panel is gone too or has no stop
     /// (section 6, rule 4). A focus it takes is brought into view, as any
-    /// focus from an effect is (section 5, rule 12).
-    pub(crate) fn settle(&mut self, window: &mut Window) {
-        // The quiet mark goes with the wanted focus, taken or dropped, and
-        // counts only for the ID it was set for.
+    /// focus from an effect is (section 5, rule 12). Returns true when the
+    /// focus it took asked to select all of its field's text.
+    pub(crate) fn settle(&mut self, window: &mut Window) -> bool {
+        // The quiet mark and the select mark go with the wanted focus,
+        // taken or dropped, and count only for the ID they were set for.
         let quiet = self.wanted_quiet.take();
+        let select = self.wanted_select.take();
         if let Some(wanted) = self.wanted.take()
             && window.stops().contains(&wanted)
         {
             self.release_owed = true;
             window.reveal = Some(wanted.clone());
             self.ring = quiet.as_ref() != Some(&wanted);
+            let select_all = select.as_ref() == Some(&wanted);
             self.set(Some(wanted));
-            return;
+            return select_all;
         }
         let Some(focus) = &self.id else {
-            return;
+            return false;
         };
         if !window.stops().contains(focus) {
             let fallback = window
@@ -137,6 +144,7 @@ impl Focus {
                 .and_then(|panel| window.first_stop_in(&panel));
             self.set(fallback);
         }
+        false
     }
 }
 
