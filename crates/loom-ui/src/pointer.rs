@@ -608,6 +608,7 @@ impl<A: App> Panels<'_, A> {
                     && self.window.is_stop(id)
                     && self.focus.id() != Some(id)
                 {
+                    self.window.drop_caret_reveal_leaving(self.focus.id(), Some(id));
                     self.focus.wanted = None;
                     self.focus.set(Some(id.clone()));
                     self.focus.ring = false;
@@ -820,6 +821,7 @@ impl<A: App> Panels<'_, A> {
         if modal && to.is_none() && self.focus.id().is_some() {
             return;
         }
+        self.window.drop_caret_reveal_leaving(self.focus.id(), to.as_ref());
         self.focus.wanted = None;
         self.focus.set(to);
         self.focus.ring = false;

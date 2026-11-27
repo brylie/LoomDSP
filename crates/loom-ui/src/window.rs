@@ -628,6 +628,23 @@ impl Window {
         }
     }
 
+    /// Drops a waiting caret request when the focus moves from the field
+    /// `from` it is for to `to`, another element or none: the next layout
+    /// then shows what took the focus, not the old field's caret. A
+    /// request for a field that never had the focus, from a screen
+    /// reader's action, stays (#879).
+    pub(crate) fn drop_caret_reveal_leaving(&mut self, from: Option<&UiId>, to: Option<&UiId>) {
+        if let Some(from) = from
+            && Some(from) != to
+            && self
+                .caret_reveal
+                .as_ref()
+                .is_some_and(|(requested, _)| requested == from)
+        {
+            self.caret_reveal = None;
+        }
+    }
+
     /// True when nothing changed since the last [`Window::lay_out`] in a
     /// window of `size`, so bounds and hits are current.
     pub(crate) fn is_settled(&self, size: Size) -> bool {

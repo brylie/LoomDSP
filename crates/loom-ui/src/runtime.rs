@@ -673,16 +673,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// and that focus moves elsewhere. A screen reader can request a reveal
     /// for a field that never had focus, which remains pending for layout.
     fn drop_caret_reveal_if_focus_leaves(&mut self, to: Option<&UiId>) {
-        if let Some(from) = self.focus.id()
-            && Some(from) != to
-            && self
-                .panels
-                .caret_reveal
-                .as_ref()
-                .is_some_and(|(requested, _)| requested == from)
-        {
-            self.panels.caret_reveal = None;
-        }
+        self.panels.drop_caret_reveal_leaving(self.focus.id(), to);
     }
 
     /// Moves the runtime's focus to `to`, from the keyboard or an effect,
