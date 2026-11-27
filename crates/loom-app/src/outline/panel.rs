@@ -84,7 +84,10 @@ impl App {
     fn row_looks(&self) -> RowLooks {
         RowLooks {
             fill: crate::style::RAISED,
-            border: crate::style::EDGE,
+            // The chosen row's edge marks it at 3:1 or more against the
+            // panel (WCAG 2.2, SC 1.4.11; #463), as the open tab's does:
+            // its fill alone is 1.43:1.
+            border: crate::style::FIELD_EDGE,
             text: crate::style::TEXT,
             quiet: crate::style::QUIET,
         }
