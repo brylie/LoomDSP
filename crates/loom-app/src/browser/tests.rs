@@ -312,13 +312,35 @@ fn toolbar_adds_two_tiles_without_covering_transport_or_each_other() {
     assert_eq!(ui.app().session.positions[&id], placed);
 }
 
-/// Shift+F10 and the menu key, typed in the search field, open the
-/// highlighted library row's menu through the window's own key path, and
-/// the canvas under the browser opens no tile menu for its selected tile.
+/// Alt+Enter on a module's row opens nothing, as the menu key does there,
+/// and never adds the module as Enter does: it is the menu key, not Enter.
+#[test]
+fn alt_enter_on_a_module_row_adds_nothing() {
+    use loom_ui_core::{Key, Modifiers};
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let before = ui.app().session.scene.modules().len();
+    ui.send(crate::Message::OpenBrowser);
+    let _ = ui.redraw();
+    ui.send(crate::Message::Browser(Message::Query("svf".into())));
+    let _ = ui.redraw();
+    let _ = ui.tap(Key::Enter, Modifiers::ALT);
+    let browser = ui.app().overlays.browser().expect("still open");
+    assert_eq!(browser.model().menu, None, "a module row has no menu");
+    assert_eq!(ui.app().session.scene.modules().len(), before, "nothing added");
+}
+
+/// Shift+F10, the menu key, and Alt+Enter, typed in the search field, open
+/// the highlighted library row's menu through the window's own key path,
+/// and the canvas under the browser opens no tile menu for its selected
+/// tile.
 #[test]
 fn the_menu_keys_open_a_library_rows_menu_from_the_field() {
     use loom_ui_core::{Key, Modifiers};
-    for (key, modifiers) in [(Key::F10, Modifiers::SHIFT), (Key::ContextMenu, Modifiers::NONE)] {
+    for (key, modifiers) in [
+        (Key::F10, Modifiers::SHIFT),
+        (Key::ContextMenu, Modifiers::NONE),
+        (Key::Enter, Modifiers::ALT),
+    ] {
         let mut ui = crate::ui_test::Ui::open("subtractive.ron");
         let _ = ui
             .app_mut()

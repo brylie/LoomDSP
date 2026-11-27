@@ -229,6 +229,22 @@ pub enum Key {
     Other,
 }
 
+impl Key {
+    /// Whether this key, with exactly `modifiers` held, opens the menu of
+    /// what has focus: the menu key, Shift+F10, or Alt+Enter (Option+Return
+    /// on a Mac). Alt+Enter is there because a laptop often has no menu key
+    /// and needs fn for F10 (ui-layer.md, section 6, rules 8 and 13).
+    #[must_use]
+    pub fn opens_menu(self, modifiers: Modifiers) -> bool {
+        match self {
+            Self::ContextMenu => modifiers == Modifiers::NONE,
+            Self::F10 => modifiers == Modifiers::SHIFT,
+            Self::Enter => modifiers == Modifiers::ALT,
+            _ => false,
+        }
+    }
+}
+
 /// Where a key sits on the keyboard, named by its place on a US layout,
 /// whatever the layout in use types with it. The names are the W3C UI
 /// Events `KeyboardEvent.code` values, so a web driver passes a browser's

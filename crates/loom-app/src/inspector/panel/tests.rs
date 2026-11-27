@@ -159,6 +159,22 @@ fn the_authors_box_keeps_its_draft_until_focus_leaves() {
     assert_eq!(ui.app().session.edits.history.len(), steps, "no undo step");
 }
 
+/// Alt+Enter (Option+Return) in the Authors box types a line break, as
+/// Enter does, and opens no menu: a field has no menu here, so the menu
+/// key that Alt+Enter is on the canvas stays out of it (ui-layer.md,
+/// section 6, rule 13).
+#[test]
+fn alt_enter_in_the_authors_box_types_a_line_break() {
+    let mut ui = patch_info();
+    ui.focus(&authors_part());
+    let _ = ui.typewrite("Ada");
+    let _ = ui.tap(Key::Enter, Modifiers::ALT);
+    let _ = ui.typewrite("Sam");
+    assert_eq!(ui.app().session.patch_info.authors, "Ada\nSam");
+    assert_eq!(ui.focused_field(), Some(authors_part()), "the box keeps the focus");
+    assert!(ui.app().overlays.tile_menu().is_none(), "no menu opened");
+}
+
 /// A screen reader's SetValue on the Authors box takes the path focus
 /// leaving takes: the stored authors are tidied and shown at once, with
 /// no undo step.

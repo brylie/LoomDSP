@@ -328,30 +328,12 @@ impl CanvasModel<'_> {
                 self.open_browser(BrowserPlacement::Pointer(state.camera.to_world(at)), at, bounds, out);
                 out.take();
             }
-            // The menu key, or Shift+F10, opens the tile menu, as a
-            // right-click on the tile does (ui-layer.md, section 6, rule 8).
-            // It acts on the focused control's tile or the selected tile,
-            // not on what the pointer is over, so it needs no pointer on
-            // the canvas.
-            Event::Key(KeyEvent::Pressed {
-                key: Key::ContextMenu,
-                modifiers,
-                ..
-            }) if modifiers.none() => {
-                if self.open_tile_menu_by_key(state, bounds, out) {
-                    out.take();
-                }
-            }
-            Event::Key(KeyEvent::Pressed {
-                key: Key::F10,
-                modifiers,
-                ..
-            }) if *modifiers
-                == (Modifiers {
-                    shift: true,
-                    ..Modifiers::NONE
-                }) =>
-            {
+            // The menu key, Shift+F10, or Alt+Enter opens the tile menu, as
+            // a right-click on the tile does (ui-layer.md, section 6, rules 8
+            // and 13). It acts on the focused control's tile or the selected
+            // tile, not on what the pointer is over, so it needs no pointer
+            // on the canvas.
+            Event::Key(KeyEvent::Pressed { key, modifiers, .. }) if key.opens_menu(*modifiers) => {
                 if self.open_tile_menu_by_key(state, bounds, out) {
                     out.take();
                 }

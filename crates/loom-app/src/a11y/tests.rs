@@ -3407,6 +3407,19 @@ fn the_menu_key_opens_no_tile_menu_under_help() {
     assert!(ui.app().overlays.help.is_some());
 }
 
+/// Alt+Enter (Option+Return) opens the selected tile's menu as the menu
+/// key does, through the window's own key path, so a laptop with no menu
+/// key and F10 behind fn reaches it (ui-layer.md, section 6, rule 13).
+#[test]
+fn alt_enter_opens_the_selected_tiles_menu() {
+    use loom_ui_core::{Key, Modifiers};
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.app_mut().send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.redraw();
+    let _ = ui.tap(Key::Enter, Modifiers::ALT);
+    assert_eq!(ui.app().overlays.tile_menu().map(|(module, _)| module), Some(4));
+}
+
 /// A tile's node offers ShowContextMenu, which opens the tile's menu at the
 /// tile's top-left corner, as the menu key does. Under an open panel it
 /// does nothing, as a right-click there does nothing.

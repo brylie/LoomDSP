@@ -4371,12 +4371,13 @@ fn an_arrow_on_a_focused_control_is_taken() {
     }
 }
 
-/// The menu key and Shift+F10 open the menu of the selected tile at its
-/// top-left corner, also while one of its controls has focus, which does
-/// not take the key. With no tile to open it for, and on F10 without
-/// Shift, nothing opens.
+/// The menu key, Shift+F10, and Alt+Enter open the menu of the selected
+/// tile at its top-left corner, also while one of its controls has focus,
+/// which does not take the key: Alt+Enter there opens the menu, not typing
+/// as Enter does. With no tile to open it for, and on F10 without Shift,
+/// nothing opens.
 #[test]
-fn the_menu_key_and_shift_f10_open_the_tile_menu() {
+fn the_menu_key_shift_f10_and_alt_enter_open_the_tile_menu() {
     let mut first = module(2, 0.0);
     first.panel = panel();
     let second = module(3, 200.0);
@@ -4409,7 +4410,11 @@ fn the_menu_key_and_shift_f10_open_the_tile_menu() {
     };
     let on_second = BTreeSet::from([3]);
     let none = BTreeSet::new();
-    for (key, modifiers) in [(Key::ContextMenu, Modifiers::NONE), (Key::F10, shift)] {
+    for (key, modifiers) in [
+        (Key::ContextMenu, Modifiers::NONE),
+        (Key::F10, shift),
+        (Key::Enter, Modifiers::ALT),
+    ] {
         let mut state = CanvasInput::default();
         let opened = host_event(
             &CanvasModel::new(&scene, &on_second),
