@@ -158,11 +158,15 @@ impl<A: App> Panels<'_, A> {
     /// asks this first, and keeps the event from the toolkit when it is
     /// true (a move reaches it as the pointer leaving). A held press on a
     /// scroll container's bar keeps every pointer event until its release,
-    /// and a select's open list every press (section 5, rule 18).
+    /// and a select's open list every press (section 5, rule 18). A custom
+    /// element's capture keeps every pointer event but the wheel, which is
+    /// not captured (section 9, rule 1, "Host: pointer routing with
+    /// capture").
     pub fn over_target(&self, event: &Event, point: Point) -> bool {
         let input = self.app.input().layer;
+        let wheel = matches!(event, Event::Pointer(PointerEvent::Scrolled(_)));
         self.pointer.thumb.is_some()
-            || self.customs.captured().is_some()
+            || (self.customs.captured().is_some() && !wheel)
             || (self.window.select.is_some() && matches!(event, Event::Pointer(PointerEvent::Pressed(_))))
             || self.keeps_hint(event, point)
             || !self.pressed_outside(input, event, point).is_empty()

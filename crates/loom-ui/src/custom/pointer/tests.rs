@@ -503,6 +503,26 @@ fn a_driver_outside_a_turn_reaches_the_pad() {
     assert_eq!(log(&harness), [Message::Began]);
 }
 
+/// While a drag holds the pointer, a driver that routes before the turn
+/// still gives the wheel to its toolkit: the wheel is not captured, so a
+/// scroll during a drag scrolls what is under the pointer.
+#[test]
+fn a_capture_leaves_the_wheel_to_the_target() {
+    let mut harness = harness();
+    let (_, _, mut panels) = harness.parts();
+    let _ = panels.pointer_below(
+        &Event::Pointer(PointerEvent::Pressed(PointerButton::Left)),
+        Point::new(50.0, 50.0),
+    );
+    let away = Point::new(300.0, 50.0);
+    assert!(
+        panels.over_target(&Event::Pointer(PointerEvent::Moved), away),
+        "a move is kept"
+    );
+    let wheel = Event::Pointer(PointerEvent::Scrolled(ScrollDelta::Lines { x: 0.0, y: 1.0 }));
+    assert!(!panels.over_target(&wheel, away), "the wheel goes to the target");
+}
+
 /// The driver reporting the pointer lost cancels the drag, and the
 /// cancel's messages run in that same turn.
 #[test]
