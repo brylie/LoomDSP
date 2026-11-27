@@ -1668,7 +1668,7 @@ fn a_meter_reports_the_number_its_text_shows() {
 /// that control and keeps its focus (ui-layer.md, section 7, rule 20).
 #[test]
 fn focus_on_a_control_selects_its_tile_and_arrow_keys_reach_it() {
-    use iced::keyboard::{Key, key::Named};
+    use loom_ui_core::Key;
     let (mut app, module, knob) = app_with_filter();
     let other = app.session.controller.add_module("loom.filter.svf").unwrap().0;
     app.commit();
@@ -1700,8 +1700,8 @@ fn focus_on_a_control_selects_its_tile_and_arrow_keys_reach_it() {
         .unwrap()
         .widgets[knob]
         .position;
-    let _ = ui.key_down(Key::Named(Named::ArrowUp), false);
-    let _ = ui.key_up(Key::Named(Named::ArrowUp));
+    let _ = ui.key_down(Key::Up, false);
+    let _ = ui.key_up(Key::Up);
     let after = ui
         .app()
         .ui_snapshot()
@@ -1956,8 +1956,8 @@ fn a_click_on_another_tile_drops_focus_from_the_first() {
     assert_eq!(ui.app_mut().a11y_tree(&Places::default()).focus, window);
 
     let before = position(ui.app(), module, knob);
-    let _ = ui.key_down(iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp), false);
-    let _ = ui.key_up(iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp));
+    let _ = ui.key_down(loom_ui_core::Key::Up, false);
+    let _ = ui.key_up(loom_ui_core::Key::Up);
     assert_eq!(
         position(ui.app(), module, knob),
         before,
@@ -3205,7 +3205,7 @@ fn every_small_overlay_part_is_named_and_placed() {
 /// highlighted item and Escape closes the menu.
 #[test]
 fn a_menu_highlight_is_moved_by_keys_and_reported_as_focus() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let (_, mut ui) = with_each_small_overlay()
         .into_iter()
         .find(|(name, _)| *name == "probe menu")
@@ -3220,14 +3220,14 @@ fn a_menu_highlight_is_moved_by_keys_and_reported_as_focus() {
         ui.app().a11y.ids.id(update.focus.0).cloned()
     };
     assert_eq!(focus(&mut ui), Some(crate::menus::probe_id()), "on the menu");
-    let _ = ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
+    let _ = ui.tap(Key::Down, Modifiers::NONE);
     assert_eq!(focus(&mut ui), Some(crate::menus::probe_id().with("scope")));
-    let _ = ui.tap(Key::Named(Named::End), Modifiers::empty());
+    let _ = ui.tap(Key::End, Modifiers::NONE);
     assert_eq!(focus(&mut ui), Some(crate::menus::probe_id().with("meter")));
-    let _ = ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
+    let _ = ui.tap(Key::Down, Modifiers::NONE);
     assert_eq!(focus(&mut ui), Some(crate::menus::probe_id().with("scope")), "it wraps");
     let modules = ui.app().session.controller.graph().nodes().count();
-    let _ = ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    let _ = ui.tap(Key::Enter, Modifiers::NONE);
     assert!(
         ui.app().overlays.probe_menu().is_none(),
         "Enter picked, and the menu closed"
@@ -3242,7 +3242,7 @@ fn a_menu_highlight_is_moved_by_keys_and_reported_as_focus() {
         .into_iter()
         .find(|(name, _)| *name == "tile menu")
         .unwrap();
-    let _ = ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    let _ = ui.tap(Key::Escape, Modifiers::NONE);
     assert!(ui.app().overlays.tile_menu().is_none(), "Escape closed it");
 }
 
@@ -3393,16 +3393,16 @@ fn only_the_overlay_that_owns_the_input_is_reported() {
 /// but never under an overlay that owns the input, such as help.
 #[test]
 fn the_menu_key_opens_no_tile_menu_under_help() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     let _ = ui.app_mut().send(Message::Canvas(CanvasEvent::Select(vec![4])));
     let _ = ui.redraw();
-    let _ = ui.tap(Key::Named(Named::ContextMenu), Modifiers::empty());
+    let _ = ui.tap(Key::ContextMenu, Modifiers::NONE);
     assert_eq!(ui.app().overlays.tile_menu().map(|(module, _)| module), Some(4));
     ui.app_mut().overlays.close_tile_menu();
     ui.app_mut().overlays.help = Some(crate::help::Help::shortcuts());
     let _ = ui.redraw();
-    let _ = ui.tap(Key::Named(Named::ContextMenu), Modifiers::empty());
+    let _ = ui.tap(Key::ContextMenu, Modifiers::NONE);
     assert!(ui.app().overlays.tile_menu().is_none(), "help keeps the key");
     assert!(ui.app().overlays.help.is_some());
 }
@@ -3539,10 +3539,7 @@ fn focus_on_a_knob_takes_the_keys_from_the_matrix() {
     ui.send(Message::A11y(Event::Action(request(Action::Focus, target, None))));
     let _ = ui.redraw();
     assert!(!ui.app().focus_in_matrix(), "the canvas has the keys now");
-    let _ = ui.tap(
-        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp),
-        iced::keyboard::Modifiers::empty(),
-    );
+    let _ = ui.tap(loom_ui_core::Key::Up, loom_ui_core::Modifiers::NONE);
     assert_ne!(cutoff(ui.app()), before, "the arrow stepped the knob");
     assert_eq!(
         ui.app().session.matrix.selected,
@@ -3582,10 +3579,7 @@ fn focus_on_a_knob_closes_a_text_field_as_a_press_does() {
     assert!(ui.app().session.value_draft.is_none(), "its draft is done with");
     assert!((cutoff(ui.app()) - 1234.0).abs() < 1.0, "and committed");
     let before = cutoff(ui.app());
-    let _ = ui.tap(
-        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp),
-        iced::keyboard::Modifiers::empty(),
-    );
+    let _ = ui.tap(loom_ui_core::Key::Up, loom_ui_core::Modifiers::NONE);
     assert_ne!(cutoff(ui.app()), before, "the arrow stepped the knob");
 }
 
@@ -4505,7 +4499,7 @@ fn a_change_during_a_rebuild_asks_for_one_more() {
 #[test]
 fn typed_value_field_reports_its_draft_selection_and_returns_focus_to_the_knob() {
     use crate::ui_test::{Ui, key_press};
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let (app, module, _) = app_with_filter();
     let mut ui = Ui::with_app(app);
     let point = ui.control(module, "cutoff");
@@ -4513,7 +4507,7 @@ fn typed_value_field_reports_its_draft_selection_and_returns_focus_to_the_knob()
     ui.press();
     ui.release();
     let control = ui.a11y_tree().focused().node_id();
-    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
     let places = ui.places();
     let tree = ui.app_mut().a11y_tree(&places);
     let field = node(&tree, tree.focus);
@@ -4524,18 +4518,13 @@ fn typed_value_field_reports_its_draft_selection_and_returns_focus_to_the_knob()
     assert_eq!(selection.anchor.character_index, 0);
     assert_eq!(selection.focus.character_index, shown.chars().count());
     assert_eq!(node(&tree, selection.focus.node).role(), Role::TextRun);
-    ui.step(&[key_press(
-        Key::Character("6".into()),
-        Modifiers::empty(),
-        Some("6"),
-        false,
-    )]);
+    ui.step(&[key_press(Key::Character('6'), Modifiers::NONE, Some("6"), false)]);
     let places = ui.places();
     let tree = ui.app_mut().a11y_tree(&places);
     let field = node(&tree, tree.focus);
     assert_eq!(field.value(), Some("6"));
     assert_eq!(field.text_selection().unwrap().focus.character_index, 1);
-    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    ui.tap(Key::Escape, Modifiers::NONE);
     assert_eq!(ui.a11y_tree().focused().node_id(), control);
     assert_eq!(ui.a11y_tree().focused().role(), Role::Slider);
 }

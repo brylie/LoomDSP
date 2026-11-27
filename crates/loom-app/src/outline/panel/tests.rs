@@ -5,14 +5,14 @@
 use super::*;
 use crate::matrix::Tab;
 use crate::ui_test::Ui;
-use iced::keyboard::{self, Key as IcedKey, key::Named};
 use loom_canvas::CanvasEvent;
+use loom_ui_core::{Key, Modifiers};
 
 /// The subtractive example with the Outline open by `O`, its first row
 /// focused.
 fn outline_open() -> Ui {
     let mut ui = Ui::open("subtractive.ron");
-    ui.tap(IcedKey::Character("o".into()), keyboard::Modifiers::empty());
+    ui.tap(Key::Character('o'), Modifiers::NONE);
     let _ = ui.redraw();
     ui
 }
@@ -69,7 +69,7 @@ fn the_tree_is_one_stop_its_current_row() {
     let stops = ui.runtime().focus_stops();
     let rows: Vec<&UiId> = stops.iter().filter(|stop| stop.is_under(&rows_id())).collect();
     assert_eq!(rows, [&summary]);
-    ui.tap(IcedKey::Named(Named::ArrowDown), keyboard::Modifiers::empty());
+    ui.tap(Key::Down, Modifiers::NONE);
     let _ = ui.redraw();
     let now = ui.runtime().focused().cloned().expect("a row");
     assert_ne!(now, summary);
@@ -107,12 +107,12 @@ fn the_jump_list_is_a_list_box_the_focus_enters_from_the_tree() {
     ui.send(Message::OutlineRow(crate::outline::row_id(format!("module-{filter}"))));
     let _ = ui.redraw();
     // Open the filter's connections and follow its output, which branches.
-    ui.tap(IcedKey::Named(Named::ArrowRight), keyboard::Modifiers::empty());
+    ui.tap(Key::Right, Modifiers::NONE);
     let _ = ui.redraw();
     let output = crate::outline::row_id(format!("module-{filter}-output-lowpass"));
     ui.send(Message::OutlineRow(output));
     let _ = ui.redraw();
-    ui.tap(IcedKey::Named(Named::Enter), keyboard::Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
     let _ = ui.redraw();
     assert!(ui.app().session.outline.has_jump(), "two places to go");
     let list = jump_id().with("list");
@@ -122,14 +122,14 @@ fn the_jump_list_is_a_list_box_the_focus_enters_from_the_tree() {
     assert_eq!(node.role(), accesskit::Role::ListBox);
     assert_eq!(node.name(), Some("2 connections"));
     assert_eq!(node.active_descendant(), Some(&list.clone().with(0u64)));
-    ui.tap(IcedKey::Named(Named::ArrowDown), keyboard::Modifiers::empty());
+    ui.tap(Key::Down, Modifiers::NONE);
     let _ = ui.redraw();
     let tree = ui.a11y_tree();
     assert_eq!(
         tree.node_by_id(&list).active_descendant(),
         Some(&list.clone().with(1u64))
     );
-    ui.tap(IcedKey::Named(Named::Enter), keyboard::Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
     let _ = ui.redraw();
     assert!(!ui.app().session.outline.has_jump());
     let focused = ui.runtime().focused().cloned().expect("a row");

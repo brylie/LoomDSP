@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::ui_test::Ui;
-use iced::keyboard::{self, key::Named};
+use loom_ui_core::{Key, Modifiers};
 
 /// A sine into an empty Filter slot into the output, with a Voice
 /// sub-patch whose surface exposes a Filter slot's cutoff.
@@ -146,7 +146,7 @@ fn an_empty_slot_is_reached_and_filled_by_keyboard() {
     let mut ui = Ui::with_app(app_with(EMPTY));
     add_from_browser(&mut ui, "filter slot");
     let slot = selected(ui.app());
-    ui.tap(keyboard::Key::Named(Named::F10), keyboard::Modifiers::SHIFT);
+    ui.tap(Key::F10, Modifiers::SHIFT);
     ui.redraw();
     assert_eq!(
         ui.app().overlays.tile_menu().map(|(m, _)| m),

@@ -1,16 +1,15 @@
 use crate::files::fake;
 use crate::recovery::tests::TempDir;
 use crate::ui_test::Ui;
-use iced::keyboard::{Key, Modifiers, key::Named};
-use loom_ui_core::Point;
+use loom_ui_core::{Key, Modifiers, Point};
 
 /// Opens and chooses a browser row with keys, including with the pointer outside.
 fn add(ui: &mut Ui, name: &str) {
-    ui.tap(Key::Character("a".into()), Modifiers::empty());
+    ui.tap(Key::Character('a'), Modifiers::NONE);
     ui.redraw();
     assert!(ui.app().overlays.browser().is_some());
     ui.typewrite(name);
-    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
     assert!(ui.app().overlays.browser().is_none());
 }
 
@@ -23,10 +22,10 @@ fn choose(ui: &mut Ui, name: &str) {
         .position(|row| row.label == name)
         .unwrap_or_else(|| panic!("{name}: {model:?}"));
     for _ in 0..at {
-        ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
+        ui.tap(Key::Down, Modifiers::NONE);
     }
     assert_eq!(ui.a11y_tree().focused().name(), Some(name));
-    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
 }
 
 /// The pointer can stay outside the canvas while adding, patching, editing and saving.
@@ -36,16 +35,16 @@ fn keys_add_connect_edit_and_save_with_the_pointer_outside() {
     ui.move_to(Point::new(4.0, 4.0));
     add(&mut ui, "constant");
     add(&mut ui, "svf");
-    ui.tap(Key::Character("c".into()), Modifiers::empty());
+    ui.tap(Key::Character('c'), Modifiers::NONE);
     choose(&mut ui, "SVF In (input)");
     choose(&mut ui, "Constant Out (output)");
     let connections = ui.app().session.scene.cables().len();
     assert_eq!(connections, 1);
 
     // Undo and redo the cable as a whole, then change the selected tile's knob.
-    ui.tap(Key::Character("z".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut());
     assert!(ui.app().session.scene.cables().is_empty());
-    ui.tap(Key::Character("z".into()), Modifiers::COMMAND | Modifiers::SHIFT);
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut() | Modifiers::SHIFT);
     assert_eq!(ui.app().session.scene.cables().len(), connections);
     let id = loom_core::ModuleId(*ui.app().session.selection.first().unwrap());
     let value = |ui: &Ui| {
@@ -53,10 +52,10 @@ fn keys_add_connect_edit_and_save_with_the_pointer_outside() {
         node.params[node.descriptor.param_index("cutoff").unwrap()]
     };
     let before = value(&ui);
-    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
-    ui.tap(Key::Named(Named::ArrowUp), Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
+    ui.tap(Key::Up, Modifiers::NONE);
     assert!(value(&ui) > before);
-    let messages = ui.tap(Key::Named(Named::Space), Modifiers::empty());
+    let messages = ui.tap(Key::Space, Modifiers::NONE);
     assert!(
         !messages
             .iter()
@@ -66,7 +65,7 @@ fn keys_add_connect_edit_and_save_with_the_pointer_outside() {
     let folder = TempDir::new("key-patch");
     let path = folder.0.join("keys.ron");
     fake::answer_save(Some(path.clone()));
-    ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('s'), Modifiers::platform_shortcut());
     let patch = loom_patch::Patch::from_ron(&std::fs::read_to_string(path).unwrap()).unwrap();
     assert_eq!(patch.cables.len(), 1);
 }
@@ -88,11 +87,11 @@ fn cable_picker_cancels_and_disconnects() {
     let count = ui.app().session.scene.cables().len();
 
     ui.send(crate::Message::ShowShortcuts);
-    ui.tap(Key::Character("c".into()), Modifiers::empty());
+    ui.tap(Key::Character('c'), Modifiers::NONE);
     assert!(ui.app().overlays.cable_menu().is_none());
     ui.send(crate::Message::CloseHelp);
 
-    ui.tap(Key::Character("c".into()), Modifiers::empty());
+    ui.tap(Key::Character('c'), Modifiers::NONE);
     let input = loom_canvas::PortRef {
         module: filter,
         output: false,
@@ -115,13 +114,13 @@ fn cable_picker_cancels_and_disconnects() {
             .iter()
             .any(|row| row.label == format!("{jump_label} (output)"))
     );
-    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    ui.tap(Key::Escape, Modifiers::NONE);
     assert_eq!(ui.app().session.scene.cables().len(), count);
-    ui.tap(Key::Character("c".into()), Modifiers::empty());
+    ui.tap(Key::Character('c'), Modifiers::NONE);
     choose(&mut ui, "SVF In (input)");
     choose(&mut ui, "Disconnect cable");
     assert_eq!(ui.app().session.scene.cables().len(), count - 1);
-    ui.tap(Key::Character("z".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut());
     assert_eq!(ui.app().session.scene.cables().len(), count);
 }
 
@@ -143,7 +142,7 @@ fn the_next_cable_picker_stage_starts_at_the_top() {
         )}}, modules: [PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("ports"))])"#
     )));
     ui.send(crate::Message::Canvas(loom_canvas::CanvasEvent::Select(vec![1])));
-    ui.tap(Key::Character("c".into()), Modifiers::empty());
+    ui.tap(Key::Character('c'), Modifiers::NONE);
     let model = ui.app().menu_model().unwrap();
     assert!(model.items.iter().any(|item| item.label == "Ports Signal 0 (input)"));
     assert!(model.items.iter().any(|item| item.label == "Ports Signal 0 (output)"));
@@ -155,9 +154,9 @@ fn the_next_cable_picker_stage_starts_at_the_top() {
             .expect("the list scrolls")
             .0
     };
-    ui.tap(Key::Named(Named::End), Modifiers::empty());
+    ui.tap(Key::End, Modifiers::NONE);
     assert!(offset(&mut ui) > 0.0);
-    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
     let model = ui.app().menu_model().unwrap();
     assert_eq!(model.highlight, Some(0));
     assert_eq!(offset(&mut ui), 0.0);
@@ -177,7 +176,7 @@ fn open_on_the_filter() -> Ui {
         .unwrap()
         .id;
     ui.send(crate::Message::Canvas(loom_canvas::CanvasEvent::Select(vec![filter])));
-    ui.tap(Key::Character("c".into()), Modifiers::empty());
+    ui.tap(Key::Character('c'), Modifiers::NONE);
     let _ = ui.redraw();
     assert!(ui.app().overlays.cable_menu().is_some(), "the picker is open");
     ui
@@ -262,7 +261,7 @@ fn a_right_press_beside_the_picker_closes_it_and_opens_nothing() {
 #[test]
 fn tab_closes_the_picker() {
     let mut ui = open_on_the_filter();
-    ui.tap(Key::Named(Named::Tab), Modifiers::empty());
+    ui.tap(Key::Tab, Modifiers::NONE);
     let _ = ui.redraw();
     assert!(ui.app().overlays.cable_menu().is_none());
 }
@@ -281,9 +280,9 @@ fn open_with_no_port() -> Ui {
     let _ = ui.redraw();
     let inner = ui.app().session.scene.modules().first().expect("the patch input").id;
     ui.send(crate::Message::Canvas(loom_canvas::CanvasEvent::Select(vec![inner])));
-    ui.tap(Key::Character("c".into()), Modifiers::empty());
+    ui.tap(Key::Character('c'), Modifiers::NONE);
     let _ = ui.redraw();
-    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
     let _ = ui.redraw();
     ui
 }
@@ -308,11 +307,11 @@ fn with_no_port_to_offer_one_turned_off_item_says_so() {
     assert!(item.offers(Action::Focus));
     assert!(!item.offers(Action::Click));
     let cables = ui.app().session.scene.cables().len();
-    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
-    ui.tap(Key::Named(Named::Space), Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
+    ui.tap(Key::Space, Modifiers::NONE);
     assert!(ui.app().overlays.cable_menu().is_some(), "Enter and Space pick nothing");
     assert_eq!(ui.app().session.scene.cables().len(), cables);
-    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    ui.tap(Key::Escape, Modifiers::NONE);
     assert!(ui.app().overlays.cable_menu().is_none(), "Escape closes it");
 }
 
@@ -348,7 +347,7 @@ fn page_keys_move_the_focus_by_a_page() {
         )}}, modules: [PatchModule(id: 1, kind: "loom.struct.subpatch@1", subpatch: Some("ports"))])"#
     )));
     ui.send(crate::Message::Canvas(loom_canvas::CanvasEvent::Select(vec![1])));
-    ui.tap(Key::Character("c".into()), Modifiers::empty());
+    ui.tap(Key::Character('c'), Modifiers::NONE);
     let _ = ui.redraw();
     let rows = ui.app().menu_model().unwrap().items.len();
     assert!(rows > 20, "a long list: {rows}");
@@ -359,19 +358,19 @@ fn page_keys_move_the_focus_by_a_page() {
             .iter()
             .position(|item| Some(&item.id) == ui.runtime().focused())
     };
-    ui.tap(Key::Named(Named::PageDown), Modifiers::empty());
+    ui.tap(Key::PageDown, Modifiers::NONE);
     let _ = ui.redraw();
     assert_eq!(focus_at(&ui), Some(10));
     let (offset, _) = ui.runtime().scroll_offset(&super::list_id()).expect("the list scrolls");
-    ui.tap(Key::Named(Named::ArrowDown), Modifiers::empty());
+    ui.tap(Key::Down, Modifiers::NONE);
     let _ = ui.redraw();
     assert_eq!(focus_at(&ui), Some(11), "Down goes on from the page");
     for _ in 0..5 {
-        ui.tap(Key::Named(Named::PageDown), Modifiers::empty());
+        ui.tap(Key::PageDown, Modifiers::NONE);
     }
     let _ = ui.redraw();
     assert_eq!(focus_at(&ui), Some(rows - 1), "it stops at the end");
-    ui.tap(Key::Named(Named::PageUp), Modifiers::empty());
+    ui.tap(Key::PageUp, Modifiers::NONE);
     let _ = ui.redraw();
     assert_eq!(focus_at(&ui), Some(rows - 11));
     assert!(offset > 0.0, "the page scrolled the list to the focus");

@@ -279,10 +279,10 @@ fn help_is_on_top_of_a_dialog_and_closes_alone() {
     {
         let mut ui = Ui::open("subtractive.ron");
         open_overlay(&mut ui, owner);
-        ui.tap(Key::Named(Named::F1), Modifiers::empty());
+        ui.tap(loom_ui_core::Key::F1, loom_ui_core::Modifiers::NONE);
         assert_eq!(ui.app().input_owner(), InputOwner::Help, "{owner:?}: F1 opened help");
         if close == "escape" {
-            ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+            ui.tap(loom_ui_core::Key::Escape, loom_ui_core::Modifiers::NONE);
         } else {
             ui.move_to(Point::new(5.0, 5.0));
             ui.press();
@@ -302,11 +302,11 @@ fn help_opens_over_a_chooser_opened_from_preferences() {
     ui.send(Message::Preferences(settings::Message::ChooseLicence));
     ui.redraw();
     assert_eq!(ui.app().input_owner(), InputOwner::Chooser);
-    ui.tap(Key::Named(Named::F1), Modifiers::empty());
+    ui.tap(loom_ui_core::Key::F1, loom_ui_core::Modifiers::NONE);
     assert_eq!(ui.app().input_owner(), InputOwner::Help);
-    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    ui.tap(loom_ui_core::Key::Escape, loom_ui_core::Modifiers::NONE);
     assert_eq!(ui.app().input_owner(), InputOwner::Chooser, "help closed");
-    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    ui.tap(loom_ui_core::Key::Escape, loom_ui_core::Modifiers::NONE);
     assert_eq!(ui.app().input_owner(), InputOwner::Preferences, "the chooser closed");
 }
 
@@ -330,10 +330,10 @@ fn help_suspends_search_in_both_browsers() {
         };
         ui.typewrite("a");
         assert_eq!(search(&ui), "a");
-        ui.tap(Key::Named(Named::F1), Modifiers::empty());
+        ui.tap(loom_ui_core::Key::F1, loom_ui_core::Modifiers::NONE);
         ui.typewrite("b");
         assert_eq!(search(&ui), "a", "{owner:?}");
-        ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+        ui.tap(loom_ui_core::Key::Escape, loom_ui_core::Modifiers::NONE);
         assert_eq!(ui.focused_field(), Some(field));
         ui.typewrite("c");
         assert_eq!(search(&ui), "ac", "{owner:?}");
@@ -343,11 +343,12 @@ fn help_suspends_search_in_both_browsers() {
 /// While help is on top, the patch list behind it hears no keys.
 #[test]
 fn up_and_down_leave_the_patch_list_alone_behind_help() {
+    use loom_ui_core::{Key, Modifiers};
     let mut ui = Ui::open("subtractive.ron");
     open_overlay(&mut ui, InputOwner::Patches);
-    ui.tap(Key::Named(Named::F1), Modifiers::empty());
-    for named in [Named::ArrowUp, Named::ArrowDown] {
-        let messages = ui.tap(Key::Named(named), Modifiers::empty());
+    ui.tap(Key::F1, Modifiers::NONE);
+    for named in [Key::Up, Key::Down] {
+        let messages = ui.tap(named, Modifiers::NONE);
         assert!(
             !messages.iter().any(|m| matches!(m, Message::Patches(_))),
             "{named:?}: {messages:?}"
@@ -356,8 +357,9 @@ fn up_and_down_leave_the_patch_list_alone_behind_help() {
 }
 
 /// Taps Cmd with a character, and returns the number of modules after it.
-fn tap_command(ui: &mut Ui, c: &str) -> usize {
-    ui.tap(Key::Character(c.into()), Modifiers::COMMAND);
+fn tap_command(ui: &mut Ui, c: char) -> usize {
+    use loom_ui_core::{Key, Modifiers};
+    ui.tap(Key::Character(c), Modifiers::platform_shortcut());
     ui.app().session.controller.graph().nodes().count()
 }
 
@@ -368,7 +370,7 @@ fn tap_command(ui: &mut Ui, c: &str) -> usize {
 fn clipboard_keys_do_nothing_behind_an_overlay() {
     let mut leaks = Vec::new();
     for owner in OWNERS.into_iter().filter(|owner| *owner != InputOwner::Canvas) {
-        for c in ["x", "d", "c"] {
+        for c in ['x', 'd', 'c'] {
             let mut ui = Ui::open("subtractive.ron");
             select_first_module(&mut ui);
             open_overlay(&mut ui, owner);
@@ -401,7 +403,7 @@ fn duplicate_does_nothing_from_a_focused_search_field() {
     open_overlay(&mut ui, InputOwner::Patches);
     ui.focus(&patches::text_fields()[0]);
     assert!(ui.text_field_focused());
-    assert_eq!(tap_command(&mut ui, "d"), modules);
+    assert_eq!(tap_command(&mut ui, 'd'), modules);
 }
 
 /// #581: with nothing open, the same keys still work.
@@ -410,12 +412,15 @@ fn clipboard_keys_work_with_no_overlay() {
     let mut ui = Ui::open("subtractive.ron");
     select_first_module(&mut ui);
     let modules = ui.app().session.controller.graph().nodes().count();
-    assert_eq!(tap_command(&mut ui, "d"), modules + 1, "Cmd+D duplicates");
+    assert_eq!(tap_command(&mut ui, 'd'), modules + 1, "Cmd+D duplicates");
     ui.set_clipboard(None);
-    ui.tap(Key::Character("c".into()), Modifiers::COMMAND);
+    ui.tap(
+        loom_ui_core::Key::Character('c'),
+        loom_ui_core::Modifiers::platform_shortcut(),
+    );
     assert!(ui.clipboard().is_some(), "Cmd+C copies");
     let before = ui.app().session.controller.graph().nodes().count();
-    assert!(tap_command(&mut ui, "x") < before, "Cmd+X cuts");
+    assert!(tap_command(&mut ui, 'x') < before, "Cmd+X cuts");
 }
 
 /// The real window's path: events go into the app's subscription as the runtime

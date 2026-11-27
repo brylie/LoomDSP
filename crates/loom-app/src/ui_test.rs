@@ -58,11 +58,12 @@ use iced::advanced::clipboard::Kind;
 use iced::advanced::widget::Id;
 use iced::advanced::widget::Operation;
 use iced::advanced::widget::operation::Outcome;
-use iced::{Event, Rectangle, Size, keyboard, mouse, window};
+use iced::{Event, Rectangle, Size, mouse, window};
 use iced_runtime::user_interface::UserInterface;
 use loom_canvas::CanvasView;
+use loom_canvas::iced_convert::key_event_to_iced;
 use loom_canvas::iced_convert::{ToCore as _, ToIced as _};
-use loom_ui_core::{Point, Rect};
+use loom_ui_core::{Code, Key, KeyEvent, Modifiers, Point, Rect};
 // The harness tests reach these through `use super::*`.
 #[cfg(test)]
 use loom_core::ModuleId;
@@ -264,9 +265,9 @@ impl Ui {
     /// `cfg(test)`, so the fake dialogs and folders are off: Cmd+S would overwrite
     /// the example patch, Cmd+O would open a real dialog, and Cmd+Shift+O would
     /// make the real library folder. Test those with `Ui::open` in a unit test.
-    pub fn tap_key(&mut self, key: keyboard::Key, modifiers: keyboard::Modifiers) {
+    pub fn tap_key(&mut self, key: Key, modifiers: Modifiers) {
         assert!(
-            !modifiers.command(),
+            !modifiers.shortcut(),
             "command shortcuts reach real files and dialogs from tests/: use Ui::open in a unit test"
         );
         self.tap(key, modifiers);
@@ -693,13 +694,13 @@ impl Ui {
 
     /// Presses a key and holds it. With `repeat`, it is a repeat the
     /// keyboard sends while the key stays down.
-    pub(crate) fn key_down(&mut self, key: keyboard::Key, repeat: bool) -> Vec<Message> {
+    pub(crate) fn key_down(&mut self, key: Key, repeat: bool) -> Vec<Message> {
         self.step(&[key_pressed(key, repeat)])
     }
 
     /// Lets go of a key.
-    pub(crate) fn key_up(&mut self, key: keyboard::Key) -> Vec<Message> {
-        self.step(&[key_released(key, keyboard::Modifiers::default())])
+    pub(crate) fn key_up(&mut self, key: Key) -> Vec<Message> {
+        self.step(&[key_released(key, Modifiers::NONE)])
     }
 
     /// Clicks the first text widget that reads exactly `content`, such as a
@@ -767,10 +768,7 @@ impl Ui {
         self.typewrite(text);
         let draft = self.app().session.value_draft.as_ref().expect("a draft is typed");
         assert_eq!(draft.draft.text, text, "every key stays in the draft");
-        self.tap(
-            keyboard::Key::Named(keyboard::key::Named::Enter),
-            keyboard::Modifiers::default(),
-        );
+        self.tap(Key::Enter, Modifiers::NONE);
         assert!(self.app().session.value_draft.is_none(), "Enter commits it");
         assert_eq!(
             self.app().focus,
@@ -853,8 +851,8 @@ impl Ui {
     }
 
     /// Presses and releases a key with modifiers held.
-    pub(crate) fn tap(&mut self, key: keyboard::Key, modifiers: keyboard::Modifiers) -> Vec<Message> {
-        let mut messages = self.step(&[key_press(key.clone(), modifiers, None, false)]);
+    pub(crate) fn tap(&mut self, key: Key, modifiers: Modifiers) -> Vec<Message> {
+        let mut messages = self.step(&[key_press(key, modifiers, None, false)]);
         messages.extend(self.step(&[key_released(key, modifiers)]));
         messages
     }
@@ -863,11 +861,11 @@ impl Ui {
     /// does. Only the widget with focus takes it.
     pub(crate) fn typewrite(&mut self, text: &str) -> Vec<Message> {
         let mut messages = Vec::new();
-        let none = keyboard::Modifiers::default();
+        let none = Modifiers::NONE;
         for c in text.chars() {
             let typed = c.to_string();
-            let key = keyboard::Key::Character(typed.as_str().into());
-            messages.extend(self.step(&[key_press(key.clone(), none, Some(&typed), false)]));
+            let key = Key::Character(c);
+            messages.extend(self.step(&[key_press(key, none, Some(&typed), false)]));
             messages.extend(self.step(&[key_released(key, none)]));
         }
         messages
@@ -968,8 +966,10 @@ impl Ui {
 
     /// Holds these modifier keys, or none, for the steps that follow, as
     /// the runtime reports a change in the held modifiers.
-    pub(crate) fn hold(&mut self, modifiers: keyboard::Modifiers) -> Vec<Message> {
-        self.step(&[Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers))])
+    pub(crate) fn hold(&mut self, modifiers: Modifiers) -> Vec<Message> {
+        self.step(&[Event::Keyboard(iced::keyboard::Event::ModifiersChanged(
+            modifiers.to_iced(),
+        ))])
     }
 
     /// The current translation of a named scrollable widget.
@@ -1035,33 +1035,28 @@ impl Ui {
 }
 
 /// A key press with no modifiers and no text, as the keyboard sends it.
-pub(crate) fn key_pressed(key: keyboard::Key, repeat: bool) -> Event {
-    key_press(key, keyboard::Modifiers::default(), None, repeat)
+pub(crate) fn key_pressed(key: Key, repeat: bool) -> Event {
+    key_press(key, Modifiers::NONE, None, repeat)
 }
 
 /// A key press with `modifiers` held, carrying `text` when the key types
-/// a character.
-pub(crate) fn key_press(key: keyboard::Key, modifiers: keyboard::Modifiers, text: Option<&str>, repeat: bool) -> Event {
-    Event::Keyboard(keyboard::Event::KeyPressed {
-        key: key.clone(),
-        modified_key: key,
-        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-        location: keyboard::Location::Standard,
+/// a character, at a place nothing reads (`Code::Other`). It is Iced's
+/// event, since the harness still feeds Iced (plan step P4).
+pub(crate) fn key_press(key: Key, modifiers: Modifiers, text: Option<&str>, repeat: bool) -> Event {
+    let press = KeyEvent::Pressed {
+        key,
+        code: Code::Other,
         modifiers,
-        text: text.map(Into::into),
         repeat,
-    })
+        text: text.map(str::to_string),
+    };
+    Event::Keyboard(key_event_to_iced(&press, modifiers))
 }
 
-/// A key release with `modifiers` held.
-pub(crate) fn key_released(key: keyboard::Key, modifiers: keyboard::Modifiers) -> Event {
-    Event::Keyboard(keyboard::Event::KeyReleased {
-        key: key.clone(),
-        modified_key: key,
-        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-        location: keyboard::Location::Standard,
-        modifiers,
-    })
+/// A key release with `modifiers` held, as Iced's event.
+pub(crate) fn key_released(key: Key, modifiers: Modifiers) -> Event {
+    let release = KeyEvent::Released { key, code: Code::Other };
+    Event::Keyboard(key_event_to_iced(&release, modifiers))
 }
 
 #[cfg(test)]

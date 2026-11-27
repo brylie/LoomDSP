@@ -9,8 +9,7 @@ use crate::licence_chooser::Target;
 use crate::ui_test::{Ui, key_press};
 use accesskit::{Action, Role};
 use iced::advanced::input_method::Event as Method;
-use iced::keyboard::{Key, Modifiers, key::Named};
-use loom_ui_core::UiId;
+use loom_ui_core::{Key, Modifiers, UiId};
 
 /// A window with the chooser open for the patch's licence, as patch info's
 /// **Choose** opens it, on a patch with no licence yet, so nothing is
@@ -48,10 +47,10 @@ fn focused(ui: &Ui) -> Option<UiId> {
 /// The stops Tab meets from where the focus is, `count` times, forward or
 /// back, starting with the one that has the focus.
 fn walk(ui: &mut Ui, count: usize, back: bool) -> Vec<UiId> {
-    let shift = if back { Modifiers::SHIFT } else { Modifiers::default() };
+    let shift = if back { Modifiers::SHIFT } else { Modifiers::NONE };
     let mut met = vec![focused(ui).expect("a stop has the focus")];
     for _ in 1..count {
-        tap(ui, Key::Named(Named::Tab), shift);
+        tap(ui, Key::Tab, shift);
         met.push(focused(ui).expect("a stop has the focus"));
     }
     met
@@ -123,12 +122,12 @@ fn a_screen_reader_meets_its_questions_as_radio_groups() {
 #[test]
 fn tab_goes_through_every_part_once_and_wraps() {
     let mut ui = chooser();
-    tap(&mut ui, Key::Named(Named::ArrowDown), Modifiers::default());
+    tap(&mut ui, Key::Down, Modifiers::NONE);
     let chooser = ui.app().overlays.chooser.as_ref().expect("open").model();
     assert!(chooser.changes[1].chosen, "Down chose the second answer");
     assert_eq!(focused(&ui), Some(answer("changes", "share-alike")));
-    tap(&mut ui, Key::Named(Named::Tab), Modifiers::default());
-    tap(&mut ui, Key::Named(Named::Space), Modifiers::default());
+    tap(&mut ui, Key::Tab, Modifiers::NONE);
+    tap(&mut ui, Key::Space, Modifiers::NONE);
     let order = [
         answer("changes", "share-alike"),
         answer("commercial", "yes"),
@@ -138,11 +137,11 @@ fn tab_goes_through_every_part_once_and_wraps() {
         button("cancel"),
         button("use"),
     ];
-    tap(&mut ui, Key::Named(Named::Tab), Modifiers::SHIFT);
+    tap(&mut ui, Key::Tab, Modifiers::SHIFT);
     assert_eq!(focused(&ui), Some(order[0].clone()));
     assert_eq!(walk(&mut ui, order.len() + 1, false)[..order.len()], order, "in order");
     assert_eq!(focused(&ui), Some(order[0].clone()), "it wraps to the first question");
-    tap(&mut ui, Key::Named(Named::Tab), Modifiers::SHIFT);
+    tap(&mut ui, Key::Tab, Modifiers::SHIFT);
     assert_eq!(focused(&ui), Some(button("use")), "Shift+Tab wraps back to Use");
 }
 
@@ -152,9 +151,9 @@ fn tab_goes_through_every_part_once_and_wraps() {
 #[test]
 fn tab_skips_use_while_it_is_off() {
     let mut ui = chooser();
-    tap(&mut ui, Key::Named(Named::Tab), Modifiers::SHIFT);
+    tap(&mut ui, Key::Tab, Modifiers::SHIFT);
     assert_eq!(focused(&ui), Some(button("cancel")), "Shift+Tab wraps to the last stop");
-    tap(&mut ui, Key::Named(Named::Tab), Modifiers::default());
+    tap(&mut ui, Key::Tab, Modifiers::NONE);
     assert_eq!(focused(&ui), Some(answer("changes", "yes")));
 }
 
@@ -166,24 +165,24 @@ fn other_is_chosen_by_space_or_typing_and_enter_uses_it() {
     let mut ui = chooser();
     ui.a11y_action(&other_id(), Action::Focus);
     assert_eq!(focused(&ui), Some(other_id()));
-    tap(&mut ui, Key::Named(Named::ArrowDown), Modifiers::default());
+    tap(&mut ui, Key::Down, Modifiers::NONE);
     let model = |ui: &Ui| ui.app().overlays.chooser.as_ref().expect("open").model();
     assert!(!model(&ui).other, "Down does not choose it");
-    tap(&mut ui, Key::Named(Named::Space), Modifiers::default());
+    tap(&mut ui, Key::Space, Modifiers::NONE);
     assert!(model(&ui).other, "Space does");
-    tap(&mut ui, Key::Named(Named::Tab), Modifiers::default());
+    tap(&mut ui, Key::Tab, Modifiers::NONE);
     assert_eq!(focused(&ui), Some(other_text_id()));
     let _ = ui.typewrite("not a licence");
     let _ = ui.redraw();
     assert_eq!(model(&ui).other_text, "not a licence");
-    tap(&mut ui, Key::Named(Named::Enter), Modifiers::default());
+    tap(&mut ui, Key::Enter, Modifiers::NONE);
     assert!(ui.app().overlays.chooser.is_some(), "an invalid expression is not used");
     for _ in 0.."not a licence".len() {
-        tap(&mut ui, Key::Named(Named::Backspace), Modifiers::default());
+        tap(&mut ui, Key::Backspace, Modifiers::NONE);
     }
     let _ = ui.typewrite("MIT");
     let _ = ui.redraw();
-    tap(&mut ui, Key::Named(Named::Enter), Modifiers::default());
+    tap(&mut ui, Key::Enter, Modifiers::NONE);
     assert!(ui.app().overlays.chooser.is_none(), "Enter used it");
     assert_eq!(ui.app().session.document.info().license.as_deref(), Some("MIT"));
 }
@@ -219,7 +218,7 @@ fn escape_closes_it_from_anywhere() {
         let before = ui.app().session.document.info().license.clone();
         ui.a11y_action(&part, Action::Focus);
         assert_eq!(focused(&ui), Some(part.clone()));
-        tap(&mut ui, Key::Named(Named::Escape), Modifiers::default());
+        tap(&mut ui, Key::Escape, Modifiers::NONE);
         assert!(ui.app().overlays.chooser.is_none(), "Escape on {part} closed it");
         assert_eq!(ui.app().session.document.info().license, before, "nothing changed");
     }
@@ -236,11 +235,11 @@ fn escape_and_tab_while_composing_are_the_compositions() {
         iced::Event::InputMethod(Method::Opened),
         iced::Event::InputMethod(Method::Preedit("に".to_owned(), Some(3..3))),
     ]);
-    let none = Modifiers::default();
-    let _ = ui.step(&[key_press(Key::Named(Named::Escape), none, None, false)]);
+    let none = Modifiers::NONE;
+    let _ = ui.step(&[key_press(Key::Escape, none, None, false)]);
     let _ = ui.redraw();
     assert!(ui.app().overlays.chooser.is_some(), "Escape was the composition's");
-    let _ = ui.step(&[key_press(Key::Named(Named::Tab), none, None, false)]);
+    let _ = ui.step(&[key_press(Key::Tab, none, None, false)]);
     let _ = ui.redraw();
     assert_eq!(focused(&ui), Some(other_text_id()), "Tab was the composition's");
 }
@@ -251,9 +250,9 @@ fn escape_and_tab_while_composing_are_the_compositions() {
 #[test]
 fn help_over_the_chooser_covers_it_and_gives_the_focus_back() {
     let mut ui = chooser();
-    tap(&mut ui, Key::Named(Named::Tab), Modifiers::default());
+    tap(&mut ui, Key::Tab, Modifiers::NONE);
     let before = focused(&ui).expect("a chooser part has the focus");
-    tap(&mut ui, Key::Named(Named::F1), Modifiers::default());
+    tap(&mut ui, Key::F1, Modifiers::NONE);
     assert!(ui.app().overlays.help.is_some(), "F1 opened help");
     let tree = ui.a11y_tree();
     assert!(!tree.has_part_under(&licence_id()), "the chooser is not reported");
@@ -263,7 +262,7 @@ fn help_over_the_chooser_covers_it_and_gives_the_focus_back() {
         "it refuses a click"
     );
     assert!(ui.app().chooser_stops().is_empty(), "nor is it a place to focus");
-    tap(&mut ui, Key::Named(Named::Escape), Modifiers::default());
+    tap(&mut ui, Key::Escape, Modifiers::NONE);
     assert!(ui.app().overlays.help.is_none());
     assert!(ui.app().overlays.chooser.is_some(), "Escape closed only help");
     assert_eq!(focused(&ui), Some(before), "the focus came back");
@@ -275,7 +274,7 @@ fn help_over_the_chooser_covers_it_and_gives_the_focus_back() {
 fn in_a_short_window_the_body_scrolls_to_a_focused_part() {
     let mut ui = chooser();
     ui.resize(1000.0, 360.0);
-    tap(&mut ui, Key::Named(Named::Space), Modifiers::default());
+    tap(&mut ui, Key::Space, Modifiers::NONE);
     let window = ui.runtime().bounds(&licence_id()).expect("the panel");
     let cancel = ui.runtime().bounds(&button("cancel")).expect("Cancel");
     assert!(
@@ -291,7 +290,7 @@ fn in_a_short_window_the_body_scrolls_to_a_focused_part() {
         if focused(&ui) == Some(other_text_id()) {
             break;
         }
-        tap(&mut ui, Key::Named(Named::Tab), Modifiers::default());
+        tap(&mut ui, Key::Tab, Modifiers::NONE);
     }
     assert_eq!(focused(&ui), Some(other_text_id()), "Tab reached the field");
     let (offset, _) = ui.runtime().scroll_offset(&body_id()).expect("the body scrolls");

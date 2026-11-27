@@ -5,7 +5,7 @@
 use super::panel::tests::{focused, key, key_with, matrix_open};
 use super::*;
 use crate::ui_test::Ui;
-use iced::keyboard::{self, key::Named};
+use loom_ui_core::{Key, Modifiers};
 
 /// The rows the matrix shows now, by assignment.
 fn shown(ui: &Ui) -> Vec<u32> {
@@ -183,15 +183,15 @@ fn matrix_surface_target_and_range_survive_rename_and_reopen() {
 fn the_snapshot_describes_open_matrix_editors() {
     let mut ui = matrix_open();
     for _ in 0..4 {
-        key(&mut ui, Named::ArrowRight);
+        key(&mut ui, Key::Right);
     }
-    key(&mut ui, Named::Enter);
+    key(&mut ui, Key::Enter);
     let model = ui.app().ui_snapshot().matrix;
     let edit = model.edit.expect("the Depth field");
     assert_eq!(edit.column, Column::Depth);
     assert_eq!(edit.depth, crate::modulation::depth_text(0.08));
 
-    key(&mut ui, Named::Escape);
+    key(&mut ui, Key::Escape);
     ui.send(Message::Matrix(Event::AddOpen));
     let model = ui.app().ui_snapshot().matrix;
     assert!(model.add.is_some());
@@ -273,21 +273,21 @@ fn positions(ui: &Ui) -> Vec<(u32, (f32, f32))> {
 fn keyboard_reveals_rows_in_an_overflowing_table() {
     let mut ui = overflowing();
     let (places, before) = (positions(&ui), assignments(&ui));
-    key(&mut ui, Named::ArrowDown);
+    key(&mut ui, Key::Down);
     check_in_view(&mut ui);
     assert_eq!(offset(&ui), 0.0, "the second row is in view: no scroll");
     for _ in 1..32 {
-        key(&mut ui, Named::ArrowDown);
+        key(&mut ui, Key::Down);
         check_in_view(&mut ui);
     }
     assert_eq!(ui.app().session.matrix.selected, Some(AssignmentId(32)), "the last row");
     assert!(offset(&ui) > 0.0, "below: it scrolled");
     for _ in 0..4 {
-        key(&mut ui, Named::ArrowRight);
+        key(&mut ui, Key::Right);
         check_in_view(&mut ui);
     }
     for _ in 0..31 {
-        key(&mut ui, Named::ArrowUp);
+        key(&mut ui, Key::Up);
         check_in_view(&mut ui);
     }
     assert_eq!(ui.app().session.matrix.selected, Some(AssignmentId(1)));
@@ -309,16 +309,12 @@ fn keyboard_reveals_rows_in_an_overflowing_table() {
 /// Tab until the runtime's focus is `to`, at most 20 presses, forward or
 /// back.
 fn tab_to(ui: &mut Ui, to: &loom_ui_core::UiId, back: bool) {
-    let modifiers = if back {
-        keyboard::Modifiers::SHIFT
-    } else {
-        keyboard::Modifiers::empty()
-    };
+    let modifiers = if back { Modifiers::SHIFT } else { Modifiers::NONE };
     for _ in 0..20 {
         if focused(ui).as_ref() == Some(to) {
             return;
         }
-        key_with(ui, Named::Tab, modifiers);
+        key_with(ui, Key::Tab, modifiers);
     }
     panic!("Tab never reached {to}, at {:?}", focused(ui));
 }
@@ -334,29 +330,29 @@ fn changing_the_filters_keeps_the_keys_off_the_canvas() {
     let mut ui = overflowing();
     let (places, before) = (positions(&ui), assignments(&ui));
     // Down twice, onto a row from the LFO that the filter keeps.
-    key(&mut ui, Named::ArrowDown);
-    key(&mut ui, Named::ArrowDown);
+    key(&mut ui, Key::Down);
+    key(&mut ui, Key::Down);
     let chosen = focused(&ui).expect("a cell");
     tab_to(&mut ui, &filter_part(), true);
     ui.typewrite("LFO");
     assert_eq!(ui.app().session.matrix.filter, "LFO");
     assert_eq!(focused(&ui), Some(filter_part()), "the focus stays in the filter");
-    for named in [Named::ArrowUp, Named::ArrowDown] {
+    for named in [Key::Up, Key::Down] {
         key(&mut ui, named);
         assert_eq!(focused(&ui), Some(filter_part()), "{named:?} stays in the filter");
     }
     tab_to(&mut ui, &access::part("selected-only"), false);
-    key(&mut ui, Named::Space);
+    key(&mut ui, Key::Space);
     assert!(ui.app().session.matrix.selected_only);
     for _ in 0..10 {
-        key(&mut ui, Named::Tab);
+        key(&mut ui, Key::Tab);
         if focused(&ui).is_some_and(|id| id.is_under(&panel::list_id())) {
             break;
         }
     }
     assert_eq!(focused(&ui), Some(chosen), "back on the chosen cell");
     for _ in 0..31 {
-        key(&mut ui, Named::ArrowDown);
+        key(&mut ui, Key::Down);
         let selected = ui.app().session.matrix.selected.expect("a chosen row");
         assert!(shown(&ui).contains(&selected.0), "{selected:?} shows");
         assert!(
@@ -499,7 +495,7 @@ fn typed_depth_and_escape() {
 fn delete_twice_removes_two_rows_and_no_module() {
     let mut ui = matrix_open();
     let modules = ui.app().session.controller.graph().nodes().count();
-    key(&mut ui, Named::Delete);
+    key(&mut ui, Key::Delete);
     assert!(
         ui.app()
             .session
@@ -509,7 +505,7 @@ fn delete_twice_removes_two_rows_and_no_module() {
             .is_none()
     );
     assert_eq!(focused(&ui), Some(access::cell(AssignmentId(2), Column::On)));
-    key(&mut ui, Named::Delete);
+    key(&mut ui, Key::Delete);
     assert_eq!(ui.app().session.controller.graph().assignments().count(), 0);
     assert_eq!(focused(&ui), Some(access::part("add")), "no row left: Add");
     assert_eq!(
@@ -529,14 +525,11 @@ fn command_shortcuts_undo_and_redo_while_the_grid_has_the_focus() {
     let id = AssignmentId(1);
     let on = |ui: &Ui| ui.app().session.controller.graph().assignment(id).unwrap().enabled;
     let original = on(&ui);
-    key(&mut ui, Named::Enter);
+    key(&mut ui, Key::Enter);
     assert_eq!(on(&ui), !original);
-    ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut());
     assert_eq!(on(&ui), original);
-    ui.tap(
-        keyboard::Key::Character("z".into()),
-        keyboard::Modifiers::COMMAND | keyboard::Modifiers::SHIFT,
-    );
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut() | Modifiers::SHIFT);
     assert_eq!(on(&ui), !original);
 }
 
@@ -547,8 +540,8 @@ fn cmd_v_in_a_depth_field_stays_out_of_the_canvas() {
     for by_key in [true, false] {
         let mut ui = matrix_open();
         if by_key {
-            key(&mut ui, Named::End);
-            key(&mut ui, Named::Enter);
+            key(&mut ui, Key::End);
+            key(&mut ui, Key::Enter);
         } else {
             ui.lay_out_panels();
             let at = ui
@@ -565,7 +558,7 @@ fn cmd_v_in_a_depth_field_stays_out_of_the_canvas() {
             Some(panel::depth_field(AssignmentId(1))),
             "by key: {by_key}"
         );
-        let messages = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
+        let messages = ui.tap(Key::Character('v'), Modifiers::platform_shortcut());
         assert!(
             !messages
                 .iter()
@@ -590,7 +583,7 @@ fn canvas_click_then_delete_removes_the_module_not_a_matrix_row() {
     heard.extend(ui.redraw());
     assert!(!ui.app().focus_in_matrix(), "{heard:?} {:?}", ui.runtime().focused());
     assert!(ui.app().session.selection.contains(&3));
-    ui.tap(keyboard::Key::Named(Named::Delete), keyboard::Modifiers::default());
+    ui.tap(Key::Delete, Modifiers::NONE);
     assert!(ui.app().session.controller.graph().node(ModuleId(3)).is_none());
     assert_eq!(ui.app().session.controller.graph().assignments().count(), 2);
 }
@@ -768,7 +761,7 @@ fn the_matrix_has_no_keys_behind_an_overlay() {
         let undo = ui.app().session.edits.history.undo_step().map(|s| s.name().to_string());
         open_overlay(&mut ui, owner);
         let before = ui.app().session.matrix.selected;
-        key(&mut ui, Named::ArrowDown);
+        key(&mut ui, Key::Down);
         assert_eq!(ui.app().session.matrix.selected, before, "{owner:?}");
         assert_eq!(
             ui.app().session.edits.history.undo_step().map(|s| s.name().to_string()),
@@ -835,18 +828,18 @@ fn the_grid_has_the_keys_again_after_an_overlay_closes() {
     for (owner, column) in owners.into_iter().flat_map(|o| [(o, Column::On), (o, Column::Source)]) {
         let mut ui = matrix_open();
         if column == Column::Source {
-            key(&mut ui, Named::ArrowRight);
+            key(&mut ui, Key::Right);
         }
         let cell = access::cell(AssignmentId(1), column);
         assert_eq!(focused(&ui), Some(cell.clone()));
         open_overlay(&mut ui, owner);
         let _ = ui.redraw();
         assert_eq!(ui.app().input_owner(), owner, "{owner:?} open");
-        key(&mut ui, Named::Escape);
+        key(&mut ui, Key::Escape);
         let _ = ui.redraw();
         assert_eq!(ui.app().input_owner(), InputOwner::Canvas, "{owner:?} closed");
         assert_eq!(focused(&ui), Some(cell), "{owner:?}: the cell has the focus again");
-        key(&mut ui, Named::ArrowDown);
+        key(&mut ui, Key::Down);
         assert_eq!(
             ui.app().session.matrix.selected,
             Some(AssignmentId(2)),
@@ -881,14 +874,7 @@ fn rows_and_cells(ui: &Ui) -> (Option<AssignmentId>, Column, bool, usize) {
 /// the focus.
 #[test]
 fn keys_in_the_filter_leave_rows_alone() {
-    for named in [
-        Named::Delete,
-        Named::Backspace,
-        Named::ArrowUp,
-        Named::ArrowDown,
-        Named::ArrowRight,
-        Named::Enter,
-    ] {
+    for named in [Key::Delete, Key::Backspace, Key::Up, Key::Down, Key::Right, Key::Enter] {
         let mut ui = matrix_open();
         click_filter(&mut ui);
         let (before, places) = (rows_and_cells(&ui), positions(&ui));
@@ -924,12 +910,12 @@ fn typing_clearing_and_leaving_the_filter() {
     click_filter(&mut ui);
     ui.typewrite("zz");
     assert_eq!(ui.app().session.matrix.filter, "zz");
-    key(&mut ui, Named::Backspace);
-    key(&mut ui, Named::Backspace);
+    key(&mut ui, Key::Backspace);
+    key(&mut ui, Key::Backspace);
     assert_eq!(ui.app().session.matrix.filter, "");
     assert_eq!(ui.app().session.controller.graph().assignments().count(), count);
     assert!(ui.app().session.edits.history.undo_step().is_none());
-    key(&mut ui, Named::Escape);
+    key(&mut ui, Key::Escape);
     assert!(!ui.app().focus_in_matrix(), "Escape left the matrix");
     assert!(ui.app().canvas_has_keys());
 }
@@ -948,10 +934,10 @@ fn cmd_z_in_the_filter_undoes_nothing_behind_it() {
             .unwrap()
             .enabled
     };
-    key(&mut ui, Named::Enter);
+    key(&mut ui, Key::Enter);
     let toggled = on(&ui);
     click_filter(&mut ui);
-    ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut());
     let _ = ui.redraw();
     assert_eq!(on(&ui), toggled, "the toggle stays");
 }
@@ -965,32 +951,32 @@ fn the_add_form_by_keyboard() {
     let mut ui = matrix_open();
     let count = ui.app().session.controller.graph().assignments().count();
     tab_to(&mut ui, &access::part("add"), true);
-    key(&mut ui, Named::Enter);
+    key(&mut ui, Key::Enter);
     let _ = ui.redraw();
     assert_eq!(focused(&ui), Some(access::part("new/source")), "the form's first pick");
     // The last source and the last target: a pair no row has.
     for pick in ["new/source", "new/target"] {
         tab_to(&mut ui, &access::part(pick), false);
-        key(&mut ui, Named::Enter);
-        key(&mut ui, Named::End);
-        key(&mut ui, Named::Enter);
+        key(&mut ui, Key::Enter);
+        key(&mut ui, Key::End);
+        key(&mut ui, Key::Enter);
         let _ = ui.redraw();
     }
     let add = ui.app().session.matrix.add.clone().expect("the form");
     assert!(add.source.is_some() && add.target.is_some(), "both picked");
     tab_to(&mut ui, &access::part("new/create"), false);
-    key(&mut ui, Named::Enter);
+    key(&mut ui, Key::Enter);
     let _ = ui.redraw();
     assert_eq!(ui.app().session.controller.graph().assignments().count(), count + 1);
     assert_eq!(focused(&ui), Some(access::part("add")), "back on Add");
     for closer in ["cancel", "escape"] {
-        key(&mut ui, Named::Enter);
+        key(&mut ui, Key::Enter);
         let _ = ui.redraw();
         if closer == "cancel" {
             tab_to(&mut ui, &access::part("new/cancel"), false);
-            key(&mut ui, Named::Enter);
+            key(&mut ui, Key::Enter);
         } else {
-            key(&mut ui, Named::Escape);
+            key(&mut ui, Key::Escape);
         }
         let _ = ui.redraw();
         assert!(ui.app().session.matrix.add.is_none(), "{closer} closed the form");
@@ -1003,9 +989,9 @@ fn the_add_form_by_keyboard() {
 fn sort_by_by_keyboard() {
     let mut ui = matrix_open();
     tab_to(&mut ui, &access::part("sort"), true);
-    key(&mut ui, Named::Enter);
-    key(&mut ui, Named::End);
-    key(&mut ui, Named::Enter);
+    key(&mut ui, Key::Enter);
+    key(&mut ui, Key::End);
+    key(&mut ui, Key::Enter);
     let _ = ui.redraw();
     assert_eq!(
         ui.app().session.matrix.sort,
@@ -1013,7 +999,7 @@ fn sort_by_by_keyboard() {
         "the last option"
     );
     tab_to(&mut ui, &access::part("reverse"), false);
-    key(&mut ui, Named::Enter);
+    key(&mut ui, Key::Enter);
     let _ = ui.redraw();
     assert_eq!(ui.app().session.matrix.sort, Some((Column::Depth, true)));
 }
@@ -1023,16 +1009,16 @@ fn sort_by_by_keyboard() {
 #[test]
 fn ctrl_tab_enters_the_grid_on_its_chosen_cell() {
     let mut ui = matrix_open();
-    key(&mut ui, Named::ArrowDown);
-    key(&mut ui, Named::ArrowRight);
-    key(&mut ui, Named::Escape);
+    key(&mut ui, Key::Down);
+    key(&mut ui, Key::Right);
+    key(&mut ui, Key::Escape);
     assert!(!ui.app().focus_in_matrix());
     ui.app_mut().session.selection.clear();
     for _ in 0..3 {
         if ui.app().focus_in_matrix() {
             break;
         }
-        key_with(&mut ui, Named::Tab, keyboard::Modifiers::CTRL);
+        key_with(&mut ui, Key::Tab, Modifiers::CONTROL);
     }
     assert_eq!(focused(&ui), Some(access::cell(AssignmentId(2), Column::Source)));
 }
@@ -1042,13 +1028,13 @@ fn ctrl_tab_enters_the_grid_on_its_chosen_cell() {
 #[test]
 fn tab_into_the_grid_with_its_row_filtered_out() {
     let mut ui = matrix_open();
-    key(&mut ui, Named::ArrowDown);
+    key(&mut ui, Key::Down);
     assert_eq!(ui.app().session.matrix.selected, Some(AssignmentId(2)));
     tab_to(&mut ui, &filter_part(), true);
     ui.typewrite("LFO");
     assert!(!shown(&ui).contains(&2), "the envelope's row is filtered out");
     for _ in 0..10 {
-        key(&mut ui, Named::Tab);
+        key(&mut ui, Key::Tab);
         if focused(&ui).is_some_and(|id| id.is_under(&panel::list_id())) {
             break;
         }
@@ -1069,13 +1055,13 @@ fn keys_the_grid_does_not_take_reach_nothing_behind_it() {
         let _ = ui.redraw();
         let cell = access::cell(AssignmentId(1), column);
         assert_eq!(focused(&ui), Some(cell.clone()));
-        key(&mut ui, Named::Backspace);
-        for letter in ["a", "o", "c"] {
-            ui.tap(keyboard::Key::Character(letter.into()), keyboard::Modifiers::empty());
+        key(&mut ui, Key::Backspace);
+        for letter in ['a', 'o', 'c'] {
+            ui.tap(Key::Character(letter), Modifiers::NONE);
             let _ = ui.redraw();
         }
         if column != Column::On {
-            key(&mut ui, Named::Space);
+            key(&mut ui, Key::Space);
             assert_eq!(offset(&ui), 0.0, "{column:?}: Space scrolled nothing");
         }
         assert_eq!(
@@ -1109,7 +1095,7 @@ fn undoing_an_add_keeps_the_focus_in_the_grid() {
             .enabled
     };
     let before = on(&ui);
-    key(&mut ui, Named::Enter);
+    key(&mut ui, Key::Enter);
     let graph = ui.app().session.controller.graph();
     let (hierarchy, level) = (&ui.app().session.hierarchy, &ui.app().session.level);
     let source = sources(graph, hierarchy, level).last().unwrap().clone();
@@ -1122,7 +1108,7 @@ fn undoing_an_add_keeps_the_focus_in_the_grid() {
     ui.send(Message::Matrix(Event::Select(added, Column::Depth)));
     let _ = ui.redraw();
     assert_eq!(focused(&ui), Some(access::cell(added, Column::Depth)));
-    ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut());
     let _ = ui.redraw();
     let _ = ui.redraw();
     assert!(
@@ -1134,7 +1120,7 @@ fn undoing_an_add_keeps_the_focus_in_the_grid() {
         "the focus is on a live cell: {:?}",
         focused(&ui)
     );
-    ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut());
     let _ = ui.redraw();
     assert_eq!(on(&ui), before, "the next undo works");
 }

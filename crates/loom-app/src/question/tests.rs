@@ -4,7 +4,7 @@ use crate::recovery::tests::TempDir;
 use crate::tests::{app, app_args};
 use crate::ui_test::Ui;
 use crate::{App, FileAction, Message as AppMessage};
-use iced::keyboard::{Key, Modifiers, key::Named};
+use loom_ui_core::{Key, Modifiers};
 
 /// A window on a new patch with unsaved changes and no file.
 fn changed() -> Ui {
@@ -164,7 +164,7 @@ fn a_failed_save_stays_and_says_why() {
     assert_eq!(ui.app().alerts.status(), error.text, "the status bar repeats it");
 
     // OK closes it. Escape would too, and neither quits.
-    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
     assert!(ui.app().overlays.question.is_none());
     assert!(!ui.app().quit);
 }
@@ -204,7 +204,7 @@ fn replace_writes_then_continues() {
 fn cancelling_replace_keeps_everything() {
     let dir = TempDir::new("question-keep");
     let mut ui = asked_to_replace(&dir);
-    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
     assert!(ui.app().overlays.question.is_none());
     assert_eq!(std::fs::read_to_string(dir.0.join("foo.ron")).unwrap(), "theirs");
     assert!(ui.app().unsaved());
@@ -233,17 +233,17 @@ fn the_keys_move_and_give_the_highlight() {
     let mut ui = changed();
     ui.send(AppMessage::File(FileAction::Close));
     assert_eq!(model(&ui).highlight, "save");
-    ui.tap(Key::Named(Named::Tab), Modifiers::empty());
+    ui.tap(Key::Tab, Modifiers::NONE);
     assert_eq!(model(&ui).highlight, "dont-save");
-    ui.tap(Key::Named(Named::ArrowRight), Modifiers::empty());
+    ui.tap(Key::Right, Modifiers::NONE);
     assert_eq!(model(&ui).highlight, "cancel");
-    ui.tap(Key::Named(Named::Tab), Modifiers::empty());
+    ui.tap(Key::Tab, Modifiers::NONE);
     assert_eq!(model(&ui).highlight, "save", "it wraps");
-    ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
+    ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(model(&ui).highlight, "cancel", "Shift goes back");
-    ui.tap(Key::Named(Named::ArrowLeft), Modifiers::empty());
+    ui.tap(Key::Left, Modifiers::NONE);
     assert_eq!(model(&ui).highlight, "dont-save");
-    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
     assert!(ui.app().quit, "Enter gave Don't Save");
 }
 
@@ -296,7 +296,7 @@ fn a_focused_field_gets_nothing() {
     ui.typewrite("drone");
     assert_eq!(ui.app().session.patch_info.tag_draft, draft);
     assert!(ui.app().overlays.question.is_some());
-    ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    ui.tap(Key::Enter, Modifiers::NONE);
     assert!(ui.app().overlays.question.is_none(), "Enter answered the question");
     // Enter gave Save, the safe answer, which adds the tag typed before the
     // question opened and nothing typed behind it (files.md, Text still
@@ -319,14 +319,14 @@ fn shortcuts_do_nothing_behind_the_question() {
     ui.send(AppMessage::File(FileAction::Close));
     ui.redraw();
     let before = model(&ui);
-    ui.tap(Key::Character("z".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut());
     assert_eq!(modules(ui.app()), count, "undo did nothing");
     assert_eq!(ui.app().session.edits.history.len(), steps);
-    ui.tap(Key::Character("n".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('n'), Modifiers::platform_shortcut());
     assert_eq!(modules(ui.app()), count, "New did nothing");
-    ui.tap(Key::Named(Named::Backspace), Modifiers::empty());
+    ui.tap(Key::Backspace, Modifiers::NONE);
     assert_eq!(modules(ui.app()), count, "Delete did nothing");
-    ui.tap(Key::Named(Named::F1), Modifiers::empty());
+    ui.tap(Key::F1, Modifiers::NONE);
     assert!(ui.app().overlays.help.is_none(), "help stays closed");
     assert_eq!(model(&ui), before, "the question stays as it was");
 }
@@ -337,11 +337,11 @@ fn shortcuts_do_nothing_behind_the_question() {
 fn escape_leaves_help_open_under_the_question() {
     let mut ui = changed();
     select_a_module(&mut ui);
-    ui.tap(Key::Named(Named::F1), Modifiers::empty());
+    ui.tap(Key::F1, Modifiers::NONE);
     assert!(ui.app().overlays.help.is_some());
     ui.send(AppMessage::File(FileAction::Close));
     ui.redraw();
-    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    ui.tap(Key::Escape, Modifiers::NONE);
     assert!(ui.app().overlays.question.is_none());
     assert!(ui.app().overlays.help.is_some(), "help is still open");
 }
@@ -351,7 +351,7 @@ fn escape_leaves_help_open_under_the_question() {
 fn a_second_close_is_ignored() {
     let mut ui = changed();
     ui.send(AppMessage::File(FileAction::Close));
-    ui.tap(Key::Named(Named::Tab), Modifiers::empty());
+    ui.tap(Key::Tab, Modifiers::NONE);
     ui.send(AppMessage::File(FileAction::Close));
     assert_eq!(model(&ui).highlight, "dont-save");
     assert!(!ui.app().quit);
@@ -363,7 +363,7 @@ fn the_panic_key_works_over_the_question() {
     let mut ui = changed();
     ui.send(AppMessage::File(FileAction::Close));
     ui.redraw();
-    ui.tap(Key::Character(".".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('.'), Modifiers::platform_shortcut());
     assert!(
         ui.app().alerts.status().starts_with("Panic"),
         "{}",
@@ -461,16 +461,17 @@ fn keys_under_the_question_never_reach_the_app() {
     let clipboard = ui.clipboard().map(str::to_string);
     ui.send(AppMessage::File(FileAction::Close));
     ui.redraw();
+    use loom_ui_core::{Key as K, Modifiers as M};
     let keys = [
-        (Key::Named(Named::Backspace), Modifiers::empty()),
-        (Key::Named(Named::Delete), Modifiers::empty()),
-        (Key::Character("d".into()), Modifiers::COMMAND),
-        (Key::Character("x".into()), Modifiers::COMMAND),
-        (Key::Character("c".into()), Modifiers::COMMAND),
-        (Key::Character("z".into()), Modifiers::COMMAND),
+        (K::Backspace, M::NONE),
+        (K::Delete, M::NONE),
+        (K::Character('d'), M::platform_shortcut()),
+        (K::Character('x'), M::platform_shortcut()),
+        (K::Character('c'), M::platform_shortcut()),
+        (K::Character('z'), M::platform_shortcut()),
     ];
     for (key, modifiers) in keys {
-        let sent = ui.tap(key.clone(), modifiers);
+        let sent = ui.tap(key, modifiers);
         assert!(
             !sent
                 .iter()
@@ -498,9 +499,9 @@ fn space_gives_the_focused_answer() {
     ui.send(AppMessage::File(FileAction::Close));
     ui.redraw();
     assert_eq!(model(&ui).highlight, "save", "the safe answer has the focus");
-    ui.tap(Key::Named(Named::Tab), Modifiers::empty());
+    ui.tap(Key::Tab, Modifiers::NONE);
     assert_eq!(model(&ui).highlight, "dont-save", "Tab moved it");
-    ui.tap(Key::Named(Named::Space), Modifiers::empty());
+    ui.tap(Key::Space, Modifiers::NONE);
     assert!(ui.app().quit, "Space gave Don't Save");
 }
 

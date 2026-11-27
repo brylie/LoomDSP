@@ -335,17 +335,14 @@ fn position(ui: &crate::ui_test::Ui) -> f32 {
 /// and goes no further: Run, which Space flips on the canvas, stays.
 #[test]
 fn space_on_a_toolbar_button_clicks_it_and_leaves_run() {
-    use iced::keyboard::{Key, key::Named};
+    use loom_ui_core::Key;
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     let learn = toolbar_id().with("midi_learn");
     ui.a11y_action(&learn, accesskit::Action::Focus);
     assert_eq!(ui.runtime().focused(), Some(&learn));
     let running = ui.app().session.controller.transport().running;
-    let mut heard = ui.step(&[crate::ui_test::key_pressed(Key::Named(Named::Space), false)]);
-    heard.extend(ui.step(&[crate::ui_test::key_released(
-        Key::Named(Named::Space),
-        Default::default(),
-    )]));
+    let mut heard = ui.step(&[crate::ui_test::key_pressed(Key::Space, false)]);
+    heard.extend(ui.step(&[crate::ui_test::key_released(Key::Space, Default::default())]));
     ui.redraw();
     assert!(ui.app().session.learn.is_on(), "the click turned learning on");
     assert_eq!(ui.app().session.controller.transport().running, running, "Run stays");
@@ -362,7 +359,7 @@ fn space_on_a_toolbar_button_clicks_it_and_leaves_run() {
 /// and runs no shortcut. Each is one step.
 #[test]
 fn undo_by_shortcut_and_by_enter_is_one_step_each() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     let original = position(&ui);
     turn(&mut ui, 0.25);
@@ -370,7 +367,7 @@ fn undo_by_shortcut_and_by_enter_is_one_step_each() {
     let undo = toolbar_id().with("undo");
     ui.a11y_action(&undo, accesskit::Action::Focus);
     assert_eq!(ui.runtime().focused(), Some(&undo));
-    ui.tap(Key::Character("z".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut());
     ui.redraw();
     assert!((position(&ui) - 0.25).abs() < 1e-6, "the shortcut undid one step");
     assert_eq!(
@@ -378,7 +375,7 @@ fn undo_by_shortcut_and_by_enter_is_one_step_each() {
         Some(&undo),
         "Undo still works, so it keeps the focus"
     );
-    ui.tap(Key::Named(Named::Enter), Modifiers::default());
+    ui.tap(Key::Enter, Modifiers::NONE);
     ui.redraw();
     assert!((position(&ui) - original).abs() < 1e-6, "Enter undid one more");
 }
@@ -388,11 +385,11 @@ fn undo_by_shortcut_and_by_enter_is_one_step_each() {
 /// section 6, rule 6: the focused element, then the app's shortcuts).
 #[test]
 fn shortcuts_work_while_a_toolbar_button_has_focus() {
-    use iced::keyboard::{Key, Modifiers};
+    use loom_ui_core::{Key, Modifiers};
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     ui.a11y_action(&toolbar_id().with("new"), accesskit::Action::Focus);
     assert!(ui.app().preferences_model().is_none());
-    ui.tap(Key::Character(",".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character(','), Modifiers::platform_shortcut());
     ui.redraw();
     assert!(ui.app().preferences_model().is_some(), "Preferences opened");
 }
@@ -419,7 +416,7 @@ fn a_click_leaves_our_focus_where_it_was() {
 /// moves the selected tile.
 #[test]
 fn a_click_takes_the_keys_from_a_knob_back_to_the_canvas() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     let (module, _) = cutoff_knob(&ui);
     let knob: UiId = format!("canvas/{module}/param/cutoff").parse().unwrap();
@@ -436,7 +433,7 @@ fn a_click_takes_the_keys_from_a_knob_back_to_the_canvas() {
     assert_eq!(ui.runtime().focused(), None, "no focus of ours");
     assert_eq!(ui.app().a11y.focus(), None, "the knob let go");
     let place = ui.app().session.positions[&module];
-    ui.tap(Key::Named(Named::ArrowRight), Modifiers::default());
+    ui.tap(Key::Right, Modifiers::NONE);
     ui.redraw();
     assert_ne!(ui.app().session.positions[&module], place, "the arrow moved the tile");
 }
@@ -447,13 +444,13 @@ fn a_click_takes_the_keys_from_a_knob_back_to_the_canvas() {
 /// and the focus moves to New.
 #[test]
 fn a_focused_undo_that_turns_off_hands_the_focus_to_new() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     turn(&mut ui, 0.25);
     let undo = toolbar_id().with("undo");
     ui.a11y_action(&undo, accesskit::Action::Focus);
     assert_eq!(ui.runtime().focused(), Some(&undo));
-    ui.tap(Key::Named(Named::Enter), Modifiers::default());
+    ui.tap(Key::Enter, Modifiers::NONE);
     ui.redraw();
     let model = ui.app().toolbar_model();
     assert!(
@@ -473,7 +470,7 @@ fn a_focused_undo_that_turns_off_hands_the_focus_to_new() {
 /// back in lands on the button last focused, as Ctrl+Tab does.
 #[test]
 fn the_toolbar_is_one_tab_stop() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
     ui.redraw();
@@ -481,11 +478,11 @@ fn the_toolbar_is_one_tab_stop() {
     let bar_last = ui.app().bar_stops().last().cloned().expect("the bar's ×");
     ui.a11y_action(&stops[2], accesskit::Action::Focus);
     assert_eq!(ui.app().top_stops()[0], stops[2], "the toolbar remembers its button");
-    ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
+    ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(ui.runtime().focused(), Some(&bar_last), "back out of the toolbar");
-    ui.tap(Key::Named(Named::Tab), Modifiers::default());
+    ui.tap(Key::Tab, Modifiers::NONE);
     assert_eq!(ui.runtime().focused(), Some(&stops[2]), "in on the button last focused");
-    ui.tap(Key::Named(Named::Tab), Modifiers::default());
+    ui.tap(Key::Tab, Modifiers::NONE);
     assert_eq!(ui.runtime().focused(), None, "out of the toolbar, into the canvas");
 }
 

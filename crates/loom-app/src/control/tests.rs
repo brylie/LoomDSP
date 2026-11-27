@@ -1628,18 +1628,14 @@ fn with_overlay(owner: crate::input_owner::InputOwner) -> crate::ui_test::Ui {
 #[test]
 fn a_scripted_key_routes_as_a_real_one_for_each_overlay() {
     use crate::input_owner::tests::OWNERS;
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     for owner in OWNERS {
-        for (name, key) in [
-            ("escape", Key::Named(Named::Escape)),
-            ("tab", Key::Named(Named::Tab)),
-            ("up", Key::Named(Named::ArrowUp)),
-        ] {
+        for (name, key) in [("escape", Key::Escape), ("tab", Key::Tab), ("up", Key::Up)] {
             let mut scripted = with_overlay(owner);
             let line = format!(r#"{{"cmd": "key", "key": "{name}"}}"#);
             let by_script = routed_names(channel_messages(&mut scripted, &line));
             let mut direct = with_overlay(owner);
-            let by_step = routed_names(direct.tap(key, Modifiers::empty()));
+            let by_step = routed_names(direct.tap(key, Modifiers::NONE));
             assert_eq!(by_script, by_step, "{owner:?}, {name}");
         }
         // A character carries its text, so a focused field can use it.
@@ -3191,7 +3187,7 @@ fn a_named_drag_destination_is_resolved_after_resize() {
 /// A captured scripted press cancels the runtime's held Space.
 #[test]
 fn a_scripted_canvas_press_cancels_space_held_on_the_bar() {
-    use iced::keyboard::{Key, key::Named};
+    use loom_ui_core::Key;
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
     ui.app_mut().alerts.error(crate::alerts::Cause::File, "save failed");
     ui.redraw();
@@ -3199,9 +3195,9 @@ fn a_scripted_canvas_press_cancels_space_held_on_the_bar() {
     let point = ui.runtime().bounds(&id).unwrap().center();
     ui.move_to(point);
     ui.press();
-    ui.key_down(Key::Named(Named::Space), false);
+    ui.key_down(Key::Space, false);
     run_ui(&mut ui, r#"{"cmd":"press","target":"4:cutoff"}"#).unwrap();
-    ui.key_up(Key::Named(Named::Space));
+    ui.key_up(Key::Space);
     assert!(!ui.app().alerts.kept().is_empty());
 }
 
@@ -3237,8 +3233,8 @@ fn a_capture_uses_the_live_runtime_focus_ring() {
 fn a_scripted_tab_moves_the_focus_in_preferences() {
     let mut ui = typing_ui();
     ui.tap(
-        iced::keyboard::Key::Character(",".into()),
-        iced::keyboard::Modifiers::COMMAND,
+        loom_ui_core::Key::Character(','),
+        loom_ui_core::Modifiers::platform_shortcut(),
     );
     ui.redraw();
     let close = crate::settings::panel::close_id();
@@ -3254,7 +3250,7 @@ fn a_scripted_tab_moves_the_focus_in_preferences() {
 /// overlay needs a route of its own.
 #[test]
 fn a_scripted_tab_moves_the_focus_as_a_real_one_in_help_and_the_chooser() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     /// An overlay's name, and how to open it.
     type Open = (&'static str, fn(&mut crate::ui_test::Ui));
     let opens: [Open; 2] = [
@@ -3269,14 +3265,14 @@ fn a_scripted_tab_moves_the_focus_as_a_real_one_in_help_and_the_chooser() {
     ];
     for (name, open) in opens {
         for back in [false, true] {
-            let modifiers = if back { Modifiers::SHIFT } else { Modifiers::empty() };
+            let modifiers = if back { Modifiers::SHIFT } else { Modifiers::NONE };
             let mut real = typing_ui();
             open(&mut real);
             let _ = real.redraw();
             let start = real.runtime().focused().cloned();
             let mut seen = Vec::new();
             for _ in 0..3 {
-                real.tap(Key::Named(Named::Tab), modifiers);
+                real.tap(Key::Tab, modifiers);
                 let _ = real.redraw();
                 seen.push(real.runtime().focused().cloned());
             }

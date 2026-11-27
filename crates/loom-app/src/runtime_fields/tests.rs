@@ -7,10 +7,9 @@ use crate::Message;
 use crate::iced_bridge::TestPanels;
 use crate::ui_test::Ui;
 use crate::window_question::WindowQuestion;
-use iced::keyboard;
 use loom_ui::access::{Access, Role};
 use loom_ui::{Element, FieldEvent, Layer, Length, View};
-use loom_ui_core::UiId;
+use loom_ui_core::{Key, Modifiers, UiId};
 use std::cell::Cell;
 
 thread_local! {
@@ -134,10 +133,7 @@ fn each_field_gives_its_own_messages_and_enter_only_where_mapped() {
     assert_eq!(ui.runtime().focused(), Some(&name()));
     let typed = ui.typewrite("ab");
     assert!(heard(&typed, &said("name edited ab")), "{typed:?}");
-    let entered = ui.tap(
-        keyboard::Key::Named(keyboard::key::Named::Enter),
-        keyboard::Modifiers::empty(),
-    );
+    let entered = ui.tap(Key::Enter, Modifiers::NONE);
     assert!(heard(&entered, &said("name committed ab")), "{entered:?}");
 
     ui.deliver(Message::MidiPoll);
@@ -145,10 +141,7 @@ fn each_field_gives_its_own_messages_and_enter_only_where_mapped() {
     assert_eq!(ui.runtime().focused(), Some(&search()));
     let typed = ui.typewrite("saw");
     assert!(heard(&typed, &said("search edited saw")), "{typed:?}");
-    let entered = ui.tap(
-        keyboard::Key::Named(keyboard::key::Named::Enter),
-        keyboard::Modifiers::empty(),
-    );
+    let entered = ui.tap(Key::Enter, Modifiers::NONE);
     assert!(
         !entered
             .iter()
@@ -167,7 +160,7 @@ fn each_field_gives_its_own_messages_and_enter_only_where_mapped() {
 fn a_focus_question_sees_the_field_until_it_goes() {
     let duplicate = |ui: &mut Ui| {
         let before = ui.app().session.controller.graph().nodes().count();
-        ui.tap(keyboard::Key::Character("d".into()), keyboard::Modifiers::COMMAND);
+        ui.tap(Key::Character('d'), Modifiers::platform_shortcut());
         ui.redraw();
         ui.app().session.controller.graph().nodes().count() - before
     };

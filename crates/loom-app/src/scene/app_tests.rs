@@ -4,8 +4,8 @@
 
 use crate::Message;
 use crate::ui_test::Ui;
-use iced::keyboard;
-use keyboard::key::Named;
+use loom_ui_core::{Key, Modifiers};
+
 use loom_core::{Channels, ModuleDescriptor, Panel, ParamSpec, PortDefault, PortRange, PortSpec, SignalType, Widget};
 
 /// A knob's parameter, from 0 to 1.
@@ -117,14 +117,14 @@ fn scope_window_bounds(ui: &mut Ui, module: u32) -> [f64; 4] {
 fn tab_sequence(ui: &mut Ui, module: u32) -> Vec<String> {
     ui.app_mut().session.selection = [module].into();
     ui.redraw();
-    let _ = ui.tap(keyboard::Key::Named(Named::Enter), keyboard::Modifiers::default());
+    let _ = ui.tap(Key::Enter, Modifiers::NONE);
     let mut names = Vec::new();
     for _ in 0..3 {
         let tree = ui.a11y_tree();
         names.push(tree.focused().name().unwrap_or_default().to_string());
-        let _ = ui.tap(keyboard::Key::Named(Named::Tab), keyboard::Modifiers::default());
+        let _ = ui.tap(Key::Tab, Modifiers::NONE);
     }
-    let _ = ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::default());
+    let _ = ui.tap(Key::Escape, Modifiers::NONE);
     names
 }
 

@@ -5,7 +5,7 @@
 use super::*;
 use crate::matrix::{Column, Event, Tab};
 use crate::ui_test::Ui;
-use iced::keyboard::{self, Key as IcedKey, key::Named};
+use loom_ui_core::{Key, Modifiers};
 
 /// The modulation example with the Matrix open from its tab by the
 /// pointer, so the grid has the focus on On in the first row.
@@ -17,13 +17,13 @@ pub(crate) fn matrix_open() -> Ui {
 }
 
 /// Presses `named` with no modifiers, and draws the frame.
-pub(crate) fn key(ui: &mut Ui, named: Named) {
-    key_with(ui, named, keyboard::Modifiers::empty());
+pub(crate) fn key(ui: &mut Ui, named: Key) {
+    key_with(ui, named, Modifiers::NONE);
 }
 
 /// Presses `named` with `modifiers`, and draws the frame.
-pub(crate) fn key_with(ui: &mut Ui, named: Named, modifiers: keyboard::Modifiers) {
-    ui.tap(IcedKey::Named(named), modifiers);
+pub(crate) fn key_with(ui: &mut Ui, named: Key, modifiers: Modifiers) {
+    ui.tap(named, modifiers);
     let _ = ui.redraw();
 }
 
@@ -85,25 +85,25 @@ fn the_grid_is_one_stop_that_remembers_its_cell() {
     let tab = crate::tabs::tab_id(Tab::Matrix);
     ui.focus(&tab);
     assert_eq!(focused(&ui), Some(tab));
-    key(&mut ui, Named::Tab);
+    key(&mut ui, Key::Tab);
     assert_eq!(
         focused(&ui),
         Some(cell(1, Column::On)),
         "into the grid, On in the first row"
     );
-    key(&mut ui, Named::Tab);
+    key(&mut ui, Key::Tab);
     assert!(
         !focused(&ui).is_some_and(|id| id.is_under(&list_id())),
         "Tab left the grid in one press: {:?}",
         focused(&ui)
     );
-    key_with(&mut ui, Named::Tab, keyboard::Modifiers::SHIFT);
+    key_with(&mut ui, Key::Tab, Modifiers::SHIFT);
     assert_eq!(focused(&ui), Some(cell(1, Column::On)), "back into the grid");
-    key(&mut ui, Named::ArrowDown);
-    key(&mut ui, Named::ArrowRight);
-    key_with(&mut ui, Named::Tab, keyboard::Modifiers::SHIFT);
+    key(&mut ui, Key::Down);
+    key(&mut ui, Key::Right);
+    key_with(&mut ui, Key::Tab, Modifiers::SHIFT);
     assert_eq!(focused(&ui), Some(access::part("sort")), "the part before the grid");
-    key(&mut ui, Named::Tab);
+    key(&mut ui, Key::Tab);
     assert_eq!(focused(&ui), Some(cell(2, Column::Source)), "the cell last chosen");
 }
 
@@ -125,39 +125,39 @@ fn every_grid_key_moves_the_focus() {
         (row, state.cell)
     };
     assert_eq!(at(&ui), (0, Column::On));
-    key(&mut ui, Named::ArrowUp);
+    key(&mut ui, Key::Up);
     assert_eq!(at(&ui), (0, Column::On), "Up stops at the first row");
-    key(&mut ui, Named::ArrowLeft);
+    key(&mut ui, Key::Left);
     assert_eq!(at(&ui), (0, Column::On), "Left stops at the first cell");
-    key(&mut ui, Named::ArrowRight);
+    key(&mut ui, Key::Right);
     assert_eq!(at(&ui), (0, Column::Source));
-    key(&mut ui, Named::ArrowDown);
+    key(&mut ui, Key::Down);
     assert_eq!(at(&ui), (1, Column::Source), "Down keeps the column");
-    key(&mut ui, Named::End);
+    key(&mut ui, Key::End);
     assert_eq!(at(&ui), (1, Column::Depth));
-    key(&mut ui, Named::ArrowRight);
+    key(&mut ui, Key::Right);
     assert_eq!(at(&ui), (1, Column::Depth), "Right stops at the last cell");
-    key(&mut ui, Named::Home);
+    key(&mut ui, Key::Home);
     assert_eq!(at(&ui), (1, Column::On));
-    key(&mut ui, Named::PageDown);
+    key(&mut ui, Key::PageDown);
     assert_eq!(at(&ui), (11, Column::On));
-    key(&mut ui, Named::PageDown);
-    key(&mut ui, Named::PageDown);
-    key(&mut ui, Named::PageDown);
+    key(&mut ui, Key::PageDown);
+    key(&mut ui, Key::PageDown);
+    key(&mut ui, Key::PageDown);
     assert_eq!(at(&ui), (31, Column::On), "Page Down stops at the last row");
-    key(&mut ui, Named::PageUp);
+    key(&mut ui, Key::PageUp);
     assert_eq!(at(&ui), (21, Column::On));
-    key_with(&mut ui, Named::Home, keyboard::Modifiers::COMMAND);
+    key_with(&mut ui, Key::Home, Modifiers::platform_shortcut());
     assert_eq!(at(&ui), (0, Column::On), "Ctrl+Home: the first row");
-    key(&mut ui, Named::ArrowRight);
-    key_with(&mut ui, Named::End, keyboard::Modifiers::COMMAND);
+    key(&mut ui, Key::Right);
+    key_with(&mut ui, Key::End, Modifiers::platform_shortcut());
     assert_eq!(at(&ui), (31, Column::Source), "Ctrl+End: the last row, same column");
-    key(&mut ui, Named::ArrowDown);
+    key(&mut ui, Key::Down);
     assert_eq!(at(&ui), (31, Column::Source), "Down stops at the last row");
-    key(&mut ui, Named::PageUp);
-    key(&mut ui, Named::PageUp);
-    key(&mut ui, Named::PageUp);
-    key(&mut ui, Named::PageUp);
+    key(&mut ui, Key::PageUp);
+    key(&mut ui, Key::PageUp);
+    key(&mut ui, Key::PageUp);
+    key(&mut ui, Key::PageUp);
     assert_eq!(at(&ui), (0, Column::Source), "Page Up stops at the first row");
 }
 
@@ -166,7 +166,7 @@ fn every_grid_key_moves_the_focus() {
 fn enter_f2_and_space_toggle_on() {
     let mut ui = matrix_open();
     let mut on = first(&ui).enabled;
-    for named in [Named::Enter, Named::F2, Named::Space] {
+    for named in [Key::Enter, Key::F2, Key::Space] {
         key(&mut ui, named);
         assert_eq!(first(&ui).enabled, !on, "{named:?} toggles");
         on = !on;
@@ -180,7 +180,7 @@ fn enter_f2_and_space_toggle_on() {
 #[test]
 fn enter_and_f2_open_a_select_cell_and_escape_closes_it() {
     for column in [Column::Source, Column::Target, Column::Polarity] {
-        for opener in [Named::Enter, Named::F2] {
+        for opener in [Key::Enter, Key::F2] {
             let mut ui = matrix_open();
             ui.send(Message::Matrix(Event::Select(AssignmentId(1), column)));
             let _ = ui.redraw();
@@ -190,12 +190,12 @@ fn enter_and_f2_open_a_select_cell_and_escape_closes_it() {
             let before = first(&ui);
             key(&mut ui, opener);
             assert!(open(&mut ui, &id), "{column:?}: {opener:?} opens it");
-            key(&mut ui, Named::ArrowDown);
-            key(&mut ui, Named::Escape);
+            key(&mut ui, Key::Down);
+            key(&mut ui, Key::Escape);
             assert!(!open(&mut ui, &id), "{column:?}: Escape closes it");
             assert_eq!(focused(&ui), Some(id.clone()), "{column:?}: back on the cell");
             assert_eq!(first(&ui), before, "{column:?}: nothing chosen");
-            key(&mut ui, Named::ArrowDown);
+            key(&mut ui, Key::Down);
             assert_eq!(focused(&ui), Some(cell(2, column)), "{column:?}: Down moves a row");
         }
     }
@@ -209,9 +209,9 @@ fn a_select_applies_the_choice() {
     ui.send(Message::Matrix(Event::Select(AssignmentId(1), Column::Polarity)));
     let _ = ui.redraw();
     let before = first(&ui);
-    key(&mut ui, Named::Enter);
-    key(&mut ui, Named::ArrowDown);
-    key(&mut ui, Named::Enter);
+    key(&mut ui, Key::Enter);
+    key(&mut ui, Key::Down);
+    key(&mut ui, Key::Enter);
     let _ = ui.redraw();
     assert_ne!(first(&ui).polarity, before.polarity, "the polarity changed");
     assert_eq!(focused(&ui), Some(cell(1, Column::Polarity)));
@@ -221,9 +221,9 @@ fn a_select_applies_the_choice() {
     // A target choice is a retarget.
     ui.send(Message::Matrix(Event::Select(AssignmentId(1), Column::Target)));
     let _ = ui.redraw();
-    key(&mut ui, Named::F2);
-    key(&mut ui, Named::ArrowDown);
-    key(&mut ui, Named::Enter);
+    key(&mut ui, Key::F2);
+    key(&mut ui, Key::Down);
+    key(&mut ui, Key::Enter);
     let _ = ui.redraw();
     let now = ui
         .app()
@@ -242,9 +242,9 @@ fn a_select_applies_the_choice() {
 /// back to the cell, and Escape cancels and goes back to it.
 #[test]
 fn the_depth_field_applies_and_cancels() {
-    for opener in [Named::Enter, Named::F2] {
+    for opener in [Key::Enter, Key::F2] {
         let mut ui = matrix_open();
-        key(&mut ui, Named::End);
+        key(&mut ui, Key::End);
         assert_eq!(focused(&ui), Some(cell(1, Column::Depth)));
         key(&mut ui, opener);
         let field = depth_field(AssignmentId(1));
@@ -257,12 +257,12 @@ fn the_depth_field_applies_and_cancels() {
         );
         // The field's keys are its own: Delete and the arrows edit text.
         let count = ui.app().session.controller.graph().assignments().count();
-        key(&mut ui, Named::ArrowLeft);
-        key(&mut ui, Named::Delete);
+        key(&mut ui, Key::Left);
+        key(&mut ui, Key::Delete);
         assert_eq!(ui.app().session.controller.graph().assignments().count(), count);
         assert_eq!(focused(&ui), Some(field.clone()));
         ui.typewrite("2");
-        key(&mut ui, Named::Enter);
+        key(&mut ui, Key::Enter);
         assert_eq!(first(&ui).depth, 0.42);
         assert!(ui.app().session.matrix.edit.is_none());
         assert_eq!(
@@ -273,7 +273,7 @@ fn the_depth_field_applies_and_cancels() {
 
         key(&mut ui, opener);
         ui.typewrite("9");
-        key(&mut ui, Named::Escape);
+        key(&mut ui, Key::Escape);
         assert_eq!(first(&ui).depth, 0.42, "Escape changes nothing");
         assert!(ui.app().session.matrix.edit.is_none());
         assert_eq!(
@@ -293,7 +293,7 @@ fn escape_lets_the_grid_go() {
     // takes keys while one is selected.
     let tile = target_tile(&ui, 1);
     ui.app_mut().session.selection = std::collections::BTreeSet::from([tile]);
-    key(&mut ui, Named::Escape);
+    key(&mut ui, Key::Escape);
     assert!(!ui.app().focus_in_matrix());
     assert!(ui.app().canvas_has_keys(), "the canvas has the keys");
 }
@@ -410,8 +410,8 @@ fn a_screen_reader_chooses_a_source_through_the_select() {
 /// Opens the first row's Depth field by keys and types `text` over its
 /// selected text.
 fn type_a_depth(ui: &mut Ui, text: &str) {
-    key(ui, Named::End);
-    key(ui, Named::Enter);
+    key(ui, Key::End);
+    key(ui, Key::Enter);
     assert_eq!(focused(ui), Some(depth_field(AssignmentId(1))));
     ui.typewrite(text);
     assert_eq!(
@@ -427,7 +427,7 @@ fn tab_out_of_the_depth_field_commits() {
     let mut ui = matrix_open();
     let steps = ui.app().session.edits.history.len();
     type_a_depth(&mut ui, "42");
-    key(&mut ui, Named::Tab);
+    key(&mut ui, Key::Tab);
     assert_ne!(focused(&ui), Some(depth_field(AssignmentId(1))), "Tab left the field");
     assert_eq!(first(&ui).depth, 0.42);
     assert!(ui.app().session.matrix.edit.is_none());
@@ -462,14 +462,14 @@ fn an_overlay_keeps_the_depth_fields_draft() {
         Some("55"),
         "the draft waits"
     );
-    key(&mut ui, Named::Escape);
+    key(&mut ui, Key::Escape);
     let _ = ui.redraw();
     assert_eq!(focused(&ui), Some(depth_field(AssignmentId(1))), "back in the field");
     assert_eq!(
         ui.app().session.matrix.edit.as_ref().map(|edit| edit.depth.as_str()),
         Some("55")
     );
-    key(&mut ui, Named::Enter);
+    key(&mut ui, Key::Enter);
     assert_eq!(first(&ui).depth, 0.55);
 }
 
@@ -481,7 +481,7 @@ fn an_invalid_depth_draft_commits_nothing_on_leaving() {
     let mut ui = matrix_open();
     let steps = ui.app().session.edits.history.len();
     type_a_depth(&mut ui, "500");
-    key(&mut ui, Named::Tab);
+    key(&mut ui, Key::Tab);
     assert_eq!(first(&ui).depth, 0.08, "the depth stays");
     assert!(ui.app().session.matrix.edit.is_none(), "the draft goes");
     assert!(
@@ -536,22 +536,22 @@ fn entering_the_grid_keeps_the_canvas_selection() {
     assert_eq!(focused(&ui), Some(cell(1, Column::On)));
     assert_eq!(ui.app().session.selection, selection, "opening the tab");
     // Tab out of the grid and Shift+Tab back in.
-    key(&mut ui, Named::Tab);
+    key(&mut ui, Key::Tab);
     assert!(!focused(&ui).is_some_and(|id| id.is_under(&list_id())));
-    key_with(&mut ui, Named::Tab, keyboard::Modifiers::SHIFT);
+    key_with(&mut ui, Key::Tab, Modifiers::SHIFT);
     assert_eq!(focused(&ui), Some(cell(1, Column::On)));
     assert_eq!(ui.app().session.selection, selection, "Tab out and back in");
     // From the tab itself, Tab in.
     let tab = crate::tabs::tab_id(Tab::Matrix);
     ui.focus(&tab);
-    key(&mut ui, Named::Tab);
+    key(&mut ui, Key::Tab);
     assert_eq!(focused(&ui), Some(cell(1, Column::On)));
     assert_eq!(ui.app().session.selection, selection, "Tab from the tab");
     // A move within the row keeps it too.
-    key(&mut ui, Named::ArrowRight);
+    key(&mut ui, Key::Right);
     assert_eq!(ui.app().session.selection, selection, "a move within the row");
     // A move to another row selects that row's target.
-    key(&mut ui, Named::ArrowDown);
+    key(&mut ui, Key::Down);
     assert_eq!(focused(&ui), Some(cell(2, Column::Source)));
     assert_eq!(
         ui.app().session.selection,

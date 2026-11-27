@@ -86,11 +86,11 @@ fn the_keyed_tile_menu_moves_the_focus_and_closes_on_escape() {
         .collect();
     assert!(items.len() > 1, "a menu with more than one item");
     assert_eq!(ui.runtime().focused(), Some(&items[0]), "on its first item");
-    ui.tap(Key::Named(Named::ArrowDown), iced::keyboard::Modifiers::empty());
+    ui.tap(loom_ui_core::Key::Down, loom_ui_core::Modifiers::NONE);
     ui.redraw();
     assert_eq!(ui.runtime().focused(), Some(&items[1]), "Down moved the focus");
     assert!(ui.runtime().focus_ring().is_some(), "with a ring, from the keys");
-    ui.tap(Key::Named(Named::Escape), iced::keyboard::Modifiers::empty());
+    ui.tap(loom_ui_core::Key::Escape, loom_ui_core::Modifiers::NONE);
     ui.redraw();
     assert!(ui.app().overlays.tile_menu().is_none(), "Escape closed it");
     assert!(ui.app().canvas_has_keys(), "the selected tile has the keys again");

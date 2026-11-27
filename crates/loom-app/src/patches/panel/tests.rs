@@ -5,8 +5,7 @@ use super::super::{Message, PatchBrowser, Row, licence_id, part_id, patch_files,
 use super::tags_id;
 use crate::recovery::tests::TempDir;
 use crate::ui_test::Ui;
-use iced::keyboard::{Key, Modifiers, key::Named};
-use loom_ui_core::{Point, UiId};
+use loom_ui_core::{Key, Modifiers, Point, UiId};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
@@ -63,8 +62,8 @@ fn click_on(ui: &mut Ui, id: &UiId) {
 }
 
 /// Presses `key` with no modifier.
-fn tap(ui: &mut Ui, key: Named) {
-    let _ = ui.tap(Key::Named(key), Modifiers::empty());
+fn tap(ui: &mut Ui, key: Key) {
+    let _ = ui.tap(key, Modifiers::NONE);
 }
 
 /// The browser's model.
@@ -144,10 +143,10 @@ fn tab_loops_through_the_dialog_with_the_tags_as_one_stop() {
         part_id("search"),
     ];
     for want in &order {
-        tap(&mut ui, Named::Tab);
+        tap(&mut ui, Key::Tab);
         assert_eq!(ui.runtime().focused(), Some(want));
     }
-    let _ = ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
+    let _ = ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(ui.runtime().focused(), Some(&part_id("close")));
 }
 
@@ -160,22 +159,22 @@ fn the_tags_are_a_toolbar() {
     let mut ui = open(&dir);
     let tags: Vec<UiId> = model(&ui).tags.iter().map(|tag| tag_id(&tag.text)).collect();
     assert_eq!(tags.len(), 3, "808, ambient, drone");
-    let _ = ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
-    let _ = ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
+    let _ = ui.tap(Key::Tab, Modifiers::SHIFT);
+    let _ = ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(ui.runtime().focused(), Some(&tags[0]), "the first tag");
-    tap(&mut ui, Named::ArrowLeft);
+    tap(&mut ui, Key::Left);
     assert_eq!(ui.runtime().focused(), Some(&tags[0]), "it stops at the start");
-    tap(&mut ui, Named::ArrowRight);
+    tap(&mut ui, Key::Right);
     assert_eq!(ui.runtime().focused(), Some(&tags[1]));
-    tap(&mut ui, Named::End);
+    tap(&mut ui, Key::End);
     assert_eq!(ui.runtime().focused(), Some(&tags[2]));
-    tap(&mut ui, Named::Home);
-    tap(&mut ui, Named::ArrowRight);
-    tap(&mut ui, Named::Space);
+    tap(&mut ui, Key::Home);
+    tap(&mut ui, Key::Right);
+    tap(&mut ui, Key::Space);
     assert!(model(&ui).tags[1].picked, "Space picked the focused tag");
-    tap(&mut ui, Named::Tab);
+    tap(&mut ui, Key::Tab);
     assert_eq!(ui.runtime().focused(), Some(&part_id("close")));
-    let _ = ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
+    let _ = ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(ui.runtime().focused(), Some(&tags[1]), "back on the tag last used");
 }
 
@@ -186,26 +185,26 @@ fn the_tags_are_a_toolbar() {
 fn both_fields_hold_the_list_and_escape_closes_from_anywhere() {
     let dir = library("keys");
     let mut ui = open(&dir);
-    tap(&mut ui, Named::Tab);
+    tap(&mut ui, Key::Tab);
     assert_eq!(ui.runtime().focused(), Some(&part_id("author")));
     // The highlight is on the patch read first, which newer rows sorted
     // below; Up moves it one row toward the top.
     let start = model(&ui).highlight.expect("a highlight");
-    tap(&mut ui, Named::ArrowUp);
+    tap(&mut ui, Key::Up);
     let now = model(&ui).highlight.expect("a highlight");
     assert_eq!(now, start.saturating_sub(1));
     let row = model(&ui).rows[now].id.clone();
     let tree = ui.a11y_tree();
     assert_eq!(tree.node_by_id(&part_id("author")).active_descendant(), Some(&row));
     assert_eq!(tree.node_by_id(&part_id("search")).active_descendant(), Some(&row));
-    tap(&mut ui, Named::Escape);
+    tap(&mut ui, Key::Escape);
     assert!(ui.app().overlays.patches().is_none(), "Escape closed it from a field");
 
     let mut ui = open(&dir);
-    let _ = ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
-    let _ = ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
+    let _ = ui.tap(Key::Tab, Modifiers::SHIFT);
+    let _ = ui.tap(Key::Tab, Modifiers::SHIFT);
     assert!(ui.runtime().focused().is_some_and(|id| id.is_under(&tags_id())));
-    tap(&mut ui, Named::Escape);
+    tap(&mut ui, Key::Escape);
     assert!(ui.app().overlays.patches().is_none(), "Escape closed it from a tag");
 }
 
@@ -231,7 +230,7 @@ fn typing_filters_and_hover_highlights() {
 fn a_batch_of_rows_moves_neither_the_focus_nor_the_highlight() {
     let dir = library("batch");
     let mut ui = open(&dir);
-    tap(&mut ui, Named::ArrowUp);
+    tap(&mut ui, Key::Up);
     let highlighted = {
         let model = model(&ui);
         model.rows[model.highlight.expect("a highlight")].id.clone()
@@ -353,16 +352,16 @@ fn the_kept_model_matches_a_fresh_one_after_every_message() {
 fn escape_closes_from_close_and_a_check_box() {
     let dir = library("escape");
     let mut ui = open(&dir);
-    let _ = ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
+    let _ = ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(ui.runtime().focused(), Some(&part_id("close")));
-    tap(&mut ui, Named::Escape);
+    tap(&mut ui, Key::Escape);
     assert!(ui.app().overlays.patches().is_none(), "from Close");
 
     let mut ui = open(&dir);
     for _ in 0..2 {
-        tap(&mut ui, Named::Tab);
+        tap(&mut ui, Key::Tab);
     }
     assert_eq!(ui.runtime().focused(), Some(&licence_id("lets-me-change")));
-    tap(&mut ui, Named::Escape);
+    tap(&mut ui, Key::Escape);
     assert!(ui.app().overlays.patches().is_none(), "from a check box");
 }

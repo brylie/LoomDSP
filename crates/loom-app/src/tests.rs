@@ -1374,8 +1374,8 @@ fn the_panic_key_button_and_command_run_panic() {
     ui.redraw();
     ui.typewrite("sin");
     let messages = ui.tap(
-        iced::keyboard::Key::Character(".".into()),
-        iced::keyboard::Modifiers::COMMAND,
+        loom_ui_core::Key::Character('.'),
+        loom_ui_core::Modifiers::platform_shortcut(),
     );
     assert!(messages.iter().any(|m| matches!(m, Message::Panic)), "{messages:?}");
     assert!(
@@ -3097,21 +3097,21 @@ fn escape_from_a_text_box_gives_keys_back_to_the_canvas() {
 #[test]
 fn tab_moves_between_the_fields_of_one_view() {
     use iced::keyboard::{Key, Modifiers, key::Named};
-    let tab = Key::Named(Named::Tab);
+    let tab = loom_ui_core::Key::Tab;
     let [authors, tags] = crate::patch_info::text_fields();
     let mut ui = typing_in_authors(false);
     assert_eq!(ui.focused_field(), Some(authors.clone()), "the click focused Authors");
 
-    ui.tap(tab.clone(), Modifiers::default());
+    ui.tap(tab, loom_ui_core::Modifiers::NONE);
     assert_eq!(ui.focused_field(), Some(tags.clone()), "Tab goes to Tags");
     // On through patch info's buttons, the runtime's stops since plan 3.2,
     // row 4d, then past its last.
     let patch = crate::inspector::ids::patch();
     for key in ["choose_licence", "shortcuts"] {
-        ui.tap(tab.clone(), Modifiers::default());
+        ui.tap(tab, loom_ui_core::Modifiers::NONE);
         assert_eq!(ui.runtime().focused(), Some(&crate::inspector::ids::part(&patch, key)));
     }
-    ui.tap(tab.clone(), Modifiers::default());
+    ui.tap(tab, loom_ui_core::Modifiers::NONE);
     assert_eq!(ui.focused_field(), None, "past patch info, no field");
     assert_eq!(
         ui.runtime().focused(),
@@ -3130,11 +3130,11 @@ fn tab_moves_between_the_fields_of_one_view() {
     ui.redraw();
     let [search, author] = crate::patches::text_fields();
     ui.focus(&search);
-    ui.tap(tab.clone(), Modifiers::default());
+    ui.tap(tab, loom_ui_core::Modifiers::NONE);
     assert_eq!(ui.focused_field(), Some(author));
     // Tab goes on to the licence filters, which the keyboard reaches now
     // (patch-metadata.md, Keys; row 5b), not back to the search field.
-    ui.tap(tab, Modifiers::default());
+    ui.tap(tab, loom_ui_core::Modifiers::NONE);
     assert_eq!(
         ui.runtime().focused(),
         Some(&crate::patches::licence_id("lets-me-change")),
@@ -3165,9 +3165,9 @@ fn tab_steps_forward_and_shift_tab_back() {
 /// inspector value field. With the field let go, both work again.
 #[test]
 fn selection_shortcuts_do_nothing_while_a_field_has_focus() {
-    use iced::keyboard::{Key, Modifiers};
+    use loom_ui_core::{Key, Modifiers};
     let mut ui = crate::ui_test::Ui::open("subtractive.ron");
-    for key in ["d", "g"] {
+    for key in ['d', 'g'] {
         ui.app_mut().session.selection = [4].into_iter().collect();
         ui.redraw();
         let field = ui.value_field(4, 0);
@@ -3177,7 +3177,7 @@ fn selection_shortcuts_do_nothing_while_a_field_has_focus() {
         assert!(ui.text_field_focused(), "the value field has focus");
         let before = ui.app().session.controller.graph().nodes().count();
         let step = ui.app().session.edits.history.undo_step().map(|s| s.name().to_owned());
-        ui.tap(Key::Character(key.into()), Modifiers::COMMAND);
+        ui.tap(Key::Character(key), Modifiers::platform_shortcut());
         assert_eq!(ui.app().session.controller.graph().nodes().count(), before, "Cmd+{key}");
         assert_eq!(
             ui.app().session.edits.history.undo_step().map(|s| s.name().to_owned()),
@@ -3189,7 +3189,7 @@ fn selection_shortcuts_do_nothing_while_a_field_has_focus() {
     ui.app_mut().session.selection = [4].into_iter().collect();
     ui.redraw();
     let before = ui.app().session.controller.graph().nodes().count();
-    ui.tap(Key::Character("d".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('d'), Modifiers::platform_shortcut());
     assert_eq!(
         ui.app().session.controller.graph().nodes().count(),
         before + 1,

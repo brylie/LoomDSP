@@ -7,9 +7,8 @@ use crate::files::fake::{self, Asked};
 use crate::question::{Answer, Message as QuestionMessage};
 use crate::ui_test::Ui;
 use crate::{FileAction, Message};
-use iced::keyboard::{Key, Modifiers, key::Named};
 use loom_core::{MidiControl, ModuleId};
-use loom_ui_core::UiId;
+use loom_ui_core::{Key, Modifiers, UiId};
 use std::path::Path;
 
 /// The filter in the subtractive example.
@@ -277,7 +276,7 @@ fn save_commits_the_focused_fields_draft() {
         let mut ui = clean();
         let path = file(&ui);
         let field = type_draft(&mut ui, kind, Text::Good);
-        ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
+        ui.tap(Key::Character('s'), Modifiers::platform_shortcut());
         assert!(holds(&path, kind), "{kind:?} is in the file");
         let _ = ui.redraw();
         assert_eq!(
@@ -389,7 +388,7 @@ fn escape_clears_the_mark_on_a_clean_patch() {
     for kind in DRAFTS {
         let mut ui = clean();
         let _ = type_draft(&mut ui, kind, Text::Good);
-        ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+        ui.tap(Key::Escape, Modifiers::NONE);
         assert!(!ui.app().has_draft(), "{kind:?}: dropped");
         assert!(!ui.app().title().starts_with("* "), "{kind:?}: {}", ui.app().title());
     }

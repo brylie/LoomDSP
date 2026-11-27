@@ -6,8 +6,8 @@ use crate::recovery::tests::TempDir;
 use crate::settings::Message;
 use crate::ui_test::Ui;
 use accesskit::{Action, Role as KitRole, Toggled};
-use iced::keyboard::{Key, Modifiers, key::Named};
 use loom_core::OutputSafety;
+use loom_ui_core::{Key, Modifiers};
 use std::rc::Rc;
 
 /// An app on a fake host with `fake`'s devices, with its preferences file
@@ -40,7 +40,7 @@ fn two_of_each() -> Fake {
 fn open(name: &str, fake: Fake) -> (TempDir, Ui, Rc<Fake>) {
     let (dir, app, fake) = app(name, fake);
     let mut ui = Ui::with_app(app);
-    ui.tap(Key::Character(",".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character(','), Modifiers::platform_shortcut());
     let _ = ui.redraw();
     assert!(ui.app().preferences_model().is_some(), "Cmd+, opens Preferences");
     (dir, ui, fake)
@@ -58,7 +58,7 @@ fn tab_to(ui: &mut Ui, id: &UiId) {
         if ui.runtime().focused() == Some(id) {
             return;
         }
-        tap(ui, Key::Named(Named::Tab), Modifiers::default());
+        tap(ui, Key::Tab, Modifiers::NONE);
     }
     panic!("Tab never reached {id}: the focus is on {:?}", ui.runtime().focused());
 }
@@ -175,10 +175,10 @@ fn it_opens_on_close_and_tab_cycles_its_stops() {
         ui.runtime().scroll_offset(&body_id()).expect("the body scrolls").0
     };
     let start = offset(&mut ui);
-    tap(&mut ui, Key::Named(Named::ArrowDown), Modifiers::default());
+    tap(&mut ui, Key::Down, Modifiers::NONE);
     let down = offset(&mut ui);
     assert!(down > start, "Down scrolls: {start} then {down}");
-    tap(&mut ui, Key::Named(Named::PageDown), Modifiers::default());
+    tap(&mut ui, Key::PageDown, Modifiers::NONE);
     assert!(offset(&mut ui) > down, "Page Down scrolls further");
     assert_eq!(ui.runtime().focused(), Some(&close_id()), "Close keeps the focus");
 
@@ -187,13 +187,13 @@ fn it_opens_on_close_and_tab_cycles_its_stops() {
     assert!(!stops.contains(&part_id("panic").with("clear")), "Clear is off");
     let mut met = vec![close_id()];
     for _ in 1..stops.len() {
-        tap(&mut ui, Key::Named(Named::Tab), Modifiers::default());
+        tap(&mut ui, Key::Tab, Modifiers::NONE);
         met.push(ui.runtime().focused().cloned().expect("a stop has the focus"));
     }
     assert_eq!(met, stops, "in reading order");
-    tap(&mut ui, Key::Named(Named::Tab), Modifiers::default());
+    tap(&mut ui, Key::Tab, Modifiers::NONE);
     assert_eq!(ui.runtime().focused(), Some(&close_id()), "it wraps to Close");
-    tap(&mut ui, Key::Named(Named::Tab), Modifiers::SHIFT);
+    tap(&mut ui, Key::Tab, Modifiers::SHIFT);
     assert_eq!(ui.runtime().focused(), stops.last(), "Shift+Tab wraps back");
 }
 
@@ -204,7 +204,7 @@ fn it_opens_on_close_and_tab_cycles_its_stops() {
 fn the_safety_arrows_choose_off_included() {
     let (_dir, mut ui, _) = open("safety", two_of_each());
     tab_to(&mut ui, &part_id("safety").with("low-latency"));
-    tap(&mut ui, Key::Named(Named::ArrowDown), Modifiers::default());
+    tap(&mut ui, Key::Down, Modifiers::NONE);
     assert_eq!(safety(&ui), OutputSafety::Clean);
     assert_eq!(ui.app().rig.store.saved().output_safety, OutputSafety::Clean, "saved");
     assert_eq!(
@@ -212,9 +212,9 @@ fn the_safety_arrows_choose_off_included() {
         OutputSafety::Clean,
         "the engine runs it"
     );
-    tap(&mut ui, Key::Named(Named::ArrowUp), Modifiers::default());
+    tap(&mut ui, Key::Up, Modifiers::NONE);
     assert_eq!(safety(&ui), OutputSafety::LowLatency);
-    tap(&mut ui, Key::Named(Named::ArrowUp), Modifiers::default());
+    tap(&mut ui, Key::Up, Modifiers::NONE);
     assert_eq!(safety(&ui), OutputSafety::Off, "it wraps to Off");
 }
 
@@ -225,21 +225,21 @@ fn the_safety_arrows_choose_off_included() {
 fn a_list_chooses_with_enter_and_escape_closes_it_first() {
     let (_dir, mut ui, _) = open("list", two_of_each());
     tab_to(&mut ui, &part_id("device"));
-    tap(&mut ui, Key::Named(Named::ArrowDown), Modifiers::default());
-    tap(&mut ui, Key::Named(Named::ArrowDown), Modifiers::default());
-    tap(&mut ui, Key::Named(Named::Enter), Modifiers::default());
+    tap(&mut ui, Key::Down, Modifiers::NONE);
+    tap(&mut ui, Key::Down, Modifiers::NONE);
+    tap(&mut ui, Key::Enter, Modifiers::NONE);
     assert_eq!(ui.app().rig.shown_audio().device, DeviceChoice::Named("Fake A".into()));
     assert_eq!(ui.app().rig.output.playing.as_ref().unwrap().device, "Fake A");
 
-    tap(&mut ui, Key::Named(Named::ArrowDown), Modifiers::default());
-    tap(&mut ui, Key::Named(Named::ArrowDown), Modifiers::default());
-    tap(&mut ui, Key::Named(Named::Escape), Modifiers::default());
+    tap(&mut ui, Key::Down, Modifiers::NONE);
+    tap(&mut ui, Key::Down, Modifiers::NONE);
+    tap(&mut ui, Key::Escape, Modifiers::NONE);
     assert!(
         ui.app().preferences_model().is_some(),
         "the first Escape closes the list"
     );
     assert_eq!(ui.app().rig.shown_audio().device, DeviceChoice::Named("Fake A".into()));
-    tap(&mut ui, Key::Named(Named::Escape), Modifiers::default());
+    tap(&mut ui, Key::Escape, Modifiers::NONE);
     assert!(ui.app().preferences_model().is_none(), "the second closes the window");
 }
 
@@ -289,9 +289,9 @@ fn a_device_that_fails_is_said_and_stepped_past() {
     // Down opens on the failed device; one more Down and Enter take the
     // next, so the step goes on past it.
     tab_to(&mut ui, &device);
-    tap(&mut ui, Key::Named(Named::ArrowDown), Modifiers::default());
-    tap(&mut ui, Key::Named(Named::ArrowDown), Modifiers::default());
-    tap(&mut ui, Key::Named(Named::Enter), Modifiers::default());
+    tap(&mut ui, Key::Down, Modifiers::NONE);
+    tap(&mut ui, Key::Down, Modifiers::NONE);
+    tap(&mut ui, Key::Enter, Modifiers::NONE);
     assert_eq!(ui.app().rig.output.playing.as_ref().unwrap().device, "Fake C");
     assert!(
         !ui.a11y_tree().has_part_under(&part_id("audio-error")),
@@ -311,13 +311,13 @@ fn the_name_field_saves_on_enter_and_on_close() {
         Some(accesskit::ActionData::Value("Ada".into())),
     );
     assert_eq!(ui.a11y_tree().node_by_id(&author_part()).value(), Some("Ada"));
-    tap(&mut ui, Key::Named(Named::Escape), Modifiers::default());
+    tap(&mut ui, Key::Escape, Modifiers::NONE);
     assert_eq!(ui.app().rig.store.saved().author, "Ada", "closing saves it");
 
-    tap(&mut ui, Key::Character(",".into()), Modifiers::COMMAND);
+    tap(&mut ui, Key::Character(','), Modifiers::platform_shortcut());
     tab_to(&mut ui, &author_part());
     ui.typewrite(" L");
-    tap(&mut ui, Key::Named(Named::Enter), Modifiers::default());
+    tap(&mut ui, Key::Enter, Modifiers::NONE);
     assert_eq!(ui.app().rig.store.saved().author, "Ada L", "Enter saves it");
     assert!(ui.app().preferences_model().is_some(), "Enter keeps the window open");
 }
@@ -328,16 +328,16 @@ fn the_name_field_saves_on_enter_and_on_close() {
 fn closing_from_the_name_field_saves_and_gives_the_focus_back() {
     let (_dir, app, _) = app("close", Fake::new(&[fake::device("Fake A")], &[]));
     let mut ui = Ui::with_app(app);
-    tap(&mut ui, Key::Named(Named::Tab), Modifiers::SHIFT);
+    tap(&mut ui, Key::Tab, Modifiers::SHIFT);
     let before = ui
         .runtime()
         .focused()
         .cloned()
         .expect("a stop of the bar has the focus");
-    tap(&mut ui, Key::Character(",".into()), Modifiers::COMMAND);
+    tap(&mut ui, Key::Character(','), Modifiers::platform_shortcut());
     tab_to(&mut ui, &author_part());
     ui.typewrite("Ada");
-    tap(&mut ui, Key::Character(",".into()), Modifiers::COMMAND);
+    tap(&mut ui, Key::Character(','), Modifiers::platform_shortcut());
     assert!(ui.app().preferences_model().is_none(), "Cmd+, closes it from the field");
     assert_eq!(ui.app().rig.store.saved().author, "Ada");
     assert_eq!(ui.runtime().focused(), Some(&before), "the focus came back");
@@ -365,7 +365,7 @@ fn the_backdrop_does_nothing_and_clear_gives_the_focus_to_learn() {
     let _ = ui.redraw();
     let clear = part_id("panic").with("clear");
     tab_to(&mut ui, &clear);
-    tap(&mut ui, Key::Named(Named::Space), Modifiers::default());
+    tap(&mut ui, Key::Space, Modifiers::NONE);
     assert!(ui.app().rig.store.saved().panic.is_none(), "cleared");
     assert_eq!(ui.runtime().focused(), Some(&learn_id()));
 }
@@ -447,10 +447,10 @@ fn help_over_preferences_gives_the_focus_back_when_it_closes() {
     let (_dir, mut ui, _) = open("help-back", two_of_each());
     let activity = part_id("activity");
     tab_to(&mut ui, &activity);
-    tap(&mut ui, Key::Named(Named::F1), Modifiers::default());
+    tap(&mut ui, Key::F1, Modifiers::NONE);
     assert!(ui.app().overlays.help.is_some(), "F1 opened help");
     assert!(ui.app().preferences_stops().is_empty(), "Preferences is covered");
-    tap(&mut ui, Key::Named(Named::Escape), Modifiers::default());
+    tap(&mut ui, Key::Escape, Modifiers::NONE);
     assert!(ui.app().overlays.help.is_none(), "Escape closed help");
     assert!(ui.app().preferences_model().is_some(), "Preferences stays open");
     assert_eq!(ui.runtime().focused(), Some(&activity));

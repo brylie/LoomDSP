@@ -3,9 +3,8 @@
 
 use super::super::{HEIGHT, LibraryItem, Message, WIDTH, browser_id, insert_linked_id, list_id, menu_id, search_id};
 use crate::ui_test::Ui;
-use iced::keyboard::{Key, Modifiers, key::Named};
 use iced::mouse;
-use loom_ui_core::{Point, Rect, UiId};
+use loom_ui_core::{Key, Modifiers, Point, Rect, UiId};
 
 /// The app with the browser open, laid out.
 fn open() -> Ui {
@@ -68,8 +67,8 @@ fn click(ui: &mut Ui, button: mouse::Button) {
 }
 
 /// Presses `key` with no modifier.
-fn tap(ui: &mut Ui, key: Named) {
-    let _ = ui.tap(Key::Named(key), Modifiers::empty());
+fn tap(ui: &mut Ui, key: Key) {
+    let _ = ui.tap(key, Modifiers::NONE);
 }
 
 /// Opened, the search field has the runtime's focus, and what is typed is
@@ -88,12 +87,12 @@ fn the_search_field_has_the_focus_and_takes_typing() {
 #[test]
 fn up_and_down_move_the_highlight_not_the_caret() {
     let mut ui = open();
-    tap(&mut ui, Named::ArrowDown);
-    tap(&mut ui, Named::ArrowDown);
+    tap(&mut ui, Key::Down);
+    tap(&mut ui, Key::Down);
     assert_eq!(highlight(&ui), Some(2));
-    tap(&mut ui, Named::ArrowUp);
-    tap(&mut ui, Named::ArrowUp);
-    tap(&mut ui, Named::ArrowUp);
+    tap(&mut ui, Key::Up);
+    tap(&mut ui, Key::Up);
+    tap(&mut ui, Key::Up);
     assert_eq!(highlight(&ui), Some(0), "it stops at the top");
     assert_eq!(ui.runtime().focused(), Some(&search_id()));
 }
@@ -102,9 +101,9 @@ fn up_and_down_move_the_highlight_not_the_caret() {
 #[test]
 fn tab_stays_on_the_search_field() {
     let mut ui = open();
-    tap(&mut ui, Named::Tab);
+    tap(&mut ui, Key::Tab);
     assert_eq!(ui.runtime().focused(), Some(&search_id()));
-    let _ = ui.tap(Key::Named(Named::Tab), Modifiers::SHIFT);
+    let _ = ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(ui.runtime().focused(), Some(&search_id()));
 }
 
@@ -114,7 +113,7 @@ fn enter_adds_the_highlighted_module() {
     let mut ui = open();
     let before = ui.app().session.controller.graph().nodes().count();
     ui.typewrite("svf");
-    tap(&mut ui, Named::Enter);
+    tap(&mut ui, Key::Enter);
     assert!(ui.app().overlays.browser().is_none(), "the browser closed");
     assert_eq!(ui.app().session.controller.graph().nodes().count(), before + 1);
 }
@@ -140,7 +139,7 @@ fn hover_highlights_a_row_and_keys_go_on_from_it() {
     assert_eq!(highlight(&ui), Some(3));
     assert!(ui.app().overlays.browser().is_some(), "nothing was chosen");
     assert_eq!(ui.app().session.controller.graph().nodes().count(), before);
-    tap(&mut ui, Named::ArrowDown);
+    tap(&mut ui, Key::Down);
     assert_eq!(highlight(&ui), Some(4), "the key goes on from the hovered row");
 }
 
@@ -165,7 +164,7 @@ fn the_highlighted_row_scrolls_into_view() {
     let mut ui = open();
     ui.typewrite("o");
     for _ in 0..14 {
-        tap(&mut ui, Named::ArrowDown);
+        tap(&mut ui, Key::Down);
     }
     let _ = ui.redraw();
     let row = model(&ui).rows[highlight(&ui).unwrap()].id.clone();
@@ -192,13 +191,13 @@ fn a_right_press_opens_a_library_rows_menu() {
     assert_eq!(model(&ui).menu, Some(0));
     assert_eq!(model(&ui).menu_highlight, None, "opened by the pointer");
     let _ = bounds(&mut ui, &insert_linked_id(&row));
-    tap(&mut ui, Named::ArrowDown);
+    tap(&mut ui, Key::Down);
     assert_eq!(model(&ui).menu_highlight, Some(0));
     assert_eq!(ui.runtime().focused(), Some(&search_id()));
     let tree = ui.a11y_tree();
     let field = tree.node_by_id(&search_id());
     assert_eq!(field.active_descendant(), Some(&insert_linked_id(&row)));
-    tap(&mut ui, Named::Enter);
+    tap(&mut ui, Key::Enter);
     assert!(ui.app().overlays.browser().is_none(), "inserted, and closed");
 }
 
@@ -208,15 +207,15 @@ fn a_right_press_opens_a_library_rows_menu() {
 #[test]
 fn the_menu_key_opens_the_menu_and_escape_closes_it_first() {
     let mut ui = with_library();
-    tap(&mut ui, Named::ContextMenu);
+    tap(&mut ui, Key::ContextMenu);
     assert_eq!((model(&ui).menu, model(&ui).menu_highlight), (Some(0), Some(0)));
-    tap(&mut ui, Named::Escape);
+    tap(&mut ui, Key::Escape);
     assert_eq!(model(&ui).menu, None, "the menu closed");
     assert!(ui.app().overlays.browser().is_some(), "the browser stays");
-    let _ = ui.tap(Key::Named(Named::F10), Modifiers::SHIFT);
+    let _ = ui.tap(Key::F10, Modifiers::SHIFT);
     assert_eq!(model(&ui).menu, Some(0), "Shift+F10 opens it too");
-    tap(&mut ui, Named::Escape);
-    tap(&mut ui, Named::Escape);
+    tap(&mut ui, Key::Escape);
+    tap(&mut ui, Key::Escape);
     assert!(ui.app().overlays.browser().is_none());
 }
 
@@ -225,13 +224,13 @@ fn the_menu_key_opens_the_menu_and_escape_closes_it_first() {
 #[test]
 fn a_press_outside_the_menu_closes_it_and_outside_both_closes_both() {
     let mut ui = with_library();
-    tap(&mut ui, Named::ContextMenu);
+    tap(&mut ui, Key::ContextMenu);
     let field = centre(&mut ui, &search_id());
     ui.move_to(field);
     click(&mut ui, mouse::Button::Left);
     assert_eq!(model(&ui).menu, None, "the menu closed");
     assert!(ui.app().overlays.browser().is_some(), "the browser stays");
-    tap(&mut ui, Named::ContextMenu);
+    tap(&mut ui, Key::ContextMenu);
     let panel = bounds(&mut ui, &browser_id());
     ui.move_to(Point::new(panel.x - 20.0, panel.y + 10.0));
     click(&mut ui, mouse::Button::Left);
@@ -242,7 +241,7 @@ fn a_press_outside_the_menu_closes_it_and_outside_both_closes_both() {
 #[test]
 fn typing_closes_the_menu_and_reaches_the_field() {
     let mut ui = with_library();
-    tap(&mut ui, Named::ContextMenu);
+    tap(&mut ui, Key::ContextMenu);
     ui.typewrite(" x");
     assert_eq!(model(&ui).menu, None);
     assert_eq!(model(&ui).query, "pad x");
@@ -253,7 +252,7 @@ fn typing_closes_the_menu_and_reaches_the_field() {
 #[test]
 fn the_menu_is_under_its_row_and_hover_keeps_the_focus() {
     let mut ui = with_library();
-    tap(&mut ui, Named::ContextMenu);
+    tap(&mut ui, Key::ContextMenu);
     let row = library_row("Pad.ron");
     let under = bounds(&mut ui, &row);
     let menu = bounds(&mut ui, &menu_id(&row));
@@ -346,7 +345,7 @@ fn wheel(ui: &mut Ui, lines: f32) {
 #[test]
 fn the_menu_follows_its_row_and_closes_when_the_row_scrolls_away() {
     let mut ui = with_long_library(20);
-    tap(&mut ui, Named::ContextMenu);
+    tap(&mut ui, Key::ContextMenu);
     let row = library_row("zz 00.ron");
     let menu = menu_id(&row);
     let before = bounds(&mut ui, &menu);
@@ -365,9 +364,9 @@ fn the_menu_follows_its_row_and_closes_when_the_row_scrolls_away() {
     // The pointer over the list hovers a row, which is highlighted, so the
     // menu key opens that row's menu.
     wheel(&mut ui, 6.0);
-    tap(&mut ui, Named::ContextMenu);
+    tap(&mut ui, Key::ContextMenu);
     assert_eq!(model(&ui).menu, highlight(&ui));
-    tap(&mut ui, Named::Escape);
+    tap(&mut ui, Key::Escape);
     assert_eq!(model(&ui).menu, None, "Escape closes the menu first");
     assert!(ui.app().overlays.browser().is_some());
 }
@@ -381,7 +380,7 @@ fn enter_while_composing_confirms_the_text_and_picks_nothing() {
     let mut ui = open();
     ui.step(&[iced::Event::InputMethod(Ime::Opened)]);
     ui.step(&[iced::Event::InputMethod(Ime::Preedit("か".to_string(), None))]);
-    tap(&mut ui, Named::Enter);
+    tap(&mut ui, Key::Enter);
     assert!(ui.app().overlays.browser().is_some(), "Enter picked nothing");
     ui.step(&[iced::Event::InputMethod(Ime::Commit("か".to_string()))]);
     assert_eq!(model(&ui).query, "か");

@@ -138,10 +138,7 @@ fn escape_and_focus_loss_cancel_an_inspector_drop() {
         if focus_loss {
             ui.step(&[Event::Window(window::Event::Unfocused)]);
         } else {
-            ui.tap(
-                keyboard::Key::Named(keyboard::key::Named::Escape),
-                keyboard::Modifiers::default(),
-            );
+            ui.tap(Key::Escape, Modifiers::NONE);
         }
         ui.release();
         assert_eq!(ui.app().session.controller.graph().assignments().count(), before);
@@ -313,9 +310,7 @@ fn envelope_mode_popup_draws_and_accepts_keyboard_choice() {
     ui.move_to(mode);
     ui.press();
     ui.release();
-
-    let key = |name| keyboard::Key::Named(name);
-    ui.tap(key(keyboard::key::Named::ArrowDown), keyboard::Modifiers::default());
+    ui.tap(Key::Down, Modifiers::NONE);
     let current = ui
         .app()
         .session
@@ -325,7 +320,7 @@ fn envelope_mode_popup_draws_and_accepts_keyboard_choice() {
         .expect("filter envelope");
     let index = current.descriptor.param_index("mode").expect("Mode parameter");
     assert_eq!(current.params[index], 0.0, "arrows highlight without committing");
-    ui.tap(key(keyboard::key::Named::Enter), keyboard::Modifiers::default());
+    ui.tap(Key::Enter, Modifiers::NONE);
 
     let node = ui
         .app()
@@ -347,7 +342,7 @@ fn undo_key_removes_a_dragged_cable() {
     ui.drag(from, to, 12);
     assert!(connected(&ui, (8, 0), (6, 1)));
 
-    ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut());
 
     assert!(!connected(&ui, (8, 0), (6, 1)), "undo removed the cable");
 }
@@ -361,14 +356,11 @@ fn the_browser_search_field_takes_typing() {
     let modules = ui.app().session.controller.graph().nodes().count();
     let canvas = ui.canvas();
     ui.move_to(Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0));
-    ui.tap(keyboard::Key::Character("a".into()), keyboard::Modifiers::default());
+    ui.tap(Key::Character('a'), Modifiers::NONE);
     assert!(ui.app().overlays.browser().is_some(), "A opens the browser");
 
     ui.typewrite("svf");
-    ui.tap(
-        keyboard::Key::Named(keyboard::key::Named::Enter),
-        keyboard::Modifiers::default(),
-    );
+    ui.tap(Key::Enter, Modifiers::NONE);
 
     assert!(
         ui.app().overlays.browser().is_none(),
@@ -387,9 +379,9 @@ fn copy_and_paste_go_through_the_clipboard() {
     let canvas = ui.canvas();
     ui.move_to(Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0));
 
-    ui.tap(keyboard::Key::Character("c".into()), keyboard::Modifiers::COMMAND);
+    ui.tap(Key::Character('c'), Modifiers::platform_shortcut());
     assert!(ui.clipboard().is_some(), "copy wrote the clipboard");
-    ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
+    ui.tap(Key::Character('v'), Modifiers::platform_shortcut());
 
     assert_eq!(ui.app().session.controller.graph().nodes().count(), modules + 1);
 }
@@ -455,7 +447,7 @@ fn a_midi_range_draft_lives_only_in_the_pair_of_fields() {
     ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
     ui.send(Message::Learn(Learn::MidiOptionsRows { module, index }));
     let [low, high] = ui.app().midi_range_fields().unwrap();
-    let none = keyboard::Modifiers::empty();
+    let none = Modifiers::NONE;
     let draft = || {
         Message::Learn(Learn::MidiRangeText {
             module,
@@ -470,16 +462,13 @@ fn a_midi_range_draft_lives_only_in_the_pair_of_fields() {
     ui.release();
     assert_eq!(ui.app().focus.as_ref(), Some(&low));
     ui.send(draft());
-    ui.tap(keyboard::Key::Named(keyboard::key::Named::Tab), none);
+    ui.tap(Key::Tab, none);
     assert_eq!(ui.focused_field(), Some(high.clone()));
     assert!(ui.app().session.learn.has_range_draft());
-    ui.tap(
-        keyboard::Key::Named(keyboard::key::Named::Tab),
-        keyboard::Modifiers::SHIFT,
-    );
+    ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(ui.focused_field(), Some(low.clone()));
     assert!(ui.app().session.learn.has_range_draft());
-    ui.tap(keyboard::Key::Named(keyboard::key::Named::Escape), none);
+    ui.tap(Key::Escape, none);
     assert!(!ui.app().session.learn.has_range_draft());
 
     // Tab past either end leaves the pair, and leaving commits both
@@ -494,7 +483,7 @@ fn a_midi_range_draft_lives_only_in_the_pair_of_fields() {
             .map(|(_, mapping)| (mapping.options.low, mapping.options.high))
             .unwrap()
     };
-    for (field, modifiers) in [(&high, none), (&low, keyboard::Modifiers::SHIFT)] {
+    for (field, modifiers) in [(&high, none), (&low, Modifiers::SHIFT)] {
         ui.send(Message::Inspector(crate::inspector::Message::SelectModule(module)));
         ui.send(Message::Learn(Learn::MidiOptions {
             module,
@@ -503,7 +492,7 @@ fn a_midi_range_draft_lives_only_in_the_pair_of_fields() {
         }));
         ui.focus(field);
         ui.send(draft());
-        let messages = ui.tap(keyboard::Key::Named(keyboard::key::Named::Tab), modifiers);
+        let messages = ui.tap(Key::Tab, modifiers);
         assert!(
             ui.focused_field()
                 .is_none_or(|focused| focused != low && focused != high)
@@ -537,7 +526,7 @@ fn a_midi_range_draft_lives_only_in_the_pair_of_fields() {
         low: "0.9".into(),
         high: "0.1".into(),
     }));
-    ui.tap(keyboard::Key::Named(keyboard::key::Named::Tab), none);
+    ui.tap(Key::Tab, none);
     assert!(!ui.app().session.learn.has_range_draft());
     assert_eq!(range(&ui), (0.2, 0.8), "the last good range stays");
     assert!(
@@ -796,10 +785,7 @@ fn resizing_scope_with_pointer_and_keyboard() {
         ui.app().session.scene.module(scope.0).unwrap().width(),
         original.0 + 2.0 * loom_canvas::GRID
     );
-    ui.tap(
-        keyboard::Key::Named(keyboard::key::Named::ArrowRight),
-        keyboard::Modifiers::ALT,
-    );
+    ui.tap(Key::Right, Modifiers::ALT);
     assert_eq!(
         ui.app().session.scene.module(scope.0).unwrap().width(),
         original.0 + 3.0 * loom_canvas::GRID
@@ -846,10 +832,7 @@ fn placeholder_label_is_editable_and_undoable() {
         None
     );
     assert!(ui.app().session.edits.history.undo_step().is_none());
-    ui.tap(
-        keyboard::Key::Named(keyboard::key::Named::Enter),
-        keyboard::Modifiers::default(),
-    );
+    ui.tap(Key::Enter, Modifiers::NONE);
     assert_eq!(
         ui.app()
             .current_patch()
@@ -892,20 +875,11 @@ fn placeholder_label_is_editable_and_undoable() {
     ui.move_to(Point::new(label.x + 25.0, label.y + 28.0));
     ui.press();
     ui.release();
-    ui.tap(
-        keyboard::Key::Named(keyboard::key::Named::End),
-        keyboard::Modifiers::default(),
-    );
+    ui.tap(Key::End, Modifiers::NONE);
     for _ in 0..9 {
-        ui.tap(
-            keyboard::Key::Named(keyboard::key::Named::Backspace),
-            keyboard::Modifiers::default(),
-        );
+        ui.tap(Key::Backspace, Modifiers::NONE);
     }
-    ui.tap(
-        keyboard::Key::Named(keyboard::key::Named::Enter),
-        keyboard::Modifiers::default(),
-    );
+    ui.tap(Key::Enter, Modifiers::NONE);
     assert_eq!(
         ui.app()
             .current_patch()
@@ -1217,9 +1191,9 @@ fn shift_gives_fine_depth_steps() {
 
     ui.drag(side, up, 4);
     let plain = env_depth(&ui) - start;
-    ui.hold(keyboard::Modifiers::SHIFT);
+    ui.hold(Modifiers::SHIFT);
     ui.drag(side, up, 4);
-    ui.hold(keyboard::Modifiers::default());
+    ui.hold(Modifiers::NONE);
     let fine = env_depth(&ui) - start - plain;
 
     assert!((plain - 0.1).abs() < 1e-4, "{plain}");
@@ -1253,7 +1227,7 @@ fn one_depth_drag_is_one_undo_step() {
     assert!((env_depth(&ui) - (start + 0.2)).abs() < 1e-4, "{}", env_depth(&ui));
     assert_eq!(ui.app().session.edits.history.len(), steps + 1, "the drag is one step");
 
-    ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut());
     assert_eq!(env_depth(&ui), start);
 }
 
@@ -1277,13 +1251,10 @@ fn the_camera_survives_opening_the_browser() {
     let moved = ui.canvas().camera;
     assert_ne!(moved, canvas.camera, "the scroll moved the camera");
 
-    ui.tap(keyboard::Key::Character("a".into()), keyboard::Modifiers::default());
+    ui.tap(Key::Character('a'), Modifiers::NONE);
     assert!(ui.app().overlays.browser().is_some(), "A opens the browser");
     assert_eq!(ui.canvas().camera, moved, "with the browser open");
-    ui.tap(
-        keyboard::Key::Named(keyboard::key::Named::Escape),
-        keyboard::Modifiers::default(),
-    );
+    ui.tap(Key::Escape, Modifiers::NONE);
     assert!(ui.app().overlays.browser().is_none(), "Escape closes the browser");
 
     assert_eq!(ui.canvas().camera, moved, "after the browser closed");
@@ -1299,7 +1270,7 @@ fn examples_open_readably_and_frame_inside_the_canvas() {
         assert!(view.camera.zoom >= 7.5 / 9.0 - 1e-4);
         assert!(view.bounds.width < WINDOW.width, "the inspector takes space");
         ui.move_to(view.bounds.center());
-        ui.tap(keyboard::Key::Character("f".into()), keyboard::Modifiers::default());
+        ui.tap(Key::Character('f'), Modifiers::NONE);
         let framed = ui.canvas();
         let visible = framed.camera.visible(framed.bounds.size());
         for tile in ui.app().session.scene.modules() {
@@ -1318,17 +1289,17 @@ fn tab_visits_subtractive_by_visual_row_in_both_directions() {
     let mut ui = Ui::open("subtractive.ron");
     let centre = ui.canvas().bounds.center();
     ui.move_to(centre);
-    let key = keyboard::Key::Named(keyboard::key::Named::Tab);
+    let key = Key::Tab;
     let expected = [1, 3, 4, 11, 10, 5, 6, 8, 9, 7];
     for &id in &expected {
-        ui.tap(key.clone(), keyboard::Modifiers::default());
+        ui.tap(key, Modifiers::NONE);
         assert_eq!(ui.app().session.selection.iter().copied().collect::<Vec<_>>(), [id]);
         let tile = ui.app().session.scene.module(id).unwrap();
         let has_control = tile.panel.widgets.iter().any(|w| w.is_control() && !w.hidden);
         assert_eq!(ui.app().ui_snapshot().status == "Enter for its controls", has_control);
     }
     for id in expected.iter().rev().skip(1).chain(expected.last()) {
-        ui.tap(key.clone(), keyboard::Modifiers::SHIFT);
+        ui.tap(key, Modifiers::SHIFT);
         assert_eq!(ui.app().session.selection.iter().copied().collect::<Vec<_>>(), [*id]);
     }
 }
@@ -1373,7 +1344,6 @@ fn a_segment_click_changes_the_mode_and_hides_its_controls() {
 /// Select list).
 #[test]
 fn a_select_list_takes_its_keys_through_the_real_view() {
-    use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let lfo = select_new(&mut ui, "loom.mod.lfo");
     let shape = |ui: &Ui| {
@@ -1383,19 +1353,19 @@ fn a_select_list_takes_its_keys_through_the_real_view() {
     let before = shape(&ui);
     let position = ui.app().session.scene.module(lfo.0).unwrap().position;
     let at = ui.control(lfo.0, "shape");
-    let none = keyboard::Modifiers::default();
+    let none = Modifiers::NONE;
 
     ui.move_to(at);
     ui.press();
     ui.release();
-    ui.tap(keyboard::Key::Named(Named::Escape), none);
+    ui.tap(Key::Escape, none);
     assert_eq!(shape(&ui), before, "Escape edits nothing");
 
     ui.press();
     ui.release();
-    ui.tap(keyboard::Key::Named(Named::ArrowDown), none);
+    ui.tap(Key::Down, none);
     assert_eq!(shape(&ui), before, "Down moves only the highlight");
-    ui.tap(keyboard::Key::Named(Named::Enter), none);
+    ui.tap(Key::Enter, none);
     assert_eq!(shape(&ui), before + 1.0, "Enter commits one choice");
     assert_eq!(ui.app().session.scene.module(lfo.0).unwrap().position, position);
 }
@@ -1548,9 +1518,9 @@ fn an_xy_pad_drags_relatively_on_both_axes() {
     // Long enough after the last click not to be a double-click.
     ui.wait(std::time::Duration::from_millis(450));
     let coarse = position_of(&ui, id, "pad_x");
-    ui.hold(keyboard::Modifiers::SHIFT);
+    ui.hold(Modifiers::SHIFT);
     ui.drag(at, Point::new(at.x + 20.0, at.y), 4);
-    ui.hold(keyboard::Modifiers::default());
+    ui.hold(Modifiers::NONE);
     let moved = position_of(&ui, id, "pad_x") - coarse;
     assert!((moved - 0.01).abs() < 1e-3, "Shift is finer: {moved}");
 }
@@ -1564,11 +1534,11 @@ fn an_xy_pad_jumps_with_alt_and_resets_both() {
     let area = pad_area(&mut ui, id);
     let world = Point::new(area.x + area.width * 0.25, area.y + area.height * 0.25);
     let at = ui.canvas().to_window(world);
-    ui.hold(keyboard::Modifiers::ALT);
+    ui.hold(Modifiers::ALT);
     ui.move_to(at);
     ui.press();
     ui.release();
-    ui.hold(keyboard::Modifiers::default());
+    ui.hold(Modifiers::NONE);
     let (x, y) = (position_of(&ui, id, "pad_x"), position_of(&ui, id, "pad_y"));
     assert!((x - 0.25).abs() < 1e-3, "x follows the pointer: {x}");
     assert!((y - 0.75).abs() < 1e-3, "y follows the pointer: {y}");
@@ -1594,30 +1564,29 @@ fn an_xy_pad_jumps_with_alt_and_resets_both() {
 /// no typed value (panel-widgets.md, XY pad).
 #[test]
 fn an_xy_pad_takes_its_keys_by_axis() {
-    use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     focus_control(&mut ui, id, "pad_x");
-    let none = keyboard::Modifiers::default();
+    let none = Modifiers::NONE;
     let start = (position_of(&ui, id, "pad_x"), position_of(&ui, id, "pad_y"));
 
-    ui.tap(keyboard::Key::Named(Named::ArrowRight), none);
+    ui.tap(Key::Right, none);
     assert!((position_of(&ui, id, "pad_x") - start.0 - 0.01).abs() < 1e-4);
     assert!((position_of(&ui, id, "pad_y") - start.1).abs() < 1e-4, "y stays");
-    ui.tap(keyboard::Key::Named(Named::ArrowLeft), keyboard::Modifiers::SHIFT);
+    ui.tap(Key::Left, Modifiers::SHIFT);
     assert!(
         (position_of(&ui, id, "pad_x") - start.0 - 0.009).abs() < 1e-4,
         "Shift is finer"
     );
-    ui.tap(keyboard::Key::Named(Named::ArrowUp), none);
+    ui.tap(Key::Up, none);
     assert!((position_of(&ui, id, "pad_y") - start.1 - 0.01).abs() < 1e-4);
-    ui.tap(keyboard::Key::Named(Named::ArrowDown), none);
+    ui.tap(Key::Down, none);
     assert!((position_of(&ui, id, "pad_y") - start.1).abs() < 1e-4);
 
     let before = (param_value(&ui, id, "pad_x"), param_value(&ui, id, "pad_y"));
-    ui.tap(keyboard::Key::Named(Named::Enter), none);
+    ui.tap(Key::Enter, none);
     ui.typewrite("7");
-    ui.tap(keyboard::Key::Named(Named::Enter), none);
+    ui.tap(Key::Enter, none);
     assert_eq!((param_value(&ui, id, "pad_x"), param_value(&ui, id, "pad_y")), before);
 }
 
@@ -1626,7 +1595,6 @@ fn an_xy_pad_takes_its_keys_by_axis() {
 /// (midi-learn.md, Making a mapping).
 #[test]
 fn learn_mode_arms_nothing_on_an_xy_pad() {
-    use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     let _ = ui.app_mut().send(Message::Learn(crate::learn::Message::Toggle));
@@ -1634,9 +1602,9 @@ fn learn_mode_arms_nothing_on_an_xy_pad() {
     focus_control(&mut ui, id, "pad_x");
     assert!(ui.app().session.learn.armed().is_none(), "a click arms nothing");
     assert!(ui.app().ui_snapshot().status.contains("inspector"));
-    for key in [Named::Space, Named::Enter] {
+    for key in [Key::Space, Key::Enter] {
         ui.app_mut().alerts.say(String::new());
-        ui.tap(keyboard::Key::Named(key), keyboard::Modifiers::default());
+        ui.tap(key, Modifiers::NONE);
         assert!(ui.app().session.learn.armed().is_none(), "{key:?} arms nothing");
         assert!(ui.app().ui_snapshot().status.contains("inspector"), "{key:?} says why");
     }
@@ -1917,69 +1885,67 @@ fn a_range_widgets_parameters_share_a_control_range() {
 /// (panel-widgets.md, rule 4, and Range).
 #[test]
 fn the_keyboard_goes_inside_a_range() {
-    use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     focus_control(&mut ui, id, "span_high");
-    let none = keyboard::Modifiers::default();
-    let key = |k| keyboard::Key::Named(k);
+    let none = Modifiers::NONE;
     let (low, high) = (position_of(&ui, id, "span_low"), position_of(&ui, id, "span_high"));
 
-    ui.tap(key(Named::ArrowRight), none);
+    ui.tap(Key::Right, none);
     assert_eq!(
         position_of(&ui, id, "span_high"),
         high,
         "outside, arrows change nothing"
     );
 
-    ui.tap(key(Named::Enter), none);
-    ui.tap(key(Named::ArrowLeft), none);
-    ui.tap(key(Named::Space), none);
-    ui.tap(key(Named::ArrowRight), none);
+    ui.tap(Key::Enter, none);
+    ui.tap(Key::Left, none);
+    ui.tap(Key::Space, none);
+    ui.tap(Key::Right, none);
     assert!(
         (position_of(&ui, id, "span_low") - low - 0.01).abs() < 1e-4,
         "inside starts on low"
     );
     assert_eq!(position_of(&ui, id, "span_high"), high, "high stays");
-    ui.tap(key(Named::ArrowRight), keyboard::Modifiers::SHIFT);
+    ui.tap(Key::Right, Modifiers::SHIFT);
     assert!(
         (position_of(&ui, id, "span_low") - low - 0.011).abs() < 1e-4,
         "Shift is finer"
     );
     let kept = position_of(&ui, id, "span_low");
-    ui.tap(key(Named::Escape), none);
+    ui.tap(Key::Escape, none);
     assert_eq!(position_of(&ui, id, "span_low"), kept, "Escape lets go and keeps it");
 
     // Not grabbed, the arrows pick: the band, then high, and stop there.
-    ui.tap(key(Named::ArrowRight), none);
-    ui.tap(key(Named::ArrowRight), none);
-    ui.tap(key(Named::ArrowRight), none);
+    ui.tap(Key::Right, none);
+    ui.tap(Key::Right, none);
+    ui.tap(Key::Right, none);
     assert_eq!(position_of(&ui, id, "span_low"), kept, "picking changes nothing");
-    ui.tap(key(Named::Enter), none);
-    ui.tap(key(Named::ArrowLeft), none);
+    ui.tap(Key::Enter, none);
+    ui.tap(Key::Left, none);
     assert!(
         (position_of(&ui, id, "span_high") - high + 0.01).abs() < 1e-4,
         "high is grabbed"
     );
     // A long way down: it stops at low.
     for _ in 0..80 {
-        ui.tap(key(Named::ArrowLeft), none);
+        ui.tap(Key::Left, none);
     }
     assert_eq!(position_of(&ui, id, "span_high"), position_of(&ui, id, "span_low"));
-    ui.tap(key(Named::Enter), none);
+    ui.tap(Key::Enter, none);
 
     // The band moves both.
-    ui.tap(key(Named::ArrowLeft), none);
-    ui.tap(key(Named::Space), none);
+    ui.tap(Key::Left, none);
+    ui.tap(Key::Space, none);
     let before = position_of(&ui, id, "span_low");
-    ui.tap(key(Named::ArrowLeft), none);
+    ui.tap(Key::Left, none);
     assert!((position_of(&ui, id, "span_low") - before + 0.01).abs() < 1e-4);
     assert!((position_of(&ui, id, "span_high") - before + 0.01).abs() < 1e-4);
 
     // Tab leaves from a grab, and arrows then belong to the next control.
-    ui.tap(key(Named::Tab), none);
+    ui.tap(Key::Tab, none);
     let after = position_of(&ui, id, "span_low");
-    ui.tap(key(Named::ArrowLeft), none);
+    ui.tap(Key::Left, none);
     assert_eq!(position_of(&ui, id, "span_low"), after, "the grab ended");
 }
 
@@ -2001,7 +1967,6 @@ fn two_value_widgets_do_not_redraw_when_nothing_changes() {
 /// (panel-widgets.md, Number).
 #[test]
 fn the_tempo_number_steps_by_whole_beats_per_minute() {
-    use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let transport = ui.app().session.controller.transport_module().expect("a transport");
     let _ = ui
@@ -2011,29 +1976,29 @@ fn the_tempo_number_steps_by_whole_beats_per_minute() {
     focus_control(&mut ui, transport, "tempo");
     let tempo = |ui: &Ui| param_value(ui, transport, "tempo");
     let start = tempo(&ui);
-    let up = keyboard::Key::Named(Named::ArrowUp);
-    ui.tap(up.clone(), keyboard::Modifiers::default());
+    let up = Key::Up;
+    ui.tap(up, Modifiers::NONE);
     assert!((tempo(&ui) - start - 1.0).abs() < 1e-2, "{}", tempo(&ui));
-    ui.tap(up.clone(), keyboard::Modifiers::SHIFT);
+    ui.tap(up, Modifiers::SHIFT);
     assert!((tempo(&ui) - start - 1.1).abs() < 1e-2, "{}", tempo(&ui));
 
     // Steps land exactly, however many there are, and walk back to the start.
-    let down = keyboard::Key::Named(Named::ArrowDown);
-    ui.tap(down.clone(), keyboard::Modifiers::SHIFT);
+    let down = Key::Down;
+    ui.tap(down, Modifiers::SHIFT);
     assert_eq!(tempo(&ui), 121.0);
     for _ in 0..100 {
-        ui.tap(up.clone(), keyboard::Modifiers::default());
+        ui.tap(up, Modifiers::NONE);
     }
     assert_eq!(tempo(&ui), 221.0);
     for _ in 0..101 {
-        ui.tap(down.clone(), keyboard::Modifiers::default());
+        ui.tap(down, Modifiers::NONE);
     }
     assert_eq!(tempo(&ui), 120.0);
 
     let id = select_new(&mut ui, "test.panel");
     focus_control(&mut ui, id, "tempo");
     let before = position_of(&ui, id, "tempo");
-    ui.tap(up, keyboard::Modifiers::default());
+    ui.tap(up, Modifiers::NONE);
     assert!((position_of(&ui, id, "tempo") - before - 0.01).abs() < 1e-4);
 }
 
@@ -2041,17 +2006,16 @@ fn the_tempo_number_steps_by_whole_beats_per_minute() {
 /// until the keyboard goes inside again (panel-widgets.md, rule 4).
 #[test]
 fn a_press_ends_the_inside_of_a_range() {
-    use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     focus_control(&mut ui, id, "span_low");
-    let none = keyboard::Modifiers::default();
-    ui.tap(keyboard::Key::Named(Named::Enter), none);
-    ui.tap(keyboard::Key::Named(Named::Space), none);
+    let none = Modifiers::NONE;
+    ui.tap(Key::Enter, none);
+    ui.tap(Key::Space, none);
     ui.wait(std::time::Duration::from_millis(450));
     focus_control(&mut ui, id, "span_low");
     let before = position_of(&ui, id, "span_low");
-    ui.tap(keyboard::Key::Named(Named::ArrowRight), none);
+    ui.tap(Key::Right, none);
     assert_eq!(position_of(&ui, id, "span_low"), before);
 }
 
@@ -2060,7 +2024,6 @@ fn a_press_ends_the_inside_of_a_range() {
 /// the inside.
 #[test]
 fn escape_lets_a_grab_go_before_it_hides_pinned_lines() {
-    use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     let index = ui
@@ -2094,24 +2057,23 @@ fn escape_lets_a_grab_go_before_it_hides_pinned_lines() {
     ui.release();
 
     focus_control(&mut ui, id, "span_low");
-    let none = keyboard::Modifiers::default();
-    let key = |k| keyboard::Key::Named(k);
-    ui.tap(key(Named::Enter), none);
-    ui.tap(key(Named::Space), none);
+    let none = Modifiers::NONE;
+    ui.tap(Key::Enter, none);
+    ui.tap(Key::Space, none);
     // The first Escape lets go, and the second hides the pinned lines, so
     // the keyboard is still inside: Space grabs again and the arrows move.
-    ui.tap(key(Named::Escape), none);
-    ui.tap(key(Named::Escape), none);
-    ui.tap(key(Named::Space), none);
+    ui.tap(Key::Escape, none);
+    ui.tap(Key::Escape, none);
+    ui.tap(Key::Space, none);
     let before = position_of(&ui, id, "span_low");
-    ui.tap(key(Named::ArrowRight), none);
+    ui.tap(Key::Right, none);
     assert!(position_of(&ui, id, "span_low") > before, "still inside");
 
     // With no pinned lines left, the same two Escapes leave the range.
-    ui.tap(key(Named::Escape), none);
-    ui.tap(key(Named::Escape), none);
+    ui.tap(Key::Escape, none);
+    ui.tap(Key::Escape, none);
     let before = position_of(&ui, id, "span_low");
-    ui.tap(key(Named::ArrowRight), none);
+    ui.tap(Key::Right, none);
     assert_eq!(position_of(&ui, id, "span_low"), before, "left the range");
 }
 
@@ -2121,7 +2083,6 @@ fn escape_lets_a_grab_go_before_it_hides_pinned_lines() {
 /// control-channel.md, rule 10).
 #[test]
 fn a_range_reports_both_values_and_names_each_handle() {
-    use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     let widget = widget_of(&ui, id, "span_low");
@@ -2151,7 +2112,7 @@ fn a_range_reports_both_values_and_names_each_handle() {
     focus_control(&mut ui, id, "span_low");
     let running = |ui: &Ui| ui.app().ui_snapshot().tiles.len();
     let before = running(&ui);
-    let messages = ui.tap(keyboard::Key::Named(Named::Space), keyboard::Modifiers::default());
+    let messages = ui.tap(Key::Space, Modifiers::NONE);
     assert!(
         messages
             .iter()
@@ -2162,7 +2123,7 @@ fn a_range_reports_both_values_and_names_each_handle() {
 
     let _ = ui.app_mut().send(Message::Learn(crate::learn::Message::Toggle));
     ui.redraw();
-    ui.tap(keyboard::Key::Named(Named::Enter), keyboard::Modifiers::default());
+    ui.tap(Key::Enter, Modifiers::NONE);
     assert!(ui.app().session.learn.armed().is_none(), "learn mode arms nothing");
     assert!(ui.app().ui_snapshot().status.contains("inspector"));
 }
@@ -2234,7 +2195,6 @@ fn focus_control(ui: &mut Ui, module: ModuleId, name: &str) {
 /// goes when Escape closes it.
 #[test]
 fn the_snapshot_shows_the_typed_field() {
-    use keyboard::key::Named;
     let mut ui = Ui::open("subtractive.ron");
     ui.app_mut().pointer = crate::pointer::Pointer::new(true);
     let id = select_new(&mut ui, "loom.filter.svf");
@@ -2255,7 +2215,7 @@ fn the_snapshot_shows_the_typed_field() {
     assert_eq!(typed.text, "4x");
     assert!(typed.reason.is_some(), "bad text gives its reason");
 
-    ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::empty());
+    ui.tap(Key::Escape, Modifiers::NONE);
     ui.redraw();
     assert_eq!(ui.app().ui_snapshot().typed_field, None, "Escape closed it");
 }
@@ -2277,7 +2237,6 @@ fn the_typed_field_is_null_without_the_control_channel() {
 /// Typing a value).
 #[test]
 fn typing_on_a_focused_knob_sets_the_exact_value() {
-    use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let transport = ui.app().session.controller.transport_module().expect("a transport");
     let _ = ui
@@ -2287,7 +2246,7 @@ fn typing_on_a_focused_knob_sets_the_exact_value() {
     focus_control(&mut ui, transport, "tempo");
     let steps = ui.app().session.edits.history.len();
     ui.typewrite("128");
-    ui.tap(keyboard::Key::Named(Named::Enter), keyboard::Modifiers::default());
+    ui.tap(Key::Enter, Modifiers::NONE);
     assert_eq!(param_value(&ui, transport, "tempo"), 128.0);
     assert_eq!(
         ui.app().session.edits.history.len(),
@@ -2301,26 +2260,25 @@ fn typing_on_a_focused_knob_sets_the_exact_value() {
 /// field never reaches the canvas.
 #[test]
 fn typed_text_commits_units_and_bad_text_is_corrected_in_place() {
-    use keyboard::key::Named;
-    let none = keyboard::Modifiers::default();
+    let none = Modifiers::NONE;
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     focus_control(&mut ui, id, "cutoff");
     ui.typewrite("2k");
-    ui.tap(keyboard::Key::Named(Named::Enter), none);
+    ui.tap(Key::Enter, none);
     assert_eq!(param_value(&ui, id, "cutoff"), 2000.0);
 
     focus_control(&mut ui, id, "tempo");
     ui.typewrite("1");
     ui.typewrite("abc");
     let before = param_value(&ui, id, "tempo");
-    ui.tap(keyboard::Key::Named(Named::Enter), none);
+    ui.tap(Key::Enter, none);
     assert_eq!(param_value(&ui, id, "tempo"), before, "bad text commits nothing");
     for _ in 0..3 {
-        ui.tap(keyboard::Key::Named(Named::Backspace), none);
+        ui.tap(Key::Backspace, none);
     }
     ui.typewrite("50");
-    ui.tap(keyboard::Key::Named(Named::Enter), none);
+    ui.tap(Key::Enter, none);
     assert_eq!(param_value(&ui, id, "tempo"), 150.0);
     assert!(
         ui.app().session.controller.graph().node(id).is_some(),
@@ -2332,8 +2290,7 @@ fn typed_text_commits_units_and_bad_text_is_corrected_in_place() {
 /// no undo step (panel-widgets.md, Typing a value, Unchanged text).
 #[test]
 fn enter_then_enter_keeps_a_value_the_text_rounds() {
-    use keyboard::key::Named;
-    let none = keyboard::Modifiers::default();
+    let none = Modifiers::NONE;
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     let index = ui
@@ -2357,8 +2314,8 @@ fn enter_then_enter_keeps_a_value_the_text_rounds() {
     ui.redraw();
     focus_control(&mut ui, id, "tempo");
     let steps = ui.app().session.edits.history.len();
-    ui.tap(keyboard::Key::Named(Named::Enter), none);
-    ui.tap(keyboard::Key::Named(Named::Enter), none);
+    ui.tap(Key::Enter, none);
+    ui.tap(Key::Enter, none);
     assert_eq!(param_value(&ui, id, "tempo"), 127.96);
     assert_eq!(ui.app().session.edits.history.len(), steps, "no undo step");
 }
@@ -2368,7 +2325,6 @@ fn enter_then_enter_keeps_a_value_the_text_rounds() {
 /// draft, and in MIDI learn mode the row has no field.
 #[test]
 fn the_inspector_takes_typed_values() {
-    use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let id = select_new(&mut ui, "test.panel");
     let node = ui.app().session.controller.graph().node(id).unwrap();
@@ -2414,7 +2370,7 @@ fn the_inspector_takes_typed_values() {
     assert!(ui.app().session.value_draft.is_some(), "and stays to be corrected");
 
     // Escape drops it, through the same listener the app uses.
-    let messages = ui.tap(keyboard::Key::Named(Named::Escape), keyboard::Modifiers::default());
+    let messages = ui.tap(Key::Escape, Modifiers::NONE);
     assert!(
         messages
             .iter()
@@ -2467,21 +2423,20 @@ fn tile_position(ui: &Ui, id: ModuleId) -> (f32, f32) {
 /// focuses a control on the tile, so the next number edits nothing else.
 #[test]
 fn enter_in_an_inspector_field_leaves_the_canvas_alone() {
-    use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let (id, index) = focus_cutoff_field(&mut ui);
     let params = |ui: &Ui| ui.app().session.controller.graph().node(id).unwrap().params.clone();
     let steps = ui.app().session.edits.history.len();
 
-    let enter = keyboard::Key::Named(Named::Enter);
+    let enter = Key::Enter;
     ui.typewrite("440");
-    ui.tap(enter.clone(), keyboard::Modifiers::default());
+    ui.tap(enter, Modifiers::NONE);
     assert_eq!(param_value(&ui, id, "cutoff"), 440.0);
     let others = params(&ui);
 
     // The commit selected the new text, so this number replaces it.
     ui.typewrite("880");
-    ui.tap(enter, keyboard::Modifiers::default());
+    ui.tap(enter, Modifiers::NONE);
     assert_eq!(param_value(&ui, id, "cutoff"), 880.0);
     let now = params(&ui);
     for (i, (before, after)) in others.iter().zip(&now).enumerate() {
@@ -2500,18 +2455,17 @@ fn enter_in_an_inspector_field_leaves_the_canvas_alone() {
 /// arrow, Space, Backspace, or a letter with the pointer over the canvas.
 #[test]
 fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
-    use keyboard::key::Named;
     let mut ui = Ui::open("sine.ron");
     let (id, _) = focus_cutoff_field(&mut ui);
     let place = tile_position(&ui, id);
     let running = ui.app().session.controller.transport().running;
     let steps = ui.app().session.edits.history.len();
 
-    let none = keyboard::Modifiers::default();
-    ui.tap(keyboard::Key::Named(Named::ArrowLeft), none);
-    ui.tap(keyboard::Key::Named(Named::ArrowRight), none);
+    let none = Modifiers::NONE;
+    ui.tap(Key::Left, none);
+    ui.tap(Key::Right, none);
     assert_eq!(tile_position(&ui, id), place, "an arrow moves the caret, not the tile");
-    ui.tap(keyboard::Key::Named(Named::Space), none);
+    ui.tap(Key::Space, none);
     assert_eq!(
         ui.app().session.controller.transport().running,
         running,
@@ -2522,7 +2476,7 @@ fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
     // and `a` would open the browser. The field has the keys all the same.
     let tile = ui.control(id.0, "level");
     ui.set_cursor(mouse::Cursor::Available(tile.to_iced()));
-    ui.tap(keyboard::Key::Named(Named::Backspace), none);
+    ui.tap(Key::Backspace, none);
     assert!(
         ui.app().session.controller.graph().node(id).is_some(),
         "Backspace edits the text"
@@ -2533,13 +2487,13 @@ fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
 
     // Escape ends the field's focus and keeps the selection. The next one
     // reaches the canvas again.
-    ui.tap(keyboard::Key::Named(Named::Escape), none);
+    ui.tap(Key::Escape, none);
     assert!(
         ui.app().session.selection.contains(&id.0),
         "Escape in a field keeps the selection"
     );
     assert!(!ui.app().focus.is_some(), "the field gave up focus");
-    ui.tap(keyboard::Key::Named(Named::Escape), none);
+    ui.tap(Key::Escape, none);
     assert!(ui.app().session.selection.is_empty());
 }
 
@@ -2550,13 +2504,12 @@ fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
 /// panel-widgets.md, Keys in a text field).
 #[test]
 fn tab_from_a_value_field_commits_and_moves_on() {
-    use keyboard::key::Named;
-    let tab = keyboard::Key::Named(Named::Tab);
+    let tab = Key::Tab;
     let mut ui = Ui::open("sine.ron");
     let (id, index) = focus_cutoff_field(&mut ui);
     let row = crate::inspector::ids::row(id.0, crate::inspector::ids::Kind::Param, "cutoff");
     ui.typewrite("440");
-    let messages = ui.tap(tab.clone(), keyboard::Modifiers::default());
+    let messages = ui.tap(tab, Modifiers::NONE);
     assert!(
         !messages.iter().any(|m| matches!(m, Message::Canvas(_))),
         "the canvas did not take Tab: {messages:?}"
@@ -2580,7 +2533,7 @@ fn tab_from_a_value_field_commits_and_moves_on() {
     ui.press();
     ui.release();
     ui.typewrite("500");
-    ui.tap(tab.clone(), keyboard::Modifiers::SHIFT);
+    ui.tap(tab, Modifiers::SHIFT);
     assert!(
         (param_value(&ui, id, "cutoff") - 500.0).abs() < 0.5,
         "Shift+Tab commits too"
@@ -2593,7 +2546,7 @@ fn tab_from_a_value_field_commits_and_moves_on() {
     ui.press();
     ui.release();
     ui.typewrite("abc");
-    ui.tap(tab, keyboard::Modifiers::default());
+    ui.tap(tab, Modifiers::NONE);
     assert!((param_value(&ui, id, "cutoff") - 500.0).abs() < 0.5, "unchanged");
     assert!(ui.app().session.value_draft.is_none(), "the draft went");
     assert!(
@@ -2680,14 +2633,14 @@ fn a_readout_shows_text_and_a_press_selects_its_module() {
 /// A structural number edit changes width in one undo step, including the hover text.
 #[test]
 fn a_voice_count_edit_recompiles_and_undo_redo_follow() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let mut ui = Ui::open("sine.ron");
     let source = select_new(&mut ui, "test.voices");
     let control = ui.control(source.0, "voices");
     ui.move_to(control);
     ui.press();
     ui.release();
-    ui.tap(Key::Named(Named::ArrowUp), Modifiers::default());
+    ui.tap(Key::Up, Modifiers::NONE);
     let width = |ui: &Ui| {
         let c = &ui.app().session.controller;
         c.last_report().width(c.output_ref(source, "out").unwrap()).voices
@@ -2796,7 +2749,7 @@ fn undo_right_after_a_click_into_a_field_leaves_the_patch() {
     ui.move_to(at);
     ui.press();
     ui.release();
-    ui.tap(keyboard::Key::Character("z".into()), keyboard::Modifiers::COMMAND);
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut());
 
     assert!(
         ui.app().session.controller.graph().node(id).is_some(),
@@ -2836,7 +2789,7 @@ fn a_paste_reads_the_clipboard_the_test_set() {
     ui.set_clipboard(Some("drums".to_string()));
     let canvas = ui.canvas();
     ui.move_to(Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0));
-    let log = ui.tap(keyboard::Key::Character("v".into()), keyboard::Modifiers::COMMAND);
+    let log = ui.tap(Key::Character('v'), Modifiers::platform_shortcut());
     assert!(
         log.iter()
             .any(|message| matches!(message, Message::Pasted { text: loom_ui::ClipboardText::Text(text), .. } if text == "drums")),
@@ -3033,7 +2986,7 @@ fn the_canvas_draws_under_the_overlays_over_it() {
     let mut ui = Ui::open("subtractive.ron");
     let canvas = ui.canvas().bounds;
     ui.move_to(Point::new(canvas.x + 8.0, canvas.y + 8.0));
-    ui.tap(keyboard::Key::Character("a".into()), keyboard::Modifiers::default());
+    ui.tap(Key::Character('a'), Modifiers::NONE);
     // The browser is the runtime's (row 5): its box is in the runtime's
     // layout, drawn in the Overlays layer over the canvas.
     ui.lay_out_panels();
@@ -3204,7 +3157,7 @@ fn a_capture_after_a_shrink_draws_the_last_frame_again() {
 /// change and the real file's stay.
 #[test]
 fn a_save_in_the_harness_writes_the_copy() {
-    use iced::keyboard::{Key, Modifiers};
+    use loom_ui_core::{Key, Modifiers};
     let real = example_path("subtractive.ron");
     let before = std::fs::read(&real).unwrap();
     let mut ui = Ui::open("subtractive.ron");
@@ -3222,7 +3175,7 @@ fn a_save_in_the_harness_writes_the_copy() {
         position: 0.123,
     }));
     let _ = ui.app_mut().send(Message::SliderReleased);
-    ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('s'), Modifiers::platform_shortcut());
     ui.redraw();
     assert_ne!(std::fs::read(&copy).unwrap(), unsaved, "the save wrote the copy");
     assert_eq!(std::fs::read(&real).unwrap(), before, "the example is unchanged");
@@ -3297,7 +3250,7 @@ fn copies_live_in_a_folder_of_their_own() {
 /// copy, never the example (CodeRabbit, #850).
 #[test]
 fn a_relative_example_name_copies_inside_its_folder() {
-    use iced::keyboard::{Key, Modifiers};
+    use loom_ui_core::{Key, Modifiers};
     let real = example_path("subtractive.ron");
     let before = std::fs::read(&real).unwrap();
     let mut ui = Ui::open("../patches/subtractive.ron");
@@ -3312,7 +3265,7 @@ fn a_relative_example_name_copies_inside_its_folder() {
         position: 0.321,
     }));
     let _ = ui.app_mut().send(Message::SliderReleased);
-    ui.tap(Key::Character("s".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('s'), Modifiers::platform_shortcut());
     ui.redraw();
     assert_ne!(std::fs::read(&copy).unwrap(), unsaved, "the save wrote the copy");
     assert_eq!(std::fs::read(&real).unwrap(), before, "the example is unchanged");
@@ -3361,7 +3314,7 @@ fn menu_over_a_focused_value_field(ui: &mut Ui) {
 /// are heard only while its view owns the input (`Message::field_view`).
 #[test]
 fn a_field_under_the_probe_menu_changes_nothing() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let mut ui = Ui::open("subtractive.ron");
     let cutoff = |ui: &Ui| {
         ui.app()
@@ -3376,7 +3329,7 @@ fn a_field_under_the_probe_menu_changes_nothing() {
     let unsaved = ui.app().unsaved();
     menu_over_a_focused_value_field(&mut ui);
     ui.typewrite("777");
-    ui.tap(Key::Named(Named::Enter), Modifiers::default());
+    ui.tap(Key::Enter, Modifiers::NONE);
     ui.redraw();
     assert_eq!(cutoff(&ui), before, "the patch is unchanged");
     assert!(ui.app().session.value_draft.is_none(), "no draft under the menu");

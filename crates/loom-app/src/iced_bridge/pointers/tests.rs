@@ -8,9 +8,10 @@ use crate::Message;
 use crate::iced_bridge::TestPanels;
 use crate::ui_test::Ui;
 use iced::keyboard;
+use loom_canvas::iced_convert::ToIced as _;
 use loom_ui::access::{Access, Action, Role};
 use loom_ui::{Element, Layer, Length, View};
-use loom_ui_core::{Point, UiId};
+use loom_ui_core::{Key, Modifiers, Point, UiId};
 
 /// The pop-up's size, from the window's top-left corner. Wide enough to
 /// cover Open whatever the system font's widths (its centre is near 200 on
@@ -200,17 +201,11 @@ fn a_layer_above_iced_keeps_its_points_from_iced() {
 fn shift_tab_from_nothing_enters_our_last_stop_and_not_iced() {
     let mut ui = ui_with(bar);
     assert_eq!(ui.focused_field(), None);
-    ui.tap(
-        keyboard::Key::Named(keyboard::key::Named::Tab),
-        keyboard::Modifiers::default(),
-    );
+    ui.tap(Key::Tab, Modifiers::NONE);
     assert_eq!(ui.runtime().focused(), None, "Tab from nothing is the canvas's");
     ui.app_mut().session.selection.clear();
     ui.redraw();
-    ui.tap(
-        keyboard::Key::Named(keyboard::key::Named::Tab),
-        keyboard::Modifiers::SHIFT,
-    );
+    ui.tap(Key::Tab, Modifiers::SHIFT);
     assert_eq!(ui.runtime().focused(), Some(&go()));
     assert!(ui.runtime().focus_ring().is_some(), "from the keyboard, with a ring");
     assert_eq!(ui.focused_field(), None, "no Iced field took the Tab");
@@ -228,10 +223,11 @@ fn iced_heard(messages: &[Message]) -> Vec<keyboard::Event> {
 }
 
 /// True for a press of `key` among what Iced heard.
-fn pressed(heard: &[keyboard::Event], key: &keyboard::Key) -> bool {
+fn pressed(heard: &[keyboard::Event], key: &Key) -> bool {
+    let key = key.to_iced();
     heard
         .iter()
-        .any(|event| matches!(event, keyboard::Event::KeyPressed { key: got, .. } if got == key))
+        .any(|event| matches!(event, keyboard::Event::KeyPressed { key: got, .. } if *got == key))
 }
 
 /// Only the key the runtime took is kept from Iced. A Shift+Tab the runtime
@@ -240,17 +236,17 @@ fn pressed(heard: &[keyboard::Event], key: &keyboard::Key) -> bool {
 #[test]
 fn only_the_key_the_runtime_took_is_kept_from_iced() {
     use crate::ui_test::key_press;
-    let none = keyboard::Modifiers::default();
-    let tab = keyboard::Key::Named(keyboard::key::Named::Tab);
-    let x = keyboard::Key::Character("x".into());
-    let q = keyboard::Key::Character("q".into());
+    let none = Modifiers::NONE;
+    let tab = Key::Tab;
+    let x = Key::Character('x');
+    let q = Key::Character('q');
 
-    let shift = keyboard::Modifiers::SHIFT;
+    let shift = Modifiers::SHIFT;
     let mut ui = ui_with(bar);
     let heard = iced_heard(&ui.step(&[
-        key_press(tab.clone(), shift, None, false),
+        key_press(tab, shift, None, false),
         iced::Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::SHIFT)),
-        key_press(x.clone(), none, Some("x"), false),
+        key_press(x, none, Some("x"), false),
     ]));
     assert_eq!(ui.runtime().focused(), Some(&go()), "the runtime took the Tab");
     assert!(!pressed(&heard, &tab), "{heard:?}");
@@ -264,9 +260,9 @@ fn only_the_key_the_runtime_took_is_kept_from_iced() {
 
     let mut ui = ui_with(bar);
     let heard = iced_heard(&ui.step(&[
-        key_press(x.clone(), none, Some("x"), false),
-        key_press(tab.clone(), shift, None, false),
-        key_press(q.clone(), none, Some("q"), false),
+        key_press(x, none, Some("x"), false),
+        key_press(tab, shift, None, false),
+        key_press(q, none, Some("q"), false),
     ]));
     assert_eq!(ui.runtime().focused(), Some(&go()));
     assert!(pressed(&heard, &x) && pressed(&heard, &q), "{heard:?}");
@@ -304,15 +300,14 @@ fn bar_with_field(view: &mut View) {
 #[test]
 fn a_key_our_field_takes_is_kept_from_iced() {
     use crate::ui_test::key_press;
-    let none = keyboard::Modifiers::default();
-    let named = |key| keyboard::Key::Named(key);
-    let a = keyboard::Key::Character("a".into());
-    let b = keyboard::Key::Character("b".into());
-    let z = keyboard::Key::Character("z".into());
-    let left = named(keyboard::key::Named::ArrowLeft);
-    let backspace = named(keyboard::key::Named::Backspace);
-    let tab = named(keyboard::key::Named::Tab);
-    let escape = named(keyboard::key::Named::Escape);
+    let none = Modifiers::NONE;
+    let a = Key::Character('a');
+    let b = Key::Character('b');
+    let z = Key::Character('z');
+    let left = Key::Left;
+    let backspace = Key::Backspace;
+    let tab = Key::Tab;
+    let escape = Key::Escape;
 
     let mut ui = ui_with(bar_with_field);
     ui.app_mut().session.selection = [4].into_iter().collect();
@@ -321,10 +316,10 @@ fn a_key_our_field_takes_is_kept_from_iced() {
     let modules = ui.app().session.controller.graph().len();
 
     let heard = iced_heard(&ui.step(&[
-        key_press(a.clone(), none, Some("a"), false),
-        key_press(b.clone(), none, Some("b"), false),
-        key_press(left.clone(), none, None, false),
-        key_press(backspace.clone(), none, None, false),
+        key_press(a, none, Some("a"), false),
+        key_press(b, none, Some("b"), false),
+        key_press(left, none, None, false),
+        key_press(backspace, none, None, false),
     ]));
     for key in [&a, &b, &left, &backspace] {
         assert!(!pressed(&heard, key), "{key:?} reached Iced: {heard:?}");
@@ -338,21 +333,22 @@ fn a_key_our_field_takes_is_kept_from_iced() {
     // Only presses are kept (`Target::kept`): a release goes on to Iced by
     // design, so nothing in Iced holds a key down.
     let heard = iced_heard(&ui.step(&[
-        crate::ui_test::key_released(a.clone(), none),
-        crate::ui_test::key_released(backspace.clone(), none),
+        crate::ui_test::key_released(a, none),
+        crate::ui_test::key_released(backspace, none),
     ]));
-    let released = |key: &keyboard::Key| {
+    let released = |key: &Key| {
+        let key = key.to_iced();
         heard
             .iter()
-            .any(|event| matches!(event, keyboard::Event::KeyReleased { key: got, .. } if got == key))
+            .any(|event| matches!(event, keyboard::Event::KeyReleased { key: got, .. } if *got == key))
     };
     assert!(released(&a) && released(&backspace), "{heard:?}");
     assert_eq!(ui.runtime().focused(), Some(&go()), "a release moves no focus");
 
-    let heard = iced_heard(&ui.step(&[key_press(z.clone(), keyboard::Modifiers::COMMAND, None, false)]));
+    let heard = iced_heard(&ui.step(&[key_press(z, Modifiers::platform_shortcut(), None, false)]));
     assert!(!pressed(&heard, &z), "{heard:?}");
 
-    let heard = iced_heard(&ui.step(&[key_press(escape.clone(), none, None, false)]));
+    let heard = iced_heard(&ui.step(&[key_press(escape, none, None, false)]));
     assert!(pressed(&heard, &escape), "{heard:?}");
     assert_eq!(
         ui.runtime().focused(),
@@ -360,7 +356,7 @@ fn a_key_our_field_takes_is_kept_from_iced() {
         "Escape left the focus on our field"
     );
 
-    ui.step(&[key_press(tab.clone(), none, None, false)]);
+    ui.step(&[key_press(tab, none, None, false)]);
     assert_ne!(ui.runtime().focused(), Some(&go()), "Tab left our field");
 }
 
@@ -377,9 +373,9 @@ fn ime(event: iced::advanced::input_method::Event) -> iced::Event {
 fn the_input_method_reaches_our_field_and_not_iced() {
     use crate::ui_test::key_press;
     use iced::advanced::input_method::Event as Method;
-    let none = keyboard::Modifiers::default();
-    let tab = keyboard::Key::Named(keyboard::key::Named::Tab);
-    let backspace = keyboard::Key::Named(keyboard::key::Named::Backspace);
+    let none = Modifiers::NONE;
+    let tab = Key::Tab;
+    let backspace = Key::Backspace;
 
     let mut ui = ui_with(bar_with_field);
     ui.send(Message::MidiGhosts);
@@ -390,8 +386,8 @@ fn the_input_method_reaches_our_field_and_not_iced() {
     );
     ui.step(&[ime(Method::Opened), ime(Method::Preedit("に".to_owned(), Some(3..3)))]);
     let heard = iced_heard(&ui.step(&[
-        key_press(tab.clone(), none, None, false),
-        key_press(backspace.clone(), none, None, false),
+        key_press(tab, none, None, false),
+        key_press(backspace, none, None, false),
     ]));
     assert_eq!(
         ui.runtime().focused(),

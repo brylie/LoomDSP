@@ -9,11 +9,11 @@
 
 use crate::ui_test::{Ui, key_press};
 use crate::{FileAction, Message};
-use iced::keyboard::{Key, Modifiers, key::Named};
+use loom_ui_core::{Key, Modifiers};
 
 /// Cmd+. (Ctrl+. off a Mac), the panic key (panic.md).
 fn tap_panic(ui: &mut Ui) -> Vec<Message> {
-    ui.tap(Key::Character(".".into()), Modifiers::COMMAND)
+    ui.tap(Key::Character('.'), Modifiers::platform_shortcut())
 }
 
 /// Asserts that Panic ran: the message was sent and the status line says so.
@@ -111,14 +111,14 @@ fn step_2_a_question_has_every_other_key() {
     let mut ui = asking();
     ui.app_mut().session.selection = [4].into_iter().collect();
     let before = modules(&ui);
-    let none = Modifiers::empty();
-    ui.tap(Key::Named(Named::Delete), none);
-    ui.tap(Key::Character("d".into()), Modifiers::COMMAND);
-    ui.step(&[key_press(Key::Character("a".into()), none, Some("a"), false)]);
-    ui.step(&[crate::ui_test::key_released(Key::Character("a".into()), none)]);
+    let none = Modifiers::NONE;
+    ui.tap(Key::Delete, none);
+    ui.tap(Key::Character('d'), Modifiers::platform_shortcut());
+    ui.step(&[key_press(Key::Character('a'), none, Some("a"), false)]);
+    ui.step(&[crate::ui_test::key_released(Key::Character('a'), none)]);
     assert_eq!(modules(&ui), before, "no key reached the canvas or a shortcut");
     assert!(ui.app().overlays.question.is_some(), "the question stays open");
-    ui.tap(Key::Named(Named::Escape), none);
+    ui.tap(Key::Escape, none);
     assert!(ui.app().overlays.question.is_none(), "Escape closed it");
     assert!(!ui.app().quit, "with the safe answer: the window stays");
 }
@@ -129,9 +129,9 @@ fn step_2_a_question_has_every_other_key() {
 #[test]
 fn step_2b_the_browser_takes_up_and_down_before_its_field() {
     let mut ui = browsing();
-    let none = Modifiers::empty();
-    ui.tap(Key::Named(Named::ArrowDown), none);
-    ui.tap(Key::Named(Named::ArrowDown), none);
+    let none = Modifiers::NONE;
+    ui.tap(Key::Down, none);
+    ui.tap(Key::Down, none);
     let browser = ui.app().overlays.browser().expect("the browser is open");
     assert_eq!(browser.model().highlight, Some(2));
     assert_eq!(ui.runtime().focused(), Some(&crate::browser::search_id()));
@@ -144,7 +144,7 @@ fn step_3_a_focused_field_keeps_its_undo() {
     let mut ui = browsing();
     let step = ui.app().session.edits.history.undo_step().map(|s| s.name().to_owned());
     ui.typewrite("sin");
-    ui.tap(Key::Character("z".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('z'), Modifiers::platform_shortcut());
     let browser = ui.app().overlays.browser().expect("the browser is open");
     assert_ne!(browser.model().query, "sin", "the field undid its typing");
     assert_eq!(
@@ -160,12 +160,12 @@ fn step_3_a_focused_field_keeps_its_undo() {
 fn step_5_the_open_overlay_has_its_keys() {
     let mut ui = Ui::open("subtractive.ron");
     ui.app_mut().session.selection = [4].into_iter().collect();
-    ui.tap(Key::Character(",".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character(','), Modifiers::platform_shortcut());
     assert!(ui.app().overlays.preferences().is_some(), "Cmd+, opened Preferences");
     let before = modules(&ui);
-    ui.tap(Key::Character("d".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('d'), Modifiers::platform_shortcut());
     assert_eq!(modules(&ui), before, "the selection behind it was not duplicated");
-    ui.tap(Key::Named(Named::Escape), Modifiers::empty());
+    ui.tap(Key::Escape, Modifiers::NONE);
     assert!(ui.app().overlays.preferences().is_none(), "Escape closed it");
 }
 
@@ -175,12 +175,7 @@ fn step_5_the_open_overlay_has_its_keys() {
 fn step_5_the_canvas_has_the_keys_when_nothing_else_does() {
     let mut ui = Ui::open("subtractive.ron");
     ui.redraw();
-    let messages = ui.step(&[key_press(
-        Key::Named(Named::Space),
-        Modifiers::empty(),
-        Some(" "),
-        false,
-    )]);
+    let messages = ui.step(&[key_press(Key::Space, Modifiers::NONE, Some(" "), false)]);
     assert!(
         messages
             .iter()
@@ -203,11 +198,11 @@ fn step_6_a_shortcut_acts_unless_a_field_has_focus() {
     ui.release();
     assert!(ui.text_field_focused(), "the value field has focus");
     let before = modules(&ui);
-    ui.tap(Key::Character("d".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('d'), Modifiers::platform_shortcut());
     assert_eq!(modules(&ui), before, "held back while a field has focus");
     ui.unfocus_all();
     ui.app_mut().session.selection = [4].into_iter().collect();
     ui.redraw();
-    ui.tap(Key::Character("d".into()), Modifiers::COMMAND);
+    ui.tap(Key::Character('d'), Modifiers::platform_shortcut());
     assert_eq!(modules(&ui), before + 1, "with no field, Cmd+D duplicates");
 }
