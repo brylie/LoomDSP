@@ -258,6 +258,7 @@ fn a_held_enter_answers_nothing() {
         modifiers,
         repeat,
         text: None,
+        code: loom_ui_core::Code::Other,
     };
     assert!(key_of(&press(K::Enter, M::NONE, true)).is_none());
     assert!(matches!(

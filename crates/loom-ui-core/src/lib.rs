@@ -51,6 +51,6 @@ mod ui_id;
 pub use color::Color;
 pub use cursor::Cursor;
 pub use geometry::{Point, Rect, Size, Vector};
-pub use input::{Event, ImeEvent, Key, KeyEvent, Modifiers, Platform, PointerButton, PointerEvent, ScrollDelta};
+pub use input::{Code, Event, ImeEvent, Key, KeyEvent, Modifiers, Platform, PointerButton, PointerEvent, ScrollDelta};
 pub use text::{Face, Span, TextMeasure, TextStyle, Weight};
 pub use ui_id::{IdKey, IdTable, ParseUiIdError, UiId};

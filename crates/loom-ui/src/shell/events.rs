@@ -8,11 +8,13 @@
 //! and go to the runtime in logical ones, divided by the window's scale.
 
 use crate::event::{DriverEvent, WindowEvent};
-use loom_ui_core::{Event, ImeEvent, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, ScrollDelta, Size};
+use loom_ui_core::{
+    Code, Event, ImeEvent, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, ScrollDelta, Size,
+};
 use std::time::Duration;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta};
-use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey};
+use winit::keyboard::{Key as WinitKey, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 
 /// What the shell keeps between events: where the pointer is, and which
 /// modifiers are held. winit reports each only when it changes.
@@ -109,10 +111,12 @@ fn pointer_event(event: PointerEvent, held: &Held) -> DriverEvent {
 /// A key press or release. `key` is the key with no modifier applied, as
 /// [`Key::Character`] promises (winit gives it through
 /// `KeyEventExtModifierSupplement::key_without_modifiers`), and `text` is
-/// what the press types. A press winit made up for a window that gained
+/// what the press types. `physical` is where the key sits, read as
+/// [`Code`]. A press winit made up for a window that gained
 /// focus is not a press the user made, and gives `None`.
 pub(crate) fn key(
     key: &WinitKey,
+    physical: PhysicalKey,
     state: ElementState,
     repeat: bool,
     text: Option<&str>,
@@ -123,15 +127,27 @@ pub(crate) fn key(
         return None;
     }
     let key = core_key(key);
+    let code = code(physical);
     Some(Event::Key(match state {
         ElementState::Pressed => KeyEvent::Pressed {
             key,
+            code,
             modifiers,
             repeat,
             text: text.map(str::to_string),
         },
-        ElementState::Released => KeyEvent::Released { key },
+        ElementState::Released => KeyEvent::Released { key, code },
     }))
+}
+
+/// Where winit says the key sits, as ours. winit's key codes name the
+/// same places as the W3C codes [`Code`] uses.
+pub(crate) fn code(physical: PhysicalKey) -> Code {
+    match physical {
+        PhysicalKey::Code(KeyCode::BracketLeft) => Code::BracketLeft,
+        PhysicalKey::Code(KeyCode::BracketRight) => Code::BracketRight,
+        _ => Code::Other,
+    }
 }
 
 /// winit's key as ours. A key that types exactly one character is
@@ -155,6 +171,7 @@ pub(crate) fn core_key(key: &WinitKey) -> Key {
             NamedKey::PageUp => Key::PageUp,
             NamedKey::PageDown => Key::PageDown,
             NamedKey::ContextMenu => Key::ContextMenu,
+            NamedKey::F1 => Key::F1,
             NamedKey::F2 => Key::F2,
             NamedKey::F10 => Key::F10,
             NamedKey::Shift

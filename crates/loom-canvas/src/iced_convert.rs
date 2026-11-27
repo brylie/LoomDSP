@@ -13,7 +13,7 @@
 
 use iced::{keyboard, mouse, window};
 use loom_ui_core::{
-    Color, Event, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, Rect, ScrollDelta, Size, Vector,
+    Code, Color, Event, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, Rect, ScrollDelta, Size, Vector,
 };
 
 /// Turns a `loom-ui-core` value into the Iced value with the same fields.
@@ -207,6 +207,7 @@ impl ToCore for &keyboard::Key {
                 Named::PageUp => Key::PageUp,
                 Named::PageDown => Key::PageDown,
                 Named::ContextMenu => Key::ContextMenu,
+                Named::F1 => Key::F1,
                 Named::F2 => Key::F2,
                 Named::F10 => Key::F10,
                 Named::Shift | Named::Control | Named::Alt | Named::AltGraph | Named::Meta | Named::Super => {
@@ -222,6 +223,21 @@ impl ToCore for &keyboard::Key {
                 }
             }
             keyboard::Key::Unidentified => Key::Other,
+        }
+    }
+}
+
+impl ToCore for keyboard::key::Physical {
+    type Core = Code;
+
+    /// Where Iced says the key sits, as ours. Iced's key codes name the
+    /// same places as the W3C codes [`Code`] uses.
+    fn to_core(self) -> Code {
+        use keyboard::key::{Code as IcedCode, Physical};
+        match self {
+            Physical::Code(IcedCode::BracketLeft) => Code::BracketLeft,
+            Physical::Code(IcedCode::BracketRight) => Code::BracketRight,
+            _ => Code::Other,
         }
     }
 }
@@ -266,17 +282,22 @@ pub fn event_to_core(event: &iced::Event) -> Option<Event> {
         iced::Event::Keyboard(event) => Event::Key(match event {
             keyboard::Event::KeyPressed {
                 key,
+                physical_key,
                 modifiers,
                 repeat,
                 text,
                 ..
             } => KeyEvent::Pressed {
                 key: key.to_core(),
+                code: physical_key.to_core(),
                 modifiers: modifiers.to_core(),
                 repeat: *repeat,
                 text: text.as_ref().map(ToString::to_string),
             },
-            keyboard::Event::KeyReleased { key, .. } => KeyEvent::Released { key: key.to_core() },
+            keyboard::Event::KeyReleased { key, physical_key, .. } => KeyEvent::Released {
+                key: key.to_core(),
+                code: physical_key.to_core(),
+            },
             keyboard::Event::ModifiersChanged(modifiers) => KeyEvent::ModifiersChanged(modifiers.to_core()),
         }),
         iced::Event::Window(window::Event::RedrawRequested(_)) => Event::Redraw,

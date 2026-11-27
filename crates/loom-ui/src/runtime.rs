@@ -1062,7 +1062,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let Event::Key(key) = event else {
             return (false, false);
         };
-        if let KeyEvent::Released { key: Key::Space } = key
+        if let KeyEvent::Released { key: Key::Space, .. } = key
             && self.pointer.space.is_some()
         {
             if let Some(armed) = self.live_arm() {

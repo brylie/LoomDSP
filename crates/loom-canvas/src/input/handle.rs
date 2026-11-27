@@ -294,7 +294,7 @@ impl CanvasModel<'_> {
                 now,
                 out,
             ) => {}
-            Event::Key(KeyEvent::Released { key }) => {
+            Event::Key(KeyEvent::Released { key, .. }) => {
                 self.release_key(state, key, now, out);
             }
             // Paste works with the pointer anywhere in the window. Only the

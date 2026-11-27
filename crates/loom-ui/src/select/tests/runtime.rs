@@ -22,7 +22,7 @@ use crate::window::scroll::tests::{
     Message, Shown, Toolkit, click, id, key, key_with, list_panel, pointer, shifted, showing, step, stop,
 };
 use accesskit::ActionRequest;
-use loom_ui_core::{Event, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, UiId};
+use loom_ui_core::{Code, Event, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, UiId};
 use std::time::Duration;
 
 /// The select's UI ID.
@@ -166,6 +166,7 @@ fn typing(c: char) -> DriverEvent {
             modifiers: Modifiers::NONE,
             repeat: false,
             text: Some(c.to_string()),
+            code: Code::Other,
         }),
         pointer: None,
     }

@@ -15,7 +15,7 @@ use crate::layout::tests::{Mono, STYLE};
 use crate::routing::{NoTarget, Routed, Target};
 use crate::view::{Layer, View};
 use accesskit::{ActionRequest, NodeId, Role as KitRole};
-use loom_ui_core::{Event, IdTable, Key, KeyEvent, Modifiers, Point, Rect, Size, UiId};
+use loom_ui_core::{Code, Event, IdTable, Key, KeyEvent, Modifiers, Point, Rect, Size, UiId};
 use std::time::Instant;
 
 /// A panel: its key, its layer, and its elements.
@@ -230,6 +230,7 @@ fn tab_with(modifiers: Modifiers) -> DriverEvent {
             modifiers,
             repeat: false,
             text: None,
+            code: Code::Other,
         }),
         pointer: None,
     }
@@ -629,11 +630,12 @@ fn a_menu_item_focusable_while_off_is_a_stop_that_clicks_nothing() {
                 modifiers: Modifiers::NONE,
                 repeat: false,
                 text: None,
+                code: Code::Other,
             }),
             pointer: None,
         });
         harness.step(DriverEvent::Input {
-            event: Event::Key(KeyEvent::Released { key }),
+            event: Event::Key(KeyEvent::Released { key, code: Code::Other }),
             pointer: None,
         });
     }
@@ -650,6 +652,7 @@ fn a_menu_item_focusable_while_off_is_a_stop_that_clicks_nothing() {
             modifiers: Modifiers::NONE,
             repeat: false,
             text: None,
+            code: Code::Other,
         }),
         pointer: None,
     });
@@ -902,6 +905,7 @@ fn a_layout_through_the_parts_settles_the_focus_before_the_next_key() {
             modifiers: Modifiers::NONE,
             repeat: false,
             text: Some("x".into()),
+            code: Code::Other,
         }),
         pointer: None,
     });
@@ -1088,6 +1092,7 @@ fn a_report_waiting_in_the_queue_runs_before_the_next_key() {
             modifiers: Modifiers::NONE,
             repeat: false,
             text: Some("k".into()),
+            code: Code::Other,
         }),
         pointer: None,
     };

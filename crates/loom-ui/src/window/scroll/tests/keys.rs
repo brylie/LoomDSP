@@ -12,7 +12,7 @@ use crate::headless::Harness;
 use crate::layout::Layout;
 use crate::layout::tests::{Mono, STYLE};
 use crate::view::Layer;
-use loom_ui_core::{Event, Key, KeyEvent, Modifiers, UiId};
+use loom_ui_core::{Code, Event, Key, KeyEvent, Modifiers, UiId};
 
 /// Ten rows of text, with no stop.
 fn rows() -> Vec<Element> {
@@ -78,7 +78,7 @@ fn with_button(_: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
 /// A key let go.
 fn released(key: Key) -> DriverEvent {
     DriverEvent::Input {
-        event: Event::Key(KeyEvent::Released { key }),
+        event: Event::Key(KeyEvent::Released { key, code: Code::Other }),
         pointer: None,
     }
 }

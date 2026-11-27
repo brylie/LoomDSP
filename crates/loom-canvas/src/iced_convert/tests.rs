@@ -52,7 +52,7 @@ fn a_colour_keeps_its_channels() {
 
 use iced::keyboard::key::Named;
 use iced::{keyboard, mouse, window};
-use loom_ui_core::{Event, Key, KeyEvent, Modifiers, PointerButton, PointerEvent, ScrollDelta};
+use loom_ui_core::{Code, Event, Key, KeyEvent, Modifiers, PointerButton, PointerEvent, ScrollDelta};
 use std::time::Instant;
 
 /// An Iced key press with the fields the conversion does not read filled in.
@@ -117,6 +117,7 @@ fn each_named_key_the_canvas_uses_has_its_own_key() {
         (Named::PageUp, Key::PageUp),
         (Named::PageDown, Key::PageDown),
         (Named::ContextMenu, Key::ContextMenu),
+        (Named::F1, Key::F1),
         (Named::F2, Key::F2),
         (Named::F10, Key::F10),
     ];
@@ -154,6 +155,50 @@ fn a_key_with_no_use_is_other() {
     assert_eq!((&keyboard::Key::Unidentified).to_core(), Key::Other);
 }
 
+/// The keys right of P are their places whatever they type, and a
+/// press and its release both carry the place. Every other key is
+/// `Code::Other`.
+#[test]
+fn the_bracket_keys_keep_their_place() {
+    use keyboard::key::{Code as IcedCode, NativeCode, Physical};
+    assert_eq!(Physical::Code(IcedCode::BracketLeft).to_core(), Code::BracketLeft);
+    assert_eq!(Physical::Code(IcedCode::BracketRight).to_core(), Code::BracketRight);
+    assert_eq!(Physical::Code(IcedCode::Period).to_core(), Code::Other);
+    assert_eq!(Physical::Unidentified(NativeCode::Unidentified).to_core(), Code::Other);
+    let place = Physical::Code(IcedCode::BracketRight);
+    let key = characters("+");
+    let pressed = iced::Event::Keyboard(keyboard::Event::KeyPressed {
+        key: key.clone(),
+        modified_key: key.clone(),
+        physical_key: place,
+        location: keyboard::Location::Standard,
+        modifiers: keyboard::Modifiers::default(),
+        text: Some("+".into()),
+        repeat: false,
+    });
+    let released = iced::Event::Keyboard(keyboard::Event::KeyReleased {
+        key: key.clone(),
+        modified_key: key,
+        physical_key: place,
+        location: keyboard::Location::Standard,
+        modifiers: keyboard::Modifiers::default(),
+    });
+    assert!(matches!(
+        event_to_core(&pressed),
+        Some(Event::Key(KeyEvent::Pressed {
+            code: Code::BracketRight,
+            ..
+        }))
+    ));
+    assert!(matches!(
+        event_to_core(&released),
+        Some(Event::Key(KeyEvent::Released {
+            code: Code::BracketRight,
+            ..
+        }))
+    ));
+}
+
 /// A key that types one character passes that character through unchanged.
 /// Iced gives the key with no modifier applied, so the conversion has
 /// nothing to fold: an uppercase character here is only a pass-through, not
@@ -184,6 +229,7 @@ fn a_key_that_types_more_than_one_character_is_other_and_keeps_its_text() {
             modifiers: Modifiers::NONE,
             repeat: false,
             text: Some("ab".to_string()),
+            code: Code::Other,
         }))
     );
 }
@@ -232,6 +278,7 @@ fn a_key_press_keeps_every_part() {
             },
             repeat: true,
             text: Some("A".to_string()),
+            code: Code::Other,
         }))
     );
     let no_text = event_to_core(&press(
@@ -247,6 +294,7 @@ fn a_key_press_keeps_every_part() {
             modifiers: Modifiers::NONE,
             repeat: false,
             text: None,
+            code: Code::Other,
         }))
     );
 }
@@ -256,7 +304,10 @@ fn a_key_press_keeps_every_part() {
 fn a_release_and_a_modifier_change_convert() {
     assert_eq!(
         event_to_core(&release(keyboard::Key::Named(Named::Space))),
-        Some(Event::Key(KeyEvent::Released { key: Key::Space }))
+        Some(Event::Key(KeyEvent::Released {
+            key: Key::Space,
+            code: Code::Other
+        }))
     );
     assert_eq!(
         event_to_core(&iced::Event::Keyboard(keyboard::Event::ModifiersChanged(

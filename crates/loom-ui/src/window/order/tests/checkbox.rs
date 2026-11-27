@@ -11,7 +11,7 @@ use crate::layout::tests::STYLE;
 use crate::view::Layer;
 use crate::window::scroll::tests::{Message, Shown, Toolkit, click, id, key, list_panel, showing, step};
 use accesskit::{ActionRequest, Toggled};
-use loom_ui_core::{Event, Key, KeyEvent, Point, UiId};
+use loom_ui_core::{Code, Event, Key, KeyEvent, Point, UiId};
 
 /// The check box's UI ID.
 fn follow() -> UiId {
@@ -30,7 +30,10 @@ fn panel(_: u32, chosen: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
 /// Space coming up.
 fn space_up() -> DriverEvent {
     DriverEvent::Input {
-        event: Event::Key(KeyEvent::Released { key: Key::Space }),
+        event: Event::Key(KeyEvent::Released {
+            key: Key::Space,
+            code: Code::Other,
+        }),
         pointer: None,
     }
 }

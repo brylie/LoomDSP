@@ -13,7 +13,7 @@ use crate::layout::tests::{Mono, STYLE};
 use crate::routing::NoTarget;
 use crate::view::{Layer, View};
 use accesskit::{ActionRequest, NodeId};
-use loom_ui_core::{Event, IdKey, Key, KeyEvent, Modifiers, Size, UiId};
+use loom_ui_core::{Code, Event, IdKey, Key, KeyEvent, Modifiers, Size, UiId};
 use std::time::Instant;
 
 /// The roll's kind.
@@ -214,6 +214,7 @@ fn press(harness: &mut Harness<Rolls, NoTarget>, key: Key, modifiers: Modifiers)
             modifiers,
             repeat: false,
             text,
+            code: Code::Other,
         }),
         pointer: None,
     });

@@ -15,7 +15,7 @@ use loom_ui::paint::Typesetter;
 use loom_ui::{
     App, Context, DriverEvent, Effects, Element, FieldEvent, Layer, Length, NoTarget, View, WindowSpec, WindowState,
 };
-use loom_ui_core::{Event, Key, KeyEvent, Modifiers, Size, TextStyle, UiId, Weight};
+use loom_ui_core::{Code, Event, Key, KeyEvent, Modifiers, Size, TextStyle, UiId, Weight};
 use std::time::Instant;
 
 /// How text is set in this example.
@@ -98,6 +98,7 @@ fn press(key: Key, modifiers: Modifiers, text: Option<&str>) -> DriverEvent {
             modifiers,
             repeat: false,
             text: text.map(str::to_owned),
+            code: Code::Other,
         }),
         pointer: None,
     }

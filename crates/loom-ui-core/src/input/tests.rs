@@ -101,6 +101,7 @@ fn a_press_carries_its_text_beside_its_key() {
         modifiers: Modifiers::NONE,
         repeat: false,
         text: Some("ß".to_string()),
+        code: Code::Other,
     };
     let KeyEvent::Pressed { key, text, .. } = &press else {
         panic!("a press");
@@ -141,4 +142,30 @@ fn the_word_key_is_alt_on_a_mac_and_control_elsewhere() {
     assert!(!control.word_on(Platform::Mac));
     assert!(control.word_on(Platform::Other));
     assert!(!alt.word_on(Platform::Other));
+}
+
+/// The shortcut key a test or a script builds is Command on a Mac and
+/// Control elsewhere, and holding it is what `shortcut_on` reads.
+#[test]
+fn the_built_shortcut_key_is_the_one_each_platform_reads() {
+    assert_eq!(Modifiers::platform_shortcut_on(Platform::Mac), Modifiers::META);
+    assert_eq!(Modifiers::platform_shortcut_on(Platform::Other), Modifiers::CONTROL);
+    for platform in [Platform::Mac, Platform::Other] {
+        assert!(
+            Modifiers::platform_shortcut_on(platform).shortcut_on(platform),
+            "{platform:?}"
+        );
+    }
+    assert!(Modifiers::platform_shortcut().shortcut());
+}
+
+/// Each named modifier holds only itself, and `|` holds both.
+#[test]
+fn named_modifiers_combine() {
+    assert_eq!(Modifiers::SHIFT, held(true, false, false, false));
+    assert_eq!(Modifiers::CONTROL, held(false, true, false, false));
+    assert_eq!(Modifiers::ALT, held(false, false, true, false));
+    assert_eq!(Modifiers::META, held(false, false, false, true));
+    assert_eq!(Modifiers::META | Modifiers::SHIFT, held(true, false, false, true));
+    assert_eq!(Modifiers::SHIFT | Modifiers::NONE, Modifiers::SHIFT);
 }

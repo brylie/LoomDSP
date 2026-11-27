@@ -5,7 +5,7 @@ use super::*;
 use crate::scene::{HoverText, ModuleView, PanelView, PortShape, PortView, WidgetView};
 use crate::{Camera, WidgetValue};
 use loom_ui::paint::testing::{Painted, Recorder};
-use loom_ui_core::{Event, Key, KeyEvent, Modifiers, PointerButton, PointerEvent};
+use loom_ui_core::{Code, Event, Key, KeyEvent, Modifiers, PointerButton, PointerEvent};
 
 /// The canvas's place in the tests: not at the window's corner, so a
 /// missing offset shows.
@@ -89,6 +89,7 @@ fn typed(key: Key, text: &str) -> Event {
         modifiers: Modifiers::NONE,
         repeat: false,
         text: Some(text.into()),
+        code: Code::Other,
     })
 }
 
@@ -369,6 +370,7 @@ fn a_selected_field_paints_its_selection_under_the_text() {
         modifiers: Modifiers::NONE,
         repeat: false,
         text: None,
+        code: Code::Other,
     });
     send(&model, &mut input, enter, centre);
 

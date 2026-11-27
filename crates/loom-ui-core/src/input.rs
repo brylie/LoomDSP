@@ -149,6 +149,8 @@ pub enum KeyEvent {
     Pressed {
         /// Which key.
         key: Key,
+        /// Where the key sits on the keyboard (see [`Code`]).
+        code: Code,
         /// The modifier keys held at that moment.
         modifiers: Modifiers,
         /// True when the key was already down and the system repeats it.
@@ -164,6 +166,8 @@ pub enum KeyEvent {
     Released {
         /// Which key.
         key: Key,
+        /// Where the key sits on the keyboard (see [`Code`]).
+        code: Code,
     },
     /// The set of held modifier keys changed.
     ModifiersChanged(Modifiers),
@@ -202,6 +206,8 @@ pub enum Key {
     PageDown,
     /// The menu key, which opens the menu of what has focus.
     ContextMenu,
+    /// F1: opens help.
+    F1,
     /// F2: in a grid, edits the cell that has focus (the WAI-ARIA data
     /// grid pattern).
     F2,
@@ -220,6 +226,28 @@ pub enum Key {
     Character(char),
     /// Any other key. It exists because nothing yet uses those keys, not
     /// because they will never have names.
+    Other,
+}
+
+/// Where a key sits on the keyboard, named by its place on a US layout,
+/// whatever the layout in use types with it. The names are the W3C UI
+/// Events `KeyboardEvent.code` values, so a web driver passes a browser's
+/// codes on with no table.
+///
+/// A handler matches [`Key`], by meaning, except for a pair of keys whose
+/// meaning is their place: `[` and `]` follow a cable back and forward,
+/// and sit side by side on every layout even where they type other
+/// characters (ui-layer.md, section 1, Keys in `loom-ui-core`, rule 3).
+/// A code is added when a handler needs one, as a [`Key`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Code {
+    /// The key right of P on a US layout, which types `[` there.
+    BracketLeft,
+    /// The key right of [`Code::BracketLeft`], which types `]` on a US
+    /// layout.
+    BracketRight,
+    /// Any other key. It exists because nothing yet reads where those keys
+    /// sit, not because they will never have names.
     Other,
 }
 
@@ -244,6 +272,61 @@ impl Modifiers {
         alt: false,
         meta: false,
     };
+
+    /// Shift alone.
+    pub const SHIFT: Self = Self {
+        shift: true,
+        ..Self::NONE
+    };
+
+    /// Control alone.
+    pub const CONTROL: Self = Self {
+        control: true,
+        ..Self::NONE
+    };
+
+    /// Alt (Option on a Mac) alone.
+    pub const ALT: Self = Self {
+        alt: true,
+        ..Self::NONE
+    };
+
+    /// The system key alone: Command on a Mac, the Windows key on a PC.
+    pub const META: Self = Self {
+        meta: true,
+        ..Self::NONE
+    };
+
+    /// The key for shortcuts alone, on the given platform: Command on a
+    /// Mac and Control everywhere else. Holding it makes
+    /// [`shortcut_on`](Self::shortcut_on) true for that platform.
+    #[must_use]
+    pub const fn platform_shortcut_on(platform: Platform) -> Self {
+        match platform {
+            Platform::Mac => Self::META,
+            Platform::Other => Self::CONTROL,
+        }
+    }
+
+    /// The key for shortcuts alone, on the platform this program was built
+    /// for: Command on macOS and Control elsewhere. A test or a script
+    /// builds Cmd+Shift+S with `Modifiers::platform_shortcut() |
+    /// Modifiers::SHIFT` and the S key, and gets Ctrl+Shift+S off a Mac.
+    #[must_use]
+    pub const fn platform_shortcut() -> Self {
+        Self::platform_shortcut_on(Platform::current())
+    }
+
+    /// Both sets held: every modifier either one holds.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self {
+            shift: self.shift || other.shift,
+            control: self.control || other.control,
+            alt: self.alt || other.alt,
+            meta: self.meta || other.meta,
+        }
+    }
 
     /// True when no modifier is held.
     #[must_use]
@@ -282,6 +365,15 @@ impl Modifiers {
     #[must_use]
     pub const fn shortcut(self) -> bool {
         self.shortcut_on(Platform::current())
+    }
+}
+
+impl std::ops::BitOr for Modifiers {
+    type Output = Self;
+
+    /// Both sets held, as [`Modifiers::union`].
+    fn bitor(self, other: Self) -> Self {
+        self.union(other)
     }
 }
 
