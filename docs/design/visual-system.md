@@ -208,12 +208,16 @@ Kept problems survive opening another patch, except as the table says.
 | `QUIET` | Details, IDs, a closed tab's title, a switch's edge, the scroll thumb | `rgb(0.66, 0.69, 0.75)` | 7.12 on `PANEL_FILL`, 4.98 on `RAISED` (4.5 needed) |
 | `ACCENT` | Links, a highlighted row's outline, a chosen card, a switch that is on | `#F5A623` | 5.35 on a dialog (4.5 needed); 1.65 against `TEXT`, so links are underlined |
 | `RAISED` | Open tabs, cards, dialogs, hovered menu items, the highlighted row, hover text | about `#393D48` | |
-| `EDGE` | Rules, and the borders of fields, tabs, and floating panels | about `#454A59` | |
+| `EDGE` | Rules, the borders of tabs and floating panels, and a slider's track | about `#454A59` | 1.76 on `PANEL_FILL`: never a control's only mark (a slider's thumb and fill show its value) |
+| `FIELD_EDGE` | The border of a text field, a select, and a browser's search and Author fields, and a switch's track while off: `QUIET` | `rgb(0.66, 0.69, 0.75)` | 7.12 on `PANEL_FILL` (3 needed, SC 1.4.11) |
 | `CARD_FILL`, `CARD_BORDER` | A modulation card's fill and border | `RAISED` and `EDGE` at 50% | |
-| `ACCENT_WEAK` | Selected text in a field, an inspector row lit as a drop target | about `#C48526` | |
-| `DANGER_EDGE` | The outline of a refused field, the inspector's danger marks | about `#C4182A` | |
+| `SELECTION` | The fill behind selected text in a field, and behind an inspector row lit as a drop target: a dark, muted amber | `#7A5520` | `TEXT` on it 5.45 (4.5 needed) |
+| `ERROR_TEXT` | An error in the stats bar, and the 2 px outline of a refused field | `#EB6B6B` | 5.06 on `PANEL_FILL` |
+| `WARNING_TEXT` | A warning in the stats bar | `#F5A623` | 7.65 on `PANEL_FILL` |
 
-`RAISED`, `EDGE`, `ACCENT_WEAK`, and `DANGER_EDGE` were shades Iced's theme worked out from the app's palette. Their values were recorded by printing what the running app used, as exact `f32`s, not by reading how Iced works shades out (ADR-0018), so no pixel moved: window captures of 23 views were byte-identical before and after. Where a value is "about" a hex colour, `style.rs` holds the exact one.
+`RAISED` and `EDGE` were shades Iced's theme worked out from the app's palette, as were the selection and refused-outline colours before #463 replaced them. Their values were recorded by printing what the running app used, as exact `f32`s, not by reading how Iced works shades out (ADR-0018), so no pixel moved: window captures of 23 views were byte-identical before and after. Where a value is "about" a hex colour, `style.rs` holds the exact one.
+
+**Every pair is checked** (#463). One test, `every_colour_pair_the_app_draws_meets_its_minimum` in `style/tests.rs`, lists each colour pair the panels draw as text (4.5:1, WCAG 2.2 SC 1.4.3) or as a control's only mark (3:1, SC 1.4.11) and checks it; a new use of a token is a new row. A developer switch's knob is `PANEL_FILL` on either track (7.12 off, 7.65 on), as a check box marks itself. A slider's track (1.76:1) is the one exempt row, with its reason beside it: its thumb and fill carry the value at 3:1 or more, the track only shows the range (WCAG 2.2 Understanding 1.4.11), and a track grey that passed could not be told from the amber fill (Brylie, 2026-11-27). The fill against the track, 4.35:1, is a pinned row.
 
 *Why:* a theme we did not write chose these colours, and the panels could not all read them once Iced goes. Named tokens keep the look and make the next theme (FR-PANEL-06) a change in one file.
 
@@ -229,9 +233,9 @@ Kept problems survive opening another patch, except as the table says.
 | `MENU_SHADOW` | The shadow under a menu | Black at 35% opacity, offset 4 px down, blur 12 px, as today |
 | `CHOOSER_WIDTH`, `CHOOSER_HEIGHT` | The licence chooser's box: 560 wide, at most 720 high, shorter when the window is; its body scrolls between the title and the buttons | As Iced drew it |
 | `RADIO_SPACING` | The room between the radios of a group | 10 px, more than two focus rings, so no ring touches a neighbour's (ui-layer.md, section 6, rule 9) |
-| `FIELD` (`FieldLook`, `FIELD_PADDING`) | A text field `loom-ui` draws: `PANEL_FILL`, a 1 px border in `EDGE`, radius 2, 5 px inside | As Iced's text field, first used by the licence chooser's Other field (plan 3.2, row 3c) |
-| `INVALID_BORDER` | The danger outline of a field whose text is refused: a value field, the MIDI range pair, and patch info's Tags field | 2 px in the danger colour, twice a rule, so it reads without colour ([#897](https://github.com/brylie/LoomDSP/issues/897)) |
-| `BROWSER_FIELD` | A browser's search or Author field: the `RAISED` fill and radius 4 (`FIELD_RADIUS`) | As Iced's text input drew it (row 5) |
+| `FIELD` (`FieldLook`, `FIELD_PADDING`) | A text field `loom-ui` draws: `PANEL_FILL`, a 1 px border in `FIELD_EDGE`, radius 2, 5 px inside | As Iced's text field, first used by the licence chooser's Other field (plan 3.2, row 3c) |
+| `INVALID_BORDER` | The danger outline of a field whose text is refused: a value field, the MIDI range pair, and patch info's Tags field | 2 px in `ERROR_TEXT`, twice a rule, so it reads without colour ([#897](https://github.com/brylie/LoomDSP/issues/897)) |
+| `BROWSER_FIELD` | A browser's search or Author field: the `RAISED` fill, a 1 px border in `FIELD_EDGE`, and radius 4 (`FIELD_RADIUS`) | As Iced's text input drew it (row 5) |
 | `SWATCH` | The 8 px family swatch beside a module browser row's name, radius 2 (`SWATCH_RADIUS`) | As today (row 5) |
 | `TAG` | A Your patches tag: a 1 px outline (`TAG_BORDER`) and radius 4 (`TAG_RADIUS`); filled and outlined while it filters, quiet text otherwise | As the tab look Iced drew (row 5b) |
 | `MENU_ITEM` | A menu item's looks: a 1 px quiet border and radius 3 always; a `RAISED` fill while hovered, pressed, or highlighted, however the highlight got there; the focus ring on top when the keys moved it | As today's menu items, without Iced's 2 px primary border on the highlight (Brylie's decision, 2026-11-20): the focus ring marks keyboard focus instead |
@@ -273,6 +277,10 @@ The rest:
 - [x] Each row of the kept error table has a test. The same text never shows twice.
 - [x] With four MIDI inputs, input drift, `Learning`, a long kept error, a long status message, and both output warnings, every item fits at 1280 px wide (headless `Ui` test).
 - [x] Disabled Hold note and Recent have hover text that says why (test on what the view passes to its tooltips, because the `Ui` harness does not reach them).
+
+Colour pairs ([#463](https://github.com/brylie/LoomDSP/issues/463)):
+
+- [x] Every colour pair the panels draw as text meets 4.5:1, and every control's only mark 3:1, against what it is drawn on (`every_colour_pair_the_app_draws_meets_its_minimum`), the slider's track an exempt row with its reason, as the palette section says.
 
 Role tokens (plan for leaving Iced, row 2):
 

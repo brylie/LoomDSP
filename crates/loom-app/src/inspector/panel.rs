@@ -97,7 +97,7 @@ impl App {
             rule: crate::style::EDGE,
             chip: crate::style::DIALOG,
             field: crate::style::FIELD,
-            danger: crate::style::DANGER_EDGE,
+            danger: crate::style::ERROR_TEXT,
         };
         let mut small_select = crate::style::select();
         small_select.text = style::SMALL_TEXT;
@@ -114,8 +114,8 @@ impl App {
             select: crate::style::select(),
             small_select,
             quiet_select,
-            danger: crate::style::DANGER_EDGE,
-            drop: crate::style::ACCENT_WEAK,
+            danger: crate::style::ERROR_TEXT,
+            drop: crate::style::SELECTION,
             card_fill: crate::style::CARD_FILL,
             card_border: crate::style::CARD_BORDER,
         };

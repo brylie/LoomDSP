@@ -447,3 +447,109 @@ fn the_highlighted_row_reads_and_stands_out() {
     let outline = contrast_ratio(row.border, panel.fill);
     assert!(outline >= 3.0, "the outline: {outline:.2}:1");
 }
+
+/// How much contrast a pair needs (WCAG 2.2).
+#[derive(Debug, Clone, Copy)]
+enum Need {
+    /// Text against what it is drawn on: 4.5:1 (SC 1.4.3).
+    Text,
+    /// The only mark of a control or its state against what is next to
+    /// it: 3:1 (SC 1.4.11).
+    Mark,
+    /// Not a control's only mark, so no minimum: listed so the pair and
+    /// the reason stay in one place, and a reader sees it was weighed.
+    Exempt(&'static str),
+}
+
+impl Need {
+    /// The ratio it needs.
+    fn ratio(self) -> f32 {
+        match self {
+            Self::Text => loom_canvas::MIN_TEXT_CONTRAST,
+            Self::Mark => 3.0,
+            Self::Exempt(_) => 1.0,
+        }
+    }
+}
+
+/// Every colour pair the app's panels draw as text, or as a control's only
+/// mark, meets WCAG 2.2 (#463): text 4.5:1, a mark 3:1. One table, so a
+/// new token or a new use of one is checked by adding a row. A modulation
+/// card's half-clear fill lies between `PANEL_FILL` and `RAISED`, both
+/// checked. Pairs other tests already pin are not repeated: the role
+/// tokens (`the_role_tokens_meet_their_table`), the focus ring, the check
+/// box, the scroll thumb, the menus, the radio, links, the highlighted
+/// row, the family swatches, and the canvas's own marks.
+///
+/// One row is exempt, with its reason beside it: a slider's track.
+#[test]
+fn every_colour_pair_the_app_draws_meets_its_minimum() {
+    use super::*;
+    use Need::{Exempt, Mark, Text};
+    let rows: &[(&str, loom_ui_core::Color, loom_ui_core::Color, Need)] = &[
+        ("body text on the panel", TEXT, PANEL_FILL, Text),
+        (
+            "body text on a raised fill: open tab, dialog, card, hover text",
+            TEXT,
+            RAISED,
+            Text,
+        ),
+        (
+            "quiet text on the panel: details, closed tabs, placeholders",
+            QUIET,
+            PANEL_FILL,
+            Text,
+        ),
+        (
+            "quiet text on a raised fill: a browser field's placeholder",
+            QUIET,
+            RAISED,
+            Text,
+        ),
+        ("a warning in the stats bar", WARNING_TEXT, PANEL_FILL, Text),
+        ("an error in the stats bar", ERROR_TEXT, PANEL_FILL, Text),
+        ("selected text in a field", TEXT, SELECTION, Text),
+        ("a row's text while it is lit as a drop target", TEXT, SELECTION, Text),
+        ("a text field's border, its only edge", FIELD.border, FIELD.fill, Mark),
+        ("a select's border, its only edge", select().border, PANEL_FILL, Mark),
+        (
+            "a browser field's edge, on the browser",
+            FIELD_EDGE,
+            FLOATING_PANEL.fill,
+            Mark,
+        ),
+        ("a developer switch's track while off", CONTROL_EDGE, PANEL_FILL, Mark),
+        (
+            "a developer switch's knob on its off track",
+            PANEL_FILL,
+            CONTROL_EDGE,
+            Mark,
+        ),
+        ("a developer switch's track while on", ACCENT, PANEL_FILL, Mark),
+        ("a developer switch's knob on its on track", PANEL_FILL, ACCENT, Mark),
+        ("a slider's thumb and fill, on the panel", ACCENT, PANEL_FILL, Mark),
+        ("a slider's fill against its track", ACCENT, EDGE, Mark),
+        (
+            "a slider's track, on the panel (1.76:1)",
+            EDGE,
+            PANEL_FILL,
+            // Brylie, 2026-11-27. WCAG 2.2 Understanding 1.4.11 asks 3:1
+            // of what identifies a control and its state; a track that
+            // passed would need a grey too close to the amber fill to tell
+            // the two apart (1.08:1 for the quiet colour).
+            Exempt("the thumb and fill carry the value at 3:1 or more; the track only shows the range"),
+        ),
+        ("a refused field's outline", ERROR_TEXT, PANEL_FILL, Mark),
+    ];
+    let failing: Vec<String> = rows
+        .iter()
+        .filter_map(|&(what, fg, bg, need)| {
+            if let Need::Exempt(why) = need {
+                assert!(!why.is_empty(), "{what}: an exempt row says why");
+            }
+            let ratio = loom_canvas::contrast_ratio(fg, bg);
+            (ratio < need.ratio()).then(|| format!("{what}: {ratio:.2}:1, needs {}:1", need.ratio()))
+        })
+        .collect();
+    assert!(failing.is_empty(), "{}", failing.join("\n"));
+}

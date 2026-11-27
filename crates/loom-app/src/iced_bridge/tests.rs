@@ -346,10 +346,11 @@ fn a_screen_readers_events_become_the_apps() {
 }
 
 /// The theme the bridge builds for Iced gives back the app's palette
-/// tokens, for every shade the app once read from it, so what Iced still
-/// draws (the window's rules, its default text) cannot drift from the
-/// tokens. The tokens were recorded from this theme on macOS, where they
-/// match exactly (plan for leaving Iced, phase 4, P3). Iced works the
+/// tokens, for every shade recorded from it that the app still uses
+/// (#463 replaced the weak primary and the strong danger), so what Iced
+/// still draws (the window's rules, its default text) cannot drift from
+/// the tokens. The tokens were recorded from this theme on macOS, where
+/// they match exactly (plan for leaving Iced, phase 4, P3). Iced works the
 /// shades out with floating-point maths whose last bits differ between
 /// platforms (on Windows by about 1e-7), so each channel may differ by
 /// [`SHADE_TOLERANCE`], far under one step of an 8-bit channel (1/255).
@@ -387,16 +388,6 @@ fn the_bridge_theme_gives_the_palette_tokens() {
             "CARD_BORDER",
             crate::style::CARD_BORDER,
             half(palette.background.strong.color),
-        ),
-        (
-            "ACCENT_WEAK",
-            crate::style::ACCENT_WEAK,
-            palette.primary.weak.color.to_core(),
-        ),
-        (
-            "DANGER_EDGE",
-            crate::style::DANGER_EDGE,
-            palette.danger.strong.color.to_core(),
         ),
     ] {
         let channels = [

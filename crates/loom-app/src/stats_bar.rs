@@ -45,8 +45,11 @@ impl App {
         let bar = Bar {
             model: self.bars_model(),
             on: crate::style::ACCENT,
-            off: crate::style::EDGE,
-            knob: crate::style::TEXT,
+            // The off track's edge and the knob on either track stand out at
+            // 3:1 or more (WCAG 2.2, SC 1.4.11; #463): the quiet colour on
+            // the panel, and a dark knob, as a check box marks itself.
+            off: crate::style::CONTROL_EDGE,
+            knob: crate::style::PANEL_FILL,
         };
         view.panel_with(stats_id(), Layer::Panels, &bar, stats);
     }

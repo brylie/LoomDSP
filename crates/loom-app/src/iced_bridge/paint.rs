@@ -177,7 +177,7 @@ impl PanelPass {
 
 /// How the runtime's panels look, for the window and its still captures
 /// alike: text in the text colour, and a field with its caret in the text
-/// colour and its selection in the weak accent, quiet text such as a
+/// colour and its selection in `style::SELECTION`, quiet text such as a
 /// radio's note in the app's quiet colour, a radio's mark in the text
 /// colour, a check box from the app's one check box look
 /// (`style::check_look`), a slider's thumb and fill in the accent, and a
@@ -186,7 +186,7 @@ pub(crate) fn panel_style() -> loom_ui::paint::PanelStyle {
     loom_ui::paint::PanelStyle {
         text: crate::style::TEXT,
         caret: crate::style::TEXT,
-        selection: crate::style::ACCENT_WEAK,
+        selection: crate::style::SELECTION,
         ring: crate::style::focus_ring(),
         quiet: crate::style::QUIET,
         mark: crate::style::TEXT,

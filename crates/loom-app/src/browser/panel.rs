@@ -301,6 +301,7 @@ fn build(panel: &Panel) -> Element {
         .width(Length::FILL)
         .height(Length::Fixed(INPUT_HEIGHT))
         .background(looks.field)
+        .border(style::RULE, style::FIELD_EDGE)
         .radius(style::FIELD_RADIUS)
         .key("search")
         .takes_first(KEYS)

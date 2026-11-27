@@ -71,7 +71,8 @@ pub const RULE: f32 = 1.0;
 
 /// The width of the danger outline on a field whose text is refused: a
 /// value field, the MIDI range pair, and the Tags field (panel-widgets.md,
-/// Typing a value). Twice a rule, so it reads without colour.
+/// Typing a value). Twice a rule, so it reads without colour. It is drawn
+/// in [`ERROR_TEXT`], 5.06:1 on the panel (#463).
 pub const INVALID_BORDER: f32 = 2.0;
 
 /// The line height of the app's text, as a multiple of its size: Iced's
@@ -216,13 +217,17 @@ pub const CARD_FILL: loom_ui_core::Color = loom_ui_core::Color { a: 0.5, ..RAISE
 /// A modulation card's border: [`EDGE`] at half opacity.
 pub const CARD_BORDER: loom_ui_core::Color = loom_ui_core::Color { a: 0.5, ..EDGE };
 
-/// A quieter accent, about `#C48526`: selected text in a field, and an
-/// inspector row lit as a drop target.
-pub const ACCENT_WEAK: loom_ui_core::Color = loom_ui_core::Color::rgb(0.770_022_3, 0.522_899_9, 0.148_859_05);
+/// The fill behind selected text in a field, and behind an inspector row
+/// lit as a drop target: a dark, muted amber, `#7A5520`, so [`TEXT`] on
+/// it keeps 5.45:1 (WCAG 2.2, SC 1.4.3; #463). Iced's weak primary, which
+/// it replaces, gave 2.54:1.
+pub const SELECTION: loom_ui_core::Color = hex(0x7A5520);
 
-/// The outline of a field whose text is refused, and the inspector's
-/// danger marks, about `#C4182A`.
-pub const DANGER_EDGE: loom_ui_core::Color = loom_ui_core::Color::rgb(0.768_626_8, 0.094_010_57, 0.163_463_77);
+/// The edge of a text field and of a select: their only boundary, so it
+/// stands out at 3:1 or more against the fill around it (WCAG 2.2, SC
+/// 1.4.11, which names a text field's boundary as the visual information
+/// that identifies it; #463). The quiet colour: 7.12:1 on [`PANEL_FILL`].
+pub const FIELD_EDGE: loom_ui_core::Color = QUIET;
 
 /// Quiet text: details, IDs, and the title of a closed tab. Iced's own
 /// secondary text colour is 4.27:1 on the panels, under the 4.5:1 that
@@ -468,7 +473,7 @@ pub struct FieldLook {
 /// chooser's fields read it.
 pub const FIELD: FieldLook = FieldLook {
     fill: PANEL_FILL,
-    border: EDGE,
+    border: FIELD_EDGE,
     radius: 2.0,
 };
 
@@ -555,7 +560,7 @@ pub fn select() -> loom_ui::SelectStyle {
         text: CONTROL_TEXT,
         colour: TEXT,
         background: PANEL_FILL,
-        border: EDGE,
+        border: FIELD_EDGE,
         border_width: 1.0,
         radius: 2.0,
         padding_x: 8.0,

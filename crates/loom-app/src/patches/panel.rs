@@ -311,6 +311,7 @@ fn build(panel: &Panel) -> Element {
             .padding(6.0)
             .width(width)
             .background(looks.field)
+            .border(style::RULE, style::FIELD_EDGE)
             .radius(style::FIELD_RADIUS)
             .key(key)
             .takes_first(FIELD_KEYS)
