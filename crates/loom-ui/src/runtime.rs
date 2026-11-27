@@ -1465,7 +1465,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     }
 
     /// A screen reader's Increment or Decrement on a slider (section 7,
-    /// rules 5 and 30): one key step, as one Start, Move, and End. Taken
+    /// rules 5 and 30): one key step, joining the group of its steps in
+    /// quick turn, so a run of them is one Start, its Moves, and one End
+    /// (`Sliding::step`). Taken
     /// even on a slider that is turned off or below the input layer, where
     /// it does nothing. `None` for any other action, or another element,
     /// which goes on. Returns whether anything that shows changed.

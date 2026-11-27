@@ -521,8 +521,10 @@ impl Sliding {
             .collect()
     }
 
-    /// Closes the open group of keys when its time is up at `now`, or when
-    /// `focus` is not its slider any more.
+    /// Closes the open group of keys when its time is up at `now`, or, for
+    /// keys, when `focus` is not its slider any more. A screen reader's
+    /// group stays open whatever has the focus, since a screen reader acts
+    /// on a node without moving the focus there (section 7, rule 30).
     pub(crate) fn close_keys_if(&mut self, now: Instant, focus: Option<&UiId>) -> Vec<Slid> {
         let over = self.keys.as_ref().is_some_and(|run| {
             now.saturating_duration_since(run.last) >= KEY_GROUP || (!run.reader && focus != Some(&run.id))
