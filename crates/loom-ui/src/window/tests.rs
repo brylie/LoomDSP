@@ -822,3 +822,40 @@ fn a_hidden_placed_root_hides_the_panels_in_its_slots() {
     assert_eq!(screen.at("inner/item"), None, "nor is the panel in its slot anywhere");
     assert_eq!(screen.at("sub/square"), None, "nor the menu placed under it");
 }
+
+/// A second menu, placed under the first menu's square.
+fn placed_under_menu(_: &()) -> Element {
+    Element::space(Length::Fixed(10.0), Length::Fixed(10.0))
+        .key("square")
+        .placed(crate::element::Placement::Under(
+            "menu/square".parse().expect("a UI ID"),
+        ))
+}
+
+/// A placed root's bounds are its box at its content size, not the
+/// window, so a root placed under one of its elements opens just under
+/// that element (section 5, rule 13).
+#[test]
+fn a_root_placed_under_a_placed_root_opens_under_its_element() {
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(
+        panel("menu"),
+        Layer::Overlays,
+        &(20u8, Some((40.0, 30.0))),
+        placed_square,
+    );
+    view.panel_with(panel("sub"), Layer::Overlays, &(), placed_under_menu);
+    screen.show_view(view);
+    screen.lay_out(Size::new(300.0, 200.0));
+    assert_eq!(
+        screen.at("menu"),
+        Some(rect(40.0, 30.0, 20.0, 20.0)),
+        "the menu, at its size"
+    );
+    assert_eq!(
+        screen.at("sub/square"),
+        Some(rect(40.0, 50.0, 10.0, 10.0)),
+        "just under its square"
+    );
+}
