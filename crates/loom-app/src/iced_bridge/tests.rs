@@ -346,10 +346,14 @@ fn a_screen_readers_events_become_the_apps() {
 }
 
 /// The theme the bridge builds for Iced gives back the app's palette
-/// tokens, exactly, for every shade the app once read from it, so what
-/// Iced still draws (the window's rules, its default text) cannot drift
-/// from the tokens. The tokens were recorded from this theme (plan for
-/// leaving Iced, phase 4, P3). P4 deletes this with the bridge.
+/// tokens, for every shade the app once read from it, so what Iced still
+/// draws (the window's rules, its default text) cannot drift from the
+/// tokens. The tokens were recorded from this theme on macOS, where they
+/// match exactly (plan for leaving Iced, phase 4, P3). Iced works the
+/// shades out with floating-point maths whose last bits differ between
+/// platforms (on Windows by about 1e-7), so each channel may differ by
+/// [`SHADE_TOLERANCE`], far under one step of an 8-bit channel (1/255).
+/// P4 deletes this with the bridge.
 #[test]
 fn the_bridge_theme_gives_the_palette_tokens() {
     use loom_canvas::iced_convert::ToCore as _;
@@ -395,6 +399,20 @@ fn the_bridge_theme_gives_the_palette_tokens() {
             palette.danger.strong.color.to_core(),
         ),
     ] {
-        assert_eq!(token, shade, "{name}");
+        let channels = [
+            (token.r, shade.r),
+            (token.g, shade.g),
+            (token.b, shade.b),
+            (token.a, shade.a),
+        ];
+        assert!(
+            channels.iter().all(|(t, s)| (t - s).abs() <= SHADE_TOLERANCE),
+            "{name}: {token:?} against {shade:?}"
+        );
     }
 }
+
+/// How far a recorded token may sit from the shade Iced works out on
+/// another platform: well above the last-bit differences seen on Windows
+/// (1.1e-7), far below one 8-bit step (3.9e-3).
+const SHADE_TOLERANCE: f32 = 1e-6;
