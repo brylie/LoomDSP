@@ -146,6 +146,25 @@ spool as (
       else 'check' end as category,
     s.attributes
   from spool_spans s
+  -- 'mise' spans came from a task wrapper that existed for one day only.
+  where s.service <> 'mise'
+),
+-- Checks and git events of one git command, outside an agent session, share
+-- a trace named after the git process (hook_context in devtel.py). Nothing
+-- writes that trace's root span, because no hook sees the command end, so
+-- it is made here from its children: "git commit", "git push", and so on.
+git_roots as (
+  select trace_id, parent_span_id as span_id, null::varchar as parent_span_id,
+    'git ' || coalesce(nullif(any_value(attributes['loom.devtel.git.command']), ''), 'command') as name,
+    'git' as service, min(start_ts) as start_ts, max(end_ts) as end_ts, bool_or(error) as error,
+    null::varchar as session_id, null::varchar as agent_id, 'git command' as category,
+    map_from_entries(list_filter([
+      ('loom.devtel.git.command', any_value(attributes['loom.devtel.git.command'])),
+      ('vcs.ref.head.name', any_value(attributes['vcs.ref.head.name'])),
+      ('vcs.ref.head.revision', max(attributes['vcs.ref.head.revision']))], lambda x: x[2] is not null)) as attributes
+  from spool
+  where attributes['loom.devtel.git.trace'] = 'true' and parent_span_id is not null
+  group by trace_id, parent_span_id
 ),
 moved as (
   select s.* replace (coalesce(b.span_id, s.parent_span_id) as parent_span_id)
@@ -156,7 +175,9 @@ moved as (
 )
 select *, epoch_ms(end_ts) - epoch_ms(start_ts) as duration_ms from claude
 union all
-select *, epoch_ms(end_ts) - epoch_ms(start_ts) from moved;
+select *, epoch_ms(end_ts) - epoch_ms(start_ts) from moved
+union all
+select *, epoch_ms(end_ts) - epoch_ms(start_ts) from git_roots;
 
 -- One row per Claude Code session: size, cost in time and tokens, and what
 -- it changed. Cost and lines come from Claude Code's cost records; commits
@@ -204,7 +225,8 @@ from records left join turns using (session_id) left join tools using (session_i
 -- Checks run again with nothing changed in between. Two sources:
 -- "same tree": a check that ran on the same working tree as an earlier run
 --   of the same check: by hand, then in the commit hook, then again before
---   push, for example. Exact, from scripts/devtel/run.sh.
+--   push, for example. Exact, from scripts/devtel/run.sh. A pass reused
+--   from an earlier run is left out.
 -- "no change": the same check command ran again in a session with no tool
 --   call in between that may have changed the code (devtel_may_write).
 --   An estimate from the transcripts, for history before the task wrapper.
@@ -217,6 +239,9 @@ with step_spans as (
     nullif(attributes['gen_ai.conversation.id'], '') as session_id,
     to_timestamp(start_ns::double / 1e9) as start_ts, to_timestamp(end_ns::double / 1e9) as end_ts
   from spool_spans where service = 'checks' and coalesce(attributes['loom.devtel.tree'], '') <> ''
+    -- A reused pass (docs/dev/check-reuse.md) costs almost nothing, so it
+    -- is not a re-run.
+    and coalesce(attributes['loom.devtel.reused'], 'false') <> 'true'
 ),
 -- prek splits a hook's files into batches, run at the same time or one
 -- after another. A span that starts before the earlier spans of the same

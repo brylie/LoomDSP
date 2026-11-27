@@ -3284,6 +3284,30 @@ fn a_ui_on_another_ui_s_copy_leaves_that_folder() {
     assert!(!folder.exists(), "and goes with its own Ui");
 }
 
+/// Every copy folder sits in the harness's own folder, never directly in
+/// the shared temporary folder, so the sweep reads only that folder. A
+/// folder directly in the temporary folder is never a copy folder, even
+/// one named as copies once were, so the sweep can never remove it.
+#[test]
+fn copies_live_in_a_folder_of_their_own() {
+    let ui = Ui::open("subtractive.ron");
+    let copy = ui.app().session.document.file().expect("a file is open").to_path_buf();
+    let folder = copy.parent().expect("the copy has a folder");
+    assert!(is_copy_folder(folder), "a copy folder: {folder:?}");
+    assert_eq!(
+        std::fs::canonicalize(folder.parent().expect("the folder has a parent")).unwrap(),
+        std::fs::canonicalize(copies_root()).unwrap(),
+        "inside the harness's own folder",
+    );
+    let stray = std::env::temp_dir().join(format!("loom-app-ui-{}-stray", std::process::id()));
+    std::fs::create_dir_all(&stray).unwrap();
+    assert!(
+        !is_copy_folder(&stray),
+        "a folder in the shared temporary folder is not a copy"
+    );
+    std::fs::remove_dir(&stray).unwrap();
+}
+
 /// A relative name that climbs out and back in (`../patches/...`) still
 /// opens a copy inside the folder made for it, and a save writes that
 /// copy, never the example (CodeRabbit, #850).

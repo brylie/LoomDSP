@@ -117,28 +117,37 @@ pub(crate) fn example_path(patch: &str) -> PathBuf {
         .join(patch)
 }
 
-/// The start of the name of each folder [`example_copy`] makes in the
-/// system's temporary folder.
-const COPY_PREFIX: &str = "loom-app-ui-";
+/// The name of the one folder, in the system's temporary folder, that
+/// holds every folder [`example_copy`] makes. The temporary folder is
+/// shared with every program on the machine and can hold a hundred
+/// thousand entries, so the sweep reads only this folder of our own,
+/// never the shared one (docs/benchmarks/2026-11-26-ui-test-cost.md).
+const COPIES: &str = "loom-app-ui";
+
+/// The folder that holds every copy folder: [`COPIES`] in the system's
+/// temporary folder.
+fn copies_root() -> PathBuf {
+    std::env::temp_dir().join(COPIES)
+}
 
 /// True when `dir` is one of the folders [`example_copy`] makes: directly
-/// inside the system's temporary folder, and named with
-/// [`COPY_PREFIX`]. Nothing else is ever removed.
+/// inside [`copies_root`]. Nothing else is ever removed.
 fn is_copy_folder(dir: &std::path::Path) -> bool {
-    let temp = std::fs::canonicalize(std::env::temp_dir()).ok();
-    let parent = dir.parent().and_then(|parent| std::fs::canonicalize(parent).ok());
-    let named = dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with(COPY_PREFIX));
-    named && temp.is_some() && parent == temp
+    let Ok(root) = std::fs::canonicalize(copies_root()) else {
+        return false;
+    };
+    dir.parent()
+        .and_then(|parent| std::fs::canonicalize(parent).ok())
+        .is_some_and(|parent| parent == root)
 }
 
 /// Removes the copy folders left by earlier runs: those more than an hour
 /// old, so a folder another test process is using now stays. Once a
-/// process, on its first copy.
+/// process, on its first copy. It reads [`copies_root`] alone, so its cost
+/// follows the number of copies left behind, not what else is in the
+/// system's temporary folder.
 fn sweep_old_copies() {
-    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+    let Ok(entries) = std::fs::read_dir(copies_root()) else {
         return;
     };
     let hour = std::time::Duration::from_secs(3600);
@@ -156,8 +165,8 @@ fn sweep_old_copies() {
     }
 }
 
-/// A copy of the example patch `patch`, in a new folder of the system's
-/// temporary folder for this test alone: the process ID and a count keep
+/// A copy of the example patch `patch`, in a new folder of
+/// [`copies_root`] for this test alone: the process ID and a count keep
 /// tests that run at once apart. A save in a test then writes the copy.
 /// A [`Ui`] removes the folder when it drops; any other is cleared by a
 /// later run's sweep ([`sweep_old_copies`]).
@@ -183,7 +192,7 @@ fn example_copy_owned(patch: &str) -> (PathBuf, Option<PathBuf>) {
     }
     SWEPT.call_once(sweep_old_copies);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("{COPY_PREFIX}{}-{n}", std::process::id()));
+    let dir = copies_root().join(format!("{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("a folder for the copy");
     // Named by the source file alone, so a relative name with `..` in it
     // still puts the copy inside the folder made for it.

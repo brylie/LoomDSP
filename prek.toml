@@ -24,7 +24,13 @@
 #
 # Each check runs through scripts/devtel/run.sh, which records how long it
 # took for the development telemetry (docs/dev/devtel.md) and otherwise
-# runs the command unchanged: same output, same exit code.
+# runs the command unchanged: same output, same exit code. When a quick
+# check already passed on exactly the same tree, tools, and settings (by
+# hand, in `mise run check`, or in the commit hook), run.sh reuses that pass
+# and prints one line saying so (docs/dev/check-reuse.md, ADR-0049). Those
+# hooks set `verbose = true`, so the line shows and a reused pass never
+# reads as a fresh one. LOOM_CHECK_REUSE=0 runs every check; CI never
+# reuses.
 #
 # Every hook that needs a tool runs it through mise (`mise run` or
 # `mise exec --`), so it uses the versions pinned in mise.toml and does not
@@ -104,6 +110,7 @@ name = "cargo fmt"
 # review and stage the result.
 entry = "sh scripts/devtel/run.sh cargo-fmt mise exec -- cargo fmt --all"
 language = "system"
+verbose = true
 types = ["rust"]
 pass_filenames = false
 
@@ -113,6 +120,7 @@ name = "cargo clippy"
 # Same lint policy as CI (workspace Cargo.toml), with warnings as errors.
 entry = "sh scripts/devtel/run.sh cargo-clippy mise run --quiet clippy"
 language = "system"
+verbose = true
 files = "(\\.rs|Cargo\\.toml|Cargo\\.lock)$"
 pass_filenames = false
 require_serial = true
@@ -124,7 +132,11 @@ name = "typos (spelling)"
 # Only the changed files are checked here; `mise run typos` checks them all.
 entry = "sh scripts/devtel/run.sh typos mise exec -- typos --force-exclude"
 language = "system"
+verbose = true
 types = ["text"]
+# One process for all the files: typos is fast, so the cost is in starting
+# it, and prek would otherwise start one per batch of files.
+require_serial = true
 
 [[repos.hooks]]
 id = "adr-status"
@@ -133,7 +145,10 @@ name = "ADR status lines"
 # (and CI) checks them all.
 entry = "sh scripts/devtel/run.sh adr-status sh scripts/check-adr-status.sh"
 language = "system"
+verbose = true
 files = "^docs/adr/[0-9]{4}-.*\\.md$"
+# One process for all the files, so a push of many ADRs is one check run.
+require_serial = true
 
 [[repos.hooks]]
 id = "adr-citations"
@@ -142,6 +157,7 @@ name = "ADR citations in agent instruction files"
 # citation in an unchanged skill stale.
 entry = "sh scripts/devtel/run.sh adr-citations sh scripts/check-adr-citations.sh"
 language = "system"
+verbose = true
 files = "^(docs/adr/[0-9]{4}-.*|(.*/)?(AGENTS|CLAUDE)|\\.claude/.*)\\.md$"
 pass_filenames = false
 
@@ -151,6 +167,7 @@ name = "Tests in their own files"
 # Checks every crate, because a moved test file affects its parent.
 entry = "sh scripts/devtel/run.sh test-placement sh scripts/check-test-placement.sh"
 language = "system"
+verbose = true
 files = "^crates/.*\\.rs$"
 pass_filenames = false
 
@@ -225,7 +242,7 @@ stages = ["manual"]
 # ---------------------------------------------------------------------------
 # Development telemetry (docs/dev/devtel.md). Records commits, checkouts,
 # merges, rewrites, and pushes as spans in a local folder outside the
-# repository. Each runs in the background, so git does not wait for it, and
+# repository. Each hands its work to a background process, so git does not wait for it, and
 # always passes, so it never stops a commit or a push. Off in CI and with
 # LOOM_DEVTEL=0. prek does not tell a hook which stage runs it, so each
 # stage has its own entry.
@@ -237,7 +254,7 @@ repo = "local"
 [[repos.hooks]]
 id = "devtel-post-commit"
 name = "devtel: record post-commit"
-entry = "sh -c '(mise exec -- python3 scripts/devtel/devtel.py git post-commit >/dev/null 2>&1 &); exit 0'"
+entry = "sh -c 'mise exec -- python3 scripts/devtel/devtel.py git post-commit >/dev/null 2>&1; exit 0'"
 language = "system"
 always_run = true
 pass_filenames = false
@@ -246,7 +263,7 @@ stages = ["post-commit"]
 [[repos.hooks]]
 id = "devtel-post-checkout"
 name = "devtel: record post-checkout"
-entry = "sh -c '(mise exec -- python3 scripts/devtel/devtel.py git post-checkout >/dev/null 2>&1 &); exit 0'"
+entry = "sh -c 'mise exec -- python3 scripts/devtel/devtel.py git post-checkout >/dev/null 2>&1; exit 0'"
 language = "system"
 always_run = true
 pass_filenames = false
@@ -255,7 +272,7 @@ stages = ["post-checkout"]
 [[repos.hooks]]
 id = "devtel-post-merge"
 name = "devtel: record post-merge"
-entry = "sh -c '(mise exec -- python3 scripts/devtel/devtel.py git post-merge >/dev/null 2>&1 &); exit 0'"
+entry = "sh -c 'mise exec -- python3 scripts/devtel/devtel.py git post-merge >/dev/null 2>&1; exit 0'"
 language = "system"
 always_run = true
 pass_filenames = false
@@ -264,7 +281,7 @@ stages = ["post-merge"]
 [[repos.hooks]]
 id = "devtel-post-rewrite"
 name = "devtel: record post-rewrite"
-entry = "sh -c '(mise exec -- python3 scripts/devtel/devtel.py git post-rewrite >/dev/null 2>&1 &); exit 0'"
+entry = "sh -c 'mise exec -- python3 scripts/devtel/devtel.py git post-rewrite >/dev/null 2>&1; exit 0'"
 language = "system"
 always_run = true
 pass_filenames = false
@@ -273,7 +290,7 @@ stages = ["post-rewrite"]
 [[repos.hooks]]
 id = "devtel-pre-push"
 name = "devtel: record pre-push"
-entry = "sh -c '(mise exec -- python3 scripts/devtel/devtel.py git pre-push >/dev/null 2>&1 &); exit 0'"
+entry = "sh -c 'mise exec -- python3 scripts/devtel/devtel.py git pre-push >/dev/null 2>&1; exit 0'"
 language = "system"
 always_run = true
 pass_filenames = false

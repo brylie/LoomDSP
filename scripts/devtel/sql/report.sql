@@ -23,6 +23,14 @@ select kind, left(regexp_replace(command, '\s+', ' ', 'g'), 70) as command, coun
 from devtel_reruns where start_ts >= now() - to_days($DAYS)
 group by all order by minutes desc limit 10;
 
+.print '== Checks that reused a pass on the same tree (docs/dev/check-reuse.md)'
+select attributes['loom.devtel.step'] as check_name, count(*) as reused,
+  round(sum(attributes['loom.devtel.reused_ms']::bigint) / 60000.0, 1) as minutes_saved
+from spool_spans
+where service = 'checks' and attributes['loom.devtel.reused'] = 'true'
+  and to_timestamp(start_ns::double / 1e9) >= now() - to_days($DAYS)
+group by 1 order by minutes_saved desc;
+
 .print '== Possible loops: one command 3+ times within 10 calls (see devtel_loops)'
 select left(command, 70) as command, count(*) as sessions, max(times_in_ten_calls) as worst_burst,
   sum(times_in_session) as runs, round(sum(minutes)) as minutes

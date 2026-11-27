@@ -6,7 +6,8 @@ OpenTelemetry spans in plain files, with no daemon. See docs/dev/devtel.md
 for the design and ADR-0048 for the decision.
 
 Writers (fast, append only, never fail the caller):
-  run        runs a check and records it (called by run.sh from prek.toml)
+  run        runs a check, or reuses its pass on the same tree, and records
+             it (called by run.sh from prek.toml; reuse is in reuse.py)
   git        records a git event (called by prek post-* and pre-push hooks)
   claude     handles a Claude Code hook event (called by hook.sh)
 
@@ -15,6 +16,7 @@ Readers (run on demand):
   report     prints the efficiency report
   traces     opens otel-desktop-viewer with every span loaded (mise run devtel)
   export     writes the archive as OTLP JSON lines
+  reuse-clear  deletes the pass records of this clone
 
 Standard library only, and Python 3.9 compatible, so a hook still works
 when it runs outside mise.
@@ -31,6 +33,9 @@ import subprocess
 import sys
 import tempfile
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import reuse  # noqa: E402 - the module next to this one
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SQL_DIR = os.path.join(HERE, "sql")
@@ -283,50 +288,156 @@ def parent_context():
     return new_trace_id(), None
 
 
+# git options that take the next word as their value.
+GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
+
+
+def git_ancestor(max_depth=12):
+    """The git command that is running this hook: (pid, start time, subcommand), or None.
+
+    Walks up the process tree with `ps`. Every hook of one `git commit`
+    finds the same git process, so its PID and start time name the commit
+    in a way all of them agree on, with no shared state.
+    """
+    pid = os.getppid()
+    for _ in range(max_depth):
+        if pid <= 1:
+            return None
+        try:
+            output = subprocess.run(
+                ["ps", "-o", "ppid=,lstart=,command=", "-p", str(pid)], capture_output=True, text=True, timeout=5
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+        # ppid, then the start time as five words (Thu Nov 26 20:54:27 2026), then the command.
+        parts = output.split(None, 6)
+        if len(parts) < 7 or not parts[0].isdigit():
+            return None
+        words = parts[6].split()
+        if os.path.basename(words[0]) == "git":
+            subcommand, skip = "", False
+            for word in words[1:]:
+                if skip:
+                    skip = False
+                elif word in GIT_VALUE_OPTIONS:
+                    skip = True
+                elif not word.startswith("-"):
+                    subcommand = word
+                    break
+            return pid, " ".join(parts[1:6]), subcommand
+        pid = int(parts[0])
+    return None
+
+
+def hook_context():
+    """Trace context for a check or git event: (trace ID, parent span ID, extra attributes).
+
+    Inside an agent session TRACEPARENT names the session, and the span nests
+    there. Otherwise, inside a git hook, every span of one git command (its
+    checks and its git events) joins one trace named after that git process,
+    under a root span the views add ("git commit", "git push"). Anywhere else
+    the span starts a trace of its own.
+    """
+    parsed = parse_traceparent(os.environ.get("TRACEPARENT", ""))
+    if parsed:
+        return parsed[0], parsed[1], {}
+    if os.environ.get("PRE_COMMIT") == "1":
+        found = git_ancestor()
+        if found:
+            pid, started, subcommand = found
+            key = "git:%s:%s:%s" % (socket.gethostname(), pid, started)
+            extra = {"loom.devtel.git.trace": True, "loom.devtel.git.command": subcommand}
+            return derived_id(key, 32), derived_id(key + ":root"), extra
+    return new_trace_id(), None, {}
+
+
 # ---------------------------------------------------------------------------
 # Writers
 # ---------------------------------------------------------------------------
 
 
 def run_step(name, command):
-    """Run one check and record it as a span named after it.
+    """Run one check, or reuse its pass on the same tree, and record it as a span.
 
     prek.toml wraps each check with run.sh, which calls this. The command's
     output and exit code are passed through unchanged. Child processes get
     TRACEPARENT pointing at this span, so anything they record nests under
     it. The working tree's hash is taken first, so two runs of a check on
     the same code can be found (devtel_reruns, "same tree").
+
+    When the check already passed on the same key (reuse.py,
+    docs/dev/check-reuse.md), it is not run: one line says so and the exit
+    code is 0. A pass is recorded only when the check exits 0 and the tree
+    is the same after it as before, because a formatter exits 0 after it
+    rewrote files.
     """
-    trace_id, parent_id = parent_context()
+    recording = enabled()
+    reusing = reuse.enabled()
     span_id = new_span_id()
     # Nothing that only feeds the span may stop the check from running.
-    attributes = {}
+    trace_id, parent_id, attributes = new_trace_id(), None, {}
+    tree = ""
     try:
-        attributes = {
+        if recording:
+            trace_id, parent_id, attributes = hook_context()
+        tree = tree_hash()
+        attributes.update({
             "cicd.pipeline.task.name": name,
             "loom.devtel.step": name,
             "process.command_line": " ".join(command)[:MAX_COMMAND],
             "process.working_directory": os.getcwd(),
-            "loom.devtel.tree": tree_hash(),
+            "loom.devtel.tree": tree,
             # prek sets PRE_COMMIT=1 for every hook it runs, and the remote
             # name only before a push.
             "loom.devtel.in_git_hook": os.environ.get("PRE_COMMIT") == "1",
             "loom.devtel.in_push": bool(os.environ.get("PRE_COMMIT_REMOTE_NAME")),
-        }
-        attributes.update(vcs_attributes())
-        attributes.update(agent_attributes())
+        })
+        if recording:
+            attributes.update(vcs_attributes())
+            attributes.update(agent_attributes())
     except Exception:  # noqa: BLE001 - fail open
         pass
-    env = dict(os.environ, TRACEPARENT=traceparent(trace_id, span_id))
     start = time.time_ns()
+    record_key = None
+    if reusing and tree:
+        try:
+            record_key = reuse.key(name, command, tree)
+            found = reuse.lookup(record_key)
+        except Exception:  # noqa: BLE001 - fail open: run the check
+            record_key, found = None, None
+        if found:
+            print(reuse.skip_line(found), flush=True)
+            attributes["loom.devtel.reused"] = True
+            attributes["loom.devtel.reused_ms"] = int(found.get("duration_ms", 0))
+            attributes["process.exit.code"] = 0
+            if recording:
+                emit("hooks", "checks", [span(trace_id, span_id, parent_id, name, start, time.time_ns(), attributes)])
+            return 0
+    env = dict(os.environ, TRACEPARENT=traceparent(trace_id, span_id))
     try:
         code = run_forwarding_signals(list(command), env)
     except OSError as error:
         print("devtel: cannot run %s: %s" % (command[0] if command else "", error), file=sys.stderr)
         code = 127
     end = time.time_ns()
+    if code == 0 and record_key:
+        try:
+            if tree_hash() == tree:
+                reuse.store(
+                    record_key,
+                    {
+                        "check": name,
+                        "tree": tree,
+                        "duration_ms": (end - start) // 1_000_000,
+                        "branch": attributes.get("vcs.ref.head.name", ""),
+                        "commit": attributes.get("vcs.ref.head.revision", ""),
+                    },
+                )
+        except Exception:  # noqa: BLE001 - a record is never worth failing a check
+            pass
     attributes["process.exit.code"] = code
-    emit("hooks", "checks", [span(trace_id, span_id, parent_id, name, start, end, attributes, code != 0)])
+    if recording:
+        emit("hooks", "checks", [span(trace_id, span_id, parent_id, name, start, end, attributes, code != 0)])
     return code
 
 
@@ -384,9 +495,25 @@ def commit_stats(revision):
 def git_event(stage):
     """Record a git event, called by a prek hook in the given stage."""
     stage = stage or "event"
-    trace_id, parent_id = parent_context()
     now = time.time_ns()
-    attributes = vcs_attributes()
+    trace_id, parent_id, attributes = hook_context()
+    # The trace context needs git still running; the rest does not, so the
+    # hook returns now and git does not wait for it.
+    if hasattr(os, "fork") and not os.environ.get("LOOM_DEVTEL_NO_FORK"):
+        if os.fork():
+            return 0
+        os.setsid()
+        try:
+            record_git_event(stage, now, trace_id, parent_id, attributes)
+        finally:
+            os._exit(0)
+    record_git_event(stage, now, trace_id, parent_id, attributes)
+    return 0
+
+
+def record_git_event(stage, now, trace_id, parent_id, attributes):
+    """Gather what a git event records and write its span."""
+    attributes.update(vcs_attributes())
     attributes.update(agent_attributes())
     attributes["loom.devtel.git.event"] = stage
     env = os.environ.get
@@ -792,6 +919,7 @@ def main(argv):
     run = commands.add_parser("run", help="run a check and record it (used by run.sh)")
     run.add_argument("name")
     run.add_argument("argv", nargs=argparse.REMAINDER, metavar="command")
+    commands.add_parser("reuse-clear", help="delete every pass record of this clone (check-reuse.md)")
     git_parser = commands.add_parser("git", help="record a git event")
     git_parser.add_argument("stage", nargs="?", default="")
     claude = commands.add_parser("claude", help="handle a Claude Code hook event (JSON on stdin)")
@@ -813,9 +941,12 @@ def main(argv):
         command = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
         if not command:
             return 2
-        if not enabled():
+        if not enabled() and not reuse.enabled():
             os.execvp(command[0], command)
         return run_step(args.name, command)
+    if args.command == "reuse-clear":
+        print("devtel: deleted %d pass records" % reuse.clear())
+        return 0
     if args.command == "git":
         return git_event(args.stage) if enabled() else 0
     if args.command == "claude":
