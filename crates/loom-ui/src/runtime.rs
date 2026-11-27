@@ -1082,7 +1082,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             // rule 11). A Space that could no longer click (the focus moved,
             // or a layer rose above it) is dropped without taking Escape,
             // which then goes where it goes, such as to a question.
-            let cancelled = self.live_arm().is_some();
+            let cancelled = self.live_arm();
             self.pointer.space = None;
             let input = self.app.input().layer;
             let shown = self
@@ -1094,7 +1094,18 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                 .pointer
                 .hint
                 .hide(shown.as_ref(), self.pointer.hover_moves, self.focus.moves);
-            if cancelled || hid {
+            // In a menu, Escape closes the menu at once, the one exception
+            // (section 5, rule 11): it cancels the Space held on an item and
+            // goes on, so one Escape closes the menu and picks nothing.
+            let menu_item = cancelled.as_ref().is_some_and(|armed| {
+                self.panels
+                    .access_of(armed)
+                    .is_some_and(|access| access.role() == crate::access::Role::MenuItem)
+            });
+            if menu_item {
+                return (false, true);
+            }
+            if cancelled.is_some() || hid {
                 return (true, hid);
             }
         }

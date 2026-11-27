@@ -796,6 +796,28 @@ fn the_pointer_leaving_keeps_a_held_space() {
     assert_eq!(clicks(&harness), [UiId::panel("bar").with("a")]);
 }
 
+/// In a menu, Escape closes the menu at once (section 5, rule 11): with a
+/// Space held on an item, one Escape cancels that Space and goes on to
+/// the target, which closes the menu, and the release clicks nothing.
+#[test]
+fn escape_with_space_held_on_a_menu_item_cancels_and_goes_on() {
+    use loom_ui_core::Key;
+    let item = UiId::panel("menu").with("item");
+    let mut harness = harness(true, Routed::Passed);
+    harness.send(Message::Input(Layer::Overlays));
+    harness.send(Message::Refocus(vec![item.clone()]));
+    assert_eq!(harness.runtime().focused(), Some(&item));
+    harness.step(press_key(Key::Space, false));
+    harness.step(press_key(Key::Escape, false));
+    assert!(
+        target_heard_press(&harness, Key::Escape),
+        "Escape went on, to close the menu"
+    );
+    harness.step(release_key(Key::Space));
+    harness.step(DriverEvent::Woken);
+    assert!(clicks(&harness).is_empty(), "Escape cancelled the Space");
+}
+
 /// Escape with a Space that could no longer click (a layer rose above its
 /// button) drops it without taking Escape, which goes on to the target.
 #[test]
