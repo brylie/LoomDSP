@@ -749,3 +749,18 @@ fn a_relation_into_a_panel_not_drawn_is_left_out() {
     assert_eq!(screen.at("menu/square"), None, "its anchor is gone");
     assert!(controls(&screen).is_empty(), "no relation to a node not sent");
 }
+
+/// A root placed under an element that is not there still counts as laid
+/// out, so the window settles after one layout, but it is not drawn: it
+/// has no bounds (section 5, rule 13).
+#[test]
+fn a_root_placed_under_a_missing_element_settles() {
+    let mut screen = Screen::new();
+    let mut view = View::new();
+    view.panel_with(panel("menu"), Layer::Overlays, &(20u8, None), placed_square);
+    screen.show_view(view);
+    let size = Size::new(300.0, 200.0);
+    screen.lay_out(size);
+    assert!(screen.window.is_settled(size), "laid out once, it is settled");
+    assert_eq!(screen.at("menu/square"), None, "and it is not placed");
+}

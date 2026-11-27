@@ -450,7 +450,9 @@ impl Window {
             };
             let Some(anchor) = anchor else {
                 // Under an element that is gone: not placed, so nothing
-                // of it is drawn or hit until the element comes back.
+                // of it is drawn or hit until the element comes back. It
+                // is still laid out, so the window settles.
+                self.compute(&root, size, text, &mut laid);
                 continue;
             };
             self.compute(&root, size, text, &mut laid);
