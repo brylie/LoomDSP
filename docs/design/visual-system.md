@@ -3,8 +3,8 @@
 The shared sizes, button roles, and quiet chrome that every view of the desktop app uses, so the app looks like one instrument and the controls a performer plays stand out.
 
 - **Kind:** living specification.
-- **Status:** The M1 visual system is implemented (2026-11-01). [Module shapes and playing state](#module-shapes-and-playing-state) records the agreed design direction (2026-11-19).
-- **Decision behind it:** [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language; themes are global), [ADR-0029](../adr/0029-module-families-and-a-shared-palette.md) (module families and a shared palette).
+- **Status:** The M1 visual system is implemented (2026-11-01). [Module shapes and playing state](#module-shapes-and-playing-state) records the agreed design direction (2026-11-19). [Signal colours and shapes](#signal-colours-and-shapes) and [Module anatomy](#module-anatomy) are Agreed (2026-11-27) and **wait for implementation after #683**; until then the app draws the family headers and signal colours of [Module families](#module-families).
+- **Decision behind it:** [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) (one design language; themes are global), [ADR-0029](../adr/0029-module-families-and-a-shared-palette.md) (module families and a shared palette), [ADR-0052](../adr/0052-signal-colour-and-shape.md) (signal colour and shape; supersedes ADR-0029's family header colours), [ADR-0053](../adr/0053-module-anatomy-and-face-archetypes.md) (module anatomy and face archetypes; the faces are specified in [module faces](module-faces.md)).
 - **Use case and requirements:** FR-PANEL-06 (global themes), NFR-UX-01 (keyboard and focus), NFR-UX-03 (colour is never the only signal).
 - **Background:** the [M1 UX audit](../research/2026-11-p1-ux-audit.md), findings 4, 11, 13, and 17.
 - **Issues:** [#454](https://github.com/brylie/LoomDSP/issues/454). Category colours and the palette: [#459](https://github.com/brylie/LoomDSP/issues/459). Tabs: [#456](https://github.com/brylie/LoomDSP/issues/456).
@@ -143,9 +143,69 @@ stroke in the same proportion. The inspector names the exact voice count
 and stereo sides. The dashed stroke continues to mark an inserted
 one-sample delay, and the signal colours continue to show the port types.
 
+### Signal colours and shapes
+
+**Status:** Agreed, 2026-11-27 ([ADR-0052](../adr/0052-signal-colour-and-shape.md)). **Waiting for implementation after #683.** Until then the app draws the colours and shapes of today's code. Measurements: [UI redesign research](../research/2026-11-ui-redesign.md#the-colour-roles-measured).
+
+Colour belongs to signals and to state, never to a module's family. Every role has one colour and a second cue that is not colour (NFR-UX-03).
+
+| Role | Token today | Colour | Second cue | Contrast on canvas `#1C1E23` / tile `#2B2E35` |
+|---|---|---|---|---|
+| Audio signal | `SignalType::Audio` (`#E04F4F`) | `#35E6F5` | circle jack | 10.95 / 8.93 |
+| Modulation signal | `SignalType::Modulation` (`#4F8FE0`) | `#8399FF` | diamond jack | 6.33 / 5.16 |
+| Pitch signal | `SignalType::Pitch` (`#F09A3E`) | `#EC854D` | pill jack | 6.38 / 5.20 |
+| Gate signal | `SignalType::Gate` (`#E8D24A`) | `#F6DE5F` | square jack; a trigger port is labelled "Trig" and its lamp flashes | 12.33 / 10.05 |
+| Phase signal | `SignalType::Phase` (`#9B6BE0`) | `#9154F2`; text in the tint `#C3A6EA` | a ring with a hand | 3.78 / 3.08 (tint 7.91 / 6.45) |
+| Editable value | `control_value` | `#F5A623` (unchanged) | handle shape, value text beside it | 8.23 / 6.71 |
+| Modulation assignment | `modulation` | `#E86AC8` (unchanged) | an arc outside the value arc | 5.82 / 4.74 |
+| Focus | `focus` | `#6CB4F0` (unchanged) | 2 px ring, 2 px offset | 7.48 / 6.10 |
+| Selection | `selection` (`#F5A623`) | `#F4F6F8` | an outline around the whole module or cable | 15.39 / 12.55 |
+| Warning | `warning` | `#E04F4F` (unchanged) | an icon and a word | 4.29 / 3.50 |
+| Light on, light off | `light_on`, `light_off` | `#7CE08A`, `#777D88` (unchanged) | filled lamp, ring-only lamp; light on is also the ring of a port carrying signal | 10.23 / 8.34, 4.03 / 3.28 |
+
+Rules:
+
+1. **Five signal types, five colours, five shapes** (ADR-0007, ADR-0052). Colour is the main cue, and the shape is the second. A trigger is a Gate port, and a level is a Modulation port.
+2. **Jack shapes.** Audio is a circle, Modulation a diamond, Pitch a pill, Gate a square, and Phase a ring with a hand. A ring around a jack means the cable carries voices.
+3. **Unpatched jacks are hollow, patched jacks filled.** Every jack's ring is at least 3:1 against the tile.
+4. **Pink marks only a parameter being modulated:** the arc on a knob, the band on a face. It never colours a cable.
+5. **White has two meanings, never on one element.** Inside a face it marks what is happening now. As an outline around a module or cable it marks the selection. A face never draws a white outline. The port under the cursor keeps its white `hover` fill, which is neither.
+6. **Headers are neutral.** A module's family shows by its name, a family icon, and its section in the module browser.
+7. **Measured.** Every pair of role colours is at least ΔE 14 (CIE76) apart in normal vision and in protanopia, deuteranopia, and tritanopia (Machado 2009, severity 1, linear sRGB); the smallest today is 15.5. Every role colour drawn as a mark is at least 3:1 on the canvas and the tile, and text in a role colour at least 4.5:1, through a tint where needed.
+
+8. **Orange is a handle or an editable value.** On a face, only what can be dragged or typed is orange (`control_value`).
+
+*Why:* audio and warning shared a red, Pitch sat beside the value orange, and family headers competed with cables for the same hues. A player asks first what a cable carries, and the family is easy to find by name.
+
+### Module anatomy
+
+**Status:** Agreed, 2026-11-27 ([ADR-0053](../adr/0053-module-anatomy-and-face-archetypes.md)). **Waiting for implementation after #683.**
+
+Every module tile has, from top to bottom:
+
+1. **The header, which is the handle:** a family icon, the name, the family word, and badges such as POLY. A click or Enter selects; a drag moves. Its fill is neutral.
+2. **Inputs on the left edge, outputs on the right.** Each port is a labelled row, and the whole row, at least 26 px high, is its pointer target (WCAG 2.2, SC 2.5.8).
+3. **The face,** one of the archetypes in [module faces](module-faces.md).
+4. **The controls,** in one knob style, with values in display units (ADR-0016).
+
+Text on a tile uses the five tokens of the [type scale](#type-scale): `SMALL` for port labels, the family word, badges, knob labels and values, and face readouts; `BODY` for captions under faces, lane names, and voice rows; `CONTROL` for the module name and button text; `HEADING` for an inspector section and the docked editor's title; `TITLE` for the inspector's title. Nothing on a module is smaller than 11 px at 100% zoom, and a port row is at least 26 px there. The canvas keeps its sizes in world units, because tile text scales with zoom, but they take these values at 100%: today `LABEL_SIZE` is 9, `BADGE_TEXT_SIZE` 7, and `ROW` 16 (`loom-canvas`). So tiles grow in world units, a patch's saved positions scale with them, and a patch opens at a default zoom that keeps tiles about as large on screen as today (ADR-0053, Consequences).
+
+Buttons on and around a module take the [button roles](#button-roles):
+
+| Role | Buttons |
+|---|---|
+| Primary | Make module (from a group), Open recipe (on a reference card); at most one per view |
+| Secondary | MIDI learn, Open (a sub-patch), Save to library, Undo in a status message, Delete module |
+| Danger | Panic only |
+| Plain | Icon buttons: Undo, Redo, Rename, add an output |
+
+Segmented choices, such as Wrap or Fold, are toggle groups with a pressed state, not buttons. The design canvas made Delete module a danger button. It stays secondary, by rule 3 and rule 4: red is kept for Panic, so a performer finds it at a glance, and deleting a module is undone like any edit.
+
 ### Module families
 
 Every module belongs to one of eight families ([ADR-0029](../adr/0029-module-families-and-a-shared-palette.md)). Its tile header takes the family's colour, and the module browser lists modules by family.
+
+ADR-0052 replaces the header colours: once it is built, headers are neutral and the families keep their names, their browser sections, and the 16 swatches below for user colours (FR-CANVAS-07). The table describes the app as it is built today.
 
 | Family | Colour | Echoes | Built-in modules |
 |---|---|---|---|
@@ -278,6 +338,18 @@ The rest:
 - [x] With four MIDI inputs, input drift, `Learning`, a long kept error, a long status message, and both output warnings, every item fits at 1280 px wide (headless `Ui` test).
 - [x] Disabled Hold note and Recent have hover text that says why (test on what the view passes to its tooltips, because the `Ui` harness does not reach them).
 
+Signal colours and shapes, and module anatomy (ADR-0052, ADR-0053; after #683):
+
+- [ ] `SignalType::colour` returns the colours of the role table, a different one for each type (test).
+- [ ] Every pair of the twelve role colours is at least ΔE 14 in all four visions (test in `theme.rs`, replacing the family pair test).
+- [ ] Every role colour is at least 3:1 on the canvas and the tile, and the Phase tint 4.5:1 (test in `theme.rs`).
+- [ ] Ports draw the shape of rule 2 for their type, hollow when unpatched and filled when patched (test on the scene).
+- [ ] A tile's header is neutral, whatever its family (test, replacing the family header test); the family still shows in the header's hover text, the browser, and help.
+- [ ] A selected module or cable has a white outline, and no knob or handle is white (test on the scene).
+- [ ] Each port row is at least 26 px high at 100% zoom and is the port's pointer target (headless `Ui` test).
+- [ ] At 100% zoom no text on a tile is smaller than `SMALL`, and a patch opens at a default zoom where tiles are about as large on screen as before (test over the canvas text sizes and the camera).
+- [ ] A port that carries signal shows a `light_on` ring, whether it is filled or hollow (test on the scene; panels.md, Signal activity on ports).
+
 Colour pairs ([#463](https://github.com/brylie/LoomDSP/issues/463)):
 
 - [x] Every colour pair the panels draw as text meets 4.5:1, and every control's only mark 3:1, against what it is drawn on (`every_colour_pair_the_app_draws_meets_its_minimum`), the slider's track an exempt row with its reason, as the palette section says.
@@ -295,7 +367,7 @@ Role tokens (plan for leaving Iced, row 2):
 - Tabs and the matrix layout: [#456](https://github.com/brylie/LoomDSP/issues/456).
 - The inspector, help, and browser layouts: [#457](https://github.com/brylie/LoomDSP/issues/457), which uses these tokens.
 - Light theme and user themes: FR-PANEL-06, M3.
-- Canvas text sizes, which scale with zoom.
+- Canvas text sizes, which scale with zoom, except the 11 px floor of [Module anatomy](#module-anatomy).
 
 ## Open points
 

@@ -731,6 +731,8 @@ The table below applies when no text field has focus.
 
 ### Signal activity on ports
 
+**Changes after #683** ([ADR-0052](../adr/0052-signal-colour-and-shape.md)): filled and hollow come to mean patched and unpatched, so *carrying* shows as a ring around the jack in `light_on` green (8.34:1 on the tile) and *silent* as no ring. The rest of this section stays until then.
+
 ([#63](https://github.com/brylie/LoomDSP/issues/63).) **Implemented:** `take_activity` in `loom-app/src/monitor.rs` measures the state, the canvas draws the marker from its overlay buffer, and the UI snapshot shows `carrying` on each port. Cables stay still ([Cables do not animate](#cables-do-not-animate)). Ports show whether they carry a signal.
 
 - **Two states:** *carrying* (a filled marker in the signal colour) and *silent* (an outlined marker). Input ports show the state of the output feeding them. Earlier connected ports were filled even while silent, so the outlined state makes activity visible.
