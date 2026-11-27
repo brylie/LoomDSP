@@ -733,10 +733,21 @@ fn the_sub_patch_name_and_authors_are_runtime_fields() {
     ui.app_mut().a11y_event(crate::a11y::Event::Activated);
     let _ = ui.redraw();
     let name = ids::part(&ids::panel(SUB_PATCH), "name");
+    // The name the patch holds, not the one being typed.
+    let stored = |ui: &Ui| {
+        ui.app()
+            .session
+            .hierarchy
+            .tile_name(loom_core::ModuleId(SUB_PATCH))
+            .unwrap_or_default()
+    };
+    let before = stored(&ui);
     ui.focus(&name);
     let _ = ui.tap(Key::Named(Named::End), Modifiers::empty());
     let _ = ui.typewrite("X");
+    assert_eq!(stored(&ui), before, "typing is only a draft");
     let _ = ui.tap(Key::Named(Named::Enter), Modifiers::empty());
+    assert_eq!(stored(&ui), format!("{before}X"), "Enter saved the name");
     let crate::inspector::Inspector::SubPatch(sub) = ui.app().inspector_model() else {
         panic!("a sub-patch's inspector");
     };
