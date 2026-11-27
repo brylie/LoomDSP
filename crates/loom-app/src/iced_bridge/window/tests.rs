@@ -1,7 +1,7 @@
 use super::*;
 use crate::tests::app;
 use loom_ui::{Runtime, WindowState};
-use loom_ui_core::UiId;
+use loom_ui_core::{Key, Modifiers, UiId};
 use std::sync::Arc;
 
 /// A runtime around the app, with no window, for the layers to be lent.
@@ -56,21 +56,26 @@ fn report(layers: &mut WindowLayers, runtime: &mut Runtime<Hosted, IcedTarget>) 
 }
 
 /// One event's messages go in Iced's order: the widgets' first, then the
-/// listeners', here the close request the app hears as its close.
+/// listeners', here what an Escape no widget used becomes.
 #[test]
 fn the_widgets_messages_come_before_the_listeners() {
     let app = app();
-    let close = iced::Event::Window(iced::window::Event::CloseRequested);
+    let escape = crate::ui_test::key_press(Key::Escape, Modifiers::NONE, None, false);
     let routed = batch(
         vec![Message::ShowHelp],
-        &[close],
+        &[escape],
         &[iced::event::Status::Ignored],
         app.listeners(),
     );
     assert!(
         matches!(
             routed.as_slice(),
-            [Message::ShowHelp, Message::File(crate::FileAction::Close)]
+            [
+                Message::ShowHelp,
+                Message::Key(_),
+                Message::CloseHelp,
+                Message::TextFocusCheck
+            ]
         ),
         "{routed:?}"
     );

@@ -343,20 +343,23 @@ fn a_drop_opens_the_first_patch() {
     assert_eq!(dropped(&[wav, PathBuf::from("/a/no-extension")]), Dropped::NoPatch);
 }
 
-/// The window's report of a dropped file becomes a message, and nothing else
-/// does.
+/// The window's report of a dropped file reaches the app as a window event
+/// (`App::window_event`) and becomes a message; the app collects a drop's
+/// files for a moment, then opens the patch among them.
 #[test]
 fn a_dropped_file_becomes_a_message() {
-    let path = PathBuf::from("/a/b.ron");
-    let status = iced::event::Status::Ignored;
-    let window = iced::window::Id::unique();
-    let event = iced::Event::Window(iced::window::Event::FileDropped(path.clone()));
-    assert!(matches!(
-        drop_event(event, status, window),
-        Some(AppMessage::FileDropped(found)) if found == path
-    ));
-    let event = iced::Event::Window(iced::window::Event::CloseRequested);
-    assert!(drop_event(event, status, window).is_none());
+    let dir = TempDir::new("recent-drop-event");
+    let files = patches(&dir.0, 1);
+    let mut ui = crate::ui_test::Ui::with_app(app());
+    let messages = ui.window_event(loom_ui::WindowEvent::FileDropped(files[0].clone()));
+    assert!(
+        messages
+            .iter()
+            .any(|m| matches!(m, AppMessage::FileDropped(found) if *found == files[0])),
+        "{messages:?}"
+    );
+    ui.send(AppMessage::DropsDone);
+    assert_eq!(ui.app().session.document.file(), Some(files[0].as_path()));
 }
 
 /// Drops `files` on the window, as the window reports them, and lets the

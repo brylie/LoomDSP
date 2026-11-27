@@ -820,20 +820,18 @@ impl App {
     /// where the pointer is. They act on the patch, so they work only while the
     /// canvas has the input.
     pub(crate) fn clipboard_key(&self, message: &Message) -> Option<char> {
-        let Message::Key(iced::keyboard::Event::KeyPressed {
-            key: iced::keyboard::Key::Character(c),
+        let Message::Key(loom_ui_core::KeyEvent::Pressed {
+            key: loom_ui_core::Key::Character(c),
             modifiers,
             ..
         }) = message
         else {
             return None;
         };
-        if !modifiers.command() || self.input_owner() != crate::input_owner::InputOwner::Canvas {
+        if !modifiers.shortcut() || self.input_owner() != crate::input_owner::InputOwner::Canvas {
             return None;
         }
-        ['c', 'x', 'd']
-            .into_iter()
-            .find(|k| c.eq_ignore_ascii_case(&k.to_string()))
+        ['c', 'x', 'd'].into_iter().find(|k| c.eq_ignore_ascii_case(k))
     }
 
     /// Runs a shortcut on the patch, once the check found no text field

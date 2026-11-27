@@ -322,12 +322,13 @@ enum Message {
     Canvas(CanvasEvent),
     /// The runtime has updated the window's scale.
     WindowRescaled,
-    /// A window event for the app's one input listener, and whether a widget
+    /// An input event for the app's one input listener, and whether a widget
     /// used it. `update` turns it into the messages it routes to
     /// (`Listening::route`).
     Input {
-        event: iced::Event,
-        status: iced::event::Status,
+        event: loom_ui_core::Event,
+        /// A widget used the event.
+        used: bool,
         /// Who was listening when the event was heard.
         listening: input_owner::Listening,
     },
@@ -486,7 +487,7 @@ enum Message {
     Midi,
     /// A key: the undo and redo shortcuts, and Escape in learn mode. Ignored
     /// while the module browser is open.
-    Key(iced::keyboard::Event),
+    Key(loom_ui_core::KeyEvent),
     /// Take back the last step (`docs/design/undo.md`).
     Undo,
     /// A shortcut that acts on the patch (undo, redo, or one on the
@@ -1864,22 +1865,22 @@ impl App {
             {
                 self.menu_key(&event)
             }
-            Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. })
-                if modifiers.command()
-                    && modifiers.shift()
-                    && matches!(key.as_ref(), iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("o"))
+            Message::Key(loom_ui_core::KeyEvent::Pressed { key, modifiers, .. })
+                if modifiers.shortcut()
+                    && modifiers.shift
+                    && matches!(key, loom_ui_core::Key::Character(c) if c.eq_ignore_ascii_case(&'o'))
                     && self.no_overlay() =>
             {
                 self.open_patches()
             }
-            Message::Key(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+            Message::Key(loom_ui_core::KeyEvent::Pressed {
+                key: loom_ui_core::Key::Tab,
                 modifiers,
                 ..
-            }) if !modifiers.command() && !modifiers.control() && !modifiers.alt() && !self.tab_fields().is_empty() => {
+            }) if !modifiers.shortcut() && !modifiers.control && !modifiers.alt && !self.tab_fields().is_empty() => {
                 // Only the window's widgets know in time where focus is: a
                 // field can take it with no message (window_question.rs).
-                let backwards = modifiers.shift();
+                let backwards = modifiers.shift;
                 self.ask_window(window_question::WindowQuestion::focus(move |from| Message::TabFrom {
                     from,
                     backwards,
@@ -2532,68 +2533,57 @@ impl App {
                     self.paste(world, text);
                 }
             }
-            Message::Key(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+            Message::Key(loom_ui_core::KeyEvent::Pressed {
+                key: loom_ui_core::Key::Escape,
                 ..
             }) if self.session.learn.is_on() => self.stop_learning(),
             // Escape with nothing else using it goes up one level
             // (sub-patches.md, Make, open, and dissolve): the canvas took it
             // first for a drag, pinned lines, control focus, or a selection.
-            Message::Key(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+            Message::Key(loom_ui_core::KeyEvent::Pressed {
+                key: loom_ui_core::Key::Escape,
                 ..
             }) if self.no_overlay() && !self.session.level.is_root() => self.go_up(),
-            Message::Key(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) if modifiers.command() => {
+            Message::Key(loom_ui_core::KeyEvent::Pressed { key, modifiers, .. }) if modifiers.shortcut() => {
+                use loom_ui_core::Key;
                 // Ctrl+Z or Cmd+Z undoes; adding Shift redoes. Ctrl+Y also
                 // redoes, except on macOS.
-                match key.as_ref() {
+                let letter = match key {
+                    Key::Character(c) => Some(c.to_ascii_lowercase()),
+                    _ => None,
+                };
+                match (key, letter) {
                     // Undo, redo, and the shortcuts on the selection wait for
                     // a focus check: a text field being edited keeps them
                     // (undo.md, Gestures; shortcut.rs).
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") && modifiers.shift() => {
+                    (_, Some('z')) if modifiers.shift => self.pending_shortcut = Some(shortcut::Shortcut::Redo),
+                    (_, Some('z')) => self.pending_shortcut = Some(shortcut::Shortcut::Undo),
+                    (_, Some('n')) => self.file_action(FileAction::New),
+                    (_, Some('o')) => self.file_action(FileAction::Open),
+                    (_, Some('s')) if modifiers.shift => self.file_action(FileAction::SaveAs),
+                    (_, Some('s')) => self.file_action(FileAction::Save),
+                    (_, Some('y')) if !cfg!(target_os = "macos") => {
                         self.pending_shortcut = Some(shortcut::Shortcut::Redo)
                     }
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("z") => {
-                        self.pending_shortcut = Some(shortcut::Shortcut::Undo)
-                    }
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("n") => {
-                        self.file_action(FileAction::New)
-                    }
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("o") => {
-                        self.file_action(FileAction::Open)
-                    }
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("s") && modifiers.shift() => {
-                        self.file_action(FileAction::SaveAs);
-                    }
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("s") => {
-                        self.file_action(FileAction::Save);
-                    }
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("y") && !cfg!(target_os = "macos") => {
-                        self.pending_shortcut = Some(shortcut::Shortcut::Redo)
-                    }
-                    iced::keyboard::Key::Character(",") => self.toggle_preferences(),
+                    (_, Some(',')) => self.toggle_preferences(),
                     // Ctrl+G makes a sub-patch; with Shift it dissolves one.
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("g") && modifiers.shift() => {
+                    (_, Some('g')) if modifiers.shift => {
                         self.pending_shortcut = Some(shortcut::Shortcut::DissolveSubpatch)
                     }
-                    iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("g") => {
-                        self.pending_shortcut = Some(shortcut::Shortcut::MakeSubpatch)
-                    }
+                    (_, Some('g')) => self.pending_shortcut = Some(shortcut::Shortcut::MakeSubpatch),
                     // Ctrl+Enter or Cmd+Enter opens the selected sub-patch.
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
-                        self.pending_shortcut = Some(shortcut::Shortcut::OpenSelected)
-                    }
+                    (Key::Enter, _) => self.pending_shortcut = Some(shortcut::Shortcut::OpenSelected),
                     _ => {}
                 }
             }
-            Message::Key(iced::keyboard::Event::KeyPressed {
+            Message::Key(loom_ui_core::KeyEvent::Pressed {
                 key,
                 modifiers,
                 repeat: false,
                 ..
-            }) if modifiers.is_empty()
+            }) if modifiers.none()
                 && self.focus.is_none()
-                && matches!(key.as_ref(), iced::keyboard::Key::Character(c) if c.eq_ignore_ascii_case("m")) =>
+                && matches!(key, loom_ui_core::Key::Character(c) if c.eq_ignore_ascii_case(&'m')) =>
             {
                 self.choose_map(None);
             }

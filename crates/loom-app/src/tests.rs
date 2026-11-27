@@ -1,6 +1,7 @@
 use super::*;
 use crate::recovery::tests::TempDir;
 use loom_core::{EngineConfig, LoomError, TRANSPORT_MODULE, create_engine};
+use loom_ui_core::{Key, Modifiers};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -541,12 +542,10 @@ fn keys_go_to_the_browser_not_the_shortcuts() {
 
     // Cmd+Z or Ctrl+Z while the browser is open does not undo.
     open_at(&mut app, Point::ORIGIN);
-    let _ = app.send(Message::Key(iced::keyboard::Event::KeyPressed {
-        key: iced::keyboard::Key::Character("z".into()),
-        modified_key: iced::keyboard::Key::Character("z".into()),
-        physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
-        location: iced::keyboard::Location::Standard,
-        modifiers: iced::keyboard::Modifiers::COMMAND,
+    let _ = app.send(Message::Key(loom_ui_core::KeyEvent::Pressed {
+        key: Key::Character('z'),
+        code: loom_ui_core::Code::Other,
+        modifiers: Modifiers::platform_shortcut(),
         text: None,
         repeat: false,
     }));
@@ -1051,13 +1050,11 @@ fn the_scene_has_a_line_per_assignment() {
 }
 
 /// Ctrl+`c` or Cmd+`c`.
-pub(crate) fn command_key(c: &str) -> Message {
-    Message::Key(iced::keyboard::Event::KeyPressed {
-        key: iced::keyboard::Key::Character(c.into()),
-        modified_key: iced::keyboard::Key::Character(c.into()),
-        physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
-        location: iced::keyboard::Location::Standard,
-        modifiers: iced::keyboard::Modifiers::COMMAND,
+pub(crate) fn command_key(c: char) -> Message {
+    Message::Key(loom_ui_core::KeyEvent::Pressed {
+        key: Key::Character(c),
+        code: loom_ui_core::Code::Other,
+        modifiers: Modifiers::platform_shortcut(),
         text: None,
         repeat: false,
     })
@@ -1194,7 +1191,7 @@ fn duplicate_from_the_keyboard_is_one_step_offset_by_two_grid_units() {
     let mut app = app();
     let (sine, _) = two_selected(&mut app);
     let before = app.session.controller.graph().nodes().count();
-    let _ = app.send(command_key("d"));
+    let _ = app.send(command_key('d'));
     assert_eq!(app.session.controller.graph().nodes().count(), before + 2);
     assert_eq!(step_name(&app).as_deref(), Some("duplicate 2 modules"));
     let first = *app.session.selection.iter().next().unwrap();
@@ -1286,8 +1283,8 @@ fn clipboard_keys_go_to_the_browser_while_it_is_open() {
     two_selected(&mut app);
     let before = app.session.controller.graph().nodes().count();
     open_at(&mut app, Point::ORIGIN);
-    let _ = app.send(command_key("d"));
-    let _ = app.send(command_key("x"));
+    let _ = app.send(command_key('d'));
+    let _ = app.send(command_key('x'));
     assert_eq!(app.session.controller.graph().nodes().count(), before);
 }
 
@@ -1373,10 +1370,7 @@ fn the_panic_key_button_and_command_run_panic() {
     let _ = ui.app_mut().send(Message::OpenBrowser);
     ui.redraw();
     ui.typewrite("sin");
-    let messages = ui.tap(
-        loom_ui_core::Key::Character('.'),
-        loom_ui_core::Modifiers::platform_shortcut(),
-    );
+    let messages = ui.tap(Key::Character('.'), Modifiers::platform_shortcut());
     assert!(messages.iter().any(|m| matches!(m, Message::Panic)), "{messages:?}");
     assert!(
         ui.app().alerts.status().starts_with("Panic"),
@@ -2987,21 +2981,8 @@ fn disabled_toolbar_buttons_say_why_in_hover_text() {
 
 /// Presses a key as a real keyboard does, with its text, and returns the
 /// messages it sends.
-fn press_key(
-    ui: &mut crate::ui_test::Ui,
-    key: iced::keyboard::Key,
-    text: Option<&str>,
-    modifiers: iced::keyboard::Modifiers,
-) -> Vec<Message> {
-    ui.step(&[iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-        modified_key: key.clone(),
-        key,
-        physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
-        location: iced::keyboard::Location::Standard,
-        modifiers,
-        text: text.map(Into::into),
-        repeat: false,
-    })])
+fn press_key(ui: &mut crate::ui_test::Ui, key: Key, text: Option<&str>, modifiers: Modifiers) -> Vec<Message> {
+    ui.step(&[crate::ui_test::key_press(key, modifiers, text, false)])
 }
 
 /// A new patch with its Authors box in focus. It leaves the pointer over the
@@ -3040,19 +3021,19 @@ fn from_canvas(messages: &[Message]) -> Vec<String> {
 /// Keyboard without a mouse).
 #[test]
 fn keys_stay_out_of_the_canvas_while_typing() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let keys = [
-        ("Space", Key::Named(Named::Space), Some(" "), Modifiers::default()),
-        ("A", Key::Character("a".into()), Some("a"), Modifiers::default()),
-        ("F", Key::Character("f".into()), Some("f"), Modifiers::default()),
-        ("Tab", Key::Named(Named::Tab), None, Modifiers::default()),
-        ("Backspace", Key::Named(Named::Backspace), None, Modifiers::default()),
-        ("Enter", Key::Named(Named::Enter), None, Modifiers::default()),
-        ("Left", Key::Named(Named::ArrowLeft), None, Modifiers::default()),
-        ("Cmd+V", Key::Character("v".into()), None, Modifiers::COMMAND),
+        ("Space", Key::Space, Some(" "), Modifiers::NONE),
+        ("A", Key::Character('a'), Some("a"), Modifiers::NONE),
+        ("F", Key::Character('f'), Some("f"), Modifiers::NONE),
+        ("Tab", Key::Tab, None, Modifiers::NONE),
+        ("Backspace", Key::Backspace, None, Modifiers::NONE),
+        ("Enter", Key::Enter, None, Modifiers::NONE),
+        ("Left", Key::Left, None, Modifiers::NONE),
+        ("Cmd+V", Key::Character('v'), None, Modifiers::platform_shortcut()),
     ];
     for over_canvas in [false, true] {
-        for (name, key, text, modifiers) in keys.clone() {
+        for (name, key, text, modifiers) in keys {
             let mut ui = typing_in_authors(over_canvas);
             let messages = press_key(&mut ui, key, text, modifiers);
             assert_eq!(
@@ -3068,19 +3049,19 @@ fn keys_stay_out_of_the_canvas_while_typing() {
 /// is read on each press, so Space is the Run shortcut again.
 #[test]
 fn escape_from_a_text_box_gives_keys_back_to_the_canvas() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let mut ui = typing_in_authors(true);
-    let typed = press_key(&mut ui, Key::Named(Named::Space), Some(" "), Modifiers::default());
+    let typed = press_key(&mut ui, Key::Space, Some(" "), Modifiers::NONE);
     assert!(
         typed.iter().any(|m| matches!(m, Message::PatchInfo(_))),
         "the box took the space: {typed:?}"
     );
 
-    let escaped = press_key(&mut ui, Key::Named(Named::Escape), None, Modifiers::default());
+    let escaped = press_key(&mut ui, Key::Escape, None, Modifiers::NONE);
     assert_eq!(from_canvas(&escaped), Vec::<String>::new(), "Escape only left the box");
     assert!(!ui.text_field_focused(), "Escape left the box");
 
-    let after = press_key(&mut ui, Key::Named(Named::Space), Some(" "), Modifiers::default());
+    let after = press_key(&mut ui, Key::Space, Some(" "), Modifiers::NONE);
     assert!(
         after
             .iter()
@@ -3096,22 +3077,22 @@ fn escape_from_a_text_box_gives_keys_back_to_the_canvas() {
 /// so the key cannot wait for the app to have heard of the focus.
 #[test]
 fn tab_moves_between_the_fields_of_one_view() {
-    use iced::keyboard::{Key, Modifiers, key::Named};
-    let tab = loom_ui_core::Key::Tab;
+    use loom_ui_core::{Key, Modifiers};
+    let tab = Key::Tab;
     let [authors, tags] = crate::patch_info::text_fields();
     let mut ui = typing_in_authors(false);
     assert_eq!(ui.focused_field(), Some(authors.clone()), "the click focused Authors");
 
-    ui.tap(tab, loom_ui_core::Modifiers::NONE);
+    ui.tap(tab, Modifiers::NONE);
     assert_eq!(ui.focused_field(), Some(tags.clone()), "Tab goes to Tags");
     // On through patch info's buttons, the runtime's stops since plan 3.2,
     // row 4d, then past its last.
     let patch = crate::inspector::ids::patch();
     for key in ["choose_licence", "shortcuts"] {
-        ui.tap(tab, loom_ui_core::Modifiers::NONE);
+        ui.tap(tab, Modifiers::NONE);
         assert_eq!(ui.runtime().focused(), Some(&crate::inspector::ids::part(&patch, key)));
     }
-    ui.tap(tab, loom_ui_core::Modifiers::NONE);
+    ui.tap(tab, Modifiers::NONE);
     assert_eq!(ui.focused_field(), None, "past patch info, no field");
     assert_eq!(
         ui.runtime().focused(),
@@ -3120,7 +3101,7 @@ fn tab_moves_between_the_fields_of_one_view() {
     );
     let _ = authors;
 
-    let _ = press_key(&mut ui, Key::Named(Named::Escape), None, Modifiers::default());
+    let _ = press_key(&mut ui, Key::Escape, None, Modifiers::NONE);
     ui.app_mut()
         .overlays
         .open(crate::overlays::Overlay::Patches(crate::patches::PatchBrowser::new(
@@ -3130,11 +3111,11 @@ fn tab_moves_between_the_fields_of_one_view() {
     ui.redraw();
     let [search, author] = crate::patches::text_fields();
     ui.focus(&search);
-    ui.tap(tab, loom_ui_core::Modifiers::NONE);
+    ui.tap(tab, Modifiers::NONE);
     assert_eq!(ui.focused_field(), Some(author));
     // Tab goes on to the licence filters, which the keyboard reaches now
     // (patch-metadata.md, Keys; row 5b), not back to the search field.
-    ui.tap(tab, loom_ui_core::Modifiers::NONE);
+    ui.tap(tab, Modifiers::NONE);
     assert_eq!(
         ui.runtime().focused(),
         Some(&crate::patches::licence_id("lets-me-change")),

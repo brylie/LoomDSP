@@ -162,18 +162,5 @@ pub fn dropped(files: &[PathBuf]) -> Dropped {
     }
 }
 
-/// A file dropped on the window, as a message. The window reports each file
-/// of a drop on its own, so the app collects them for a moment.
-pub fn drop_event(
-    event: iced::Event,
-    _status: iced::event::Status,
-    _window: iced::window::Id,
-) -> Option<crate::Message> {
-    match event {
-        iced::Event::Window(iced::window::Event::FileDropped(path)) => Some(crate::Message::FileDropped(path)),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests;

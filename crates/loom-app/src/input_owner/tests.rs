@@ -3,10 +3,11 @@
 use super::*;
 use crate::patches;
 use crate::ui_test::Ui;
-use iced::keyboard::Modifiers;
+use iced::event::Status;
+use iced::{mouse, window};
 use loom_canvas::stats::{FrameCause, requests_this_thread};
 use loom_canvas::{CanvasEvent, PortRef};
-use loom_ui_core::{Point, Rect, Size};
+use loom_ui_core::{Modifiers, Point, PointerButton, Rect, Size};
 
 /// Every overlay, and the canvas with none.
 pub(crate) const OWNERS: [InputOwner; 10] = [
@@ -87,23 +88,12 @@ pub(crate) fn open_overlay(ui: &mut Ui, owner: InputOwner) {
 /// pointer and redrawing send no message and an idle app stays idle.
 #[test]
 fn the_listener_passes_only_what_a_row_can_use() {
-    let hears = |event| input_event(event, Status::Ignored, window::Id::unique()).is_some();
-    assert!(hears(iced::Event::Keyboard(keyboard::Event::ModifiersChanged(
-        Modifiers::SHIFT
-    ))));
-    assert!(hears(iced::Event::Mouse(mouse::Event::ButtonPressed(
-        mouse::Button::Left
-    ))));
-    assert!(!hears(iced::Event::Window(window::Event::FileDropped("a.ron".into()))));
-    assert!(!hears(iced::Event::Mouse(mouse::Event::CursorMoved {
-        position: iced::Point::ORIGIN
-    })));
-    assert!(!hears(iced::Event::Mouse(mouse::Event::ButtonReleased(
-        mouse::Button::Left
-    ))));
-    assert!(!hears(iced::Event::Window(window::Event::RedrawRequested(
-        std::time::Instant::now()
-    ))));
+    let hears = |event: Event| input_event(&event, false).is_some();
+    assert!(hears(Event::Key(KeyEvent::ModifiersChanged(Modifiers::SHIFT))));
+    assert!(hears(Event::Pointer(PointerEvent::Pressed(PointerButton::Left))));
+    assert!(!hears(Event::Pointer(PointerEvent::Moved)));
+    assert!(!hears(Event::Pointer(PointerEvent::Released(PointerButton::Left))));
+    assert!(!hears(Event::Redraw));
 }
 
 /// Each overlay is its own owner, and only the canvas with none is interactive.
@@ -150,15 +140,12 @@ fn the_canvas_policy_follows_the_matrix() {
 fn a_key_press_counts_one_input_cause() {
     let mut ui = Ui::open("subtractive.ron");
     let before = requests_this_thread(FrameCause::Input);
-    ui.step(&[iced::Event::Keyboard(keyboard::Event::KeyPressed {
-        key: Key::Character("q".into()),
-        modified_key: Key::Character("q".into()),
-        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-        location: keyboard::Location::Standard,
-        modifiers: Modifiers::empty(),
-        text: None,
-        repeat: false,
-    })]);
+    ui.step(&[crate::ui_test::key_press(
+        Key::Character('q'),
+        Modifiers::NONE,
+        None,
+        false,
+    )]);
     assert_eq!(requests_this_thread(FrameCause::Input) - before, 1);
 }
 
@@ -168,19 +155,16 @@ fn a_key_press_counts_one_input_cause() {
 fn an_empty_route_counts_as_input() {
     let mut app = crate::ui_test::open_app("subtractive.ron");
     let before = requests_this_thread(FrameCause::Input);
-    let released = keyboard::Event::KeyReleased {
-        key: Key::Character("q".into()),
-        modified_key: Key::Character("q".into()),
-        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-        location: keyboard::Location::Standard,
-        modifiers: Modifiers::empty(),
+    let released = KeyEvent::Released {
+        key: Key::Character('q'),
+        code: loom_ui_core::Code::Other,
     };
     let listening = app.listening();
-    let event = iced::Event::Keyboard(released);
-    assert!(listening.route(event.clone(), Status::Captured).is_empty());
+    let event = Event::Key(released);
+    assert!(listening.route(&event, true).is_empty());
     let _ = app.send(Message::Input {
         event,
-        status: Status::Captured,
+        used: true,
         listening,
     });
     assert_eq!(requests_this_thread(FrameCause::Input) - before, 1);
@@ -199,18 +183,10 @@ fn a_route_reads_who_was_listening_before_the_event() {
     });
     let _ = app.send(Message::File(crate::FileAction::New));
     assert!(app.overlays.question.is_some());
-    let enter = iced::Event::Keyboard(keyboard::Event::KeyPressed {
-        key: Key::Named(Named::Enter),
-        modified_key: Key::Named(Named::Enter),
-        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-        location: keyboard::Location::Standard,
-        modifiers: Modifiers::empty(),
-        text: None,
-        repeat: false,
-    });
+    let enter = Event::Key(crate::ui_test::pressed(Key::Enter, Modifiers::NONE));
     let _ = app.send(Message::Input {
         event: enter,
-        status: Status::Captured,
+        used: true,
         listening: before,
     });
     assert!(
@@ -219,26 +195,18 @@ fn a_route_reads_who_was_listening_before_the_event() {
     );
 }
 
-/// The panic key and dropped files go through the listener that never restarts.
+/// The panic key goes through the listener that never restarts. A dropped
+/// file is a window event now (`subscriptions::window_message`).
 #[test]
-fn panic_and_drops_are_heard_whoever_has_the_input() {
-    let hears = |event| always_event(event, Status::Captured, window::Id::unique());
-    let panic = iced::Event::Keyboard(keyboard::Event::KeyPressed {
-        key: Key::Character(".".into()),
-        modified_key: Key::Character(".".into()),
-        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-        location: keyboard::Location::Standard,
-        modifiers: Modifiers::COMMAND,
-        text: None,
-        repeat: false,
-    });
-    assert!(matches!(hears(panic), Some(Message::Panic)));
-    assert!(matches!(
-        hears(iced::Event::Window(window::Event::FileDropped("a.ron".into()))),
-        Some(Message::FileDropped(_))
+fn panic_is_heard_whoever_has_the_input() {
+    let hears = |event: Event| always_event(&event, true);
+    let panic = Event::Key(crate::ui_test::pressed(
+        Key::Character('.'),
+        Modifiers::platform_shortcut(),
     ));
+    assert!(matches!(hears(panic), Some(Message::Panic)));
     assert!(
-        hears(iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))).is_none(),
+        hears(Event::Pointer(PointerEvent::Pressed(PointerButton::Left))).is_none(),
         "nothing else"
     );
 }
@@ -255,7 +223,7 @@ fn identity(subscription: iced::Subscription<Message>) -> u64 {
 }
 
 /// When who is listening changes, the input listener restarts, and the one for
-/// the panic key and dropped files does not. So Escape that closes the browser
+/// the panic key does not. So Escape that closes the browser
 /// cannot take a Panic pressed straight after it down with it.
 #[test]
 fn only_the_input_listener_restarts_when_who_is_listening_changes() {
@@ -279,10 +247,10 @@ fn help_is_on_top_of_a_dialog_and_closes_alone() {
     {
         let mut ui = Ui::open("subtractive.ron");
         open_overlay(&mut ui, owner);
-        ui.tap(loom_ui_core::Key::F1, loom_ui_core::Modifiers::NONE);
+        ui.tap(Key::F1, Modifiers::NONE);
         assert_eq!(ui.app().input_owner(), InputOwner::Help, "{owner:?}: F1 opened help");
         if close == "escape" {
-            ui.tap(loom_ui_core::Key::Escape, loom_ui_core::Modifiers::NONE);
+            ui.tap(Key::Escape, Modifiers::NONE);
         } else {
             ui.move_to(Point::new(5.0, 5.0));
             ui.press();
@@ -302,11 +270,11 @@ fn help_opens_over_a_chooser_opened_from_preferences() {
     ui.send(Message::Preferences(settings::Message::ChooseLicence));
     ui.redraw();
     assert_eq!(ui.app().input_owner(), InputOwner::Chooser);
-    ui.tap(loom_ui_core::Key::F1, loom_ui_core::Modifiers::NONE);
+    ui.tap(Key::F1, Modifiers::NONE);
     assert_eq!(ui.app().input_owner(), InputOwner::Help);
-    ui.tap(loom_ui_core::Key::Escape, loom_ui_core::Modifiers::NONE);
+    ui.tap(Key::Escape, Modifiers::NONE);
     assert_eq!(ui.app().input_owner(), InputOwner::Chooser, "help closed");
-    ui.tap(loom_ui_core::Key::Escape, loom_ui_core::Modifiers::NONE);
+    ui.tap(Key::Escape, Modifiers::NONE);
     assert_eq!(ui.app().input_owner(), InputOwner::Preferences, "the chooser closed");
 }
 
@@ -330,10 +298,10 @@ fn help_suspends_search_in_both_browsers() {
         };
         ui.typewrite("a");
         assert_eq!(search(&ui), "a");
-        ui.tap(loom_ui_core::Key::F1, loom_ui_core::Modifiers::NONE);
+        ui.tap(Key::F1, Modifiers::NONE);
         ui.typewrite("b");
         assert_eq!(search(&ui), "a", "{owner:?}");
-        ui.tap(loom_ui_core::Key::Escape, loom_ui_core::Modifiers::NONE);
+        ui.tap(Key::Escape, Modifiers::NONE);
         assert_eq!(ui.focused_field(), Some(field));
         ui.typewrite("c");
         assert_eq!(search(&ui), "ac", "{owner:?}");
@@ -414,10 +382,7 @@ fn clipboard_keys_work_with_no_overlay() {
     let modules = ui.app().session.controller.graph().nodes().count();
     assert_eq!(tap_command(&mut ui, 'd'), modules + 1, "Cmd+D duplicates");
     ui.set_clipboard(None);
-    ui.tap(
-        loom_ui_core::Key::Character('c'),
-        loom_ui_core::Modifiers::platform_shortcut(),
-    );
+    ui.tap(Key::Character('c'), Modifiers::platform_shortcut());
     assert!(ui.clipboard().is_some(), "Cmd+C copies");
     let before = ui.app().session.controller.graph().nodes().count();
     assert!(tap_command(&mut ui, 'x') < before, "Cmd+X cuts");
@@ -433,15 +398,7 @@ fn the_subscription_sends_what_it_hears_with_who_was_listening() {
     let ui = Ui::open("subtractive.ron");
     let window = window::Id::unique();
     let interaction = |event, status| Runtime::Interaction { window, event, status };
-    let escape = iced::Event::Keyboard(keyboard::Event::KeyPressed {
-        key: Key::Named(Named::Escape),
-        modified_key: Key::Named(Named::Escape),
-        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-        location: keyboard::Location::Standard,
-        modifiers: Modifiers::empty(),
-        text: None,
-        repeat: false,
-    });
+    let escape = crate::ui_test::key_press(Key::Escape, Modifiers::NONE, None, false);
     let events = vec![
         interaction(
             iced::Event::Window(window::Event::RedrawRequested(ui.now())),
@@ -459,18 +416,11 @@ fn the_subscription_sends_what_it_hears_with_who_was_listening() {
     assert_eq!(recipes.len(), 1, "one recipe for the input listener");
     let recipe = recipes.remove(0);
     let messages: Vec<Message> = block_on(recipe.stream(stream::iter(events).boxed()).collect());
-    let [
-        Message::Input {
-            event,
-            status,
-            listening,
-        },
-    ] = messages.as_slice()
-    else {
+    let [Message::Input { event, used, listening }] = messages.as_slice() else {
         panic!("only the key comes out: {messages:?}");
     };
     assert_eq!(*listening, ui.app().listening());
-    let routed = listening.route(event.clone(), *status);
+    let routed = listening.route(event, *used);
     assert!(
         matches!(
             routed.as_slice(),
@@ -486,20 +436,12 @@ fn the_subscription_sends_what_it_hears_with_who_was_listening() {
 fn the_injector_and_the_subscription_agree_for_each_overlay() {
     use iced_runtime::futures::futures::{StreamExt, executor::block_on, stream};
     use iced_runtime::futures::subscription::{Event as Runtime, into_recipes};
-    let escape = iced::Event::Keyboard(keyboard::Event::KeyPressed {
-        key: Key::Named(Named::Escape),
-        modified_key: Key::Named(Named::Escape),
-        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-        location: keyboard::Location::Standard,
-        modifiers: Modifiers::empty(),
-        text: None,
-        repeat: false,
-    });
+    let escape = crate::ui_test::key_press(Key::Escape, Modifiers::NONE, None, false);
     for owner in OWNERS {
         let mut ui = Ui::open("subtractive.ron");
         open_overlay(&mut ui, owner);
 
-        let injected = heard_messages(&escape, Status::Ignored, ui.app().listening());
+        let injected = ui.app().listeners().messages(&escape, Status::Ignored);
 
         let runtime = Runtime::Interaction {
             window: window::Id::unique(),

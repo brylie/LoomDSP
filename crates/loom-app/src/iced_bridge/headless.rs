@@ -321,6 +321,12 @@ impl Bridge<UiDriver> {
         })
     }
 
+    /// Delivers one window event, as the shell hands the runtime a close
+    /// request or a dropped file.
+    pub(crate) fn window_event(&mut self, event: loom_ui::WindowEvent) -> Pending {
+        self.step(|runtime, now, driver| runtime.handle(loom_ui::DriverEvent::Window(event), now, driver))
+    }
+
     /// Delivers one accessibility event and reports whether the runtime
     /// asked the shell for a frame with Iced's automatic redraw disabled.
     pub(crate) fn accessibility_turn(&mut self, event: loom_ui::AccessEvent) -> (Pending, bool) {

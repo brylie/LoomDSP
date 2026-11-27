@@ -868,17 +868,12 @@ pub(crate) struct ValueDraft {
 
 /// The inspector value field's Escape, heard whichever widget used it. It
 /// drops a draft.
-pub(crate) fn value_draft_event(
-    event: iced::Event,
-    _status: iced::event::Status,
-    _window: iced::window::Id,
-) -> Option<Message> {
-    use iced::keyboard::{self, key::Named};
+pub(crate) fn value_draft_event(event: &loom_ui_core::Event, _used: bool) -> Option<Message> {
+    use loom_ui_core::{Event, Key, KeyEvent};
     match event {
-        iced::Event::Keyboard(keyboard::Event::KeyPressed {
-            key: keyboard::Key::Named(Named::Escape),
-            ..
-        }) => Some(Message::Inspector(crate::inspector::Message::ValueDraftClear)),
+        Event::Key(KeyEvent::Pressed { key: Key::Escape, .. }) => {
+            Some(Message::Inspector(crate::inspector::Message::ValueDraftClear))
+        }
         _ => None,
     }
 }
@@ -887,25 +882,19 @@ pub(crate) fn value_draft_event(
 /// press, Escape, which a text field takes as giving up focus, and Tab.
 /// Ctrl+Tab is not a field's Tab: it moves between regions, and a focused
 /// text field does not take it (ui-layer.md, section 6, rule 7).
-pub(crate) fn text_focus_event(
-    event: iced::Event,
-    _status: iced::event::Status,
-    _window: iced::window::Id,
-) -> Option<Message> {
-    use iced::keyboard::{self, key::Named};
+pub(crate) fn text_focus_event(event: &loom_ui_core::Event, _used: bool) -> Option<Message> {
+    use loom_ui_core::{Event, Key, KeyEvent, PointerEvent};
     match event {
-        iced::Event::Keyboard(keyboard::Event::KeyPressed {
-            key: keyboard::Key::Named(Named::Tab),
+        Event::Key(KeyEvent::Pressed {
+            key: Key::Tab,
             modifiers,
             ..
-        }) if !modifiers.command() && !modifiers.control() && !modifiers.alt() => Some(Message::TextFieldTab {
-            backwards: modifiers.shift(),
+        }) if !modifiers.shortcut() && !modifiers.control && !modifiers.alt => Some(Message::TextFieldTab {
+            backwards: modifiers.shift,
         }),
-        iced::Event::Keyboard(keyboard::Event::KeyPressed {
-            key: keyboard::Key::Named(Named::Escape),
-            ..
-        })
-        | iced::Event::Mouse(iced::mouse::Event::ButtonPressed(_)) => Some(Message::TextFocusCheck),
+        Event::Key(KeyEvent::Pressed { key: Key::Escape, .. }) | Event::Pointer(PointerEvent::Pressed(_)) => {
+            Some(Message::TextFocusCheck)
+        }
         _ => None,
     }
 }

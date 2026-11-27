@@ -1,20 +1,21 @@
 use super::*;
+use loom_ui_core::Modifiers;
 
 /// Down and Up wrap at the ends, and from no highlight go to the first and
 /// the last item. Home and End go to the ends. Other keys move nothing, and
 /// an empty menu has nothing to move to.
 #[test]
 fn a_menu_step_wraps_and_goes_to_the_ends() {
-    let down = Key::Named(Named::ArrowDown);
-    let up = Key::Named(Named::ArrowUp);
+    let down = Key::Down;
+    let up = Key::Up;
     assert_eq!(step(None, 3, &down), Some(0));
     assert_eq!(step(None, 3, &up), Some(2));
     assert_eq!(step(Some(0), 3, &down), Some(1));
     assert_eq!(step(Some(2), 3, &down), Some(0), "Down wraps");
     assert_eq!(step(Some(0), 3, &up), Some(2), "Up wraps");
-    assert_eq!(step(Some(1), 3, &Key::Named(Named::Home)), Some(0));
-    assert_eq!(step(Some(1), 3, &Key::Named(Named::End)), Some(2));
-    assert_eq!(step(Some(1), 3, &Key::Named(Named::Tab)), None);
+    assert_eq!(step(Some(1), 3, &Key::Home), Some(0));
+    assert_eq!(step(Some(1), 3, &Key::End), Some(2));
+    assert_eq!(step(Some(1), 3, &Key::Tab), None);
     assert_eq!(step(None, 0, &down), None, "an empty menu");
 }
 
@@ -36,12 +37,10 @@ fn enter_with_no_item_focused_stops_at_the_menu() {
         by_key: true,
     }));
     app.overlays.set_menu_highlight(None);
-    let enter = keyboard::Event::KeyPressed {
-        key: Key::Named(Named::Enter),
-        modified_key: Key::Named(Named::Enter),
-        physical_key: keyboard::key::Physical::Unidentified(keyboard::key::NativeCode::Unidentified),
-        location: keyboard::Location::Standard,
-        modifiers: keyboard::Modifiers::empty(),
+    let enter = KeyEvent::Pressed {
+        key: Key::Enter,
+        code: loom_ui_core::Code::Other,
+        modifiers: Modifiers::NONE,
         text: None,
         repeat: false,
     };
@@ -86,11 +85,11 @@ fn the_keyed_tile_menu_moves_the_focus_and_closes_on_escape() {
         .collect();
     assert!(items.len() > 1, "a menu with more than one item");
     assert_eq!(ui.runtime().focused(), Some(&items[0]), "on its first item");
-    ui.tap(loom_ui_core::Key::Down, loom_ui_core::Modifiers::NONE);
+    ui.tap(Key::Down, Modifiers::NONE);
     ui.redraw();
     assert_eq!(ui.runtime().focused(), Some(&items[1]), "Down moved the focus");
     assert!(ui.runtime().focus_ring().is_some(), "with a ring, from the keys");
-    ui.tap(loom_ui_core::Key::Escape, loom_ui_core::Modifiers::NONE);
+    ui.tap(Key::Escape, Modifiers::NONE);
     ui.redraw();
     assert!(ui.app().overlays.tile_menu().is_none(), "Escape closed it");
     assert!(ui.app().canvas_has_keys(), "the selected tile has the keys again");

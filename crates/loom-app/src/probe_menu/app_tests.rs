@@ -2,6 +2,7 @@ use super::*;
 use crate::{App, Args, Message, tests};
 use loom_canvas::CanvasEvent;
 use loom_core::{InputRef, ModuleId, OutputRef};
+use loom_ui_core::{Key, Modifiers};
 use std::path::PathBuf;
 
 /// The subtractive example patch, with no audio.
@@ -133,22 +134,20 @@ fn escape_and_a_click_outside_close_the_menu() {
 
     open(&mut app, output, port);
     let press = |key| {
-        Message::Key(iced::keyboard::Event::KeyPressed {
+        Message::Key(loom_ui_core::KeyEvent::Pressed {
             key,
-            modified_key: iced::keyboard::Key::Unidentified,
-            physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
-            location: iced::keyboard::Location::Standard,
-            modifiers: iced::keyboard::Modifiers::default(),
+            code: loom_ui_core::Code::Other,
+            modifiers: Modifiers::NONE,
             text: None,
             repeat: false,
         })
     };
-    let _ = app.send(press(iced::keyboard::Key::Character("a".into())));
+    let _ = app.send(press(Key::Character('a')));
     assert!(
         app.overlays.probe_menu().is_some() && app.overlays.browser().is_none(),
         "A does not open the browser"
     );
-    let _ = app.send(press(iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape)));
+    let _ = app.send(press(Key::Escape));
     assert!(app.overlays.probe_menu().is_none());
 
     open(&mut app, output, port);
@@ -170,8 +169,8 @@ fn clipboard_keys_do_nothing_while_the_menu_is_open() {
     let _ = app.send(Message::Canvas(CanvasEvent::Select(vec![output.module])));
     let modules = app.session.controller.graph().nodes().count();
     open(&mut app, output, port);
-    let _ = app.send(tests::command_key("d"));
-    let _ = app.send(tests::command_key("x"));
+    let _ = app.send(tests::command_key('d'));
+    let _ = app.send(tests::command_key('x'));
     assert_eq!(app.session.controller.graph().nodes().count(), modules);
     assert!(app.overlays.probe_menu().is_some());
 }

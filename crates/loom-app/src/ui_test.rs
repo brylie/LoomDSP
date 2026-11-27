@@ -683,6 +683,16 @@ impl Ui {
         self.settle(vec![task]);
     }
 
+    /// A window event, as the shell hands the runtime one: a close request
+    /// or a dropped file. The app hears it through `App::window_event`, and
+    /// what comes of it runs as for a message.
+    #[cfg(test)]
+    pub(crate) fn window_event(&mut self, event: loom_ui::WindowEvent) -> Vec<Message> {
+        let task = self.bridge.window_event(event);
+        self.settle(vec![task]);
+        self.bridge.take_log()
+    }
+
     /// A redraw at a chosen time, so a test can pass a timer's deadline
     /// without sleeping.
     pub(crate) fn redraw_at(&mut self, at: Instant) -> Vec<Message> {
@@ -1031,6 +1041,19 @@ impl Ui {
             self.lay_out_panels();
             self.runtime().text_bounds(content)
         })
+    }
+}
+
+/// A key press of ours with `modifiers` held, typing no text, at a place
+/// nothing reads (`Code::Other`): what a unit test hands a key handler.
+#[cfg(test)]
+pub(crate) fn pressed(key: loom_ui_core::Key, modifiers: loom_ui_core::Modifiers) -> loom_ui_core::KeyEvent {
+    loom_ui_core::KeyEvent::Pressed {
+        key,
+        code: loom_ui_core::Code::Other,
+        modifiers,
+        repeat: false,
+        text: None,
     }
 }
 

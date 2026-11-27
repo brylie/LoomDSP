@@ -10,8 +10,7 @@
 //! pointer has no highlight until a key moves it.
 
 use crate::{App, Message, probe_menu, recent};
-use iced::keyboard::{self, Key, key::Named};
-use loom_ui_core::UiId;
+use loom_ui_core::{Key, KeyEvent, UiId};
 
 /// Which menu is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,27 +105,27 @@ fn tile_item_id(menu: &UiId, message: &Message) -> UiId {
 /// the last. `None` for a key that moves nothing.
 pub(crate) fn step(at: Option<usize>, len: usize, key: &Key) -> Option<usize> {
     let last = len.checked_sub(1)?;
-    match key.as_ref() {
-        Key::Named(Named::ArrowDown) => Some(at.map_or(0, |at| if at >= last { 0 } else { at + 1 })),
-        Key::Named(Named::ArrowUp) => Some(at.map_or(last, |at| if at == 0 { last } else { at - 1 })),
-        Key::Named(Named::Home) => Some(0),
-        Key::Named(Named::End) => Some(last),
+    match key {
+        Key::Down => Some(at.map_or(0, |at| if at >= last { 0 } else { at + 1 })),
+        Key::Up => Some(at.map_or(last, |at| if at == 0 { last } else { at - 1 })),
+        Key::Home => Some(0),
+        Key::End => Some(last),
         _ => None,
     }
 }
 
 /// True for a key a menu uses: the arrows up and down, Home, End, Enter,
 /// and Escape, pressed with no Command, Control, or Alt.
-pub(crate) fn is_menu_key(event: &keyboard::Event) -> bool {
-    let keyboard::Event::KeyPressed { key, modifiers, .. } = event else {
+pub(crate) fn is_menu_key(event: &KeyEvent) -> bool {
+    let KeyEvent::Pressed { key, modifiers, .. } = event else {
         return false;
     };
-    !modifiers.command()
-        && !modifiers.control()
-        && !modifiers.alt()
+    !modifiers.shortcut()
+        && !modifiers.control
+        && !modifiers.alt
         && matches!(
-            key.as_ref(),
-            Key::Named(Named::ArrowUp | Named::ArrowDown | Named::Home | Named::End | Named::Enter | Named::Escape)
+            key,
+            Key::Up | Key::Down | Key::Home | Key::End | Key::Enter | Key::Escape
         )
 }
 
@@ -209,21 +208,21 @@ impl App {
 
     /// A key a menu uses ([`is_menu_key`]) while a menu is open. It stops
     /// here, so it reaches neither the canvas nor a window behind the menu.
-    pub(crate) fn menu_key(&mut self, event: &keyboard::Event) {
-        let keyboard::Event::KeyPressed { key, .. } = event else {
+    pub(crate) fn menu_key(&mut self, event: &KeyEvent) {
+        let KeyEvent::Pressed { key, .. } = event else {
             return;
         };
         let Some(menu) = self.menu_model() else {
             return;
         };
-        match key.as_ref() {
-            Key::Named(Named::Escape) => {
+        match key {
+            Key::Escape => {
                 self.close_menu(menu.kind);
             }
             // Enter and Space on an item are the runtime's activation
             // (section 3, rule 4), which reaches the app as `App::clicked`.
             // Here Enter only stops at the menu, with no item focused.
-            Key::Named(Named::Enter) => {}
+            Key::Enter => {}
             _ => {
                 if let Some(at) = step(menu.highlight, menu.items.len(), key) {
                     self.menu_move(at);

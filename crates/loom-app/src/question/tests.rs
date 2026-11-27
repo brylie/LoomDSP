@@ -475,7 +475,7 @@ fn keys_under_the_question_never_reach_the_app() {
         assert!(
             !sent
                 .iter()
-                .any(|message| matches!(message, AppMessage::Key(iced::keyboard::Event::KeyPressed { .. }))),
+                .any(|message| matches!(message, AppMessage::Key(loom_ui_core::KeyEvent::Pressed { .. }))),
             "{key:?}: no key reached the app: {sent:?}"
         );
     }

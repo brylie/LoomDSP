@@ -3,13 +3,13 @@
 
 use super::tree::{WidgetIds, WidgetKey, canvas_id, tile_id, window_id};
 use super::*;
+use loom_ui_core::{Key, Modifiers, Point, Rect, Size, UiId};
 
 use crate::places::Places;
 use crate::{App, Message};
 use accesskit::{Action, ActionData, Node, NodeId, Role, TreeId};
 use loom_canvas::{Camera, CanvasEvent, CanvasView, ControlPart};
 use loom_core::ModuleNames as _;
-use loom_ui_core::{Point, Rect, Size, UiId};
 
 /// A screen reader's action at `at`, and the turn after it, where its
 /// messages run. True when it sent any.
@@ -1956,8 +1956,8 @@ fn a_click_on_another_tile_drops_focus_from_the_first() {
     assert_eq!(ui.app_mut().a11y_tree(&Places::default()).focus, window);
 
     let before = position(ui.app(), module, knob);
-    let _ = ui.key_down(loom_ui_core::Key::Up, false);
-    let _ = ui.key_up(loom_ui_core::Key::Up);
+    let _ = ui.key_down(Key::Up, false);
+    let _ = ui.key_up(Key::Up);
     assert_eq!(
         position(ui.app(), module, knob),
         before,
@@ -3539,7 +3539,7 @@ fn focus_on_a_knob_takes_the_keys_from_the_matrix() {
     ui.send(Message::A11y(Event::Action(request(Action::Focus, target, None))));
     let _ = ui.redraw();
     assert!(!ui.app().focus_in_matrix(), "the canvas has the keys now");
-    let _ = ui.tap(loom_ui_core::Key::Up, loom_ui_core::Modifiers::NONE);
+    let _ = ui.tap(Key::Up, Modifiers::NONE);
     assert_ne!(cutoff(ui.app()), before, "the arrow stepped the knob");
     assert_eq!(
         ui.app().session.matrix.selected,
@@ -3579,7 +3579,7 @@ fn focus_on_a_knob_closes_a_text_field_as_a_press_does() {
     assert!(ui.app().session.value_draft.is_none(), "its draft is done with");
     assert!((cutoff(ui.app()) - 1234.0).abs() < 1.0, "and committed");
     let before = cutoff(ui.app());
-    let _ = ui.tap(loom_ui_core::Key::Up, loom_ui_core::Modifiers::NONE);
+    let _ = ui.tap(Key::Up, Modifiers::NONE);
     assert_ne!(cutoff(ui.app()), before, "the arrow stepped the knob");
 }
 

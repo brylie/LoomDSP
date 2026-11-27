@@ -199,7 +199,7 @@ impl App {
         }
         let last = menu.items.len().checked_sub(1)?;
         let at = menu.highlight.unwrap_or(0);
-        let named = match key {
+        match key {
             Key::PageUp => {
                 return Some(Message::MenuMove {
                     to: at.saturating_sub(CABLE_PAGE_ROWS),
@@ -210,13 +210,9 @@ impl App {
                     to: (at + CABLE_PAGE_ROWS).min(last),
                 });
             }
-            Key::Up => iced::keyboard::key::Named::ArrowUp,
-            Key::Down => iced::keyboard::key::Named::ArrowDown,
-            Key::Home => iced::keyboard::key::Named::Home,
-            Key::End => iced::keyboard::key::Named::End,
-            _ => return None,
-        };
-        let to = super::step(menu.highlight, menu.items.len(), &iced::keyboard::Key::Named(named))?;
+            _ => {}
+        }
+        let to = super::step(menu.highlight, menu.items.len(), key)?;
         Some(Message::MenuMove { to })
     }
 

@@ -5,25 +5,28 @@
 
 use crate::preferences::PanicPref;
 use crate::{App, Message};
-use iced::keyboard::{self, Key};
+use loom_ui_core::{Event, Key, KeyEvent, Modifiers};
 
 /// Cmd+. on macOS and Ctrl+. elsewhere runs panic. It is read from every
 /// key event, taken by a widget or not, so it works with a text field
 /// focused, with a window open, and during a drag (panic.md, How to run
 /// it). A held key does not repeat it.
-pub fn key(event: iced::Event, _status: iced::event::Status, _window: iced::window::Id) -> Option<Message> {
-    let iced::Event::Keyboard(keyboard::Event::KeyPressed {
+pub fn key(event: &Event, _used: bool) -> Option<Message> {
+    let Event::Key(KeyEvent::Pressed {
         key, modifiers, repeat, ..
     }) = event
     else {
         return None;
     };
-    (is_panic_key(&key, modifiers) && !repeat).then_some(Message::Panic)
+    (is_panic_key(key, *modifiers) && !repeat).then_some(Message::Panic)
 }
 
-/// True for the panic shortcut: `.` with the platform's command key.
-pub fn is_panic_key(key: &Key, modifiers: keyboard::Modifiers) -> bool {
-    matches!(key.as_ref(), Key::Character(".")) && modifiers.command()
+/// True for the panic shortcut: `.` with the platform's shortcut key. The
+/// `.` is the character the layout gives the key with no modifier, so on a
+/// layout that types `.` only with Shift (French AZERTY), the key is not
+/// reachable; the toolbar's Panic button and the MIDI trigger still are.
+pub fn is_panic_key(key: &Key, modifiers: Modifiers) -> bool {
+    *key == Key::Character('.') && modifiers.shortcut()
 }
 
 impl App {

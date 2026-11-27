@@ -7,12 +7,14 @@
 //! what does not. The real window, the control channel's `pointer::Injector`, and
 //! the headless `Ui` all go through [`heard_messages`] or the same two listeners,
 //! so a test sees what the app does.
+//!
+//! The listeners hear `loom-ui-core` events. Iced still delivers them until
+//! the window leaves Iced (plan step P4), and `subscriptions::Listeners`
+//! converts each one once on the way in.
 
-use crate::{App, Message, panic, recent, settings};
+use crate::{App, Message, panic, settings};
 use crate::{controls, subscriptions};
-use iced::event::Status;
-use iced::keyboard::{self, Key, key::Named};
-use iced::{mouse, window};
+use loom_ui_core::{Event, Key, KeyEvent, PointerEvent};
 
 /// Who the keys and clicks over the window belong to. When two are open, the
 /// earlier one has the input. From `Question` down to `Preferences` this is the
@@ -49,7 +51,7 @@ pub(crate) enum InputOwner {
 
 /// A listener: what an event becomes, if anything. Each one also gets whether
 /// a widget used the event.
-type Listener = fn(iced::Event, Status, window::Id) -> Option<Message>;
+type Listener = fn(&Event, bool) -> Option<Message>;
 
 /// Which listeners hear events. It is read before an event arrives and travels
 /// with the event's message, because widgets act on an event first. Without
@@ -85,8 +87,9 @@ impl Listening {
 /// An event the input listener heard, and whether a widget used it.
 #[derive(Debug, Clone)]
 pub(crate) struct Heard {
-    event: iced::Event,
-    status: Status,
+    event: Event,
+    /// A widget used the event.
+    used: bool,
 }
 
 impl Heard {
@@ -94,7 +97,7 @@ impl Heard {
     pub(crate) fn message(self, listening: Listening) -> Message {
         Message::Input {
             event: self.event,
-            status: self.status,
+            used: self.used,
             listening,
         }
     }
@@ -108,29 +111,29 @@ impl Heard {
 /// queued for the old one is lost. That is rare: the window is usually very
 /// short, though longer while the main thread is busy, and a person just presses
 /// the key again. What must never be lost goes through [`always_event`].
-pub(crate) fn input_event(event: iced::Event, status: Status, _window: window::Id) -> Option<Heard> {
-    let used = matches!(
-        event,
-        iced::Event::Keyboard(_) | iced::Event::Mouse(mouse::Event::ButtonPressed(_))
-    );
-    used.then_some(Heard { event, status })
+pub(crate) fn input_event(event: &Event, used: bool) -> Option<Heard> {
+    let heard = matches!(event, Event::Key(_) | Event::Pointer(PointerEvent::Pressed(_)));
+    heard.then(|| Heard {
+        event: event.clone(),
+        used,
+    })
 }
 
 /// The listener for what works whoever has the input: the panic key
-/// (panic.md), and files dropped on the window. Its subscription never restarts,
-/// so it never loses one of these.
-pub(crate) fn always_event(event: iced::Event, status: Status, window: window::Id) -> Option<Message> {
-    panic::key(event.clone(), status, window).or_else(|| recent::drop_event(event, status, window))
+/// (panic.md). Its subscription never restarts, so it never loses one.
+/// A file dropped on the window is a window event, which the runtime hands
+/// the app (`subscriptions::window_message`).
+pub(crate) fn always_event(event: &Event, used: bool) -> Option<Message> {
+    panic::key(event, used)
 }
 
 /// What the two listeners send for an event, for the paths that hand events on
 /// themselves, through `subscriptions::Listeners`.
-pub(crate) fn heard_messages(event: &iced::Event, status: Status, listening: Listening) -> Vec<Message> {
-    let window = window::Id::unique();
-    input_event(event.clone(), status, window)
+pub(crate) fn heard_messages(event: &Event, used: bool, listening: Listening) -> Vec<Message> {
+    input_event(event, used)
         .map(|heard| heard.message(listening))
         .into_iter()
-        .chain(always_event(event.clone(), status, window))
+        .chain(always_event(event, used))
         .collect()
 }
 
@@ -161,26 +164,26 @@ impl Listening {
     }
 
     /// The messages an event becomes, in the order they are applied.
-    pub(crate) fn route(self, event: iced::Event, status: Status) -> Vec<Message> {
+    pub(crate) fn route(self, event: &Event, used: bool) -> Vec<Message> {
         self.rows()
             .into_iter()
             .filter(|(on, _)| *on)
-            .filter_map(|(_, listener)| listener(event.clone(), status, window::Id::unique()))
+            .filter_map(|(_, listener)| listener(event, used))
             .collect()
     }
 }
 
 /// A key no widget used goes to the app, as `keyboard::listen` would send it.
-fn app_key(event: iced::Event, status: Status, _window: window::Id) -> Option<Message> {
+fn app_key(event: &Event, used: bool) -> Option<Message> {
     match event {
-        iced::Event::Keyboard(
-            key @ keyboard::Event::KeyPressed {
-                key: Key::Named(Named::Tab),
+        Event::Key(
+            key @ KeyEvent::Pressed {
+                key: Key::Tab,
                 modifiers,
                 ..
             },
-        ) if modifiers.control() => Some(Message::Key(key)),
-        iced::Event::Keyboard(key) if status == Status::Ignored => Some(Message::Key(key)),
+        ) if modifiers.control => Some(Message::Key(key.clone())),
+        Event::Key(key) if !used => Some(Message::Key(key.clone())),
         _ => None,
     }
 }
@@ -243,11 +246,11 @@ impl App {
 
     /// A key no widget used while an overlay has the input. An overlay's keys
     /// stop here, so none reaches the canvas or a window behind it.
-    pub(crate) fn overlay_key(&mut self, event: &keyboard::Event) {
-        let keyboard::Event::KeyPressed { key, modifiers, .. } = event else {
+    pub(crate) fn overlay_key(&mut self, event: &KeyEvent) {
+        let KeyEvent::Pressed { key, modifiers, .. } = event else {
             return;
         };
-        let escape = *key == Key::Named(Named::Escape);
+        let escape = *key == Key::Escape;
         match self.input_owner() {
             // These have listeners or widgets of their own, and the menus
             // their own keys (`menus.rs`), which `update` gives them first.
@@ -261,9 +264,9 @@ impl App {
             | InputOwner::Canvas => {}
             InputOwner::Chooser if escape => self.overlays.chooser = None,
             InputOwner::Chooser => {}
-            InputOwner::Preferences => match key.as_ref() {
-                Key::Named(Named::Escape) => self.preferences(settings::Message::Close),
-                Key::Character(",") if modifiers.command() => self.toggle_preferences(),
+            InputOwner::Preferences => match key {
+                Key::Escape => self.preferences(settings::Message::Close),
+                Key::Character(',') if modifiers.shortcut() => self.toggle_preferences(),
                 _ => {}
             },
         }
@@ -276,12 +279,8 @@ impl App {
 /// message still redraws, so it counts as input for `--measure-idle`.
 pub(crate) fn route(message: Message) -> Vec<Message> {
     match message {
-        Message::Input {
-            event,
-            status,
-            listening,
-        } => {
-            let messages = listening.route(event, status);
+        Message::Input { event, used, listening } => {
+            let messages = listening.route(&event, used);
             if messages.is_empty() {
                 loom_canvas::stats::request_frame(loom_canvas::stats::FrameCause::Input);
             }

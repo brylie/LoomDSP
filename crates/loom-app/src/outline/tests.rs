@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_test::{Ui, key_press};
+use crate::ui_test::Ui;
 use loom_ui_core::{Key, Modifiers};
 
 const NONE: Modifiers = Modifiers::NONE;
@@ -16,11 +16,16 @@ fn focused(ui: &mut Ui) -> UiId {
 
 /// Pushes a key by position with the letter a particular layout gave it.
 fn physical(ui: &mut Ui, code: Code, letter: char, modifiers: Modifiers) {
-    let mut press = key_press(Key::Character(letter), modifiers, Some(&letter.to_string()), false);
-    if let iced::Event::Keyboard(keyboard::Event::KeyPressed { physical_key, .. }) = &mut press {
-        *physical_key = Physical::Code(code);
-    }
-    ui.step(&[press]);
+    let press = KeyEvent::Pressed {
+        key: Key::Character(letter),
+        code,
+        modifiers,
+        repeat: false,
+        text: Some(letter.to_string()),
+    };
+    ui.step(&[iced::Event::Keyboard(loom_canvas::iced_convert::key_event_to_iced(
+        &press, modifiers,
+    ))]);
 }
 
 /// The subtractive patch reads in signal order, with monitors and Transport at the end.

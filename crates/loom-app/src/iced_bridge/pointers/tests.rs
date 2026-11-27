@@ -212,7 +212,7 @@ fn shift_tab_from_nothing_enters_our_last_stop_and_not_iced() {
 }
 
 /// The keys Iced heard, as the app's key listener reports them.
-fn iced_heard(messages: &[Message]) -> Vec<keyboard::Event> {
+fn iced_heard(messages: &[Message]) -> Vec<loom_ui_core::KeyEvent> {
     messages
         .iter()
         .filter_map(|m| match m {
@@ -223,11 +223,10 @@ fn iced_heard(messages: &[Message]) -> Vec<keyboard::Event> {
 }
 
 /// True for a press of `key` among what Iced heard.
-fn pressed(heard: &[keyboard::Event], key: &Key) -> bool {
-    let key = key.to_iced();
+fn pressed(heard: &[loom_ui_core::KeyEvent], key: &Key) -> bool {
     heard
         .iter()
-        .any(|event| matches!(event, keyboard::Event::KeyPressed { key: got, .. } if *got == key))
+        .any(|event| matches!(event, loom_ui_core::KeyEvent::Pressed { key: got, .. } if got == key))
 }
 
 /// Only the key the runtime took is kept from Iced. A Shift+Tab the runtime
@@ -245,7 +244,7 @@ fn only_the_key_the_runtime_took_is_kept_from_iced() {
     let mut ui = ui_with(bar);
     let heard = iced_heard(&ui.step(&[
         key_press(tab, shift, None, false),
-        iced::Event::Keyboard(keyboard::Event::ModifiersChanged(keyboard::Modifiers::SHIFT)),
+        iced::Event::Keyboard(keyboard::Event::ModifiersChanged(Modifiers::SHIFT.to_iced())),
         key_press(x, none, Some("x"), false),
     ]));
     assert_eq!(ui.runtime().focused(), Some(&go()), "the runtime took the Tab");
@@ -253,7 +252,7 @@ fn only_the_key_the_runtime_took_is_kept_from_iced() {
     assert!(
         heard
             .iter()
-            .any(|event| matches!(event, keyboard::Event::ModifiersChanged(_))),
+            .any(|event| matches!(event, loom_ui_core::KeyEvent::ModifiersChanged(_))),
         "{heard:?}"
     );
     assert!(pressed(&heard, &x), "{heard:?}");
@@ -337,10 +336,9 @@ fn a_key_our_field_takes_is_kept_from_iced() {
         crate::ui_test::key_released(backspace, none),
     ]));
     let released = |key: &Key| {
-        let key = key.to_iced();
         heard
             .iter()
-            .any(|event| matches!(event, keyboard::Event::KeyReleased { key: got, .. } if *got == key))
+            .any(|event| matches!(event, loom_ui_core::KeyEvent::Released { key: got, .. } if got == key))
     };
     assert!(released(&a) && released(&backspace), "{heard:?}");
     assert_eq!(ui.runtime().focused(), Some(&go()), "a release moves no focus");

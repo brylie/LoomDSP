@@ -1448,23 +1448,21 @@ fn with_no_audio_a_choice_is_only_saved() {
 
 #[test]
 fn the_window_opens_and_closes_with_its_shortcut_and_escape() {
-    use iced::keyboard::{Event, Key, Modifiers, key::Named};
+    use loom_ui_core::{Key, Modifiers};
     let dir = folder("keys");
     let mut app = start(args(&dir), &two_devices());
     let press = |key: Key, modifiers: Modifiers| {
-        crate::Message::Key(Event::KeyPressed {
-            key: key.clone(),
-            modified_key: key,
-            physical_key: iced::keyboard::key::Physical::Unidentified(iced::keyboard::key::NativeCode::Unidentified),
-            location: iced::keyboard::Location::Standard,
+        crate::Message::Key(loom_ui_core::KeyEvent::Pressed {
+            key,
+            code: loom_ui_core::Code::Other,
             modifiers,
             text: None,
             repeat: false,
         })
     };
-    let _ = app.send(press(Key::Character(",".into()), Modifiers::COMMAND));
+    let _ = app.send(press(Key::Character(','), Modifiers::platform_shortcut()));
     assert!(app.overlays.preferences().is_some());
-    let _ = app.send(press(Key::Named(Named::Escape), Modifiers::empty()));
+    let _ = app.send(press(Key::Escape, Modifiers::NONE));
     assert!(app.overlays.preferences().is_none());
 }
 
