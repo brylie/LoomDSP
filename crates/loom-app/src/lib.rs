@@ -2568,7 +2568,10 @@ impl App {
                     (_, Some('y')) if !cfg!(target_os = "macos") => {
                         self.pending_shortcut = Some(shortcut::Shortcut::Redo)
                     }
-                    (_, Some(',')) => self.toggle_preferences(),
+                    // Cmd+, or Ctrl+, with no Shift: on a French layout,
+                    // Shift with the comma key types `?`, which is the help
+                    // key (ui-layer.md, section 6, rule 13).
+                    (_, Some(',')) if !modifiers.shift => self.toggle_preferences(),
                     // Ctrl+G makes a sub-patch; with Shift it dissolves one.
                     (_, Some('g')) if modifiers.shift => {
                         self.pending_shortcut = Some(shortcut::Shortcut::DissolveSubpatch)
