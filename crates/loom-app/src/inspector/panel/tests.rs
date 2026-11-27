@@ -1029,6 +1029,61 @@ fn leaving_a_row_that_went_clears_the_drop_row() {
     assert!(ui.app().inspector_hovered(&gone, true).is_none(), "it takes no drop");
 }
 
+/// The column's content has equal margins left and right, with the
+/// scrollbar's gutter kept whether it scrolls or not, so nothing moves
+/// sideways when a short window makes it scroll (Brylie's decision,
+/// 2026-11-27; ui-layer.md, section 5, rule 12).
+#[test]
+fn the_column_margins_match_and_hold_when_it_scrolls() {
+    let margins = |ui: &mut Ui| {
+        let _ = ui.redraw();
+        let column = ui.runtime().bounds(&inspector_id()).expect("the column");
+        let field = ui.runtime().bounds(&authors_part()).expect("Authors");
+        (
+            field.x - column.x,
+            (column.x + column.width) - (field.x + field.width),
+            field.width,
+        )
+    };
+    let mut ui = patch_info();
+    let before = margins(&mut ui);
+    let (left, right, _) = before;
+    assert_eq!(left, right, "left {left}, right {right}");
+    ui.resize(1000.0, 260.0);
+    let _ = ui.redraw();
+    let column = ui.runtime().bounds(&inspector_id()).expect("the column");
+    let shortcuts = ui
+        .runtime()
+        .bounds(&ids::part(&ids::patch(), "shortcuts"))
+        .expect("Keyboard shortcuts");
+    assert!(
+        shortcuts.y + shortcuts.height > column.y + column.height,
+        "the short window makes the column scroll: {shortcuts:?} in {column:?}"
+    );
+    assert_eq!(margins(&mut ui), before, "nothing moved sideways");
+
+    // Preferences, the other container that pads its content inside its
+    // scroll, matches too: its Output safety group starts at the content's
+    // left edge, and its "Your name" field ends at the right one.
+    let mut ui = patch_info();
+    ui.tap(Key::Character(','), Modifiers::platform_shortcut());
+    let _ = ui.redraw();
+    let body = ui
+        .runtime()
+        .bounds(&crate::settings::panel::body_id())
+        .expect("the body");
+    let safety = ui
+        .runtime()
+        .bounds(&crate::settings::panel::part_id("safety"))
+        .expect("Output safety");
+    let field = ui
+        .runtime()
+        .bounds(&crate::settings::panel::author_part())
+        .expect("Your name");
+    let (left, right) = (safety.x - body.x, (body.x + body.width) - (field.x + field.width));
+    assert_eq!(left, right, "Preferences: left {left}, right {right}");
+}
+
 /// A double-click on a parameter's slider resets the parameter to its
 /// default, as the runtime's slider rule says (ui-layer.md, section 5,
 /// rule 16), from anywhere on the track.

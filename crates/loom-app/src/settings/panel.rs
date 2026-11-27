@@ -353,7 +353,8 @@ fn build(panel: &Panel) -> Element {
 
     let content = Element::column(body)
         .spacing(12.0)
-        .padding(loom_ui::Padding::symmetric(0.0, 12.0))
+        // Its side margins match beside the scrollbar's kept gutter.
+        .padding(style::scroll_padding(0.0, 12.0))
         .width(Length::FILL);
     // The scroll keys reach it from Close too, which is above it, as in
     // help (section 5, rule 12).

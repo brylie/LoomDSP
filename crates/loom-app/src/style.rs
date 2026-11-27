@@ -403,6 +403,28 @@ pub const SCROLLBAR_RADIUS: f32 = 3.0;
 /// drawn (WCAG 2.2, 1.4.11). A test checks it.
 pub const SCROLLBAR_THUMB: loom_ui_core::Color = QUIET;
 
+/// The room a scroll container keeps at its right for its bar, scrolling
+/// or not, in logical pixels: the bar and the inset on either side of it
+/// (ui-layer.md, section 5, rule 12). A container cuts its content's right
+/// padding by this, so its margins match (Brylie's decision, 2026-11-27).
+pub fn scroll_gutter() -> f32 {
+    let scroll = scroll();
+    scroll.width + 2.0 * scroll.inset
+}
+
+/// The padding for content inside a scroll container: `vertical` above
+/// and below, `horizontal` on the left, and on the right `horizontal` less
+/// the gutter the container keeps, so the content's margins match whether
+/// it scrolls or not (Brylie's decision, 2026-11-27).
+pub fn scroll_padding(vertical: f32, horizontal: f32) -> loom_ui::Padding {
+    loom_ui::Padding {
+        top: vertical,
+        right: (horizontal - scroll_gutter()).max(0.0),
+        bottom: vertical,
+        left: horizontal,
+    }
+}
+
 /// How a scroll container of the app's own UI layer looks and moves: the
 /// scrollbar tokens, the focus ring's reach kept as room around the
 /// content, and one line of body text for its keys and the wheel.
