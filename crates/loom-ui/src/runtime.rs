@@ -601,8 +601,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// started with. When the input layer rose above the element that had
     /// the focus, that element is saved. When the layer dropped, every
     /// overlay above it is gone: the focus saved from the layer it is now
-    /// takes the focus again, with the ring it had, if nothing of the input
-    /// layer has it. An element that has gone since is moved to its panel's
+    /// takes the focus again, with the ring it had, while the focus is
+    /// still on a closing overlay, on an element that went, or nowhere. A
+    /// focus an effect of this turn put on an element below is kept. An element that has gone since is moved to its panel's
     /// first stop by the next layout (`Focus::settle`). Returns true when
     /// the focus changed.
     fn keep_focus_across_overlays(&mut self, before: (Layer, Option<UiId>, bool)) -> bool {
@@ -631,12 +632,16 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let Some((_, id, ring)) = back else {
             return false;
         };
-        let held = self
+        // The layers that closed are the overlays above the input layer
+        // now: the canvas and the panels stay open under every overlay.
+        let closed_above = now.max(Layer::Panels);
+        // The focus is on the closing overlay, on an element that went,
+        // or nowhere. Anywhere else, an effect of this turn put it there.
+        let on_closing = self
             .focus
             .id()
-            .and_then(|focused| self.panels.layer_of(focused))
-            .is_some_and(|layer| layer == now);
-        if held || !self.panels.stops().contains(&id) && self.panels.panel_of(&id).is_none() {
+            .is_none_or(|focused| self.panels.layer_of(focused).is_none_or(|layer| layer > closed_above));
+        if !on_closing || !self.panels.stops().contains(&id) && self.panels.panel_of(&id).is_none() {
             return false;
         }
         self.release_target();

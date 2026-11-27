@@ -43,6 +43,9 @@ enum Message {
     Menu(UiId, bool),
     /// Turn the menu's item off, keeping it a stop.
     OffItem,
+    /// Close the overlay, back to the canvas's input layer, and focus this
+    /// element, in one update.
+    CloseAndFocus(UiId),
 }
 
 /// An app that shows a bar of two buttons in the panels layer, across the
@@ -79,6 +82,10 @@ impl App for Layers {
             Message::Reports(on) => self.reports = *on,
             Message::Canvas(on) => self.canvas = *on,
             Message::OffItem => self.off_item = true,
+            Message::CloseAndFocus(id) => {
+                self.input = Layer::Canvas;
+                effects = Effects::focus(id.clone());
+            }
             Message::Refocus(ids) => {
                 for id in ids {
                     effects = effects.and(Effects::focus(id.clone()));
@@ -1358,6 +1365,28 @@ fn hovering_a_menu_item_focuses_it_without_a_ring() {
     bar.send(Message::Input(Layer::Canvas));
     bar.step(at(5.0, 5.0, PointerEvent::Moved));
     assert_eq!(bar.runtime().focused(), None, "a button takes no focus from hover");
+}
+
+/// An overlay that closes in the same update as a focus effect onto
+/// another element below it leaves the focus there: the focus it saved
+/// goes back only when the focus is still on the closing overlay (section
+/// 6, rule 4). The toolbar is in the Panels layer, above the canvas's
+/// input layer, and still counts as below the overlay.
+#[test]
+fn closing_an_overlay_keeps_a_focus_its_update_moved() {
+    let (a, b, item) = (
+        UiId::panel("bar").with("a"),
+        UiId::panel("bar").with("b"),
+        UiId::panel("menu").with("item"),
+    );
+    let mut menu = harness(true, Routed::Passed);
+    menu.step(tab_key());
+    menu.step(tab_key());
+    assert_eq!(menu.runtime().focused(), Some(&a));
+    menu.send(Message::Input(Layer::Overlays));
+    menu.send(Message::Refocus(vec![item]));
+    menu.send(Message::CloseAndFocus(b.clone()));
+    assert_eq!(menu.runtime().focused(), Some(&b), "the effect's focus is kept");
 }
 
 /// A turned-off menu item that stays a stop (section 6, rule 2, as the
