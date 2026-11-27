@@ -134,6 +134,18 @@ pub const CHOOSER_HEIGHT: f32 = 720.0;
 /// (ui-layer.md, section 6, rule 9).
 pub const RADIO_SPACING: f32 = 10.0;
 
+/// The room between an inspector port list's headings and its groups, in
+/// logical pixels.
+pub const PORT_SPACING: f32 = 2.0;
+
+/// The room between two ports' lines in the inspector's port list, in
+/// logical pixels: about 18 px from one port to the next (#901).
+pub const PORT_LINE_SPACING: f32 = 4.0;
+
+/// The room above a port group's heading after the first, in logical
+/// pixels, so Inputs and Outputs read as two groups (#901).
+pub const PORT_GROUP_GAP: f32 = 8.0;
+
 /// How far a part that belongs to a radio sits in from the radio's mark,
 /// so it lines up with the radio's label: the mark's width, 14, and the
 /// gap after it, 6 (`loom-ui`'s `Element::radio`).

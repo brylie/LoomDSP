@@ -168,14 +168,32 @@ fn ports(m: &ModuleRows, looks: Looks) -> Element {
         .access(Access::label(words).description(port.description.clone()));
         groups.last_mut().expect("pushed above").1.push(line);
     }
-    let columns = groups.into_iter().flat_map(|(direction, lines)| {
+    // About 18 px from one port to the next, and 8 px above a group's
+    // heading after the first, so the groups read apart (#901).
+    let columns = groups.into_iter().enumerate().flat_map(|(at, (direction, lines))| {
         let heading = if direction == "Input" { "Inputs" } else { "Outputs" };
+        let above = if at == 0 {
+            0.0
+        } else {
+            style::PORT_GROUP_GAP - style::PORT_SPACING
+        };
         [
-            Element::text(heading, style::SMALL_TEXT).colour(looks.quiet),
-            col(lines).width(Length::FILL).key(direction),
+            Element::text(heading, style::SMALL_TEXT)
+                .colour(looks.quiet)
+                .padding(Padding {
+                    top: above,
+                    ..Padding::all(0.0)
+                }),
+            col(lines)
+                .spacing(style::PORT_LINE_SPACING)
+                .width(Length::FILL)
+                .key(direction),
         ]
     });
-    col(columns).spacing(2.0).width(Length::FILL).key("port")
+    col(columns)
+        .spacing(style::PORT_SPACING)
+        .width(Length::FILL)
+        .key("port")
 }
 
 /// One parameter's row (`<row>` is its UI ID): its label line, with the

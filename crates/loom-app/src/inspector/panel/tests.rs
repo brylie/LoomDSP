@@ -1052,6 +1052,38 @@ fn an_exposed_rows_field_stays_on_its_label_line() {
     );
 }
 
+/// The port list's lines are about 18 px apart, and the Outputs group
+/// sits 8 px further down than its lines' spacing, so the two groups read
+/// apart (#901).
+#[test]
+fn the_port_lists_groups_read_apart() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    let _ = ui.redraw();
+    let crate::inspector::Inspector::Module(module) = ui.app().inspector_model() else {
+        panic!("a module's inspector");
+    };
+    let line = |ui: &Ui, direction: &str, label: &str| {
+        let id = ids::panel(4).with("port").with(direction).with(label);
+        ui.runtime().bounds(&id).unwrap_or_else(|| panic!("{id} is laid out"))
+    };
+    let inputs: Vec<_> = module.ports.iter().filter(|p| p.direction == "Input").collect();
+    let outputs: Vec<_> = module.ports.iter().filter(|p| p.direction == "Output").collect();
+    assert!(
+        inputs.len() >= 2 && !outputs.is_empty(),
+        "the filter has inputs and outputs"
+    );
+    let (first, second) = (line(&ui, "Input", inputs[0].label), line(&ui, "Input", inputs[1].label));
+    let pitch = second.y - first.y;
+    assert!((17.0..=19.0).contains(&pitch), "about 18 px from line to line: {pitch}");
+    let last_in = line(&ui, "Input", inputs[inputs.len() - 1].label);
+    let first_out = line(&ui, "Output", outputs[0].label);
+    // Between the groups: 8 px, the heading's own line, and the column's
+    // 2 px around it.
+    let between = first_out.y - (last_in.y + last_in.height);
+    assert!(between >= 8.0 + first.height, "the groups read apart: {between}");
+}
+
 /// The column's content has equal margins left and right, with the
 /// scrollbar's gutter kept whether it scrolls or not, so nothing moves
 /// sideways when a short window makes it scroll (Brylie's decision,
