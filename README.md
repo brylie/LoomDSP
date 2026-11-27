@@ -49,7 +49,7 @@ The goal is bigger than a synth. LoomDSP is for **living musical systems**: patc
 | M3. Living systems | Front panels, presets, and a locked performance mode first. Then loopers, sequencers, scenes, counters, and logic: patches that arrange themselves on stage. |
 | M4. Sharing | Self-contained patch files, a patch library, and a module SDK for community modules. |
 
-Plugin export (CLAP, VST3) and a browser version may come later. See the full [roadmap](docs/product/roadmap.md).
+Plugin and standalone export (CLAP, VST3) and a browser version come after M3. They will ship: the roadmap sets when, not whether. See the full [roadmap](docs/product/roadmap.md).
 
 ## What you can do today
 
