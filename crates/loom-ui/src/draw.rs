@@ -665,10 +665,17 @@ fn paint_slider(bounds: Rect, slider: &crate::slider::Slider, painter: &mut dyn 
             Size::new((to - from).abs(), TRACK),
         )
     };
-    painter.quad(Quad::filled(track(left, left + length), style.track, TRACK / 2.0));
+    // The track runs across the whole element, so it starts at the left
+    // edge the rows around it share; only the thumb's travel is inset, so
+    // the thumb stays inside at either end.
+    painter.quad(Quad::filled(
+        track(bounds.x, bounds.x + bounds.width),
+        style.track,
+        TRACK / 2.0,
+    ));
     let thumb = thumb_centre(bounds, slider.position());
     let start = match slider.fill() {
-        Fill::FromMin => left,
+        Fill::FromMin => bounds.x,
         Fill::FromMiddle => left + length / 2.0,
     };
     painter.quad(Quad::filled(track(start, thumb.x), style.primary, TRACK / 2.0));
