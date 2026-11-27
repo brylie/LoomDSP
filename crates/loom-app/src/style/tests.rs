@@ -58,7 +58,7 @@ fn active_control_marks_and_family_tints_meet_contrast() {
     assert!(contrast_ratio(canvas.text, canvas.control_track) >= loom_canvas::MIN_TEXT_CONTRAST);
 }
 
-/// The check box look both toolkits read (`check_look`) meets 3:1 on both
+/// The check box look the runtime reads (`check_look`) meets 3:1 on both
 /// panels (WCAG 2.2, SC 1.4.11): an off box's edge and an on box's fill
 /// against the panel, the mark against the fill, and the focus ring around
 /// either against the panel.

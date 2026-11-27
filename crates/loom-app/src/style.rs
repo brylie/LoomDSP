@@ -192,12 +192,11 @@ pub const QUIET: iced::Color = iced::Color::from_rgb(0.66, 0.69, 0.75);
 /// An unchecked switch's edge, and a choice's border on hover.
 pub const CONTROL_EDGE: iced::Color = QUIET;
 
-/// How a check box looks, one token for both toolkits (visual-system.md,
-/// Check boxes): off, a 1 px edge in [`CONTROL_EDGE`]; on, filled in the
-/// canvas's control value colour, with its mark in the canvas background,
-/// so a checked box reads as a set value, as #856 made it for #463's
-/// contrast. Iced's boxes ([`check_box`]) and the runtime's
-/// (`PanelStyle::check`) read it; a test checks each pair for 3:1.
+/// How a check box looks (visual-system.md, Check boxes): off, a 1 px edge
+/// in [`CONTROL_EDGE`]; on, filled in the canvas's control value colour,
+/// with its mark in the canvas background, so a checked box reads as a set
+/// value, as #856 made it for #463's contrast. The runtime's boxes read it
+/// through `PanelStyle::check`; a test checks each pair for 3:1.
 pub fn check_look() -> loom_ui::paint::CheckLook {
     use loom_canvas::iced_convert::ToCore as _;
     let palette = loom_canvas::Palette::default();
