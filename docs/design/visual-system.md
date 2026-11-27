@@ -63,7 +63,7 @@ A disabled button keeps its role's shape and is drawn dimmed, so it reads as una
 
 **Status:** Implemented, M2 (Brylie's decisions of 2026-11-18, [plan for leaving Iced](../dev/leaving-iced-plan.md), step 3.2, row 2). The tokens are `style::PRIMARY`, `SECONDARY`, `DANGER`, and `PLAIN`, read through `style::Role`.
 
-Each role has a look for each state a button can be in: normal, hovered (the pointer is over it), pressed (a press on it is held, by the pointer or by Space), and off (turned off). The tokens are ours, in `style.rs`, as `loom-ui-core` colours, and they are **the one source for every button**: `loom-ui`'s buttons read them. Iced's role style functions (`style::primary`, `secondary`, `plain`), which mapped Iced's button states to these tokens, went with the last of Iced's buttons, the matrix's (plan 3.2, row 4e, commit 3, 2026-11-27). The states are named for what our buttons need. The values start from the dark theme's palette, whose panel background is `#22242A`.
+Each role has a look for each state a button can be in: normal, hovered (the pointer is over it), pressed (a press on it is held, by the pointer or by Space), and off (turned off). The tokens are ours, in `style.rs`, as `loom-ui-core` colours, and they are **the one source for every button**: `loom-ui`'s buttons read them. Iced's role style functions (`style::primary`, `secondary`, `plain`), which mapped Iced's button states to these tokens, went with the last of Iced's buttons, the matrix's (plan 3.2, row 4e, commit 3, 2026-11-27). The states are named for what our buttons need. The values are set on the panel fill, `style::PANEL_FILL` (`#22242A`), one of the palette tokens below.
 
 | Role | State | Fill | Text | Text on fill | Fill on background | Fill against normal |
 |---|---|---|---|---|---|---|
@@ -86,7 +86,7 @@ Each role has a look for each state a button can be in: normal, hovered (the poi
 
 Ratios are by the WCAG 2.2 formula (`loom_canvas::contrast_ratio`), against the panel background. The filled roles have a 2 px radius and no border; plain has neither.
 
-- **One table, for the one theme.** The app has one theme, a dark one (`boot.rs`, `Theme::custom`, panel background `#22242A`), so the tokens are set for that background and every ratio is measured on it. A light theme (FR-PANEL-06) needs a table of its own, checked the same way.
+- **One table, for the one theme.** The app has one theme, a dark one: the palette tokens in `style.rs` (below), with the panel fill `#22242A`. The tokens are set for that background and every ratio is measured on it. A light theme (FR-PANEL-06) needs a table of its own, checked the same way.
 - **Text is at least 4.5:1 in every state** (WCAG 2.2, SC 1.4.3). **A turned-on fill of primary, secondary, or danger is at least 3:1 against the background** (SC 1.4.11), so the button's edge shows. *Why:* the toolbar is read at a glance on a dark stage.
 - **Each state stands apart from normal: our own rule.** For primary, secondary, and danger, the hovered and the pressed fills are each at least 1.3:1 against the normal fill, and plain's hovered fill at least 1.5:1 against the background it sits on, with pressed a further step. WCAG asks nothing of this. *Why:* a step most people cannot see is a lost state: a press would look like nothing happened.
 - **Pressed may change the text colour.** A filled role's pressed fill is dark enough that its text turns light (secondary and danger), so the text keeps 4.5:1.
@@ -197,6 +197,26 @@ Kept problems survive opening another patch, except as the table says.
 
 - **Disabled toolbar buttons say why.** Hold note and Recent have hover text with the reason while disabled, as Undo and Redo do.
 
+### Palette tokens
+
+**Status:** Implemented, M2 ([plan for leaving Iced](../dev/leaving-iced-plan.md), phase 4, P3, 2026-11-27). The panels' colours are constants in `style.rs`, as `loom-ui-core` colours, and every view reads them. The app keeps no Iced theme. Until the cut-over (P4), the bridge builds one for what Iced still draws, the window's rules and its default text, from these tokens (`iced_bridge::theme`), and a test checks it gives them back exactly.
+
+| Token | What reads it | Value | Contrast a test pins |
+|---|---|---|---|
+| `PANEL_FILL` | The window's panels, fields, menus, the module browser | `#22242A` | The background of every ratio in this spec |
+| `TEXT` | Body text on the panels | `#E6E8EE` | 12.66 on `PANEL_FILL`, 8.85 on `RAISED` (4.5 needed) |
+| `QUIET` | Details, IDs, a closed tab's title, a switch's edge, the scroll thumb | `rgb(0.66, 0.69, 0.75)` | 7.12 on `PANEL_FILL`, 4.98 on `RAISED` (4.5 needed) |
+| `ACCENT` | Links, a highlighted row's outline, a chosen card, a switch that is on | `#F5A623` | 5.35 on a dialog (4.5 needed); 1.65 against `TEXT`, so links are underlined |
+| `RAISED` | Open tabs, cards, dialogs, hovered menu items, the highlighted row, hover text | about `#393D48` | |
+| `EDGE` | Rules, and the borders of fields, tabs, and floating panels | about `#454A59` | |
+| `CARD_FILL`, `CARD_BORDER` | A modulation card's fill and border | `RAISED` and `EDGE` at 50% | |
+| `ACCENT_WEAK` | Selected text in a field, an inspector row lit as a drop target | about `#C48526` | |
+| `DANGER_EDGE` | The outline of a refused field, the inspector's danger marks | about `#C4182A` | |
+
+`RAISED`, `EDGE`, `ACCENT_WEAK`, and `DANGER_EDGE` were shades Iced's theme worked out from the app's palette. Their values were recorded by printing what the running app used, as exact `f32`s, not by reading how Iced works shades out (ADR-0018), so no pixel moved: window captures of 23 views were byte-identical before and after. Where a value is "about" a hex colour, `style.rs` holds the exact one.
+
+*Why:* a theme we did not write chose these colours, and the panels could not all read them once Iced goes. Named tokens keep the look and make the next theme (FR-PANEL-06) a change in one file.
+
 ### Overlays
 
 **Status:** Agreed (Brylie, 2026-11-20), for plan 3.2, row 3. Each look is a token in `style.rs`, so `loom-ui`'s overlays and anything Iced still draws read the same values.
@@ -209,12 +229,12 @@ Kept problems survive opening another patch, except as the table says.
 | `MENU_SHADOW` | The shadow under a menu | Black at 35% opacity, offset 4 px down, blur 12 px, as today |
 | `CHOOSER_WIDTH`, `CHOOSER_HEIGHT` | The licence chooser's box: 560 wide, at most 720 high, shorter when the window is; its body scrolls between the title and the buttons | As Iced drew it |
 | `RADIO_SPACING` | The room between the radios of a group | 10 px, more than two focus rings, so no ring touches a neighbour's (ui-layer.md, section 6, rule 9) |
-| `field` (`FieldLook`, `FIELD_PADDING`) | A text field `loom-ui` draws: the base fill, a 1 px border in the strong background colour, radius 2, 5 px inside | As Iced's text field, first used by the licence chooser's Other field (plan 3.2, row 3c) |
+| `FIELD` (`FieldLook`, `FIELD_PADDING`) | A text field `loom-ui` draws: `PANEL_FILL`, a 1 px border in `EDGE`, radius 2, 5 px inside | As Iced's text field, first used by the licence chooser's Other field (plan 3.2, row 3c) |
 | `INVALID_BORDER` | The danger outline of a field whose text is refused: a value field, the MIDI range pair, and patch info's Tags field | 2 px in the danger colour, twice a rule, so it reads without colour ([#897](https://github.com/brylie/LoomDSP/issues/897)) |
-| `BROWSER_FIELD` | A browser's search or Author field: the weak fill and radius 4 (`FIELD_RADIUS`) | As Iced's text input drew it (row 5) |
+| `BROWSER_FIELD` | A browser's search or Author field: the `RAISED` fill and radius 4 (`FIELD_RADIUS`) | As Iced's text input drew it (row 5) |
 | `SWATCH` | The 8 px family swatch beside a module browser row's name, radius 2 (`SWATCH_RADIUS`) | As today (row 5) |
 | `TAG` | A Your patches tag: a 1 px outline (`TAG_BORDER`) and radius 4 (`TAG_RADIUS`); filled and outlined while it filters, quiet text otherwise | As the tab look Iced drew (row 5b) |
-| `MENU_ITEM` | A menu item's looks: a 1 px quiet border and radius 3 always; a weak fill while hovered, pressed, or highlighted, however the highlight got there; the focus ring on top when the keys moved it | As today's menu items, without Iced's 2 px primary border on the highlight (Brylie's decision, 2026-11-20): the focus ring marks keyboard focus instead |
+| `MENU_ITEM` | A menu item's looks: a 1 px quiet border and radius 3 always; a `RAISED` fill while hovered, pressed, or highlighted, however the highlight got there; the focus ring on top when the keys moved it | As today's menu items, without Iced's 2 px primary border on the highlight (Brylie's decision, 2026-11-20): the focus ring marks keyboard focus instead |
 
 *Why:* the dialogs and menus were drawn with Iced's own box and its palette, which are not ours. Tokens keep the look the same while it moves, and give later menus and popovers one source.
 

@@ -508,6 +508,8 @@ Docs only. The phase 4 criteria, section 9 as a host contract, the key types, se
 
 ### P3. Colours off Iced's theme
 
+**Done (2026-11-27).** The palette tokens are in `style.rs` ([visual system](../design/visual-system.md#palette-tokens)), and no app code reads Iced's theme; the bridge builds one from the tokens for what Iced still draws, until P4 deletes it. The role style functions had already gone in row 4e. 23 window captures were byte-identical before and after, and the contrast tests kept every pair and threshold.
+
 1. `style.rs` tokens give `loom_ui_core::Color` from our own palette constants; `boot.rs` drops Iced's `Theme`; the Iced role style functions with no user left are deleted.
 2. **Clean room:** about 20 files read the shades Iced works out from its palette. Do not port how Iced works them out. Record each shade the app uses as a named constant with its resolved value.
 3. Gates: `--screenshot-window` byte-identical; the contrast tests in `style/tests.rs` unchanged.
