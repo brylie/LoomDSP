@@ -341,6 +341,9 @@ fn runs_stop_at_a_hard_break_and_the_selection_finds_its_run() {
 struct Notes {
     /// The area sits in a scroll container 40 px high.
     scrolled: bool,
+    /// A Next button follows the area, a stop for Tab and a press to
+    /// move to. Off for the tests that measure the container's end.
+    next: bool,
     text: String,
     heard: Vec<FieldEvent>,
     ids: IdTable,
@@ -388,22 +391,27 @@ impl App for Notes {
     }
 
     fn view(&self, view: &mut View) {
-        let model = (self.text.clone(), self.scrolled);
+        let model = (self.text.clone(), self.scrolled, self.next);
         view.panel_with(
             UiId::panel("notes"),
             Layer::Panels,
             &model,
-            |(text, scrolled): &(String, bool)| {
-                let area = Element::column([
+            |(text, scrolled, next): &(String, bool, bool)| {
+                let mut parts = vec![
                     Element::text_area(text.clone(), STYLE)
                         .key("area")
                         .width(Length::Fixed(160.0))
                         .access(Access::new(Role::TextInput, "Authors, one per line")),
-                    Element::text("Next", STYLE)
-                        .key("next")
-                        .focusable()
-                        .access(Access::new(Role::Button, "Next").action(crate::access::Action::Click)),
-                ]);
+                ];
+                if *next {
+                    parts.push(
+                        Element::text("Next", STYLE)
+                            .key("next")
+                            .focusable()
+                            .access(Access::new(Role::Button, "Next").action(crate::access::Action::Click)),
+                    );
+                }
+                let area = Element::column(parts);
                 if !*scrolled {
                     return area;
                 }
@@ -439,6 +447,11 @@ fn notes(text: &str) -> Option<(Harness<Notes, Keys>, Typesetter)> {
 
 /// The notes app with `text`, in a scroll container if `scrolled`.
 fn notes_in(text: &str, scrolled: bool) -> Option<(Harness<Notes, Keys>, Typesetter)> {
+    notes_with(text, scrolled, false)
+}
+
+/// The same, with a Next button after the area when `next` is set.
+fn notes_with(text: &str, scrolled: bool, next: bool) -> Option<(Harness<Notes, Keys>, Typesetter)> {
     let mut typesetter = Typesetter::new();
     if typesetter.measure("x", STYLE, None).width <= 0.0 {
         eprintln!("skipped: no system font");
@@ -447,6 +460,7 @@ fn notes_in(text: &str, scrolled: bool) -> Option<(Harness<Notes, Keys>, Typeset
     let app = Notes {
         text: text.to_owned(),
         scrolled,
+        next,
         ..Notes::default()
     };
     let window = WindowState::new(Size::new(400.0, 300.0));
@@ -594,7 +608,7 @@ fn assert_caret_shows(harness: &Harness<Notes, Keys>) {
 /// instead of following the text area's stale caret request.
 #[test]
 fn tab_after_edit_drops_the_old_caret_reveal() {
-    let Some((mut harness, mut text)) = notes_in("a", true) else {
+    let Some((mut harness, mut text)) = notes_with("a", true, true) else {
         return;
     };
     for _ in 0..6 {
