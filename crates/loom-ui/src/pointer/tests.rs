@@ -1703,6 +1703,44 @@ fn a_reported_hover_ends_once_each_way() {
     assert_eq!(heard(&gone), start_and_end, "out of the layout");
 }
 
+/// Outside a turn, a hover that ends, because the other toolkit took the
+/// pointer or the pointer moved off every element, is heard ending before
+/// the pointer comes back onto the same element: the app hears the hover
+/// start, end, and start again, never start twice.
+#[test]
+fn a_hover_cleared_outside_a_turn_ends_before_it_starts_again() {
+    let b = UiId::panel("bar").with("b");
+    let back_and_forth = [
+        Message::Hovered(b.clone()),
+        Message::Unhovered(b.clone()),
+        Message::Hovered(b.clone()),
+    ];
+    let on_b = Point::new(60.0, 8.0);
+    let moved = Event::Pointer(PointerEvent::Moved);
+
+    // The other toolkit takes a move, then the pointer comes back.
+    let mut taken = reporting();
+    taken.step(at(on_b.x, on_b.y, PointerEvent::Moved));
+    {
+        let (_, _, mut panels) = taken.parts();
+        let _ = panels.pointer_taken(&moved);
+        let _ = panels.pointer_below(&moved, on_b);
+    }
+    taken.step(DriverEvent::Woken);
+    assert_eq!(reports(&taken), back_and_forth, "taken by the other toolkit");
+
+    // A late move off every element, then back.
+    let mut off = reporting();
+    off.step(at(on_b.x, on_b.y, PointerEvent::Moved));
+    {
+        let (_, _, mut panels) = off.parts();
+        let _ = panels.pointer_below(&moved, Point::new(60.0, 150.0));
+        let _ = panels.pointer_below(&moved, on_b);
+    }
+    off.step(DriverEvent::Woken);
+    assert_eq!(reports(&off), back_and_forth, "off every element");
+}
+
 /// Only the pointer's own move reports: a layout that leaves the hover on
 /// the same element tells the app nothing.
 #[test]

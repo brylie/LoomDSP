@@ -260,6 +260,9 @@ impl<A: App> Panels<'_, A> {
             self.pointer.space = None;
         }
         let hover = self.pointer.set_hover(None);
+        // A hover the app was told of ends now, outside a turn, so the
+        // pointer coming back onto that element is heard as a new hover.
+        self.report_unhover();
         Heard {
             taken: false,
             redraw: hover || self.shown_pressed() != pressed,
@@ -557,7 +560,13 @@ impl<A: App> Panels<'_, A> {
                 return Heard::default();
             }
             let redraw = match pointer {
-                PointerEvent::Moved => self.pointer.set_hover(None),
+                PointerEvent::Moved => {
+                    let changed = self.pointer.set_hover(None);
+                    // Off every element: a hover the app was told of ends,
+                    // as it does at the end of a turn.
+                    self.report_unhover();
+                    changed
+                }
                 PointerEvent::Released(PointerButton::Left) => {
                     self.pointer.pressed = None;
                     false
