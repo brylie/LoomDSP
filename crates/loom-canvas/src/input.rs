@@ -888,7 +888,16 @@ pub struct CanvasInput {
     key_holds: [Option<KeyHold>; 2],
     /// Modules with lights on screen, as last reported.
     reported_lights: Option<Vec<u32>>,
+    /// The moment of the last event or pass, from which the measuring
+    /// animation's next step is due.
+    last_now: Option<Instant>,
 }
+
+/// How long one step of the measuring animation waits: about one display
+/// refresh. The animation sends the camera to the app, so it runs on a
+/// deadline, not on animation frames, which may send no message
+/// (ui-layer.md, section 9, rule 4).
+pub const ANIMATION_STEP: std::time::Duration = std::time::Duration::from_millis(16);
 
 /// The moment an event arrives in: where the pointer is, where the canvas
 /// is, and the time. The driver knows these and the canvas does not.
@@ -922,6 +931,7 @@ impl CanvasInput {
     /// The shared path of [`CanvasInput::handle`] and [`CanvasInput::pass`].
     fn run(&mut self, model: &CanvasModel<'_>, event: Option<&Event>, moment: Moment) -> Reaction {
         let mut out = Reaction::default();
+        self.last_now = Some(moment.now);
         let before = self.focus.control();
         let typed = model.report_typed.then(|| self.focus.typed().cloned()).flatten();
         model.on_event(self, event, moment.pointer, moment.bounds, moment.now, &mut out);
@@ -942,7 +952,9 @@ impl CanvasInput {
     }
 
     /// When the canvas next needs to wake with no input, if it does: the
-    /// earlier of an edit group closing and hover text appearing.
+    /// earliest of an edit group closing, hover text appearing, and, while
+    /// the measuring animation runs, its next step, [`ANIMATION_STEP`]
+    /// after the last moment it was given.
     ///
     /// This is a fact of the state, so it can be asked at any time and
     /// gives the same answer until an event changes it. The driver wakes
@@ -952,10 +964,14 @@ impl CanvasInput {
             EditGroupView::Open { due } => Some(due),
             _ => None,
         };
-        match (edit_group, self.hover_text.due()) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (one, other) => one.or(other),
-        }
+        let animation = self
+            .last_now
+            .filter(|_| model.animate)
+            .map(|last| last + ANIMATION_STEP);
+        [edit_group, self.hover_text.due(), animation]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     /// The pointer shape to show: the one of the gesture in progress, or

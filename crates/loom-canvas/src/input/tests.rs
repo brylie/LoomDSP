@@ -4670,3 +4670,43 @@ fn the_map_rebuilds_its_marks_when_only_its_graph_changes() {
     assert_eq!(paint(&graph, 1), 1);
     assert_eq!(paint(&MapGraph::default(), 2), 0);
 }
+
+/// While the measuring animation runs, the canvas asks to wake one step
+/// after each moment it was given, so a host that wakes it at its deadline
+/// moves the camera on with no animation frame; with the animation off it
+/// asks for nothing (ui-layer.md, section 9, rule 4).
+#[test]
+fn the_animation_runs_on_a_deadline_that_moves_on() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+    let none = BTreeSet::new();
+    let model = CanvasModel::new(&scene, &none).animate(true);
+    let mut input = CanvasInput::default();
+    assert_eq!(input.next_deadline(&model), None, "no moment yet");
+    let start = Instant::now();
+    let _ = input.handle(&model, &Event::Redraw, moment(None, start));
+    assert_eq!(input.next_deadline(&model), Some(start + ANIMATION_STEP));
+    let step = start + ANIMATION_STEP;
+    let reaction = input.handle(&model, &Event::Redraw, moment(None, step));
+    assert!(reaction.redraw, "the camera moved one step");
+    assert_eq!(input.next_deadline(&model), Some(step + ANIMATION_STEP));
+    let still = CanvasModel::new(&scene, &none);
+    assert_eq!(input.next_deadline(&still), None, "the animation is off");
+}
+
+/// A sync with nothing new sends nothing, so a host that syncs the canvas
+/// after each update stops once the app has taken what the last sync sent.
+#[test]
+fn a_second_sync_with_nothing_new_sends_nothing() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+    let none = BTreeSet::new();
+    let model = CanvasModel::new(&scene, &none);
+    let mut input = CanvasInput::default();
+    let now = Instant::now();
+    let first = input.handle(&model, &Event::Redraw, moment(None, now));
+    assert!(
+        !first.events.is_empty(),
+        "the first sync frames the scene and reports it"
+    );
+    let second = input.handle(&model, &Event::Redraw, moment(None, now));
+    assert_eq!(second.events, []);
+}
