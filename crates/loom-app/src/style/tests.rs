@@ -107,7 +107,6 @@ const BORDER: &str = ".border(";
 /// True when `arg` starts by building a colour inline, with or without the
 /// crate's path in front.
 fn built_inline(arg: &str) -> bool {
-    let arg = arg.strip_prefix("iced::").unwrap_or(arg);
     let arg = arg.strip_prefix("loom_ui_core::").unwrap_or(arg);
     COLOUR_BUILDERS.iter().any(|built| arg.starts_with(built))
 }
@@ -253,11 +252,10 @@ fn a_radio_note_and_mark_read_against_the_panel() {
 /// No app source writes a size or a colour inline: every `.size(...)`,
 /// `text_size(...)`, `.radius(...)`, and `.border(...)` takes a token from
 /// this module, as does every `.background(...)` and `.colour(...)` of a
-/// `loom-ui` element; and no view builds an Iced button, whose default role
-/// is primary. Only this module may (visual-system.md, rule 1). Every file
-/// is read, in every folder.
+/// `loom-ui` element. Only this module may (visual-system.md, rule 1).
+/// Every file is read, in every folder.
 #[test]
-fn sizes_and_buttons_come_only_from_this_module() {
+fn sizes_come_only_from_this_module() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     app_sources(&dir, &mut files);
@@ -270,28 +268,8 @@ fn sizes_and_buttons_come_only_from_this_module() {
         for at in inline_values(&source) {
             problems.push(format!("{name}:{at}: {}", lines[at - 1].trim()));
         }
-        for (n, line) in source.lines().enumerate() {
-            let imports_button = line.contains("use iced::widget::")
-                && (line.contains("button") || source_import_has_button(&source, n));
-            if imports_button {
-                problems.push(format!("{name}:{}: imports Iced's button", n + 1));
-            }
-        }
     }
     assert!(problems.is_empty(), "{problems:#?}");
-}
-
-/// True when the `use iced::widget::{...}` that starts on line `n`
-/// lists `button` on one of its later lines.
-fn source_import_has_button(source: &str, n: usize) -> bool {
-    let rest: Vec<&str> = source.lines().skip(n).collect();
-    let Some(end) = rest.iter().position(|l| l.contains("};")) else {
-        return false;
-    };
-    rest[..=end].iter().any(|l| {
-        l.split(|c: char| !c.is_alphanumeric() && c != '_')
-            .any(|w| w == "button")
-    })
 }
 
 /// Every canvas menu state meets the text and edge thresholds on the

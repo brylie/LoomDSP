@@ -79,12 +79,5 @@ pub(crate) fn patch() -> UiId {
     UiId::panel("inspector").with("patch")
 }
 
-/// The widget ID of a text field whose part is named `id`. It differs from
-/// the container's, so a focus request finds the field and the window's
-/// walk finds the container.
-pub(crate) fn field(id: &UiId) -> iced::advanced::widget::Id {
-    crate::places::field_widget_id(id)
-}
-
 #[cfg(test)]
 mod tests;

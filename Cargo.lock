@@ -2524,8 +2524,6 @@ name = "loom-canvas"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "iced",
- "iced_wgpu",
  "loom-ui",
  "loom-ui-core",
  "naga",

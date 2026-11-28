@@ -152,14 +152,14 @@ pub(crate) fn items(model: &Inspector) -> Vec<Item> {
     }
 }
 
-/// A text field: its name, its text, what typing sets, and the widget that
+/// A text field: its name, its text, what typing sets, and the part that
 /// takes focus.
 fn field(id: UiId, label: &str, text: &str, set: SetText) -> Item {
     Item {
         label: Some(label.to_string()),
         value: Some(text.to_string()),
         set_text: Some(set),
-        focus: Some(ids::field(&id)),
+        focus: Some(id.clone()),
         ..Item::new(id, Kind::Field)
     }
 }
@@ -187,7 +187,7 @@ fn patch(rows: &crate::patch_info::PatchRows) -> Item {
         ));
     }
     parts.push(Item {
-        focus: Some(crate::places::field_widget_id(&crate::patch_info::tags_part())),
+        focus: Some(crate::patch_info::tags_part()),
         description: rows.tag_note.clone(),
         ..field(ids::part(&panel, "tags"), "Tags", &rows.tag_draft, SetText::Tag)
     });
@@ -234,7 +234,7 @@ fn authors(id: UiId, names: &[String]) -> Item {
     Item {
         label: Some("Authors, one per line".to_string()),
         value: Some(names.join("\n")),
-        focus: Some(crate::places::field_widget_id(&id)),
+        focus: Some(id.clone()),
         ..Item::new(id, Kind::Field)
     }
 }

@@ -761,8 +761,8 @@ pub(crate) struct Frames {
     /// The open panel's parts: the inspector's or the matrix's, by the tab
     /// that is open.
     pub panel: Vec<items::Item>,
-    /// The text field with keyboard focus, as the window last said.
-    pub focused_field: Option<iced::advanced::widget::Id>,
+    /// The part with keyboard focus, as the runtime last said.
+    pub focused_field: Option<UiId>,
     /// The panel part the keys act on while no text field has them: the
     /// matrix's chosen cell while the matrix has the keys.
     pub focused_item: Option<UiId>,
@@ -814,8 +814,8 @@ struct Frame<'a> {
     /// panel or a menu lies over the window: the nodes are then hidden
     /// (ui-layer.md, section 5, rule 3).
     covered: bool,
-    /// The text field that has keyboard focus, as the window last said.
-    field: Option<&'a iced::advanced::widget::Id>,
+    /// The part that has keyboard focus, as the runtime last said.
+    field: Option<&'a UiId>,
     /// The node of that field, once it is built.
     focused: Option<NodeId>,
     table: &'a mut IdTable,

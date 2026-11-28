@@ -752,7 +752,7 @@ impl crate::App {
         let (overlay, overlay_focus) = self.overlay_items();
         tree::Frames {
             panel,
-            focused_field: self.focus.as_ref().map(crate::places::field_widget_id),
+            focused_field: self.focus.clone(),
             focused_item: self
                 .jump_focus()
                 .or_else(|| {
@@ -822,9 +822,7 @@ impl crate::App {
                 return Some(Vec::new());
             };
             self.reader_event(ReaderEvent::Close);
-            if let Some(part) = crate::places::field_of(&field) {
-                self.effect(loom_ui::Effects::focus(part));
-            }
+            self.effect(loom_ui::Effects::focus(field));
             return Some(Vec::new());
         }
         Some(self.a11y_item_action(&item, request, at))
