@@ -7,7 +7,7 @@
 [![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
 [![Status: early alpha](https://img.shields.io/badge/status-early%20alpha-orange.svg)](docs/product/roadmap.md)
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-3-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-4-orange.svg?style=flat-square)](#contributors-)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 ![A subtractive synth patched from primitives in the LoomDSP desktop app: MIDI note, phase, saw, filter, two envelopes, a VCA, transport, and a scope showing the filtered wave, with the filter's parameters in the inspector](docs/images/readme-subtractive.png)
@@ -197,6 +197,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/brylie"><img src="https://avatars.githubusercontent.com/u/17307?v=4&size=100" width="100px" height="100px" alt="Brylie Oxley"/><br /><sub><b>Brylie Oxley</b></sub></a><br /><a href="https://github.com/brylie/LoomDSP/commits?author=brylie" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/montionugera"><img src="https://avatars.githubusercontent.com/u/5601426?v=4&size=100" width="100px" height="100px" alt="Pasit Nusso"/><br /><sub><b>Pasit Nusso</b></sub></a><br /><a href="https://github.com/brylie/LoomDSP/commits?author=montionugera" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://www.basuoikantik.in/"><img src="https://avatars.githubusercontent.com/u/140976895?v=4&size=100" width="100px" height="100px" alt="Oikantik Basu"/><br /><sub><b>Oikantik Basu</b></sub></a><br /><a href="https://github.com/brylie/LoomDSP/commits?author=Golden007-prog" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/jay23606"><img src="https://avatars.githubusercontent.com/u/4602056?v=4&size=100" width="100px" height="100px" alt="Jay"/><br /><sub><b>Jay</b></sub></a><br /><a href="https://github.com/brylie/LoomDSP/commits?author=jay23606" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>

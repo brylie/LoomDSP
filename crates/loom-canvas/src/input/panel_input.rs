@@ -549,6 +549,12 @@ impl CanvasModel<'_> {
         if self.typed_field_key(state, key, modifiers, text, repeat, out) {
             return true;
         }
+        // A menu key goes on to open the tile's menu, so Alt+Enter on a
+        // focused control never starts typing as Enter does (ui-layer.md,
+        // section 6, rule 13).
+        if key.opens_menu(modifiers) {
+            return false;
+        }
         if self.open_typed_field(state, key, modifiers, text, repeat) {
             out.redraw();
             out.take();

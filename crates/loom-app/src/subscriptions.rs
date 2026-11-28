@@ -166,13 +166,27 @@ fn used(status: Status) -> bool {
     status == Status::Captured
 }
 
-/// F1 and Escape reach help even while a text field has focus.
+/// The help key and Escape reach help even while a text field has focus.
 pub(crate) fn help_key(event: &Event, _used: bool) -> Option<Message> {
     match event {
-        Event::Key(KeyEvent::Pressed { key: Key::F1, .. }) => Some(Message::ShowHelp),
+        Event::Key(KeyEvent::Pressed {
+            key, modifiers, text, ..
+        }) if opens_help(*key, *modifiers, text.as_deref()) => Some(Message::ShowHelp),
         Event::Key(KeyEvent::Pressed { key: Key::Escape, .. }) => Some(Message::CloseHelp),
         _ => None,
     }
+}
+
+/// Whether a press opens help: F1, or Cmd+/ on macOS and Ctrl+/ elsewhere,
+/// with or without Shift, so Cmd+? is the same key (ui-layer.md, section 6,
+/// rule 13). F1 needs fn on most laptops. The slash is found by the key or
+/// by what the press types, since it moves between layouts: a German
+/// layout types `/` with Shift and 7 and `?` with Shift and ß, a French one
+/// `?` with Shift and the comma key, and on macOS the typed text keeps
+/// Shift's effect while Cmd is held.
+pub(crate) fn opens_help(key: Key, modifiers: loom_ui_core::Modifiers, text: Option<&str>) -> bool {
+    key == Key::F1
+        || (modifiers.shortcut() && !modifiers.alt && (key == Key::Character('/') || matches!(text, Some("/" | "?"))))
 }
 
 /// The app's message for a window event the runtime hands it, if it wants

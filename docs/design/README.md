@@ -80,7 +80,9 @@ Copy [template.md](template.md). Keep it to one feature. Link the ADR, requireme
 | [Output safety](output-safety.md) | [ADR-0019](../adr/0019-output-safety-stage.md) | Implemented, M1; rule 15 (fade in on restart) Agreed |
 | [Autosave and crash recovery](autosave.md) | None (builds on [ADR-0008](../adr/0008-patch-format-ron.md) and [files](files.md)) | Implemented, M1 |
 | [App preferences](preferences.md) | None (builds on [ADR-0019](../adr/0019-output-safety-stage.md)) | Implemented, M1 |
-| [Visual system](visual-system.md) | [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md) | Implemented, M1 |
+| [Visual system](visual-system.md) | [ADR-0025](../adr/0025-one-design-language-and-derived-panels.md), [ADR-0052](../adr/0052-signal-colour-and-shape.md), [ADR-0053](../adr/0053-module-anatomy-and-face-archetypes.md) | Implemented, M1; signal colours and shapes, and module anatomy, Agreed, after #683 |
+| [Module faces](module-faces.md) | [ADR-0053](../adr/0053-module-anatomy-and-face-archetypes.md) | Agreed, after #683 |
+| [Designer brief](designer-brief.md) | None (links the tokens, decisions, and measuring rules a UI designer needs) | Agreed |
 | [Patch metadata](patch-metadata.md) | [ADR-0023](../adr/0023-patch-licences-spdx-and-creative-commons.md) | Implemented, M2; the library browser's filters M4 |
 | [Control channel](control-channel.md) | None (builds on [ADR-0021](../adr/0021-plain-data-view-models-and-keyed-identity.md)) | Implemented, developer tooling, with `stats.telemetry_dropped` after a `--frames` run counting only real drops and lead-in clips lighting (M2, [#637](https://github.com/brylie/LoomDSP/issues/637)) |
 | [Module help pages](help-pages.md) | None (builds on [ADR-0016](../adr/0016-ports-and-parameters-carry-their-own-text.md)) | Agreed and Implemented, M1 |

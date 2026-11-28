@@ -266,7 +266,7 @@ impl App {
             InputOwner::Chooser => {}
             InputOwner::Preferences => match key {
                 Key::Escape => self.preferences(settings::Message::Close),
-                Key::Character(',') if modifiers.shortcut() => self.toggle_preferences(),
+                Key::Character(',') if modifiers.shortcut() && !modifiers.shift => self.toggle_preferences(),
                 _ => {}
             },
         }
