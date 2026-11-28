@@ -27,6 +27,13 @@ impl<A: App> Panels<'_, A> {
         for id in placed {
             self.tick(&id, &CustomEvent::Placed);
         }
+        self.tick_due(now);
+    }
+
+    /// Gives a deadline tick to each element whose deadline came by `now`,
+    /// with no placement: at a turn's start, and again after its updates,
+    /// for a deadline an update made due. What they send runs in this turn.
+    pub(crate) fn tick_due(&mut self, now: Instant) {
         let due: Vec<UiId> = self
             .customs
             .elements

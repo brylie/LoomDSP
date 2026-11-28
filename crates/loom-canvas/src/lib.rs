@@ -57,7 +57,8 @@ pub use controls::{
 };
 pub use controls::{arrow_share, arrow_step, option_bounds, part_bounds, range_bar_point};
 pub use draft::{DraftSubmit, TypedDraft};
-pub use gpu::{CanvasFrame, CanvasRenderer};
+pub use gpu::{Cable, CanvasFrame, CanvasRenderer};
+pub use hover::{HOVER_DELAY, HoverTarget};
 pub use input::{
     BrowserPlacement, CanvasEvent, CanvasFocusPolicy, CanvasInput, CanvasModel, CanvasPointer, CanvasTyped, CanvasView,
     ControlPart, EditGroupView, FrameCache, LearnView, MapGraph, MapLine, MapView, Moment, PointerDrag, READABLE_ZOOM,

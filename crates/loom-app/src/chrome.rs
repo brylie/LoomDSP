@@ -1,14 +1,14 @@
-//! The parts of the window around the canvas that `loom-ui` draws (plan for
-//! leaving Iced, step 3.2, rows 1 and 2; ui-layer.md, section 5, rule 10).
+//! The window's root panel and the parts around the canvas (plan for
+//! leaving Iced, step 3.2, rows 1 and 2, and step P4; ui-layer.md, section
+//! 2, the end of the bridge).
 //!
 //! One root panel, `window`, fills the window and holds, top to bottom, the
-//! toolbar's slot, the breadcrumb's (inside a sub-patch only), a fill with
-//! no key that paints nothing, and the stats bar's slot. A point in the
-//! fill has no element of the runtime's, so it goes on to Iced and the
-//! canvas. Iced keeps transparent spaces of the same heights where these
-//! were (`view.rs`), from the same tokens, so the canvas starts and ends
-//! where the panels do. One root, not one per part, so the window is laid
-//! out and hit-tested once, and each part keeps its own panel and UI IDs.
+//! toolbar's slot, the breadcrumb's (inside a sub-patch only), a row of the
+//! canvas's slot, a 1 px rule, and the right column, then a 1 px rule and
+//! the stats bar's slot. The canvas is a panel of its own in its slot, one
+//! custom element (`canvas.rs`). One root, not one per part, so the window
+//! is laid out and hit-tested once, and each part keeps its own panel and
+//! UI IDs.
 
 use crate::{App, Message, style};
 use loom_ui::{Element, Layer, Length, View};
@@ -34,6 +34,7 @@ impl App {
             },
         };
         view.panel_with(window_id(), Layer::Panels, &shape, root);
+        self.canvas_panel(view);
         self.toolbar_panel(view);
         self.breadcrumb_panel(view);
         self.bar_panel(view);
@@ -266,17 +267,24 @@ struct Shape {
 }
 
 /// The root: the toolbar's slot, the breadcrumb's inside a sub-patch, the
-/// fill beside the right column, and the bar's slot. The column is at the
-/// right edge, as wide as Iced's: the tabs' slot (plan 3.2, row 4e), then
-/// the content's slot, which holds the open tab's panel, then the rule over
-/// the bar.
+/// canvas's slot with a rule beside the right column, a rule over the bar,
+/// and the bar's slot. The column is at the right edge, as wide as Iced's
+/// was: the tabs' slot (plan 3.2, row 4e), then the content's slot, which
+/// holds the open tab's panel. The rules are 1 px in the edge colour, as
+/// Iced drew them.
 fn root(shape: &Shape) -> Element {
     let slot = |id: UiId, height: f32| Element::slot(id).width(Length::FILL).height(Length::Fixed(height));
     let mut parts = vec![slot(crate::toolbar::toolbar_id(), style::TOOLBAR_HEIGHT)];
     if shape.inside {
         parts.push(slot(crate::breadcrumb::breadcrumb_id(), style::BREADCRUMB_HEIGHT));
     }
-    let fill = Element::space(Length::FILL, Length::FILL);
+    // The canvas is a panel of its own in this slot (`canvas.rs`).
+    let canvas = Element::slot(crate::canvas::canvas_id())
+        .width(Length::FILL)
+        .height(Length::FILL)
+        .min_width(0.0)
+        .min_height(0.0);
+    let rule = |width: Length, height: Length| Element::space(width, height).background(style::EDGE);
     let content = if let Some(panel) = shape.content.clone() {
         Element::slot(panel)
             .width(Length::FILL)
@@ -285,14 +293,15 @@ fn root(shape: &Shape) -> Element {
     } else {
         Element::space(Length::FILL, Length::FILL)
     };
-    let column = Element::column([
-        slot(crate::tabs::tabs_id(), style::RIGHT_TABS_HEIGHT),
-        content,
-        Element::space(Length::FILL, Length::Fixed(style::RULE)),
-    ])
-    .width(Length::Fixed(style::RIGHT_COLUMN_WIDTH))
-    .height(Length::FILL);
-    parts.push(Element::row([fill, column]).width(Length::FILL).height(Length::FILL));
+    let column = Element::column([slot(crate::tabs::tabs_id(), style::RIGHT_TABS_HEIGHT), content])
+        .width(Length::Fixed(style::RIGHT_COLUMN_WIDTH))
+        .height(Length::FILL);
+    parts.push(
+        Element::row([canvas, rule(Length::Fixed(style::RULE), Length::FILL), column])
+            .width(Length::FILL)
+            .height(Length::FILL),
+    );
+    parts.push(rule(Length::FILL, Length::Fixed(style::RULE)));
     parts.push(slot(crate::stats_bar::stats_id(), style::STATS_BAR_HEIGHT));
     Element::column(parts).width(Length::FILL).height(Length::FILL)
 }

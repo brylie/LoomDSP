@@ -383,6 +383,20 @@ fn an_element_event_reaches_the_target_and_its_message_runs() {
     assert_eq!(harness.runtime().target().events.len(), 1);
 }
 
+/// Section 2, Behaviour 2: an input event's messages run in its own turn,
+/// one update each, after the messages already waiting, so a watcher's
+/// message sent before the key is applied before it. One turn does both.
+#[test]
+fn an_input_events_messages_run_after_what_waits_in_one_turn() {
+    let mut harness = harness();
+    let seen = harness.app().seen.len();
+    let turns = harness.runtime().counts().turns;
+    harness.runtime().waker().send(Msg::Add(5));
+    harness.step(key_press());
+    assert_eq!(harness.app().seen[seen..], [Msg::Add(5), Msg::Add(1)]);
+    assert_eq!(harness.runtime().counts().turns, turns + 1, "one turn");
+}
+
 /// Section 3, rule 6, and the redraw guarantee of plan step 2.1: a changed
 /// panel draws, a message that changes nothing does not, an explicit
 /// Redraw draws once, and a system redraw request draws with no update.
@@ -1154,7 +1168,7 @@ impl App for Combo {
         crate::app::InputState {
             layer: if self.below { Layer::Question } else { Layer::Overlays },
             canvas_focused: self.canvas,
-            target_first: false,
+            home_first: false,
         }
     }
 
@@ -1366,7 +1380,7 @@ impl App for Opener {
         crate::app::InputState {
             layer: if self.open { Layer::Overlays } else { Layer::Canvas },
             canvas_focused: false,
-            target_first: false,
+            home_first: false,
         }
     }
 }

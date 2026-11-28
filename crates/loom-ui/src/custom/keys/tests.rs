@@ -100,6 +100,8 @@ impl Custom<Rolls> for RollState {
 /// with the roll as the window's home, and an overlay when it is open.
 struct Rolls {
     overlay: bool,
+    /// The roll, the window's home, reads Tab from nothing first.
+    home_first: bool,
     log: Vec<Message>,
 }
 
@@ -151,6 +153,7 @@ impl App for Rolls {
     fn input(&self) -> InputState {
         InputState {
             layer: if self.overlay { Layer::Overlays } else { Layer::Canvas },
+            home_first: self.home_first,
             ..InputState::default()
         }
     }
@@ -195,8 +198,15 @@ fn id(key: &str) -> UiId {
 
 /// A harness laid out in a 400 by 300 window, with nothing focused.
 fn harness() -> Harness<Rolls, NoTarget> {
+    harness_with(false)
+}
+
+/// The harness, with the roll reading Tab from nothing first when
+/// `home_first`.
+fn harness_with(home_first: bool) -> Harness<Rolls, NoTarget> {
     let app = Rolls {
         overlay: false,
+        home_first,
         log: Vec::new(),
     };
     let window = WindowState::new(Size::new(400.0, 300.0));
@@ -379,6 +389,33 @@ fn the_home_element_hears_keys_while_nothing_has_focus() {
     assert_eq!(harness.runtime().focused(), Some(&field));
     letter(&mut harness, 'x');
     assert_eq!(used(&harness), 1, "a focused field keeps the key from home");
+}
+
+/// With `home_first`, Tab from nothing goes to the home element first:
+/// the roll moves through its parts with no runtime focus, and once it lets
+/// Tab go, past its last part, Tab enters the runtime's first stop.
+/// Shift+Tab from nothing still enters the runtime's last stop, and the
+/// roll never hears it (section 6, rule 2).
+#[test]
+fn with_home_first_tab_from_nothing_reaches_the_home_element_first() {
+    let tabs = |harness: &Harness<Rolls, NoTarget>| {
+        heard(harness)
+            .iter()
+            .filter(|event| matches!(event, CustomEvent::Key(KeyEvent::Pressed { key: Key::Tab, .. })))
+            .count()
+    };
+    let mut harness = harness_with(true);
+    tab(&mut harness, false);
+    tab(&mut harness, false);
+    assert_eq!(tabs(&harness), 2, "the roll heard both");
+    assert_eq!(harness.runtime().focused(), None, "and kept them from the stops");
+    tab(&mut harness, false);
+    assert_eq!(harness.runtime().focused(), Some(&id("before")), "past its last part");
+
+    let mut harness = harness_with(true);
+    tab(&mut harness, true);
+    assert_eq!(tabs(&harness), 0);
+    assert_eq!(harness.runtime().focused(), Some(&id("name")), "the last stop");
 }
 
 /// Under an open overlay, the home element hears no key: its layer takes

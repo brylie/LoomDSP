@@ -533,6 +533,10 @@ fn a_warning_during_a_rebuild_reaches_the_next_tree() {
     ui.app_mut().a11y_after(Touch::Changed);
     ui.app_mut().alerts.warn("Autosave failed");
     ui.app_mut().a11y_after(Touch::Changed);
+    // The app answers the window's questions after an update, and in the
+    // window every question is asked in one. This test asked from outside,
+    // so one update carries the answers.
+    ui.send(Message::Tick);
     for _ in 0..4 {
         ui.redraw();
     }

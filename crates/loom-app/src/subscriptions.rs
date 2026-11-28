@@ -1,52 +1,13 @@
-//! Who hears the window's events: the input listeners, as plain calls
-//! ([`Listeners`]), and the window events the runtime hands the app
-//! ([`window_message`]): the close request and a dropped file. The window's layers on the
-//! `winit` shell (`iced_bridge/window.rs`), the `Ui` harness, and the
-//! control channel's pointer hand each event on through them. The watcher
-//! threads are in `watching.rs`, and the timers and frames are deadlines
-//! (`timers.rs`).
-//!
-//! The same listeners as Iced's subscriptions stay, for tests only, as the
-//! reference the plain calls are checked against (`subscriptions/tests.rs`).
-//! Plan step P4 deletes them with the bridge.
+//! What the runtime hands the app about the window: the window events
+//! ([`window_message`]), help's keys ([`help_key`]), and the lights on
+//! screen the telemetry watches. The watcher threads are in `watching.rs`,
+//! and the timers and frames are deadlines (`timers.rs`).
 
-use crate::input_owner::Listening;
 use crate::{App, FileAction, Message, lights};
-#[cfg(test)]
-use iced::Subscription;
-use iced::event::Status;
 use loom_core::ModuleId;
 use loom_ui_core::{Event, Key, KeyEvent};
 
 impl App {
-    /// What Iced's runtime ran for the app, as subscriptions, less the
-    /// close request, which the runtime now hands the app as a window event
-    /// ([`window_message`]). The window on the shell hears the same through
-    /// [`Listeners`]; this stays for the tests that compare the two. Plan
-    /// step P4 deletes it.
-    #[cfg(test)]
-    pub(crate) fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([self.input_subscription(), always_subscription()])
-    }
-
-    /// Who hears the window's events now, for [`Listeners::messages`].
-    /// Take it before a batch of events, as Iced's subscriptions hear a
-    /// batch as the app stood before it.
-    pub(crate) fn listeners(&self) -> Listeners {
-        Listeners {
-            listening: self.listening(),
-        }
-    }
-
-    /// The listener for input that depends on who has it. Its messages say who
-    /// was listening before the event (input_owner.rs).
-    #[cfg(test)]
-    pub(crate) fn input_subscription(&self) -> Subscription<Message> {
-        iced::event::listen_with(iced_input_event)
-            .with(self.listening())
-            .map(|(listening, heard)| heard.message(listening))
-    }
-
     /// The lights on screen and where their values live, with the reader of
     /// this engine's table, or `None` when there are none.
     pub(crate) fn watched_lights(&self) -> Option<lights::OnScreen> {
@@ -136,42 +97,10 @@ impl App {
     }
 }
 
-/// The listener for input that works whoever has it. It reads no app state, so
-/// its identity never changes and it never restarts (input_owner.rs).
-#[cfg(test)]
-pub(crate) fn always_subscription() -> Subscription<Message> {
-    iced::event::listen_with(iced_always_event)
-}
-
-/// [`crate::input_owner::input_event`] as Iced's listener, hearing Iced's
-/// event as ours. Plan step P4 deletes it.
-#[cfg(test)]
-fn iced_input_event(
-    event: iced::Event,
-    status: Status,
-    _window: iced::window::Id,
-) -> Option<crate::input_owner::Heard> {
-    crate::input_owner::input_event(&loom_canvas::iced_convert::event_to_core(&event)?, used(status))
-}
-
-/// [`crate::input_owner::always_event`] as Iced's listener, hearing Iced's
-/// event as ours. Plan step P4 deletes it.
-#[cfg(test)]
-fn iced_always_event(event: iced::Event, status: Status, _window: iced::window::Id) -> Option<Message> {
-    crate::input_owner::always_event(&loom_canvas::iced_convert::event_to_core(&event)?, used(status))
-}
-
-/// Whether a widget used an event, from Iced's word for it.
-fn used(status: Status) -> bool {
-    status == Status::Captured
-}
-
-/// The help key and Escape reach help even while a text field has focus.
+/// An Escape nothing took closes help. The keys that open help are heard
+/// first, whoever has the keys (`App::always_key`).
 pub(crate) fn help_key(event: &Event, _used: bool) -> Option<Message> {
     match event {
-        Event::Key(KeyEvent::Pressed {
-            key, modifiers, text, ..
-        }) if opens_help(*key, *modifiers, text.as_deref()) => Some(Message::ShowHelp),
         Event::Key(KeyEvent::Pressed { key: Key::Escape, .. }) => Some(Message::CloseHelp),
         _ => None,
     }
@@ -200,37 +129,6 @@ pub(crate) fn window_message(event: &loom_ui::WindowEvent) -> Option<Message> {
         loom_ui::WindowEvent::FileDropped(path) => Some(Message::FileDropped(path.clone())),
         loom_ui::WindowEvent::ScaleChanged(_) => Some(Message::WindowRescaled),
         _ => None,
-    }
-}
-
-/// The window's listeners as the app stood at one moment: the same ones
-/// Iced's subscriptions heard (`App::subscription`, kept for the tests), as
-/// plain calls. The screen reader adapter's events are not here: they come
-/// through the runtime's waker (`a11y/macos.rs`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Listeners {
-    /// Who has the input (input_owner.rs).
-    listening: Listening,
-}
-
-impl Listeners {
-    /// The messages the listeners send for Iced's `event`, which a widget
-    /// used or not as `status` says (input_owner.rs). This is the one place
-    /// an event Iced delivers becomes ours, for the window, the `Ui`
-    /// harness, and the control channel's injector alike. An event with no
-    /// meaning to the listeners, such as a window event, sends nothing: the
-    /// runtime hands the app those itself ([`window_message`]). Plan step
-    /// P4 deletes it, when the runtime delivers every event.
-    pub(crate) fn messages(self, event: &iced::Event, status: Status) -> Vec<Message> {
-        loom_canvas::iced_convert::event_to_core(event)
-            .map(|event| self.heard(&event, used(status)))
-            .unwrap_or_default()
-    }
-
-    /// The messages the listeners send for `event`, which a widget used or
-    /// not as `used` says (input_owner.rs).
-    pub(crate) fn heard(self, event: &Event, used: bool) -> Vec<Message> {
-        crate::input_owner::heard_messages(event, used, self.listening)
     }
 }
 

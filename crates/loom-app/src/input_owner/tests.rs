@@ -1,13 +1,13 @@
-//! Tests for the input owner and the one input route.
+//! Tests for the input owner, the overlays' keys, and the two key hooks.
 
 use super::*;
+use crate::Message;
 use crate::patches;
 use crate::ui_test::Ui;
-use iced::event::Status;
-use iced::{mouse, window};
 use loom_canvas::stats::{FrameCause, requests_this_thread};
 use loom_canvas::{CanvasEvent, PortRef};
-use loom_ui_core::{Modifiers, Point, PointerButton, Rect, Size};
+use loom_ui_core::Key;
+use loom_ui_core::{Modifiers, Point, Rect, Size};
 
 /// Every overlay, and the canvas with none.
 pub(crate) const OWNERS: [InputOwner; 10] = [
@@ -84,18 +84,6 @@ pub(crate) fn open_overlay(ui: &mut Ui, owner: InputOwner) {
     assert_eq!(ui.app().input_owner(), owner, "the overlay opened");
 }
 
-/// The listener passes what a row reads, and nothing else, so that moving the
-/// pointer and redrawing send no message and an idle app stays idle.
-#[test]
-fn the_listener_passes_only_what_a_row_can_use() {
-    let hears = |event: Event| input_event(&event, false).is_some();
-    assert!(hears(Event::Key(KeyEvent::ModifiersChanged(Modifiers::SHIFT))));
-    assert!(hears(Event::Pointer(PointerEvent::Pressed(PointerButton::Left))));
-    assert!(!hears(Event::Pointer(PointerEvent::Moved)));
-    assert!(!hears(Event::Pointer(PointerEvent::Released(PointerButton::Left))));
-    assert!(!hears(Event::Redraw));
-}
-
 /// Each overlay is its own owner, and only the canvas with none is interactive.
 #[test]
 fn each_overlay_has_the_input_while_it_is_open() {
@@ -149,90 +137,35 @@ fn a_key_press_counts_one_input_cause() {
     assert_eq!(requests_this_thread(FrameCause::Input) - before, 1);
 }
 
-/// A route with no message still redraws, so it still counts as input. A key a
-/// widget used, and that no row reads, is such a route.
+/// A key that opens a question must not also answer it: the runtime routes
+/// the key, and asks the app's shortcuts for it, before any of its own
+/// updates run, so the question it opens hears nothing of it (ui-layer.md,
+/// section 6, rule 6). Before this was so, opening a patch with unsaved
+/// changes from the search field discarded them at once.
 #[test]
-fn an_empty_route_counts_as_input() {
-    let mut app = crate::ui_test::open_app("subtractive.ron");
-    let before = requests_this_thread(FrameCause::Input);
-    let released = KeyEvent::Released {
-        key: Key::Character('q'),
-        code: loom_ui_core::Code::Other,
-    };
-    let listening = app.listening();
-    let event = Event::Key(released);
-    assert!(listening.route(&event, true).is_empty());
-    let _ = app.send(Message::Input {
-        event,
-        used: true,
-        listening,
-    });
-    assert_eq!(requests_this_thread(FrameCause::Input) - before, 1);
-}
-
-/// Enter that makes a widget open a question must not also answer it: the
-/// route uses who was listening before the event. Before this was so, opening
-/// a patch with unsaved changes from the search field discarded them at once.
-#[test]
-fn a_route_reads_who_was_listening_before_the_event() {
-    let mut app = crate::ui_test::open_app("subtractive.ron");
-    let before = app.listening();
-    app.edit(|app| {
+fn a_key_that_opens_a_question_does_not_answer_it() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.app_mut().edit(|app| {
         app.session.controller.add_module("loom.osc.sine").unwrap();
         app.commit();
     });
-    let _ = app.send(Message::File(crate::FileAction::New));
-    assert!(app.overlays.question.is_some());
-    let enter = Event::Key(crate::ui_test::pressed(Key::Enter, Modifiers::NONE));
-    let _ = app.send(Message::Input {
-        event: enter,
-        used: true,
-        listening: before,
-    });
+    // Cmd+N asks about the unsaved changes; its release reaches no answer.
+    ui.tap(Key::Character('n'), Modifiers::platform_shortcut());
     assert!(
-        app.overlays.question.is_some(),
+        ui.app().overlays.question.is_some(),
         "the question is still waiting for its answer"
     );
 }
 
-/// The panic key goes through the listener that never restarts. A dropped
-/// file is a window event now (`subscriptions::window_message`).
+/// The panic key is the app's always-heard key (section 6, rule 6, step 1),
+/// whoever has the input; nothing else is.
 #[test]
 fn panic_is_heard_whoever_has_the_input() {
-    let hears = |event: Event| always_event(&event, true);
-    let panic = Event::Key(crate::ui_test::pressed(
-        Key::Character('.'),
-        Modifiers::platform_shortcut(),
-    ));
-    assert!(matches!(hears(panic), Some(Message::Panic)));
-    assert!(
-        hears(Event::Pointer(PointerEvent::Pressed(PointerButton::Left))).is_none(),
-        "nothing else"
-    );
-}
-
-/// The hash Iced keeps a subscription under. A new hash restarts it, and an
-/// event queued for the old one is lost.
-fn identity(subscription: iced::Subscription<Message>) -> u64 {
-    use std::hash::Hasher as _;
-    let recipes = iced_runtime::futures::subscription::into_recipes(subscription);
-    assert_eq!(recipes.len(), 1, "one listener");
-    let mut hasher = iced_runtime::futures::subscription::Hasher::default();
-    recipes[0].hash(&mut hasher);
-    hasher.finish()
-}
-
-/// When who is listening changes, the input listener restarts, and the one for
-/// the panic key does not. So Escape that closes the browser
-/// cannot take a Panic pressed straight after it down with it.
-#[test]
-fn only_the_input_listener_restarts_when_who_is_listening_changes() {
-    let mut ui = Ui::open("subtractive.ron");
-    let input = identity(ui.app().input_subscription());
-    let always = identity(crate::subscriptions::always_subscription());
-    open_overlay(&mut ui, InputOwner::Browser);
-    assert_ne!(identity(ui.app().input_subscription()), input);
-    assert_eq!(identity(crate::subscriptions::always_subscription()), always);
+    let app = crate::tests::app();
+    let panic = crate::ui_test::pressed(Key::Character('.'), Modifiers::platform_shortcut());
+    assert!(matches!(loom_ui::App::always_key(&app, &panic), Some(Message::Panic)));
+    let other = crate::ui_test::pressed(Key::Character('a'), Modifiers::NONE);
+    assert!(loom_ui::App::always_key(&app, &other).is_none(), "nothing else");
 }
 
 /// Help opens on top of Your patches, the chooser, and Preferences
@@ -386,70 +319,4 @@ fn clipboard_keys_work_with_no_overlay() {
     assert!(ui.clipboard().is_some(), "Cmd+C copies");
     let before = ui.app().session.controller.graph().nodes().count();
     assert!(tap_command(&mut ui, 'x') < before, "Cmd+X cuts");
-}
-
-/// The real window's path: events go into the app's subscription as the runtime
-/// sends them, and the messages that come out route as the other paths do. A
-/// redraw sends nothing, so an idle app stays idle.
-#[test]
-fn the_subscription_sends_what_it_hears_with_who_was_listening() {
-    use iced_runtime::futures::futures::{StreamExt, executor::block_on, stream};
-    use iced_runtime::futures::subscription::{Event as Runtime, into_recipes};
-    let ui = Ui::open("subtractive.ron");
-    let window = window::Id::unique();
-    let interaction = |event, status| Runtime::Interaction { window, event, status };
-    let escape = crate::ui_test::key_press(Key::Escape, Modifiers::NONE, None, false);
-    let events = vec![
-        interaction(
-            iced::Event::Window(window::Event::RedrawRequested(ui.now())),
-            Status::Ignored,
-        ),
-        interaction(
-            iced::Event::Mouse(mouse::Event::CursorMoved {
-                position: iced::Point::ORIGIN,
-            }),
-            Status::Ignored,
-        ),
-        interaction(escape, Status::Ignored),
-    ];
-    let mut recipes = into_recipes(ui.app().input_subscription());
-    assert_eq!(recipes.len(), 1, "one recipe for the input listener");
-    let recipe = recipes.remove(0);
-    let messages: Vec<Message> = block_on(recipe.stream(stream::iter(events).boxed()).collect());
-    let [Message::Input { event, used, listening }] = messages.as_slice() else {
-        panic!("only the key comes out: {messages:?}");
-    };
-    assert_eq!(*listening, ui.app().listening());
-    let routed = listening.route(event, *used);
-    assert!(
-        matches!(
-            routed.as_slice(),
-            [Message::Key(_), Message::CloseHelp, Message::TextFocusCheck]
-        ),
-        "{routed:?}"
-    );
-}
-
-/// For each overlay, a key sent the way the `Injector` and the headless `Ui`
-/// send it makes the same message as the real window's subscription.
-#[test]
-fn the_injector_and_the_subscription_agree_for_each_overlay() {
-    use iced_runtime::futures::futures::{StreamExt, executor::block_on, stream};
-    use iced_runtime::futures::subscription::{Event as Runtime, into_recipes};
-    let escape = crate::ui_test::key_press(Key::Escape, Modifiers::NONE, None, false);
-    for owner in OWNERS {
-        let mut ui = Ui::open("subtractive.ron");
-        open_overlay(&mut ui, owner);
-
-        let injected = ui.app().listeners().messages(&escape, Status::Ignored);
-
-        let runtime = Runtime::Interaction {
-            window: window::Id::unique(),
-            event: escape.clone(),
-            status: Status::Ignored,
-        };
-        let recipe = into_recipes(ui.app().input_subscription()).remove(0);
-        let heard: Vec<Message> = block_on(recipe.stream(stream::iter(vec![runtime]).boxed()).collect());
-        assert_eq!(format!("{injected:?}"), format!("{heard:?}"), "{owner:?}");
-    }
 }

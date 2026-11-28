@@ -4,9 +4,8 @@
 //! reader edits one through its node, and none of it outlives the field.
 
 use crate::Message;
-use crate::iced_bridge::TestPanels;
+use crate::test_panels::TestPanels;
 use crate::ui_test::Ui;
-use crate::window_question::WindowQuestion;
 use loom_ui::access::{Access, Role};
 use loom_ui::{Element, FieldEvent, Layer, Length, View};
 use loom_ui_core::{Key, Modifiers, UiId};
@@ -105,22 +104,12 @@ fn heard(messages: &[Message], message: &Message) -> bool {
     messages.iter().any(|message| format!("{message:?}") == wanted)
 }
 
-/// Asks the window where focus is, as Tab from a field, the clipboard keys,
-/// and a script's typing do, and gives the answer the app heard.
+/// The field the app reads as having the keys in an update, as Tab from a
+/// field, the clipboard keys, and a script's typing read it
+/// (`window_now.rs`).
 fn focus_answer(ui: &mut Ui) -> Option<UiId> {
-    ui.app().ask_window(WindowQuestion::focus(|part| {
-        said(&format!(
-            "focus {}",
-            part.map_or_else(|| "none".to_string(), |part| part.to_string())
-        ))
-    }));
-    let log = ui.deliver(Message::MidiGhosts);
-    log.iter().rev().find_map(|message| match message {
-        Message::HelpLink(text) => text
-            .strip_prefix("focus ")
-            .map(|part| (part != "none").then(|| part.parse().expect("a UI ID"))),
-        _ => None,
-    })?
+    let _ = ui.deliver(Message::MidiGhosts);
+    ui.app().focused_field_now().cloned()
 }
 
 /// Typing in a runtime field gives its view's edit message, and Enter its

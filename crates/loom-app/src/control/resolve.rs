@@ -1,7 +1,7 @@
 //! Turning names in commands into what the app shows: ports, controls on screen, keys, and buttons.
 
 use super::*;
-use crate::places::{Collect, Places};
+use crate::places::Places;
 use loom_core::ModuleNames;
 use loom_ui_core::{Code, IdKey, Key, KeyEvent, Modifiers, UiId};
 
@@ -52,9 +52,9 @@ pub struct Found {
     pub text: Option<Rect>,
     /// The window's named parts, for a target given as UI ID text.
     pub(crate) places: Places,
-    /// The target in `loom-ui`'s own layout (the stats bar): by its UI ID,
-    /// or by the text it shows. Filled in the update that answers, which
-    /// can read that layout (`App::update`).
+    /// The target in `loom-ui`'s own layout: by its UI ID, what of it
+    /// shows, or by the text it shows. Filled in the update that answers,
+    /// which can read that layout (`App::update`).
     pub(crate) ours: Option<Rect>,
 }
 
@@ -62,73 +62,38 @@ impl Found {
     /// Fills [`Found::ours`] for `target` from the runtime's layout, by its
     /// UI ID when it reads as one, else by the text the window shows.
     pub(crate) fn find_ours<M>(&mut self, target: &str, cx: &loom_ui::Context<'_, M>) {
-        self.ours = ui_id(target)
-            .and_then(|id| cx.bounds(&id))
-            .or_else(|| cx.text_bounds(target));
-    }
-}
-
-/// Finds the canvas, and the first text widget that reads `text`.
-pub(crate) struct Find {
-    text: String,
-    found: Found,
-    /// Collects the window's named parts on the same walk.
-    parts: Collect,
-}
-
-impl Find {
-    /// The search for `text`, for the bridge to run on the window.
-    pub(crate) fn new(text: String) -> Self {
-        Self {
-            text,
-            found: Found::default(),
-            parts: Collect::default(),
-        }
-    }
-}
-
-impl Operation<Found> for Find {
-    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<Found>)) {
-        let outside = self.parts.enter();
-        operate(self);
-        self.parts.leave(outside);
+        self.place_ours(
+            target,
+            |id| cx.bounds(id),
+            |id| cx.shown_bounds(id),
+            |text| cx.text_bounds(text),
+        );
     }
 
-    fn container(&mut self, id: Option<&Id>, bounds: iced::Rectangle) {
-        Operation::<Places>::container(&mut self.parts, id, bounds);
+    /// [`Found::find_ours`] between turns, from the layout a driver holds,
+    /// for a script's pointer.
+    pub(crate) fn find_ours_in(&mut self, target: &str, panels: &loom_ui::Panels<'_, crate::App>) {
+        self.place_ours(
+            target,
+            |id| panels.bounds(id),
+            |id| panels.shown_bounds(id),
+            |text| panels.locate(None, text),
+        );
     }
 
-    fn scrollable(
+    /// The one rule both read the layout by: a UI ID by what of it shows,
+    /// else text the window shows, which is cut to what shows too; and
+    /// whether the UI ID is laid out but scrolled out of view.
+    fn place_ours(
         &mut self,
-        id: Option<&Id>,
-        bounds: iced::Rectangle,
-        content_bounds: iced::Rectangle,
-        translation: iced::Vector,
-        state: &mut dyn iced::advanced::widget::operation::Scrollable,
+        target: &str,
+        bounds: impl Fn(&UiId) -> Option<Rect>,
+        shown: impl Fn(&UiId) -> Option<Rect>,
+        text: impl Fn(&str) -> Option<Rect>,
     ) {
-        Operation::<Places>::scrollable(&mut self.parts, id, bounds, content_bounds, translation, state);
-    }
-
-    fn custom(&mut self, id: Option<&Id>, bounds: iced::Rectangle, state: &mut dyn Any) {
-        if let Some(view) = state.downcast_ref::<CanvasView>() {
-            self.found.canvas = Some(*view);
-        }
-        // The places need the canvas too: a canvas UI ID is placed by the
-        // tree, which reads the canvas from them.
-        Operation::<Places>::custom(&mut self.parts, id, bounds, state);
-    }
-
-    fn text(&mut self, _id: Option<&Id>, bounds: iced::Rectangle, text: &str) {
-        if self.found.text.is_none() && text == self.text {
-            self.found.text = Some(bounds.to_core());
-        }
-    }
-
-    fn finish(&self) -> Outcome<Found> {
-        Outcome::Some(Found {
-            places: self.parts.places(),
-            ..self.found.clone()
-        })
+        let id = ui_id(target);
+        self.ours = id.as_ref().and_then(&shown).or_else(|| text(target));
+        self.places.scrolled_out = id.is_some_and(|id| bounds(&id).is_some() && shown(&id).is_none());
     }
 }
 
@@ -224,11 +189,8 @@ fn locate_id(app: &App, id: &UiId, found: &Found) -> Result<Option<Rect>, String
     if on_canvas {
         return Ok(app.a11y_bounds(id, &found.places));
     }
-    match found.places.of(id) {
-        Some(place) if place.is_shown() => Ok(Some(place.rect)),
-        Some(_) => Err(format!("`{id}` is scrolled out of view")),
-        None => Ok(None),
-    }
+    // Outside the canvas, the runtime's layout places it (`Found::ours`).
+    Ok(None)
 }
 
 /// True when `locate` cannot answer `target` from Iced's search and the
@@ -271,6 +233,7 @@ pub fn locate(app: &App, target: &str, found: &Found) -> Result<Rect, String> {
     if let Some(id) = ui_id(target) {
         return match locate_id(app, &id, found)? {
             Some(rect) => Ok(rect),
+            None if found.places.scrolled_out => Err(format!("`{id}` is scrolled out of view")),
             None => found
                 .ours
                 .or(found.text)

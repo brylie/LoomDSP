@@ -234,18 +234,6 @@ impl App {
         Some(Message::MenuMove { to })
     }
 
-    /// True while one of the runtime's overlays owns the input: the
-    /// question, help, the probe menu, or Recent.
-    pub(crate) fn runtime_overlay_open(&self) -> bool {
-        self.overlays.question.is_some()
-            || self.overlays.help.is_some()
-            || self.overlays.chooser.is_some()
-            || self.overlays.preferences().is_some()
-            || self.runtime_menu().is_some()
-            || self.overlays.browser().is_some()
-            || self.overlays.patches().is_some()
-    }
-
     /// The runtime menu's items as focus stops, in order.
     pub(crate) fn menu_stops(&self) -> Vec<UiId> {
         self.runtime_menu()

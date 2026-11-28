@@ -81,3 +81,6 @@ pub(super) fn choice(buttons: &[String], result: rfd::MessageDialogResult) -> Ch
         MessageDialogResult::Cancel => None,
     }
 }
+
+#[cfg(test)]
+mod tests;

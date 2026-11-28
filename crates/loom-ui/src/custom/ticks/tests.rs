@@ -30,6 +30,9 @@ enum Message {
     Ticked,
     /// Open or close the overlay over the meter.
     Overlay(bool),
+    /// Make the meter's deadline the app's moment, as an update that
+    /// leaves the element behind the app does.
+    Due(Instant),
 }
 
 /// The meter's state: what it heard, its deadline, and how many frames it
@@ -38,6 +41,8 @@ struct MeterState {
     heard: Vec<CustomEvent>,
     deadline: Option<Instant>,
     frames: u32,
+    /// The app's moment its last tick answered.
+    answered: Option<Instant>,
 }
 
 impl Custom<Meters> for MeterState {
@@ -60,6 +65,7 @@ impl Custom<Meters> for MeterState {
                 if !app.keep_deadline {
                     self.deadline = None;
                 }
+                self.answered = app.due;
                 out.send(Message::Ticked);
             }
             CustomEvent::Frame => {
@@ -74,8 +80,8 @@ impl Custom<Meters> for MeterState {
         Used::Yes
     }
 
-    fn next_deadline(&self, _app: &Meters) -> Option<Instant> {
-        self.deadline
+    fn next_deadline(&self, app: &Meters) -> Option<Instant> {
+        self.deadline.or(app.due.filter(|due| self.answered != Some(*due)))
     }
 
     fn animating(&self, _app: &Meters) -> bool {
@@ -94,6 +100,8 @@ struct Meters {
     /// True when the meter's tick forgets to move its deadline on, which a
     /// debug build refuses.
     keep_deadline: bool,
+    /// A moment the meter's deadline follows, set by [`Message::Due`].
+    due: Option<Instant>,
     /// Every message, in order.
     log: Vec<Message>,
 }
@@ -102,8 +110,10 @@ impl App for Meters {
     type Message = Message;
 
     fn update(&mut self, message: Message, _cx: &Context<'_, Message>) -> Effects<Message> {
-        if let Message::Overlay(open) = message {
-            self.overlay = open;
+        match message {
+            Message::Overlay(open) => self.overlay = open,
+            Message::Due(at) => self.due = Some(at),
+            Message::Ticked => {}
         }
         self.log.push(message);
         Effects::none()
@@ -140,6 +150,7 @@ impl App for Meters {
                 heard: Vec::new(),
                 deadline: None,
                 frames: self.start_frames,
+                answered: None,
             }) as Box<dyn Custom<Self>>
         })
     }
@@ -152,6 +163,7 @@ fn meters(start_frames: u32) -> Meters {
         start_frames,
         send_from_frames: false,
         keep_deadline: false,
+        due: None,
         log: Vec::new(),
     }
 }
@@ -250,6 +262,22 @@ fn a_deadline_tick_sends_in_its_turn() {
     assert_eq!(ticks(&harness), [CustomEvent::Deadline]);
     assert_eq!(harness.app().log, [Message::Ticked]);
     assert_eq!(harness.next().deadline, None, "the tick moved its deadline on");
+}
+
+/// A deadline an update made due ticks in that update's turn, after its
+/// batch, so what the element sends runs and the turn draws once, before
+/// the loop would wake again: the canvas syncs with the app after each
+/// update this way (section 9, rule 4).
+#[test]
+fn a_deadline_an_update_made_due_ticks_in_the_same_turn() {
+    let mut harness = harness(meters(0));
+    let now = harness.now();
+    let drawn = harness.driver().redraws();
+    let next = harness.send(Message::Due(now));
+    assert_eq!(ticks(&harness), [CustomEvent::Deadline]);
+    assert_eq!(harness.app().log, [Message::Due(now), Message::Ticked]);
+    assert_eq!(next.deadline, None, "nothing left to wake for");
+    assert_eq!(harness.driver().redraws() - drawn, 0, "nothing visible changed");
 }
 
 /// A turn for one message alone leaves a due deadline for the next turn,

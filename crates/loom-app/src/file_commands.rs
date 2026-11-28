@@ -461,8 +461,6 @@ impl App {
         // whole patch.
         self.frame_key += 1;
         self.meter = bench::FrameMeter::default();
-        // A field can go with the old patch's views: ask the window again.
-        self.focus_question.set(true);
         // A part of the old patch's inspector, the runtime's since plan
         // 3.2, row 4d, lets go of the focus too, as Iced's field did, so
         // the runtime does not move it to the new inspector's first stop

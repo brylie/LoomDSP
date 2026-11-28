@@ -630,21 +630,6 @@ impl App {
         }
     }
 
-    /// Tab in a text field on the main view: it closes the field, as on the
-    /// canvas. The canvas has taken the same key and moved its focus. The matrix
-    /// and the windows over the canvas have their own use of the keys.
-    pub(crate) fn text_field_tab(&mut self, focused: Option<&UiId>, backwards: bool) {
-        if focused.is_none()
-            || self.focus_in_matrix()
-            || !self.no_overlay()
-            || self.text_field_tabs(focused)[usize::from(backwards)]
-        {
-            return;
-        }
-        self.session.value_draft = None;
-        self.effect(loom_ui::Effects::unfocus());
-    }
-
     /// Typing in an inspector value field keeps the text as a draft, with the
     /// reason if it is not a value yet.
     pub(crate) fn type_value_draft(&mut self, module: u32, index: usize, text: String) {
@@ -873,27 +858,6 @@ pub(crate) fn value_draft_event(event: &loom_ui_core::Event, _used: bool) -> Opt
     match event {
         Event::Key(KeyEvent::Pressed { key: Key::Escape, .. }) => {
             Some(Message::Inspector(crate::inspector::Message::ValueDraftClear))
-        }
-        _ => None,
-    }
-}
-
-/// The events that can move text focus, heard whichever widget used them: a
-/// press, Escape, which a text field takes as giving up focus, and Tab.
-/// Ctrl+Tab is not a field's Tab: it moves between regions, and a focused
-/// text field does not take it (ui-layer.md, section 6, rule 7).
-pub(crate) fn text_focus_event(event: &loom_ui_core::Event, _used: bool) -> Option<Message> {
-    use loom_ui_core::{Event, Key, KeyEvent, PointerEvent};
-    match event {
-        Event::Key(KeyEvent::Pressed {
-            key: Key::Tab,
-            modifiers,
-            ..
-        }) if !modifiers.shortcut() && !modifiers.control && !modifiers.alt => Some(Message::TextFieldTab {
-            backwards: modifiers.shift,
-        }),
-        Event::Key(KeyEvent::Pressed { key: Key::Escape, .. }) | Event::Pointer(PointerEvent::Pressed(_)) => {
-            Some(Message::TextFocusCheck)
         }
         _ => None,
     }

@@ -2369,12 +2369,16 @@ fn the_inspector_takes_typed_values() {
     assert_eq!(param_value(&ui, id, "cutoff"), 440.0, "bad text commits nothing");
     assert!(ui.app().session.value_draft.is_some(), "and stays to be corrected");
 
-    // Escape drops it, through the same listener the app uses.
+    // Escape in its field drops it: the inspector takes Escape first and
+    // leaves, dropping the draft before the focus goes, which would commit
+    // it. A draft lives only while its field has focus.
+    let part = ui.app().value_field_part(module, index).expect("the cutoff field");
+    ui.focus(&part);
     let messages = ui.tap(Key::Escape, Modifiers::NONE);
     assert!(
         messages
             .iter()
-            .any(|m| matches!(m, Message::Inspector(crate::inspector::Message::ValueDraftClear)))
+            .any(|m| matches!(m, Message::PatchInfo(crate::patch_info::Message::Leave)))
     );
     assert!(ui.app().session.value_draft.is_none());
 
@@ -2851,25 +2855,6 @@ fn gpu_required() -> bool {
     std::env::var("LOOM_REQUIRE_GPU").is_ok_and(|value| value == "1")
 }
 
-/// The harness lays out on a renderer that only measures, and the window
-/// draws with wgpu. Both lay Iced's view out alike, so the canvas lands in
-/// the same place on both (plan for leaving Iced, step 2.3, item 2). Since
-/// the matrix moved (plan 3.2, row 4e), the canvas is all Iced places:
-/// every other part is the runtime's, laid out by its own text measure.
-/// Skips with no GPU adapter, unless one is required.
-#[test]
-fn measure_and_wgpu_lay_out_alike() {
-    let mut ui = Ui::open("subtractive.ron");
-    ui.send(Message::Matrix(crate::MatrixEvent::Tab(crate::matrix::Tab::Matrix)));
-    let Some((measured, drawn)) = ui.places_on_both() else {
-        assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
-        return;
-    };
-    assert!(measured.canvas.is_some(), "the walk found the canvas");
-    assert_eq!(measured.len(), 0, "no part of Iced's own is named any more");
-    assert_eq!(measured, drawn, "with the matrix open");
-}
-
 /// A capture draws the toolbar's buttons in their role's looks
 /// (visual-system.md, Role tokens): an enabled button in its normal fill,
 /// and a turned-off one, Undo with nothing to undo, in its off fill (#460,
@@ -3105,50 +3090,25 @@ fn locate_follows_a_pan_before_release() {
     assert!((after.x - during.x).abs() < 0.01 && (after.y - during.y).abs() < 0.01);
 }
 
-/// A capture after a resize, before any frame at the new size, draws the
-/// last frame again into a smaller target. The canvas's text was prepared
-/// with scissors cut to the old size, and wgpu rejects a scissor larger
-/// than its target, so the canvas is prepared again for the new one. The
-/// shell can run a capture right after a resize, before the next frame.
+/// A capture after the window shrinks draws the window at its new size:
+/// the shell can run a capture right after a resize, before the next frame,
+/// and a capture draws the window afresh, so nothing of the old size's
+/// drawing, such as the canvas's text scissors, can run past the target.
 #[test]
-fn a_capture_after_a_shrink_draws_the_last_frame_again() {
-    use iced::advanced::renderer::Style;
-    use iced_runtime::user_interface::{Cache, UserInterface};
-    let ui = Ui::open("subtractive.ron");
-    let Some(mut offscreen) = crate::iced_bridge::offscreen::Offscreen::new() else {
+fn a_capture_after_a_shrink_draws_at_the_new_size() {
+    let mut ui = Ui::open("subtractive.ron");
+    if !ui.draws_the_canvas() {
         assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
         return;
-    };
-    let app = ui.app();
-    let theme = crate::iced_bridge::theme();
-    let background = loom_canvas::iced_convert::ToIced::to_iced(crate::style::PANEL_FILL);
-    let size = crate::WINDOW;
-    let mut built = UserInterface::build(app.view(), size, Cache::default(), &mut offscreen.renderer);
-    let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(ui.now()));
-    let _ = built.update(
-        &[redraw],
-        iced::mouse::Cursor::Unavailable,
-        &mut offscreen.renderer,
-        &mut iced::advanced::clipboard::Null,
-        &mut Vec::new(),
+    }
+    assert!(capture_window(&mut ui).is_some(), "the full window draws");
+    // Half the size: the old size's scissors would run past it.
+    ui.resize(WINDOW.width / 2.0, WINDOW.height / 2.0);
+    let image = capture_window(&mut ui).expect("the frame is read back");
+    assert_eq!(
+        (image.width(), image.height()),
+        ((WINDOW.width / 2.0) as u32, (WINDOW.height / 2.0) as u32)
     );
-    app.canvas_drawn.clear();
-    let style = Style {
-        text_color: loom_canvas::iced_convert::ToIced::to_iced(crate::style::TEXT),
-    };
-    built.draw(&mut offscreen.renderer, theme, &style, iced::mouse::Cursor::Unavailable);
-    let drawing = app.canvas_drawn.take();
-    assert!(drawing.is_some(), "the canvas built a frame");
-    let full = iced::Size::new(size.width as u32, size.height as u32);
-    assert!(offscreen.pixels(full, 1.0, background, drawing).is_some());
-
-    // Half the size: the text's old scissors would run past it.
-    let half = iced::Size::new(full.width / 2, full.height / 2);
-    let again = offscreen
-        .pixels_again(half, 1.0, background)
-        .expect("the frame is read back");
-    assert_eq!(again.len(), (half.width * half.height * 4) as usize);
-    drop(built);
 }
 
 /// A test that saves writes its own copy of the example, never the
@@ -3372,4 +3332,20 @@ fn a_field_in_the_view_that_owns_the_input_still_works() {
         .expect("the filter")
         .params[0];
     assert_eq!(cutoff, 777.0);
+}
+
+/// A value draft left with nothing focused is dropped by Escape, as the old
+/// listener row did: an Escape nothing takes reaches the app's unclaimed
+/// keys, which end a draft (`runtime_app.rs`). A draft outlives its field's
+/// focus only while an overlay has the focus, since a focus move anywhere
+/// else commits it (`controls.rs`, `focus_moved`).
+#[test]
+fn escape_drops_a_value_draft_with_nothing_focused() {
+    let mut ui = Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    ui.app_mut().type_value_draft(4, 0, "12".to_string());
+    assert!(ui.app().session.value_draft.is_some());
+    assert_eq!(ui.runtime().focused(), None, "nothing has the focus");
+    ui.tap(Key::Escape, Modifiers::NONE);
+    assert!(ui.app().session.value_draft.is_none(), "Escape dropped the draft");
 }

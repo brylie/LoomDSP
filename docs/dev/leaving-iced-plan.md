@@ -527,6 +527,8 @@ One pull request with ordered commits (Brylie, 2026-11-25), since the window and
 
 Delete the text gate tool (`crates/loom-app/src/screenshot/text_gate_tests.rs`) and the measuring renderer (`iced_bridge/measure.rs`): both measure with Iced's paragraph.
 
+The pull request's last commit deletes what is left that names Iced outside the tests: `loom-canvas`'s Iced widget (`widget.rs`, `widget/`, `iced_convert.rs`), and the Iced widget IDs in `places.rs`, `inspector/ids.rs`, `a11y/items.rs`, and `a11y/tree.rs`. The commit before it changes the tests' types (step 6), so the harness's Iced shim goes with them. After P4, no file in `src/` outside the tests names Iced, so P5 only drops the dependencies. Window questions (`window_question.rs`) are gone in the cut-over itself: an update reads what they answered from its context (`window_now.rs`).
+
 Before the cut, if it shrinks P4, move `services.rs` out and give offscreen captures a device of their own, as small commits or a small pull request.
 
 Risks to check, each in the pull request:
@@ -543,15 +545,16 @@ Gates: every parity gate; `--measure-idle` (counts may fall, since the bridge's 
 
 ### P5. Remove the Iced dependencies
 
-1. Drop `iced`, `iced_wgpu`, `iced_renderer`, `iced_winit`, and `iced_runtime` from the workspace and every crate. #683 names three; all five go (the spec wins).
-2. Set `wgpu`'s and `winit`'s features directly, where Iced turned some on. Check Linux window decorations survive: `cargo tree --target x86_64-unknown-linux-gnu -e features -i winit`.
-3. Purity: the Iced rules in `loom-app`'s and `loom-canvas`'s `tests/purity.rs` go, with no source scan in their place. `deny.toml` bans the `iced*` crates (`[bans] deny`), so `cargo deny check` catches Iced coming back, and `rfd` keeps its own rule (spec section 1, rule 7; Brylie, 2026-11-26).
-4. `deny.toml`: remove each ignored advisory that left with Iced, and reword the OQ-14 comment.
-5. Gates: `cargo deny check`; `cargo tree -d` against the baseline below, on macOS, Linux, and Windows; CI on all three.
+1. First commit: delete the runtime's routing target (`loom_ui::Target`) and `Routed::Later`. P4 leaves the app on a target that passes every event (`layers::NoToolkit`), so nothing routes through it.
+2. Drop `iced`, `iced_wgpu`, `iced_renderer`, `iced_winit`, and `iced_runtime` from the workspace and every crate. #683 names three; all five go (the spec wins).
+3. Set `wgpu`'s and `winit`'s features directly, where Iced turned some on. Check Linux window decorations survive: `cargo tree --target x86_64-unknown-linux-gnu -e features -i winit`.
+4. Purity: the Iced rules in `loom-app`'s and `loom-canvas`'s `tests/purity.rs` go, with no source scan in their place. `deny.toml` bans the `iced*` crates (`[bans] deny`), so `cargo deny check` catches Iced coming back, and `rfd` keeps its own rule (spec section 1, rule 7; Brylie, 2026-11-26).
+5. `deny.toml`: remove each ignored advisory that left with Iced, and reword the OQ-14 comment.
+6. Gates: `cargo deny check`; `cargo tree -d` against the baseline below, on macOS, Linux, and Windows; CI on all three.
 
 ### P6. The runtime owns the whole accessibility tree
 
-1. The runtime builds the tree from panels and custom elements' nodes and keeps the only `IdTable` (spec section 7). The app's tree code in `a11y/` is left only for the canvas's nodes; `a11y/items.rs` goes.
+1. The runtime builds the tree from panels and custom elements' nodes and keeps the only `IdTable` (spec section 7). The canvas gives its tiles' nodes itself, as a custom element's nodes (spec section 9, rule 3), and the app's tree code in `a11y/` goes with `a11y/items.rs`. P4 left them to the app: the canvas element gives no nodes yet, and a screen reader's request on a part it gave no node for goes on to the app (approved in review, 2026-11-28). The criterion for section 9, rule 3 moved here from P4.
 2. Risks: node IDs stay stable; hiding the layers under an overlay or a question; the 250 ms cap on live values (spec section 7, rule 7); `controls` relations across the canvas and the panels.
 3. Gates: `Ui::a11y_tree()` dumps identical before and after, recorded for every view and overlay; node ID stability tests; VoiceOver.
 

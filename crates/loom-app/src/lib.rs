@@ -19,6 +19,7 @@ mod breadcrumb;
 mod browser;
 mod builtin;
 mod cable_picker;
+mod canvas;
 mod canvas_events;
 mod chrome;
 mod clip;
@@ -31,6 +32,7 @@ mod dialogs;
 mod document;
 mod documents;
 mod drafts;
+mod drawing;
 mod editing;
 mod edits;
 #[cfg(test)]
@@ -40,13 +42,13 @@ mod files;
 mod gestures;
 mod help;
 mod history;
-mod iced_bridge;
 mod input_owner;
 mod input_session;
 mod input_watch;
 mod inspector;
 #[cfg(test)]
 mod key_order_tests;
+mod layers;
 mod layout;
 mod learn;
 mod levels;
@@ -60,6 +62,7 @@ mod menus;
 mod modes;
 mod modulation;
 mod monitor;
+mod offscreen;
 mod outline;
 mod overlays;
 mod panic;
@@ -81,10 +84,12 @@ mod qa_tests;
 mod question;
 mod recent;
 mod recovery;
+mod runtime_app;
 mod runtime_fields;
 mod scene;
 mod screenshot;
 mod script_vars;
+mod services;
 mod session;
 mod settings;
 mod shortcut;
@@ -98,6 +103,8 @@ mod subscriptions;
 mod surface;
 mod tabs;
 mod targets;
+#[cfg(any(test, feature = "test-ui"))]
+mod test_panels;
 mod timers;
 mod toolbar;
 #[cfg(any(test, feature = "test-ui"))]
@@ -107,15 +114,15 @@ mod undo;
 mod view;
 mod watcher;
 mod watching;
-mod window_question;
+mod window_now;
 mod xy;
 
 use clap::Parser;
-use iced::{Size, Theme};
 use loom_canvas::CanvasEvent;
 use loom_core::{Controller, InputRef, MidiEvent, ModuleDescriptor, ModuleId, OutputRef, OutputSafety, ProbeId};
 use loom_patch::Patch;
 use loom_ui_core::Point;
+use loom_ui_core::Size;
 use matrix::{Event as MatrixEvent, Tab as RightTab};
 use overlays::Overlay;
 use std::collections::{BTreeMap, BTreeSet};
@@ -286,12 +293,12 @@ pub fn run() -> Result<(), loom_ui::shell::Error> {
     let mut app = App::new(args.clone());
     app.remember_opened_at_start(&args);
     let result = loom_ui::shell::run(
-        iced_bridge::Hosted(app, None, iced_bridge::Extra::default()),
-        iced_bridge::IcedTarget::default(),
-        iced_bridge::WindowLayers::new(),
-        iced_bridge::AppServices,
+        app,
+        crate::layers::NoToolkit,
+        layers::AppLayers::new(),
+        services::AppServices,
         loom_ui::shell::Options {
-            size: loom_ui_core::Size::new(WINDOW.width, WINDOW.height),
+            size: WINDOW,
             // The window is open: the watchers start on the first turn.
             first: vec![Message::StartWatching],
         },
@@ -305,18 +312,6 @@ pub fn run() -> Result<(), loom_ui::shell::Error> {
 
 /// The window size the app opens with.
 const WINDOW: Size = Size::new(1440.0, 900.0);
-
-/// The renderer the app's views are built for. Every view, widget, and
-/// element names this alias rather than Iced's own `Renderer`. It is Iced's
-/// fallback renderer over two: the window always draws with the first,
-/// wgpu; the headless harness lays out on the second, which measures text
-/// as wgpu does and draws nothing, so event tests need no GPU (step 2.3,
-/// items 2 and 3 of the plan for leaving Iced).
-pub(crate) type Renderer = iced_renderer::fallback::Renderer<iced_wgpu::Renderer, iced_bridge::Measure>;
-
-/// An element of the app's views, built for [`Renderer`].
-pub(crate) type Element<'a, M = Message> = iced::Element<'a, M, Theme, Renderer>;
-
 #[derive(Debug, Clone)]
 enum Message {
     /// The player pressed × on a kept error.
@@ -324,16 +319,6 @@ enum Message {
     Canvas(CanvasEvent),
     /// The runtime has updated the window's scale.
     WindowRescaled,
-    /// An input event for the app's one input listener, and whether a widget
-    /// used it. `update` turns it into the messages it routes to
-    /// (`Listening::route`).
-    Input {
-        event: loom_ui_core::Event,
-        /// A widget used the event.
-        used: bool,
-        /// Who was listening when the event was heard.
-        listening: input_owner::Listening,
-    },
     /// The toolbar asks for the module browser at the centre of the canvas.
     OpenBrowser,
     /// Picks a port in the cable menu, or disconnects its chosen input.
@@ -451,12 +436,6 @@ enum Message {
         area: Option<loom_ui_core::Rect>,
         image: Result<loom_ui::effect::Image, loom_ui::effect::NoGpu>,
     },
-    /// Whether a text field has focus, for a `type` command.
-    TypeFocus {
-        call: control::Call,
-        text: String,
-        focused: bool,
-    },
     Animate(bool),
     /// A frame while `--measure` runs, a deadline at display rate
     /// (`timers.rs`). It carries the time it was due, not the turn's
@@ -492,20 +471,9 @@ enum Message {
     Key(loom_ui_core::KeyEvent),
     /// Take back the last step (`docs/design/undo.md`).
     Undo,
-    /// A shortcut that acts on the patch (undo, redo, or one on the
-    /// selection), after checking whether a text field has focus. While
-    /// one has, the shortcut does nothing: the field is being edited, and
-    /// the shortcut would change the patch behind it (`shortcut.rs`).
-    Shortcut {
-        shortcut: shortcut::Shortcut,
-        typing: bool,
-    },
     /// Replay the step undo took back.
     Redo,
-    /// Something may have moved text focus, such as a press. The bridge asks
-    /// the widgets after it.
-    TextFocusCheck,
-    /// The part with focus, or none, as the window says (`iced_bridge.rs`).
+    /// The part with focus, or none, as the runtime says (`runtime_app.rs`).
     /// Every answer is sent, changed or not, as the window's word on focus
     /// after a press: a press elsewhere ends a draft whose field never had
     /// focus, which a change alone would miss.
@@ -514,10 +482,6 @@ enum Message {
     /// the status line, never shown as an empty clipboard (ui-layer.md,
     /// section 8, rule 2).
     FieldPasteRefused,
-    /// Tab was pressed. It closes a text field on the main view.
-    TextFieldTab {
-        backwards: bool,
-    },
     /// Moves the runtime's focus to a toolbar button, or with `None` out of
     /// the toolbar and back to the canvas: the toolbar's arrow keys and
     /// Escape (ui-layer.md, section 6, rule 7). Posted for a turn of its
@@ -540,12 +504,17 @@ enum Message {
     FocusStep {
         back: bool,
     },
-    /// Tab between a view's fields, from the part the window says has
-    /// focus (`window_question.rs`).
-    TabFrom {
-        from: Option<loom_ui_core::UiId>,
-        backwards: bool,
-    },
+    /// The window lost the keys: the canvas lets go of what it holds on
+    /// its next sync (`canvas.rs`).
+    WindowUnfocused,
+    /// A press outside the canvas: the canvas lets go of the keys on its
+    /// next sync, so a digit never opens a field on a control the player
+    /// has left (`canvas.rs`).
+    PressedElsewhere,
+    /// A shortcut key nothing took while the focus was outside the canvas:
+    /// the canvas hears it on its next sync, as it heard every key on
+    /// Iced, so Cmd+V pastes and Cmd+0 and Cmd+A work there (`canvas.rs`).
+    CanvasKey(loom_ui_core::KeyEvent),
     /// Tab reached patch info's fields from one of the runtime's stops: the
     /// last field takes focus, or the first when not `backwards`
     /// (ui-layer.md, section 6, rule 3, from row 2).
@@ -649,7 +618,6 @@ impl Message {
                 | Self::MidiPoll
                 | Self::BenchDone
                 | Self::Inspector(inspector::Message::UnknownLabelDraft { .. })
-                | Self::TextFocusCheck
                 | Self::FocusMoved(_)
                 | Self::AskRecovery
                 | Self::ControlReply
@@ -793,9 +761,6 @@ impl Message {
             // its own, so a Click on one of the question's answers is heard and
             // one on anything below it waits, as a press would.
             Self::A11y(_) | Self::Question(_)
-            // Never asked: `update` routes it before this check, and each
-            // message it becomes is checked on its own.
-            | Self::Input { .. }
             | Self::Panic
             | Self::MidiPoll
             | Self::AudioPoll
@@ -811,7 +776,6 @@ impl Message {
             | Self::ControlFrame(_)
             | Self::Located { .. }
             | Self::Captured { .. }
-            | Self::TypeFocus { .. }
             | Self::Frame(_)
             | Self::Tick
             | Self::Audio(_)
@@ -875,11 +839,10 @@ impl Message {
             | Self::Inspector(_)
             | Self::Modulation(_)
             | Self::Undo
-            | Self::Shortcut { .. }
             | Self::Redo
-            | Self::TextFocusCheck
-            | Self::TextFieldTab { .. }
-            | Self::TabFrom { .. }
+            | Self::WindowUnfocused
+            | Self::PressedElsewhere
+            | Self::CanvasKey(_)
             | Self::EnterFields { .. }
             | Self::ToolbarFocus(_)
             | Self::MenuTab { .. }
@@ -939,14 +902,24 @@ struct App {
     /// focus outside `update` (the view, the input rows, the accessibility
     /// tree); `update` checks it equals `cx.focused()`.
     focus: Option<loom_ui_core::UiId>,
-    /// Set when a message may have moved focus: the bridge then asks the
-    /// window where it is, after the turn (`App::take_focus_question`).
-    focus_question: std::cell::Cell<bool>,
-    /// Where the canvas widget leaves the frame it builds while the view is
-    /// drawn, for the window's canvas pass (`iced_bridge/paint.rs`). Each
-    /// draw empties it first and takes the frame after, so it holds nothing
-    /// between frames.
-    pub(crate) canvas_drawn: loom_canvas::CanvasSlot,
+    /// How many updates have run: the canvas syncs with the app after each
+    /// (`canvas.rs`).
+    pub(crate) updates: u64,
+    /// How many times the window lost the keys: the canvas lets go of what
+    /// it holds on its next sync (`canvas.rs`).
+    pub(crate) unfocused: u64,
+    /// How many presses landed outside the canvas: it lets go of the keys
+    /// on its next sync (`canvas.rs`).
+    pub(crate) pressed_elsewhere: u64,
+    /// The shortcut keys the canvas hears on its next sync (`canvas.rs`).
+    pub(crate) canvas_keys: crate::canvas::CanvasKeys,
+    /// Every message `update` got, for the `Ui` harness, whose tests read
+    /// what ran. `None` in the app, so nothing is copied.
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) message_log: Option<Vec<Message>>,
+    /// The `loom-ui` panels a test adds to the window.
+    #[cfg(any(test, feature = "test-ui"))]
+    pub(crate) test_panels: Option<crate::test_panels::TestPanels>,
     /// Counts the engines built. Background watchers restart when it changes.
     generation: u64,
     /// The `test.` modules are loaded (`--test-modules`).
@@ -1011,10 +984,9 @@ struct App {
     /// Where the app reads the time: the system clock, or the test
     /// harness's stepped clock (`clock.rs`, #868).
     clock: clock::Clock,
-    /// What only the window's widgets can answer, for the bridge to ask
-    /// after the turn (`window_question.rs`). Interior, so a call that only
-    /// reads the app can ask.
-    window_questions: std::cell::RefCell<Vec<window_question::WindowQuestion>>,
+    /// What the window showed when the current update began
+    /// (`window_now.rs`).
+    pub(crate) window_now: window_now::WindowNow,
     /// Control commands whose UI messages are on their way (`control/run.rs`).
     control_replies: control::Replies,
     /// True once the window is open and watchers and timers may run
@@ -1126,19 +1098,6 @@ impl App {
             }
             recovery::Report::Note(line) => self.alerts.warn(line),
         }
-    }
-
-    /// True once after a message that may have moved focus: the bridge then
-    /// asks the window where focus is.
-    pub(crate) fn take_focus_question(&self) -> bool {
-        self.focus_question.replace(false)
-    }
-
-    /// True while the window waits to be asked where focus is, for a harness
-    /// that runs a turn so the bridge asks.
-    #[cfg(any(test, feature = "test-ui"))]
-    pub(crate) fn focus_question_waits(&self) -> bool {
-        self.focus_question.get()
     }
 
     fn title(&self) -> String {
@@ -1647,30 +1606,22 @@ impl App {
     /// 5. Runs the idle engine, and retries a commit that waited for room.
     /// 6. Quits cleanly when asked, or focuses the browser when it opens.
     ///
-    /// A window event from the input listener never comes here: the bridge
-    /// routes it first (`Listening::route`), and each message it becomes is
-    /// its own update.
+    /// A window event never comes here: the runtime routes it first, and
+    /// each message it becomes is its own update (section 6, rule 6).
     ///
-    /// One message, from the runtime (`iced_bridge.rs`), and its effects
+    /// One message, from the runtime (`runtime_app.rs`), and its effects
     /// (ui-layer.md, section 2). Messages the app posts for the next turn
     /// (`App::post`) are returned as one next-turn effect, in order, once it
     /// has run; the runtime queues them itself.
     pub(crate) fn update(&mut self, message: Message, cx: &loom_ui::Context<'_, Message>) -> loom_ui::Effects<Message> {
         // The copy of focus follows the runtime's; `FocusMoved` is how it
-        // catches up, so it alone may arrive with the two apart.
-        if !matches!(message, Message::FocusMoved(_)) {
+        // catches up, so it may arrive with the two apart. So may
+        // `PressedElsewhere`, sent beside a press whose focus report comes
+        // a turn later; it only counts, and reads no focus.
+        if !matches!(message, Message::FocusMoved(_) | Message::PressedElsewhere) {
             debug_assert_eq!(self.focus.as_ref(), cx.focused(), "the app's copy of focus drifted");
         }
-        // A shortcut waits for Iced's answer to which part has focus; the
-        // runtime's own fields say so through the context (section 6, rule
-        // 6, step 6).
-        let message = match message {
-            Message::Shortcut { shortcut, typing } => Message::Shortcut {
-                shortcut,
-                typing: typing || cx.field_has_focus(),
-            },
-            other => other,
-        };
+        self.read_window(cx);
         // What reads the runtime's layout (where a part is for `locate`, the
         // nodes for the tree) waits for the draw that lays out a view a
         // live value just rebuilt, so it never reads a layout half made.
@@ -1720,11 +1671,9 @@ impl App {
         if let Message::Located { target, found, .. } = &mut message {
             found.find_ours(target, cx);
         }
-        debug_assert!(
-            !matches!(message, Message::Input { .. }),
-            "input is routed before update (iced_bridge.rs)"
-        );
         let now = cx.now();
+        // The canvas syncs with the app after each update (`canvas.rs`).
+        self.updates += 1;
         self.timers.set_frame(cx.window().frame);
         // Display sizes and accessibility bounds share the runtime's scale.
         if cx.window().scale != self.window_scale {
@@ -1739,7 +1688,19 @@ impl App {
             self.control_frame_asked = false;
         }
         let asked = self.overlays.questions_asked();
+        // An output dragged out of the canvas lights the inspector row under
+        // the pointer, as a hover there did: the canvas holds the pointer's
+        // capture through the drag, so no other element hovers (ui-layer.md,
+        // section 9, rule 1), and the row is found in the runtime's layout.
+        let drag_row = match &message {
+            Message::Canvas(CanvasEvent::AssignDrag { at: Some(at), .. }) => Some(self.inspector_drop_row_at(*at, cx)),
+            _ => None,
+        };
         self.apply_at(message, now);
+        if let Some(row) = drag_row {
+            let allowed = !self.session.learn.is_on();
+            self.session.gestures.hover_row(row, allowed);
+        }
         // A question that opened takes the focus to its safe answer, with a
         // ring (ui-layer.md, section 6, rule 4; plan 3.2, row 3b), and so
         // does one that replaced another in this update.
@@ -1775,8 +1736,7 @@ impl App {
         self.posted.push(message);
     }
 
-    /// Applies one message. Its effects collect in `self.effects`, and the
-    /// window questions it asks in `self.window_questions`.
+    /// Applies one message. Its effects collect in `self.effects`.
     fn apply(&mut self, message: Message) {
         self.apply_at(message, self.clock.now());
     }
@@ -1795,8 +1755,7 @@ impl App {
             | Message::ControlReply
             | Message::ControlFrame(_)
             | Message::Located { .. }
-            | Message::Captured { .. }
-            | Message::TypeFocus { .. } => FrameCause::Control,
+            | Message::Captured { .. } => FrameCause::Control,
             Message::Canvas(_) | Message::Key(_) | Message::File(FileAction::Close) | Message::WindowRescaled => {
                 FrameCause::Input
             }
@@ -1834,10 +1793,6 @@ impl App {
         // The accessibility layer's own messages change no view either. If
         // they asked, the answer would ask for a rebuild, and the rebuild's
         // answer would ask again, for as long as a field has focus.
-        let ask_focus = matches!(message, Message::TextFocusCheck)
-            || (self.focus.is_some()
-                && !matches!(message, Message::FocusMoved(_) | Message::A11y(_))
-                && !cause.is_live());
         // A mode change the engine's full queue refused goes again now.
         self.send_pending_safety();
         if !message.keeps_patch() {
@@ -1883,16 +1838,10 @@ impl App {
                 modifiers,
                 ..
             }) if !modifiers.shortcut() && !modifiers.control && !modifiers.alt && !self.tab_fields().is_empty() => {
-                // Only the window's widgets know in time where focus is: a
-                // field can take it with no message (window_question.rs).
-                let backwards = modifiers.shift;
-                self.ask_window(window_question::WindowQuestion::focus(move |from| Message::TabFrom {
-                    from,
-                    backwards,
-                }));
-            }
-            Message::TabFrom { from, backwards } => {
-                self.tab_between_fields(from.as_ref(), backwards);
+                // The field with the keys, as the runtime has it in this
+                // turn (window_now.rs).
+                let from = self.focused_field_now().cloned();
+                self.tab_between_fields(from.as_ref(), modifiers.shift);
             }
             Message::EnterFields { backwards } => self.enter_fields(backwards),
             Message::MenuTab { back } => {
@@ -1934,9 +1883,9 @@ impl App {
             Message::FieldPasteRefused => {
                 self.alerts.warn(crate::clipboard::COULD_NOT_READ.to_string());
             }
-            Message::TextFieldTab { backwards } => {
-                self.text_field_tab(self.focus.clone().as_ref(), backwards);
-            }
+            Message::WindowUnfocused => self.unfocused += 1,
+            Message::PressedElsewhere => self.pressed_elsewhere += 1,
+            Message::CanvasKey(key) => self.canvas_keys.push(key),
             Message::FocusMoved(focus) => {
                 self.focus_moved(focus);
                 // Focus leaving a field commits its draft (a value, the
@@ -1960,9 +1909,6 @@ impl App {
             } => {
                 self.captured(&call, &path, area, image);
             }
-            Message::TypeFocus { call, text, focused } => {
-                self.type_after_focus_check(call, &text, focused);
-            }
             Message::A11y(event) => self.a11y_event(event),
             Message::Dialog(answer) => {
                 self.dialog_answered(answer);
@@ -1985,18 +1931,14 @@ impl App {
         {
             self.leave_midi_range(param);
         }
-        // The bridge asks the window where focus is after this turn.
-        if ask_focus {
-            self.focus_question.set(true);
-        }
-        // A shortcut on the patch asks the window whether a text field has
-        // focus first, so Cmd+Z or Cmd+D right after a click into a field
-        // leaves the patch alone (window_question.rs, shortcut.rs).
-        if let Some(shortcut) = self.pending_shortcut.take() {
-            self.ask_window(window_question::WindowQuestion::focus(move |part| Message::Shortcut {
-                shortcut,
-                typing: part.is_some(),
-            }));
+        // A shortcut on the patch runs in its key's own turn unless a text
+        // field has the keys, so Cmd+Z or Cmd+D right after a click into a
+        // field leaves the patch alone (ui-layer.md, section 6, rule 6,
+        // step 6; window_now.rs, shortcut.rs).
+        if let Some(shortcut) = self.pending_shortcut.take()
+            && self.focused_field_now().is_none()
+        {
+            self.run_shortcut(shortcut);
         }
         // A screen reader's tree follows what this message changed.
         if self.a11y.is_active() {
@@ -2253,15 +2195,15 @@ impl App {
             Message::Dialog(_)
             | Message::AskRecovery
             | Message::Browser(_)
-            | Message::Input { .. }
             | Message::Control(_)
             | Message::ControlReply
             | Message::StartWatching
             | Message::RetryCommit(_)
             | Message::ControlFrame(_)
             | Message::FieldPasteRefused
-            | Message::TextFieldTab { .. }
-            | Message::TabFrom { .. }
+            | Message::WindowUnfocused
+            | Message::PressedElsewhere
+            | Message::CanvasKey(_)
             | Message::EnterFields { .. }
             | Message::OutlineKey { .. }
             | Message::ToolbarFocus(_)
@@ -2272,7 +2214,6 @@ impl App {
             | Message::Inspector(_)
             | Message::Located { .. }
             | Message::Captured { .. }
-            | Message::TypeFocus { .. }
             | Message::Matrix(_) => {}
             Message::A11y(_) => {}
             Message::ShowHelp => {
@@ -2375,11 +2316,6 @@ impl App {
             Message::JumpChoice(index) => self.choose_jump(index),
             Message::DismissJump => self.session.outline.close_jump(),
             Message::PatchInfo(message) => self.patch_info_message(message),
-            Message::Shortcut { shortcut, typing } => {
-                if !typing {
-                    self.run_shortcut(shortcut);
-                }
-            }
             Message::Licence(message) => self.licence_message(message),
             Message::Patches(_) | Message::Question(_) => {}
             Message::OpenRecent => self.open_recent_list(),
@@ -2393,7 +2329,6 @@ impl App {
             }
             Message::AddProbe { probe, output, world } => self.add_probe(probe, output, world),
             Message::Canvas(event) => self.canvas_event(event),
-            Message::TextFocusCheck => {}
             Message::SliderReleased => self.close_slider_gesture(),
             Message::Undo => self.undo(),
             Message::Redo => self.redo(),

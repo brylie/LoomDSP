@@ -224,14 +224,33 @@ fn update_reads_the_state() {
     assert_eq!(harness.app().read, [(Some(1), true)]);
 }
 
-/// A custom element with no key has no UI ID to keep its state by, which
-/// a debug build refuses at layout.
+/// A custom element with no key inside a panel has no UI ID to keep its
+/// state by, which a debug build refuses at layout.
 #[test]
 #[cfg(debug_assertions)]
 #[should_panic(expected = "an element in panel p breaks a rule: it has no key")]
 fn a_custom_element_needs_a_key() {
     let mut layout = Layout::new(UiId::panel("p"));
-    layout.rebuild(Element::custom(PAD));
+    layout.rebuild(Element::column([Element::custom(PAD)]));
+}
+
+/// A custom element that is its panel's root, with no key of its own,
+/// takes the panel's UI ID, so a panel can be one custom element whose
+/// parts sit under the panel's name.
+#[test]
+fn a_keyless_custom_root_takes_its_panels_ui_id() {
+    let mut layout = Layout::new(UiId::panel("p"));
+    layout.rebuild(
+        Element::custom(PAD)
+            .width(Length::Fixed(40.0))
+            .height(Length::Fixed(30.0)),
+    );
+    layout.compute(Size::new(100.0, 100.0), &mut Mono::default());
+    assert!(layout.access_problems().is_empty(), "{:?}", layout.access_problems());
+    assert_eq!(
+        layout.bounds(&UiId::panel("p")),
+        Some(Rect::new(Point::ORIGIN, Size::new(40.0, 30.0)))
+    );
 }
 
 /// A kind the app does not know gets no state, which a debug build

@@ -477,6 +477,22 @@ fn an_action_on_a_part_reaches_the_element() {
     assert_eq!(clicked, [Message::Clicked("b".into()), Message::Clicked(String::new())]);
 }
 
+/// A request on a path under the element that it gave no node for is not
+/// the element's: it goes on to the app, which may build nodes of its own
+/// there, as the patch canvas builds its tiles' nodes in the app until the
+/// canvas gives its own (ui-layer.md, section 9).
+#[test]
+fn an_action_on_a_part_with_no_node_goes_on_to_the_app() {
+    let mut harness = harness(grids());
+    let _ = tree(&harness);
+    act(&mut harness, &grid().with("not-a-cell"), accesskit::Action::Click);
+    assert!(
+        !harness.app().log.iter().any(|m| matches!(m, Message::Clicked(_))),
+        "the element hears nothing"
+    );
+    assert!(harness.app().log.contains(&Message::Reader(accesskit::Action::Click)));
+}
+
 /// Focus on a part goes on to the app, as any Focus does, and so does an
 /// action the element leaves.
 #[test]

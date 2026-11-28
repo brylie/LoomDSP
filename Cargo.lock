@@ -2506,6 +2506,7 @@ dependencies = [
  "loom-ui",
  "loom-ui-core",
  "png",
+ "pollster",
  "pulldown-cmark",
  "rfd",
  "ron",
@@ -2513,6 +2514,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "wgpu",
  "windows-sys 0.61.2",
  "winit",
 ]

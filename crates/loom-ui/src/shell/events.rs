@@ -25,6 +25,8 @@ pub(crate) struct Held {
     pub pointer: Option<Point>,
     /// The modifiers held now.
     pub modifiers: Modifiers,
+    /// The finger that drives the pointer, while one touches the window.
+    pub touch: Option<u64>,
 }
 
 impl Default for Held {
@@ -32,6 +34,7 @@ impl Default for Held {
         Self {
             pointer: None,
             modifiers: Modifiers::NONE,
+            touch: None,
         }
     }
 }
@@ -60,6 +63,7 @@ pub(crate) fn driver_events(event: &winit::event::WindowEvent, scale: f32, held:
             };
             vec![pointer_event(event, held)]
         }
+        W::Touch(touch) => self::touch(touch, scale, held),
         W::MouseWheel { delta, .. } => vec![pointer_event(PointerEvent::Scrolled(scroll(*delta, scale)), held)],
         W::ModifiersChanged(modifiers) => {
             held.modifiers = self::modifiers(modifiers.state());
@@ -77,6 +81,43 @@ pub(crate) fn driver_events(event: &winit::event::WindowEvent, scale: f32, held:
         W::CloseRequested => vec![DriverEvent::Window(WindowEvent::CloseRequested)],
         W::DroppedFile(path) => vec![DriverEvent::Window(WindowEvent::FileDropped(path.clone()))],
         W::Ime(ime) => vec![input(Event::Ime(self::ime(ime)), held)],
+        _ => Vec::new(),
+    }
+}
+
+/// A touch as the pointer: the first finger on the window moves it and
+/// holds the main button, as a browser's compatibility mouse events do for
+/// a touch (W3C Pointer Events, "Compatibility mapping with mouse events"), so a tap clicks what is under
+/// the finger, as it did on Iced's window. A finger that goes up releases
+/// the button; one the system cancels ends as a lost pointer, which clicks
+/// nothing. Other fingers are left alone: no element reads more than one
+/// pointer yet (`loom-ui-core`'s input module).
+fn touch(touch: &winit::event::Touch, scale: f32, held: &mut Held) -> Vec<DriverEvent> {
+    use winit::event::TouchPhase;
+    let at = point(touch.location, scale);
+    let ours = held.touch == Some(touch.id);
+    match touch.phase {
+        TouchPhase::Started if held.touch.is_none() => {
+            held.touch = Some(touch.id);
+            held.pointer = Some(at);
+            vec![
+                pointer_event(PointerEvent::Moved, held),
+                pointer_event(PointerEvent::Pressed(PointerButton::Left), held),
+            ]
+        }
+        TouchPhase::Moved if ours => {
+            held.pointer = Some(at);
+            vec![pointer_event(PointerEvent::Moved, held)]
+        }
+        TouchPhase::Ended if ours => {
+            held.touch = None;
+            held.pointer = Some(at);
+            vec![pointer_event(PointerEvent::Released(PointerButton::Left), held)]
+        }
+        TouchPhase::Cancelled if ours => {
+            held.touch = None;
+            vec![pointer_event(PointerEvent::Lost, held)]
+        }
         _ => Vec::new(),
     }
 }

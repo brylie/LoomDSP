@@ -62,8 +62,6 @@ fn audio_input_follows_module_lifecycle() {
     let first = app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
     assert_eq!(fake.input_opens.get(), 1);
-    // The running input must also be included when subscriptions are built.
-    let _ = app.subscription();
     let tracker = app.rig.input.open().unwrap().1.clone();
     let second = app.session.controller.add_module("loom.io.audio-in").unwrap();
     assert!(app.commit());
@@ -1540,7 +1538,6 @@ fn audio_poll_subscription_and_message_handling() {
     let dir = folder("audio-poll-sub");
     let fake = two_devices();
     let mut app = start(args(&dir), &fake);
-    let _ = app.subscription();
     let _ = app.send(crate::Message::AudioPoll);
 }
 

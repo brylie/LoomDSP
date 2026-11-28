@@ -113,27 +113,31 @@ fn run(app: &mut App, line: &str) -> Answer {
     receiver.try_recv().expect("answered after drawing")
 }
 
-/// In the bridge, a command waiting to be drawn asks for the frame after
+/// In the runtime, a command waiting to be drawn asks for the frame after
 /// its draw (`Effects::after_draw`), and answers once two frames have been
 /// shown, counted by `Presented`. A turn with no frame shown counts none.
 #[test]
 fn a_command_answers_after_two_frames_shown() {
-    use crate::iced_bridge::{AppBridge, Bridged};
-    let (mut bridge, _) = AppBridge::new(crate::tests::app());
+    use loom_ui::DriverEvent;
+    let window = loom_ui::WindowState::new(crate::WINDOW);
+    let mut runtime = loom_ui::Runtime::new(crate::tests::app(), crate::layers::NoToolkit, window, Arc::new(|| {}));
+    let mut driver = loom_ui::headless::Headless::new();
+    let now = Instant::now();
     let (sender, answers) = std::sync::mpsc::channel();
     let call = Call {
         command: serde_json::from_str(r#"{"cmd": "wait", "ms": 0}"#).unwrap(),
         reply: Reply(Arc::new(Mutex::new(Some(sender)))),
     };
-    let _ = bridge.update(Bridged::App(Message::Control(call)));
-    assert!(bridge.app().control_waiting(), "it waits for the draw");
+    runtime.waker().send(Message::Control(call));
+    let _ = runtime.handle(DriverEvent::Woken, now, &mut driver);
+    assert!(runtime.app().control_waiting(), "it waits for the draw");
     for frame in 0..FRAMES_BEFORE_ANSWER {
-        let _ = bridge.update(Bridged::Woken);
+        let _ = runtime.handle(DriverEvent::Woken, now, &mut driver);
         assert!(answers.try_recv().is_err(), "no answer before frame {frame} is shown");
-        let _ = bridge.update(Bridged::Presented);
+        let _ = runtime.handle(DriverEvent::Presented, now, &mut driver);
     }
     assert!(answers.try_recv().expect("answered after two frames").is_ok());
-    assert!(!bridge.app().control_waiting());
+    assert!(!runtime.app().control_waiting());
 }
 
 #[test]
@@ -1577,9 +1581,14 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
     assert!(error.contains("`nope`"), "{error}");
     // A target that is there waits for the window capture.
     assert!(ask(&mut ui, "4:cutoff", then).is_err(), "not answered yet");
-    // A search is a question for the window, asked after the turn.
+    // A search reads what the window shows now and answers on the next
+    // turn, where a part of the runtime's own waits for its layout. A turn
+    // of the window's first, since `pointer_ui` set up through `App::send`,
+    // which has no window.
+    let _ = ui.deliver(Message::Tick);
+    ui.app_mut().posted.clear();
     search(
-        ui.app(),
+        ui.app_mut(),
         Call {
             command: Command::Snapshot,
             reply: Reply(Arc::new(Mutex::new(None))),
@@ -1587,8 +1596,10 @@ fn a_search_answers_locate_and_refuses_a_missing_screenshot_target() {
         "4".to_string(),
         AfterSearch::Locate,
     );
-    let asked = ui.app().take_window_questions();
-    assert!(matches!(asked.as_slice(), [crate::window_question::WindowQuestion::Find { text, .. }] if text == "4"));
+    assert!(matches!(
+        ui.app().posted.as_slice(),
+        [Message::Located { target, .. }] if target == "4"
+    ));
 }
 
 /// The snapshot names a tile under a light, a knob turn, a tile move,
@@ -1713,17 +1724,7 @@ fn routed_names(messages: Vec<Message>) -> Vec<String> {
                 .unwrap_or_default()
                 .to_string()
         })
-        .filter(|name| {
-            ![
-                "Control",
-                "ControlFrame",
-                "Located",
-                "FocusMoved",
-                "TypeFocus",
-                "Telemetry",
-            ]
-            .contains(&name.as_str())
-        })
+        .filter(|name| !["Control", "ControlFrame", "Located", "FocusMoved", "Telemetry"].contains(&name.as_str()))
         .collect()
 }
 
@@ -2769,42 +2770,50 @@ fn locate_takes_an_overlay_ui_id() {
 }
 
 /// A part that is scrolled out of view is not located: a pointer sent
-/// there would land on something else.
+/// there would land on something else. A module with more rows than the
+/// inspector shows: a row below the fold is in the runtime's layout but
+/// shows none of it, so `locate` refuses it, saying so; once the inspector
+/// scrolls it into view, `locate` finds it.
 #[test]
 fn a_part_scrolled_out_of_view_is_not_located() {
-    use iced::advanced::widget::Operation;
-    use iced::advanced::widget::operation::scrollable::{AbsoluteOffset, RelativeOffset};
-    struct Still;
-    impl iced::advanced::widget::operation::Scrollable for Still {
-        fn snap_to(&mut self, _offset: RelativeOffset<Option<f32>>) {}
-        fn scroll_to(&mut self, _offset: AbsoluteOffset<Option<f32>>) {}
-        fn scroll_by(&mut self, _offset: AbsoluteOffset, _bounds: iced::Rectangle, _content: iced::Rectangle) {}
-    }
-    let area = iced::Rectangle {
-        x: 0.0,
-        y: 0.0,
-        width: 100.0,
-        height: 100.0,
-    };
-    let row = |y: f32| iced::Rectangle {
-        x: 0.0,
-        y,
-        width: 100.0,
-        height: 20.0,
-    };
-    let mut find = Find::new(String::new());
-    find.scrollable(None, area, area, iced::Vector::new(0.0, 0.0), &mut Still);
-    find.traverse(&mut |inside| {
-        inside.container(Some(&"inspector/4/param/cutoff".into()), row(10.0));
-        inside.container(Some(&"inspector/4/param/mix".into()), row(400.0));
-    });
-    let iced::advanced::widget::operation::Outcome::Some(found) = find.finish() else {
-        panic!("the search always has a result");
-    };
-    let app = crate::tests::app();
-    assert_eq!(locate(&app, "inspector/4/param/cutoff", &found).unwrap().y, 10.0);
-    let error = locate(&app, "inspector/4/param/mix", &found).unwrap_err();
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let id = ui
+        .app_mut()
+        .session
+        .controller
+        .add_module("test.panel")
+        .expect("the test modules are registered in tests")
+        .0;
+    ui.app_mut().commit();
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![id])));
+    let _ = ui.redraw();
+    ui.lay_out_panels();
+    let names: Vec<&str> = ui
+        .app()
+        .session
+        .controller
+        .graph()
+        .node(loom_core::ModuleId(id))
+        .unwrap()
+        .descriptor
+        .params
+        .iter()
+        .map(|param| param.name)
+        .collect();
+    let below = names
+        .iter()
+        .map(|name| crate::inspector::ids::row(id, crate::inspector::ids::Kind::Param, name))
+        .find(|row| ui.runtime().bounds(row).is_some() && ui.runtime().shown_bounds(row).is_none())
+        .expect("a row below the fold");
+    let error = run_ui(&mut ui, &format!(r#"{{"cmd": "locate", "target": "{below}"}}"#)).unwrap_err();
     assert!(error.contains("scrolled out of view"), "{error}");
+
+    ui.app_mut().effect(loom_ui::Effects::scroll_into_view(below.clone()));
+    let _ = ui.deliver(Message::Tick);
+    let _ = ui.redraw();
+    let reply = run_ui(&mut ui, &format!(r#"{{"cmd": "locate", "target": "{below}"}}"#))
+        .unwrap_or_else(|why| panic!("{below} after the scroll: {why}"));
+    assert!(reply.contains_key("y"), "{reply:?}");
 }
 
 /// A canvas UI ID is found through the commands themselves, not only by

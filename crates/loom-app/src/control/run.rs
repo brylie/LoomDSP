@@ -48,14 +48,21 @@ fn blocked_by_question(command: &Command) -> bool {
     }
 }
 
-/// Asks the window for a target, then does `then` with what it found.
-pub(super) fn search(app: &App, call: Call, target: String, then: AfterSearch) {
-    app.ask_window(WindowQuestion::find(target.clone(), move |found| Message::Located {
+/// Looks for a target in what the window shows now, then does `then` with
+/// what it found, on the next turn: a part of the runtime's own waits there
+/// for a current layout (`App::update`).
+pub(super) fn search(app: &mut App, call: Call, target: String, then: AfterSearch) {
+    // With no window (`App::send`, in tests) there is nothing to search.
+    if !app.window_now.window {
+        return;
+    }
+    let found = app.found_now();
+    app.post(Message::Located {
         call,
         target,
         found,
         then,
-    }));
+    });
 }
 
 /// Asks for the window as it was last drawn, to save all of it, or the
@@ -137,7 +144,7 @@ pub(super) fn save_screenshot(
         // that can be tens of megabytes.
         std::borrow::Cow::Borrowed(shot.rgba())
     };
-    crate::screenshot::write_png(path, iced::Size::new(width, height), &rgba)?;
+    crate::screenshot::write_png(path, crate::screenshot::Physical { width, height }, &rgba)?;
     let mut reply = fields(json!({
         "width": width,
         "height": height,
@@ -297,13 +304,12 @@ impl App {
                     call.answer(answer);
                 }
                 Step::Locate(target) => search(self, call, target, AfterSearch::Locate),
-                // Only the window's widgets know in time whether a field has
-                // the keys (`window_question.rs`).
-                Step::Type(text) => self.ask_window(WindowQuestion::focus(move |part| Message::TypeFocus {
-                    call,
-                    text,
-                    focused: part.is_some(),
-                })),
+                // Whether a field has the keys, as the runtime has it in
+                // this turn (`window_now.rs`).
+                Step::Type(text) => {
+                    let focused = self.focused_field_now().is_some();
+                    self.type_after_focus_check(call, &text, focused);
+                }
                 Step::Screenshot(path, Area::Target { target, margin }) => {
                     search(self, call, target, AfterSearch::Screenshot { path, margin });
                 }
@@ -311,6 +317,9 @@ impl App {
                 Step::Screenshot(path, Area::Window) => self.effect(capture(call, path, None)),
             }
         }
+        // A step finished above may have queued a command of its own, as
+        // `type` queues its keys: those wait after the ones still waiting.
+        waiting.append(&mut self.control_pending);
         self.control_pending = waiting;
     }
 

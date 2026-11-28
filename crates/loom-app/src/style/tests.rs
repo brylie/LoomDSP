@@ -64,8 +64,8 @@ fn the_check_box_look_meets_contrast() {
             assert!(ratio >= 3.0, "{what} on {panel:?}: {ratio:.2}:1");
         }
     }
-    // The runtime's boxes read the same look as Iced's.
-    assert_eq!(crate::iced_bridge::paint::panel_style().check, look);
+    // The runtime's boxes read the same look.
+    assert_eq!(crate::drawing::panel_style().check, look);
 }
 
 /// The app's Rust files under `dir`, in every folder, with `style.rs` and
@@ -243,7 +243,7 @@ fn a_scroll_container_keeps_room_for_the_ring() {
 fn a_radio_note_and_mark_read_against_the_panel() {
     use loom_canvas::contrast_ratio;
     let panel = super::PANEL_FILL;
-    let style = crate::iced_bridge::paint::panel_style();
+    let style = crate::drawing::panel_style();
     let note = contrast_ratio(style.quiet, panel);
     assert!(note >= 4.5, "the note: {note:.2}:1");
     let mark = contrast_ratio(style.mark, panel);

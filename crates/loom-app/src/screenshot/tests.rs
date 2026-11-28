@@ -1,10 +1,10 @@
 use super::*;
 
-/// The window at its default size, drawn by `draw_window` with the wgpu
-/// renderer. `None` on a machine without a GPU adapter.
-fn render_window(app: &crate::App) -> Option<Vec<u8>> {
+/// The window at its default size, run and drawn as `--screenshot-window`
+/// draws it (`window_pixels`). `None` on a machine without a GPU adapter.
+fn render_window(app: crate::App) -> Option<Vec<u8>> {
     let mut offscreen = Offscreen::new()?;
-    draw_window(app, &mut offscreen, crate::WINDOW, 1.0)
+    window_pixels(app, &mut offscreen, crate::WINDOW, 1.0)
 }
 
 /// The headless app for an example patch, as `--screenshot-window`
@@ -28,7 +28,7 @@ fn example_app(name: &str) -> crate::App {
 #[test]
 fn window_images_draw_enabled_and_disabled_buttons_apart() {
     let app = example_app("subtractive.ron");
-    let Some(pixels) = render_window(&app) else {
+    let Some(pixels) = render_window(example_app("subtractive.ron")) else {
         assert!(
             !std::env::var("LOOM_REQUIRE_GPU").is_ok_and(|value| value == "1"),
             "coverage requires a GPU adapter"
@@ -70,9 +70,13 @@ fn window_images_draw_enabled_and_disabled_buttons_apart() {
 
     // A checkbox keeps its status the same way: an assignment that is
     // on fills its box, left of its source, with the primary colour.
-    let mut app = example_app("modulation.ron");
-    app.session.selection.insert(4);
-    let pixels = render_window(&app).expect("the renderer used above");
+    let selected = || {
+        let mut app = example_app("modulation.ron");
+        app.session.selection.insert(4);
+        app
+    };
+    let pixels = render_window(selected()).expect("the renderer used above");
+    let app = selected();
     let mut ui = crate::ui_test::Ui::with_app(app);
     let source = ui.text("LFO: Out").expect("the LFO assignment's source");
     let y = source.center_y() as usize;
@@ -89,7 +93,7 @@ fn window_images_draw_enabled_and_disabled_buttons_apart() {
 #[test]
 fn a_window_drag_draws_over_the_inspector() {
     let mut app = example_app("subtractive.ron");
-    let Some(before) = render_window(&app) else {
+    let Some(before) = render_window(example_app("subtractive.ron")) else {
         assert!(
             !std::env::var("LOOM_REQUIRE_GPU").is_ok_and(|value| value == "1"),
             "coverage requires a GPU adapter"
@@ -108,7 +112,7 @@ fn a_window_drag_draws_over_the_inspector() {
         at: Some(Point::new(1250.0, 150.0)),
         zoom: 1.0,
     });
-    let after = render_window(&app).expect("the renderer used above");
+    let after = render_window(app).expect("the renderer used above");
     let width = crate::WINDOW.width as usize;
     let changed = (120..220)
         .flat_map(|y| (1180..1250).map(move |x| (y * width + x) * 4))
@@ -243,7 +247,13 @@ fn parses_window_options() {
 #[test]
 fn scale_keeps_the_image_in_range() {
     let size = Size::new(640.0, 400.0);
-    assert_eq!(physical_size(size, 2.0), Ok(Size::new(1280, 800)));
+    assert_eq!(
+        physical_size(size, 2.0),
+        Ok(Physical {
+            width: 1280,
+            height: 800
+        })
+    );
     assert!(physical_size(Size::new(1.0, 1.0), 0.1).is_err());
     assert!(physical_size(size, 100.0).is_err());
 }

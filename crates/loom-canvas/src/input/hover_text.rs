@@ -7,18 +7,13 @@ impl CanvasModel<'_> {
     /// text). It asks for a frame only when the text appears or hides, so
     /// it never draws while nothing changes. When waiting text is due is
     /// reported by [`CanvasInput::next_deadline`].
-    pub(super) fn sync_hover_text(
-        &self,
-        state: &mut CanvasInput,
-        event: Option<&Event>,
-        now: Instant,
-        out: &mut Reaction,
-    ) {
-        let redrawing = matches!(event, Some(Event::Redraw));
+    pub(super) fn sync_hover_text(&self, state: &mut CanvasInput, now: Instant, out: &mut Reaction) {
         let target = self.hover_target(state);
         let mut changed = state.hover_text.rest(target, now);
-        // This frame is being drawn already, so text due now needs no other.
-        changed |= state.hover_text.tick(now) && !redrawing;
+        // Text that comes due asks for a frame, whatever woke the canvas: a
+        // redraw is the host's sync with the app, not a frame being drawn,
+        // so an idle patch would never show it otherwise.
+        changed |= state.hover_text.tick(now);
         if changed {
             out.redraw();
         }

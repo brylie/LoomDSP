@@ -365,3 +365,25 @@ fn escape_closes_from_close_and_a_check_box() {
     tap(&mut ui, Key::Escape);
     assert!(ui.app().overlays.patches().is_none(), "from a check box");
 }
+
+/// Enter that opens a patch with unsaved changes asks about them, and the
+/// same Enter does not answer the question it opened: the runtime routes
+/// the key before any of its updates run, so the question, opened by one
+/// of them, hears nothing of it (ui-layer.md, section 6, rule 6). Before
+/// this was so, Enter in the search field discarded the changes at once.
+#[test]
+fn enter_that_opens_a_patch_does_not_answer_the_question_it_asks() {
+    let dir = library("enter-question");
+    let mut ui = open(&dir);
+    ui.app_mut().edit(|app| {
+        app.session.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+    });
+    let _ = ui.redraw();
+    assert!(model(&ui).highlight.is_some(), "a row is highlighted");
+    tap(&mut ui, Key::Enter);
+    assert!(
+        ui.app().overlays.question.is_some(),
+        "the question about the unsaved changes still waits for its answer"
+    );
+}

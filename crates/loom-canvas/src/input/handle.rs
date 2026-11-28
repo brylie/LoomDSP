@@ -184,8 +184,14 @@ impl CanvasModel<'_> {
                     // A new patch frames as always. A new level takes the
                     // camera it had, and frames on its first visit.
                     match self.level_camera.filter(|_| !new_frame) {
-                        Some(camera) => state.camera = camera,
-                        None => self.frame(state, bounds.size()),
+                        Some(camera) => {
+                            state.camera = camera;
+                            state.fitted = None;
+                        }
+                        None => {
+                            self.frame(state, bounds.size());
+                            state.fitted = Some(bounds.size());
+                        }
                     }
                     state.framed_key = Some(self.frame_key);
                     state.level_key = Some(self.level_key);
@@ -264,14 +270,18 @@ impl CanvasModel<'_> {
                     state.camera = base;
                     out.redraw();
                 }
-                let lights = visible_lights(self.scene, &state.camera, bounds.size());
-                if state.reported_lights.as_ref() != Some(&lights) {
-                    state.reported_lights = Some(lights.clone());
-                    self.emit(out, CanvasEvent::VisibleDisplays(lights));
-                }
-                let full = detail(state.camera.zoom) == Detail::Close;
-                if state.reported_full_traces.replace(full) != Some(full) {
-                    self.emit(out, CanvasEvent::TraceDetail(full));
+                // While the measuring animation moves the camera, what is on
+                // screen is reported once it ends, as `frame` says.
+                if !self.animate {
+                    let lights = visible_lights(self.scene, &state.camera, bounds.size());
+                    if state.reported_lights.as_ref() != Some(&lights) {
+                        state.reported_lights = Some(lights.clone());
+                        self.emit(out, CanvasEvent::VisibleDisplays(lights));
+                    }
+                    let full = detail(state.camera.zoom) == Detail::Close;
+                    if state.reported_full_traces.replace(full) != Some(full) {
+                        self.emit(out, CanvasEvent::TraceDetail(full));
+                    }
                 }
             }
             Event::Key(KeyEvent::ModifiersChanged(modifiers)) => {
@@ -1117,6 +1127,11 @@ impl CanvasModel<'_> {
 
     /// Frames the whole scene at a readable zoom. A scene with no modules
     /// keeps the camera it has.
+    /// Frames the scene again at `size`, for [`CanvasInput::refit`].
+    pub(super) fn fit(&self, state: &mut CanvasInput, size: Size) {
+        self.frame(state, size);
+    }
+
     fn frame(&self, state: &mut CanvasInput, size: Size) {
         if let Some(world) = self.scene.bounds() {
             state.camera.frame_readable(world, size, READABLE_ZOOM);

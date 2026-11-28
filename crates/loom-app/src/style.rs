@@ -44,17 +44,6 @@ pub const RIGHT_COLUMN_WIDTH: f32 = 280.0;
 /// the top level it takes no height. Iced's was 30.9 with a 1 px rule.
 pub const BREADCRUMB_HEIGHT: f32 = 32.0;
 
-/// The height above the canvas that the toolbar and, `inside` a sub-patch,
-/// the breadcrumb take: the root panel's slots and Iced's space both use
-/// it, so the canvas starts where the panels end.
-pub const fn top_height(inside: bool) -> f32 {
-    if inside {
-        TOOLBAR_HEIGHT + BREADCRUMB_HEIGHT
-    } else {
-        TOOLBAR_HEIGHT
-    }
-}
-
 /// The room around a button's label: 5 above and below, 10 at the sides,
 /// as Iced's buttons had.
 pub const BUTTON_PADDING: loom_ui::Padding = loom_ui::Padding::symmetric(5.0, 10.0);

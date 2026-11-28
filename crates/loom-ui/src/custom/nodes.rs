@@ -243,11 +243,16 @@ impl<A: App> Panels<'_, A> {
         let access = if rest.is_empty() {
             self.window.access_of(&owner)
         } else {
-            self.window
-                .custom_nodes
-                .get(&owner)
-                .and_then(|nodes| nodes.iter().find(|node| node.path == rest))
-                .map(CustomNode::access)
+            // A path under the element that it gave no node for is not its
+            // node: the request goes on to the app, which may build nodes
+            // of its own there (`App::accessibility_event`).
+            Some(
+                self.window
+                    .custom_nodes
+                    .get(&owner)
+                    .and_then(|nodes| nodes.iter().find(|node| node.path == rest))
+                    .map(CustomNode::access)?,
+            )
         };
         let offered = access.is_some_and(|access| access.offers(request.action) && !access.is_disabled());
         if !offered || !crate::runtime::in_input_layer(self.window, self.app, &owner) {

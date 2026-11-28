@@ -52,6 +52,18 @@ use std::collections::VecDeque;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
+/// When a turn ticks custom elements whose deadline came: a turn of
+/// [`Runtime::handle`] also after its updates, so a deadline an update made
+/// due ticks before the turn draws; a turn of [`Runtime::deliver`] runs its
+/// one message alone, and leaves a due deadline for the next turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Ticks {
+    /// At the turn's start, and again after its updates.
+    AfterUpdates,
+    /// At the turn's start only.
+    AtStartOnly,
+}
+
 /// What the driver should do after a turn.
 ///
 /// # Drawing
@@ -803,11 +815,20 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         }
         let input = self.app.input();
         if self.focus.id().is_none() {
-            // Forward from nothing goes to the half that reads first: the
-            // target's, when it says so.
-            let ours_first = !input.target_first || modifiers.shift;
-            let enters =
-                input.layer <= Layer::Panels && !input.canvas_focused && self.target.focused().is_none() && ours_first;
+            // Forward from nothing goes to the window's home element first,
+            // when the app says so: the canvas moves through its controls,
+            // and Tab enters the runtime's stops only once it lets Tab go
+            // (section 6, rule 2). Shift+Tab from nothing still enters the
+            // runtime's last stop.
+            let home_first = input.home_first && !modifiers.shift;
+            let target_focus = self.target.focused().is_some();
+            if home_first && self.panels().key_to_home(event, target_focus) {
+                self.target.kept(event);
+                return (true, false);
+            }
+            let enters = input.layer <= Layer::Panels
+                && (home_first || !input.canvas_focused)
+                && self.target.focused().is_none();
             return match self.tab_step(input.layer, modifiers.shift) {
                 FocusStep::To(stop) if enters => (true, self.focus_to(Some(stop))),
                 _ => (false, false),
@@ -1684,6 +1705,18 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.panels.bounds(id)
     }
 
+    /// What of the element with UI ID `id` shows, as last laid out: its
+    /// bounds cut by every clip around it, or `None` when it is cut away
+    /// entirely, as a part scrolled out of view is.
+    ///
+    /// # Panics
+    ///
+    /// In a debug build, as [`Runtime::bounds`] does.
+    pub fn shown_bounds(&self, id: &UiId) -> Option<Rect> {
+        self.check_laid_out();
+        self.panels.shown_bounds(id)
+    }
+
     /// What is under `point` in the window, and in which layer, as last
     /// laid out: panels are tried in the reverse of draw order.
     ///
@@ -1747,7 +1780,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // in this turn, after the batch (section 9, rule 4).
         self.pointer.now = Some(now);
         self.panels().tick_deadlines(now);
-        self.turn(event, batch, now, driver)
+        self.turn(event, batch, Ticks::AfterUpdates, now, driver)
     }
 
     /// Runs one turn for `message` alone, at `now`. Messages already in the
@@ -1770,7 +1803,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // which overtakes it.
         let waiting = self.pending_focus.take();
         let reported = self.focus.reported.clone();
-        let mut next = self.turn(DriverEvent::Woken, vec![message], now, driver);
+        let mut next = self.turn(DriverEvent::Woken, vec![message], Ticks::AtStartOnly, now, driver);
         let overtaken = self.pending_focus.is_some() || self.focus.reported != reported;
         if !overtaken && waiting.is_some() {
             self.pending_focus = waiting;
@@ -1780,11 +1813,14 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     }
 
     /// One turn: routes `event`, runs `batch` and the messages routing
-    /// adds, one update each, then works out what is next.
+    /// adds, one update each, then works out what is next. With
+    /// [`Ticks::AfterUpdates`], a custom element's deadline that the
+    /// updates made due ticks in this turn too.
     fn turn(
         &mut self,
         event: DriverEvent,
         mut batch: Vec<A::Message>,
+        ticks: Ticks,
         now: Instant,
         driver: &mut impl Driver<A::Message>,
     ) -> Next {
@@ -1981,14 +2017,19 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         let mut updates = 0;
         redraw |= self.run_batch(batch, now, driver, &mut updates);
         // What custom elements sent runs in this turn too, after the batch,
-        // before the rebuild (section 9, rule 1): from the event, and from
-        // a cancel an update caused, by an effect or by raising the input
+        // before the rebuild (section 9, rule 1): from the event, from a
+        // cancel an update caused, by an effect or by raising the input
         // layer above a held capture, as an overlay that opens mid-drag
-        // does. This ends: after one cancel no capture is left to cancel,
-        // and an update cannot make an element send.
+        // does, and from a deadline an update made due, which ticks here,
+        // so the turn draws once (section 9, rule 4). This ends: after one
+        // cancel no capture is left to cancel, a tick must move its
+        // deadline on, and an update cannot make an element send.
         loop {
             let layer = self.app.input().layer;
             self.panels().cancel_capture_below(layer);
+            if updates > 0 && ticks == Ticks::AfterUpdates {
+                self.panels().tick_due(now);
+            }
             let sent = self.customs.take_sent();
             if sent.is_empty() || self.exited {
                 break;
@@ -2139,10 +2180,19 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         {
             return heard.redraw;
         }
-        // With no capture, a lost pointer has nothing to end: it reaches
-        // no element and no target.
+        // With no capture, a lost pointer ends a press held on one of the
+        // runtime's own elements with no click, as a release elsewhere
+        // would (section 3, rule 4), stops a scroll thumb's drag, and ends
+        // a slider's drag where it is, with its End, as a release does
+        // (section 5, rule 16). It reaches no element and no target.
         if let Event::Pointer(PointerEvent::Lost) = event {
-            return false;
+            let pressed = self.panels().shown_pressed();
+            self.pointer.pressed = None;
+            self.pointer.thumb = None;
+            let ended = self.pointer.slide.released();
+            let slid = ended.is_some();
+            self.panels().report_slid(ended);
+            return self.panels().shown_pressed() != pressed || slid;
         }
         let point = match (event, pointer) {
             (Event::Pointer(PointerEvent::LeftWindow), _) => {

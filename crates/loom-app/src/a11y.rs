@@ -384,9 +384,12 @@ impl crate::App {
 
     /// Reads the window after its latest layout.
     fn a11y_read_places(&mut self) {
-        self.ask_window(crate::window_question::WindowQuestion::places(|places| {
-            crate::Message::A11y(Event::Located(places))
-        }));
+        // With no window there is nothing to read; the tree waits.
+        if !self.window_now.window {
+            return;
+        }
+        let places = self.places_now();
+        self.post(crate::Message::A11y(Event::Located(places)));
     }
 
     /// Builds the tree and gives what the screen reader must be sent: the
@@ -739,8 +742,10 @@ impl crate::App {
     pub(crate) fn a11y_frames(&self) -> tree::Frames {
         let panel = match self.right_tab {
             // The runtime's inspector gives its own nodes (`inspector/panel.rs`).
-            crate::matrix::Tab::Inspector if self.inspector_ours() => Vec::new(),
-            crate::matrix::Tab::Inspector => crate::inspector::access::items(&self.inspector_model()),
+            // While a cable jump list covers it, the column shows the list,
+            // whose nodes the runtime gives too, and the inspector is not
+            // drawn, so it is not reported.
+            crate::matrix::Tab::Inspector => Vec::new(),
             // The runtime's matrix and Outline give their own nodes
             // (`matrix/panel.rs`, `outline/panel.rs`).
             crate::matrix::Tab::Matrix | crate::matrix::Tab::Outline => Vec::new(),

@@ -128,11 +128,11 @@ impl App for Keys {
         .then_some(Msg::Panic)
     }
 
-    fn unclaimed_key(&self, key: &KeyEvent) -> Option<Msg> {
+    fn unclaimed_key(&self, key: &KeyEvent) -> Vec<Msg> {
         match key {
-            KeyEvent::Pressed { key, .. } => Some(Msg::Unclaimed(format!("{key:?}"), true)),
-            KeyEvent::Released { key, .. } => Some(Msg::Unclaimed(format!("{key:?}"), false)),
-            _ => None,
+            KeyEvent::Pressed { key, .. } => vec![Msg::Unclaimed(format!("{key:?}"), true)],
+            KeyEvent::Released { key, .. } => vec![Msg::Unclaimed(format!("{key:?}"), false)],
+            _ => Vec::new(),
         }
     }
 }
