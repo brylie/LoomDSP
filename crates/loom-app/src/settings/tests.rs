@@ -1466,6 +1466,32 @@ fn the_window_opens_and_closes_with_its_shortcut_and_escape() {
     assert!(app.overlays.preferences().is_none());
 }
 
+/// Cmd+Shift+, (Ctrl+Shift+, off a Mac) neither opens nor closes
+/// Preferences: on a French AZERTY layout, Shift with the comma key types
+/// `?`, so that press is the help key (ui-layer.md, section 6, rule 13).
+/// The press goes through the window's own routing, as a keyboard's does.
+#[test]
+fn shift_with_the_preferences_shortcut_is_not_preferences() {
+    use crate::ui_test::{Ui, key_press, key_released};
+    use loom_ui_core::{Key, Modifiers};
+    let mut ui = Ui::open("subtractive.ron");
+    let shifted = Modifiers {
+        shift: true,
+        ..Modifiers::platform_shortcut()
+    };
+    let comma = Key::Character(',');
+    ui.step(&[key_press(comma, shifted, Some("?"), false)]);
+    ui.step(&[key_released(comma, shifted)]);
+    assert!(ui.app().overlays.preferences().is_none(), "Shift: not Preferences");
+    // That press is the help key (`?`): close help before the next one.
+    ui.tap(Key::Escape, Modifiers::NONE);
+    ui.tap(comma, Modifiers::platform_shortcut());
+    assert!(ui.app().overlays.preferences().is_some(), "without Shift it opens");
+    ui.step(&[key_press(comma, shifted, Some("?"), false)]);
+    ui.step(&[key_released(comma, shifted)]);
+    assert!(ui.app().overlays.preferences().is_some(), "and Shift does not close it");
+}
+
 /// unwrap_reopen_error strips the restart wrapper while preserving raw reasons.
 #[test]
 fn unwrap_reopen_error_normalizes_various_formats() {

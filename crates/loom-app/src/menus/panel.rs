@@ -272,7 +272,7 @@ fn build(panel: &Panel) -> Element {
     // gutter, which stays when nothing scrolls.
     let (rows, padding, width) = if panel.scrolls {
         let scroll = style::scroll();
-        let gutter = scroll.width + 2.0 * scroll.inset;
+        let gutter = style::scroll_gutter();
         (
             vec![list(Element::column(rows(panel, &items, 0)).width(Length::FILL), false)],
             (MENU_PADDING - scroll.ring).max(0.0),

@@ -61,7 +61,7 @@ The index lists every module by family, in the module browser's order ([ADR-0029
 
 Opening help releases keyboard focus from the search or Author field in either browser. Closing help restores that field's focus if it is still present.
 
-The app shows a module's help in an overlay over a dimmed backdrop. F1 opens it for the highlighted module in the browser, including while the search field has focus, or for the selected tile; with neither, F1 opens the **Keyboard shortcuts** page, which the inspector's button also opens. The inspector has a help action, and the tile menu has a help item. It opens on top of Your patches, the licence chooser, and Preferences, which wait underneath, and only a question is drawn over it. Escape, the **Close** button, or a click on the backdrop closes the overlay and nothing else; a click inside it does nothing else. The same help view is used for all entry points.
+The app shows a module's help in an overlay over a dimmed backdrop. F1, or Cmd+/ (Ctrl+/ off a Mac, with or without Shift; [UI layer](ui-layer.md), section 6, rule 13), opens it for the highlighted module in the browser, including while the search field has focus, or for the selected tile; with neither, F1 opens the **Keyboard shortcuts** page, which the inspector's button also opens. The inspector has a help action, and the tile menu has a help item. It opens on top of Your patches, the licence chooser, and Preferences, which wait underneath, and only a question is drawn over it. Escape, the **Close** button, or a click on the backdrop closes the overlay and nothing else; a click inside it does nothing else. The same help view is used for all entry points.
 
 A slot tile's **Help** menu item opens the role's page in the same view. Its port hover text uses the role port's label and description. Links between modules and roles open the corresponding help in the app.
 
@@ -90,6 +90,7 @@ Help is a modal dialog, by the WAI-ARIA dialog pattern ([APG Dialog (Modal)](htt
 ### Acceptance criteria
 
 - [x] F1 opens help for the highlighted browser item, even with search focused, and for the selected tile. The inspector action and tile menu open the same view. Escape closes it.
+- [x] Cmd+/ (Ctrl+/ off a Mac), with or without Shift, opens help as F1 does, from the canvas and from the browser's search, and by what it types on German and French layouts (`the_slash_shortcut_opens_help_as_f1_does`, `the_help_key_follows_the_layout`).
 - [x] The view shows description, ports and parameters from the descriptor and renders bundled hand-written notes as Markdown.
 - [x] Open example loads the bundled example after the usual unsaved-changes flow; it is absent when there is no example.
 - [x] With nothing selected, the inspector shows two short lines and a **Keyboard shortcuts** button; it and F1 open the shortcuts page (test, [#457](https://github.com/brylie/LoomDSP/issues/457)).

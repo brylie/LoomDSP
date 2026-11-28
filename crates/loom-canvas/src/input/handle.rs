@@ -328,30 +328,12 @@ impl CanvasModel<'_> {
                 self.open_browser(BrowserPlacement::Pointer(state.camera.to_world(at)), at, bounds, out);
                 out.take();
             }
-            // The menu key, or Shift+F10, opens the tile menu, as a
-            // right-click on the tile does (ui-layer.md, section 6, rule 8).
-            // It acts on the focused control's tile or the selected tile,
-            // not on what the pointer is over, so it needs no pointer on
-            // the canvas.
-            Event::Key(KeyEvent::Pressed {
-                key: Key::ContextMenu,
-                modifiers,
-                ..
-            }) if modifiers.none() => {
-                if self.open_tile_menu_by_key(state, bounds, out) {
-                    out.take();
-                }
-            }
-            Event::Key(KeyEvent::Pressed {
-                key: Key::F10,
-                modifiers,
-                ..
-            }) if *modifiers
-                == (Modifiers {
-                    shift: true,
-                    ..Modifiers::NONE
-                }) =>
-            {
+            // The menu key, Shift+F10, or Alt+Enter opens the tile menu, as
+            // a right-click on the tile does (ui-layer.md, section 6, rules 8
+            // and 13). It acts on the focused control's tile or the selected
+            // tile, not on what the pointer is over, so it needs no pointer
+            // on the canvas.
+            Event::Key(KeyEvent::Pressed { key, modifiers, .. }) if key.opens_menu(*modifiers) => {
                 if self.open_tile_menu_by_key(state, bounds, out) {
                     out.take();
                 }
@@ -727,9 +709,17 @@ impl CanvasModel<'_> {
                             self.emit(out, CanvasEvent::ButtonReleased { module, widget });
                         }
                     }
+                    // A right-click that did not move: on empty canvas it
+                    // opens the module browser there, as a double-click does
+                    // (module-browser.md, Opening the browser); on an output,
+                    // a cable, or a tile, its menu. A right-drag panned.
                     Interaction::Panning { click: Some(_), .. } => {
                         if let (Some(world), Some(screen)) = (world, screen) {
-                            self.open_probe_menu(state, world, screen, bounds, out);
+                            if matches!(self.hit(state, world), Hit::Nothing) {
+                                self.open_browser(BrowserPlacement::Pointer(world), screen, bounds, out);
+                            } else {
+                                self.open_probe_menu(state, world, screen, bounds, out);
+                            }
                         }
                     }
                     // The pan is over: the app learns the view once, not on

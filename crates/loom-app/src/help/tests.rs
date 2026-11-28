@@ -665,3 +665,89 @@ fn f1_over_a_browser_focuses_close_and_escape_gives_the_field_back() {
         );
     }
 }
+
+/// A press with `modifiers` held that types `text`, then its release,
+/// through the window's own routing, as a keyboard sends it.
+fn press_typing(ui: &mut Ui, key: Key, modifiers: Modifiers, text: &str) {
+    ui.step(&[crate::ui_test::key_press(key, modifiers, Some(text), false)]);
+    ui.step(&[crate::ui_test::key_released(key, modifiers)]);
+}
+
+/// Cmd+/ (Ctrl+/ off a Mac) opens help as F1 does, with no fn: for the
+/// selected tile, and for the browser's highlighted row while its search
+/// field has focus, which types nothing (ui-layer.md, section 6, rule 13).
+/// With Shift it is Cmd+?, the same key.
+#[test]
+fn the_slash_shortcut_opens_help_as_f1_does() {
+    let shortcut = Modifiers::platform_shortcut();
+    let shifted = Modifiers {
+        shift: true,
+        ..shortcut
+    };
+    let mut ui = Ui::open("subtractive.ron");
+    let _ = ui.app_mut().send(Message::Canvas(CanvasEvent::Select(vec![4])));
+    ui.tap(Key::F1, Modifiers::NONE);
+    let by_f1 = ui.app().ui_snapshot().help.expect("F1 opens help");
+    ui.tap(Key::Escape, Modifiers::NONE);
+    for (modifiers, text) in [(shortcut, "/"), (shifted, "?")] {
+        press_typing(&mut ui, Key::Character('/'), modifiers, text);
+        assert_eq!(
+            ui.app().ui_snapshot().help.as_ref(),
+            Some(&by_f1),
+            "{text}: the tile's help"
+        );
+        ui.tap(Key::Escape, Modifiers::NONE);
+        assert!(ui.app().overlays.help.is_none());
+    }
+
+    let canvas = ui.canvas();
+    ui.move_to(Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0));
+    let _ = ui.app_mut().send(Message::Canvas(CanvasEvent::Select(Vec::new())));
+    ui.tap(Key::Character('a'), Modifiers::NONE);
+    ui.typewrite("svf");
+    press_typing(&mut ui, Key::Character('/'), shifted, "?");
+    assert_eq!(
+        ui.app().ui_snapshot().help.map(|help| help.id),
+        Some("loom.filter.svf"),
+        "the highlighted row's help"
+    );
+    ui.tap(Key::Escape, Modifiers::NONE);
+    assert_eq!(
+        ui.app().overlays.browser().unwrap().model().query,
+        "svf",
+        "nothing typed"
+    );
+}
+
+/// The help key is found by what the press types on layouts where `/` and
+/// `?` are on other keys: Shift with 7 types `/` and Shift with ß types
+/// `?` on a German layout, and Shift with the comma key types `?` on a
+/// French one, where Cmd+, alone is Preferences. With Alt held too, or with
+/// no shortcut key, the press opens nothing.
+#[test]
+fn the_help_key_follows_the_layout() {
+    let shifted = Modifiers {
+        shift: true,
+        ..Modifiers::platform_shortcut()
+    };
+    for (key, text) in [
+        (Key::Character('7'), "/"),
+        (Key::Character('ß'), "?"),
+        (Key::Character(','), "?"),
+    ] {
+        let mut ui = Ui::open("subtractive.ron");
+        press_typing(&mut ui, key, shifted, text);
+        assert!(ui.app().overlays.help.is_some(), "{key:?} typing {text}: help");
+        assert!(ui.app().overlays.preferences().is_none(), "{key:?}: not Preferences");
+    }
+    let with_alt = Modifiers { alt: true, ..shifted };
+    let plain_shift = Modifiers {
+        shift: true,
+        ..Modifiers::NONE
+    };
+    for modifiers in [with_alt, plain_shift] {
+        let mut ui = Ui::open("subtractive.ron");
+        press_typing(&mut ui, Key::Character('/'), modifiers, "?");
+        assert!(ui.app().overlays.help.is_none(), "{modifiers:?}: no help");
+    }
+}

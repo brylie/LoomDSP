@@ -134,6 +134,18 @@ pub const CHOOSER_HEIGHT: f32 = 720.0;
 /// (ui-layer.md, section 6, rule 9).
 pub const RADIO_SPACING: f32 = 10.0;
 
+/// The room between an inspector port list's headings and its groups, in
+/// logical pixels.
+pub const PORT_SPACING: f32 = 2.0;
+
+/// The room between two ports' lines in the inspector's port list, in
+/// logical pixels: about 18 px from one port to the next (#901).
+pub const PORT_LINE_SPACING: f32 = 4.0;
+
+/// The room above a port group's heading after the first, in logical
+/// pixels, so Inputs and Outputs read as two groups (#901).
+pub const PORT_GROUP_GAP: f32 = 8.0;
+
 /// How far a part that belongs to a radio sits in from the radio's mark,
 /// so it lines up with the radio's label: the mark's width, 14, and the
 /// gap after it, 6 (`loom-ui`'s `Element::radio`).
@@ -403,6 +415,28 @@ pub const SCROLLBAR_RADIUS: f32 = 3.0;
 /// drawn (WCAG 2.2, 1.4.11). A test checks it.
 pub const SCROLLBAR_THUMB: loom_ui_core::Color = QUIET;
 
+/// The room a scroll container keeps at its right for its bar, scrolling
+/// or not, in logical pixels: the bar and the inset on either side of it
+/// (ui-layer.md, section 5, rule 12). A container cuts its content's right
+/// padding by this, so its margins match (Brylie's decision, 2026-11-27).
+pub fn scroll_gutter() -> f32 {
+    let scroll = scroll();
+    scroll.width + 2.0 * scroll.inset
+}
+
+/// The padding for content inside a scroll container: `vertical` above
+/// and below, `horizontal` on the left, and on the right `horizontal` less
+/// the gutter the container keeps, so the content's margins match whether
+/// it scrolls or not (Brylie's decision, 2026-11-27).
+pub fn scroll_padding(vertical: f32, horizontal: f32) -> loom_ui::Padding {
+    loom_ui::Padding {
+        top: vertical,
+        right: (horizontal - scroll_gutter()).max(0.0),
+        bottom: vertical,
+        left: horizontal,
+    }
+}
+
 /// How a scroll container of the app's own UI layer looks and moves: the
 /// scrollbar tokens, the focus ring's reach kept as room around the
 /// content, and one line of body text for its keys and the wheel.
@@ -559,7 +593,9 @@ pub fn select() -> loom_ui::SelectStyle {
     loom_ui::SelectStyle {
         text: CONTROL_TEXT,
         colour: TEXT,
-        background: PANEL_FILL,
+        // A raised fill, so a select reads apart from a text field, which
+        // is an outline on the panel (#901).
+        background: RAISED,
         border: FIELD_EDGE,
         border_width: 1.0,
         radius: 2.0,

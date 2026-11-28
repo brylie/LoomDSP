@@ -211,6 +211,10 @@ pub enum Key {
     /// F2: in a grid, edits the cell that has focus (the WAI-ARIA data
     /// grid pattern).
     F2,
+    /// F6: moves the focus to the next region of the window, and with
+    /// Shift to the one before, as Ctrl+Tab does (the usual pane key on
+    /// Windows and in browsers).
+    F6,
     /// F10. With Shift, it opens a menu as the menu key does.
     F10,
     /// Shift, Control, Alt, or the system key, on either side. One variant
@@ -227,6 +231,22 @@ pub enum Key {
     /// Any other key. It exists because nothing yet uses those keys, not
     /// because they will never have names.
     Other,
+}
+
+impl Key {
+    /// Whether this key, with exactly `modifiers` held, opens the menu of
+    /// what has focus: the menu key, Shift+F10, or Alt+Enter (Option+Return
+    /// on a Mac). Alt+Enter is there because a laptop often has no menu key
+    /// and needs fn for F10 (ui-layer.md, section 6, rules 8 and 13).
+    #[must_use]
+    pub fn opens_menu(self, modifiers: Modifiers) -> bool {
+        match self {
+            Self::ContextMenu => modifiers == Modifiers::NONE,
+            Self::F10 => modifiers == Modifiers::SHIFT,
+            Self::Enter => modifiers == Modifiers::ALT,
+            _ => false,
+        }
+    }
 }
 
 /// Where a key sits on the keyboard, named by its place on a US layout,

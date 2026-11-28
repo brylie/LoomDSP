@@ -317,9 +317,11 @@ fn build(panel: &Panel) -> Element {
         Element::field(model.author.clone(), style::CONTROL_TEXT)
             .placeholder("Added as author of new patches", looks.quiet)
             .padding(loom_ui::Padding::symmetric(4.0, 6.0))
-            .border(looks.select.border_width, looks.select.border)
-            .radius(looks.radius)
-            .background(looks.select.background)
+            // A text field's look, an outline on the panel, not a
+            // select's raised fill.
+            .border(looks.select.border_width, style::FIELD.border)
+            .radius(style::FIELD.radius)
+            .background(style::FIELD.fill)
             .width(Length::FILL)
             .key("author")
             .access(Access::new(Role::TextInput, "Your name")),
@@ -353,7 +355,8 @@ fn build(panel: &Panel) -> Element {
 
     let content = Element::column(body)
         .spacing(12.0)
-        .padding(loom_ui::Padding::symmetric(0.0, 12.0))
+        // Its side margins match beside the scrollbar's kept gutter.
+        .padding(style::scroll_padding(0.0, 12.0))
         .width(Length::FILL);
     // The scroll keys reach it from Close too, which is above it, as in
     // help (section 5, rule 12).

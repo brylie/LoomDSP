@@ -337,10 +337,18 @@ fn build(panel: &Panel) -> Element {
     scroll(content, Some(key.into()), &label)
 }
 
+/// The room around the column's content, in logical pixels, as Iced's
+/// was: on the right, the scrollbar's gutter takes most of it.
+const CONTENT_PADDING: f32 = 12.0;
+
 /// `content` in the column's scroll container, keyed `key`, padded as
-/// Iced's was, and filling the slot.
+/// Iced's was, and filling the slot. The container keeps its scrollbar's
+/// gutter whether it scrolls or not, so nothing moves when it starts to;
+/// the right padding gives that room back, so the margins match.
 fn scroll(content: Element, key: Option<loom_ui_core::IdKey>, label: &str) -> Element {
-    let content = content.padding(12.0).width(Length::FILL);
+    let content = content
+        .padding(style::scroll_padding(CONTENT_PADDING, CONTENT_PADDING))
+        .width(Length::FILL);
     let scroll = Element::scroll(content, style::scroll())
         .height(Length::FILL)
         .min_height(0.0)

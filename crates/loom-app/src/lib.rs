@@ -2570,7 +2570,10 @@ impl App {
                     (_, Some('y')) if !cfg!(target_os = "macos") => {
                         self.pending_shortcut = Some(shortcut::Shortcut::Redo)
                     }
-                    (_, Some(',')) => self.toggle_preferences(),
+                    // Cmd+, or Ctrl+, with no Shift: on a French layout,
+                    // Shift with the comma key types `?`, which is the help
+                    // key (ui-layer.md, section 6, rule 13).
+                    (_, Some(',')) if !modifiers.shift => self.toggle_preferences(),
                     // Ctrl+G makes a sub-patch; with Shift it dissolves one.
                     (_, Some('g')) if modifiers.shift => {
                         self.pending_shortcut = Some(shortcut::Shortcut::DissolveSubpatch)
@@ -2654,7 +2657,7 @@ impl App {
 /// Inspector help text, shown with nothing selected. It lists every canvas
 /// gesture and shortcut (#16), so keep it in step with `PatchCanvas::handle`
 /// and the key handling in `loom-canvas/src/widget/input.rs` and `panel_input.rs`.
-pub(crate) const HELP: &str = "Double-click empty canvas to open the module browser there.\n\
+pub(crate) const HELP: &str = "Double-click or right-click empty canvas to open the module browser there.\n\
 Drag from a port to patch a cable. Drag a connected input to move or remove its cable.\n\
 Drag tiles to move them. Shift-click or drag a box to select several. Cmd/Ctrl+A selects all.\n\
 Delete or Backspace removes the selection.\n\
@@ -2664,6 +2667,9 @@ With a control focused, Tab moves between controls and arrow keys change values.
 Escape clears control focus, then the selection. With a module selected and no control focused, arrow keys move it.\n\
 Right-drag or two-finger scroll to pan. Wheel or Cmd/Ctrl-scroll to zoom. Cmd/Ctrl+0 zooms to 100%.\n\
 F or Home frames the patch.\n\
+F1, or Cmd/Ctrl+/, opens help for the selected module, or this page.\n\
+Shift+F10, the menu key, or Alt+Enter (Option+Return) opens the selected module's menu.\n\
+Ctrl+Tab and Ctrl+Shift+Tab, or F6 and Shift+F6, move between the canvas, the right column, and the toolbar.\n\
 M cycles the patch map. O opens the Outline. The bracket keys follow a cable, and Cmd/Ctrl+[ goes back.\n\
 Right-click an output or a cable to add a scope or a meter fed by it.\n\
 Click a modulation badge to pin its lines; click again or press Escape to hide them.\n\

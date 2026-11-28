@@ -208,6 +208,7 @@ fn named_keys_map_to_ours() {
         (NamedKey::PageDown, Key::PageDown),
         (NamedKey::ContextMenu, Key::ContextMenu),
         (NamedKey::F2, Key::F2),
+        (NamedKey::F6, Key::F6),
         (NamedKey::F10, Key::F10),
         (NamedKey::Shift, Key::Modifier),
         (NamedKey::Control, Key::Modifier),

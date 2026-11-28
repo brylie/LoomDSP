@@ -30,6 +30,12 @@ use std::time::{Duration, Instant};
 /// The size of a slider's round thumb, in logical pixels (rule 16).
 pub(crate) const THUMB: f32 = 14.0;
 
+/// The height of a slider's element, in logical pixels: what a pointer
+/// hits and the focus ring goes around. 24 px meets WCAG 2.2, SC 2.5.8
+/// (target size, minimum) directly; the track and the thumb are drawn
+/// centred in it (rule 16; Brylie's decision, 2026-11-27).
+pub(crate) const TARGET: f32 = 24.0;
+
 /// The thickness of a slider's track, in logical pixels (rule 16).
 pub(crate) const TRACK: f32 = 4.0;
 

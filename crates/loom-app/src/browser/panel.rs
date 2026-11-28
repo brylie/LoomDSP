@@ -182,8 +182,8 @@ impl App {
     }
 
     /// The browser's message for a key the search field leaves to it
-    /// (`KEYS`), or `None` to let the field have it: Shift+F10 opens a
-    /// row's menu, and F10 alone goes on.
+    /// (`KEYS`), or `None` to let the field have it: the menu key,
+    /// Shift+F10, or Alt+Enter opens a row's menu, and F10 alone goes on.
     pub(crate) fn browser_panel_key(&self, id: &UiId, key: &KeyEvent) -> Option<crate::Message> {
         self.overlays.browser()?;
         let KeyEvent::Pressed { key, modifiers, .. } = key else {
@@ -193,16 +193,14 @@ impl App {
             return None;
         }
         let message = match key {
+            // Before Enter: Alt+Enter opens the row's menu, never adds.
+            _ if key.opens_menu(*modifiers) => Message::Key(Nav::Menu),
             Key::Up => Message::Key(Nav::Up),
             Key::Down => Message::Key(Nav::Down),
             Key::PageUp => Message::Key(Nav::PageUp),
             Key::PageDown => Message::Key(Nav::PageDown),
             Key::Escape => Message::Key(Nav::Escape),
             Key::Enter => Message::Submit,
-            Key::ContextMenu => Message::Key(Nav::Menu),
-            Key::F10 if modifiers.shift && !modifiers.meta && !modifiers.control && !modifiers.alt => {
-                Message::Key(Nav::Menu)
-            }
             _ => return None,
         };
         Some(crate::Message::Browser(message))

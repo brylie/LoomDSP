@@ -200,6 +200,7 @@ fn keys_and_modifiers_by_name() {
         ("pageup", Key::PageUp),
         ("pagedown", Key::PageDown),
         ("f2", Key::F2),
+        ("f6", Key::F6),
     ] {
         assert_eq!(key(name), Ok(named), "{name}");
     }

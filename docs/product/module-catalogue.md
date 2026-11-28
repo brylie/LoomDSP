@@ -51,6 +51,7 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 | MT-PHASE-08 | Phase wrap and fold | Brings any signal into the 0 to 1 phase range, by wrapping it around or by folding it back at the edges. | | M1 | FR-LIB-01 | Built (`loom.phase.wrap`) |
 | MT-PHASE-07 | Span phase | A phase that covers N bars and is anchored to bar 1, so it has the same value at the same musical time after any jump. | | M3 | New | Planned |
 | MT-PHASE-09 | Clock to phase | Turns a clock that arrives as triggers into a phase, by measuring the time between them, so it can be multiplied and divided like any phase. | | M3 | FR-LIB-27 | Specified ([clock](../design/clock.md#clock-to-phase)) |
+| MT-PHASE-10 | Coupled phases | Several phases, each at its own rate, that pull toward one another each time one of them wraps. With no coupling they drift apart; with more, they fall into step, as many natural oscillators do. Each phase has a trigger output. | Timebase, Seed | M3 | New | Planned |
 
 ## Sound sources
 
@@ -59,7 +60,7 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 | MT-SRC-01 | Oscillator | A band-limited periodic wave with pitch, phase, and frequency modulation inputs, hard sync, and a sub output. The shape comes from the shape source trait. Can be read by an external phase, so it also works as a lookup table. | Shape source, Timebase, Retrigger, Quality | M1 | FR-LIB-02 | Built in part (`loom.osc.sine`, `loom.osc.saw`, `loom.osc.pulse`, `loom.osc.triangle`: pitch and phase inputs, tune and octave, [oscillators](../design/oscillators.md); frequency modulation, hard sync, and the sub output to come) |
 | MT-SRC-02 | Noise | White, pink, and other noise colours. | Seed | M1 | FR-LIB-02 | Built (`loom.osc.noise`: white, pink, and brown) |
 | MT-SRC-03 | Additive oscillator | Builds a tone from many sine partials, with level control per partial and per group. | Quality | M4 | New | Planned |
-| MT-SRC-04 | Chaotic source | Signals from chaotic systems, such as iterated maps, attractors, and stochastic waveforms. | Seed | M4 | New | Planned |
+| MT-SRC-04 | Chaotic source | Signals from chaotic systems, such as iterated maps, attractors, and stochastic waveforms, at audio rate as sound sources. The slow modulators MT-MOD-06 (Attractor) and MT-MOD-11 (Iterated map) may share their algorithms. | Seed | M4 | New | Planned |
 | MT-SRC-05 | Swept sine | Sweeps a sine between two frequencies, for tests, risers, and effects. | Timebase | M4 | New | Planned |
 | MT-SRC-06 | Modal resonator | A bank of tuned resonant modes that rings like a bar, plate, or membrane when excited. | Character | M4 | FR-LIB-15 | Planned |
 | MT-SRC-07 | FM operator (abstraction) | An oscillator with a phase modulation input, its own envelope, and its own level, for building FM voices. | | M3 | New | Planned |
@@ -80,7 +81,7 @@ Sampling is built from small parts, so one set of primitives covers one-shot pla
 | MT-SAMPLE-03 | Buffer writer | Records a signal into a buffer, with overdub and clear, into memory allocated before recording starts. | | M3 | FR-LIB-20 | Planned |
 | MT-SAMPLE-04 | Slice map | Turns a slice number into the start and end of a slice, so a reader plays one slice per trigger. | | M3 | New | Planned |
 | MT-SAMPLE-05 | Zone map | Picks a buffer by pitch and velocity range, for multi-sampled instruments. | | M4 | FR-LIB-15 | Planned |
-| MT-SAMPLE-06 | Grain engine | Plays many short, overlapping, windowed reads of one buffer, with control over size, position, density, spread, and pitch. Reading a buffer that is still recording gives live granulation. | Seed, Quality | M4 | FR-LIB-15 | Planned |
+| MT-SAMPLE-06 | Grain engine | Plays many short, overlapping, windowed reads of one buffer, with control over size, position, density, spread, and pitch. Reading a buffer that is still recording gives live granulation. Its face shows the recent audio and the zone the grains read from (working name on the design canvas: Grain buffer). | Seed, Quality | M4 | FR-LIB-15 | Planned |
 | MT-SAMPLE-07 | Time stretch | Changes speed and pitch of a buffer independently. | Quality | M4 | New | Planned |
 | MT-SAMPLE-08 | File streamer | Streams a long audio file from disk in step with the transport, through a buffer filled on a control thread. | | M4 | New | Planned |
 | MT-SAMPLE-09 | Recorder | Captures a signal to a file while it passes through, without risk to the audio thread. | | M3 | FR-SHARE-03 | Planned |
@@ -151,9 +152,17 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 | MT-ENV-04 | Envelope follower | Outputs the loudness of an audio signal as a control signal. | Sidechain | M3 | FR-LIB-12 | Planned |
 | MT-ENV-05 | Slope detector | Outputs whether a signal is rising, falling, or still. | | M4 | New | Planned |
 | MT-MOD-01 | LFO | A slow periodic signal, free or synced, with extra outputs at fixed phase offsets. The shape comes from the shape source trait. | Shape source, Timebase, Retrigger, Spread | M1 | FR-LIB-04 | Built (`loom.mod.lfo`) |
-| MT-MOD-02 | Curve reader | Reads the shared curve data in one of three ways: by phase (it repeats), by time over seconds or bars (it runs once), or by value (it maps an input to an output). This one type covers drawn LFOs, section curves, velocity curves, and keytracking curves. | Timebase, Retrigger | M3 | FR-LIB-12, FR-LIB-16 | Planned |
+| MT-MOD-02 | Curve reader | Reads the shared curve data in one of three ways: by phase (it repeats), by time over seconds or bars (it runs once), or by value (it maps an input to an output). This one type covers drawn LFOs, section curves, velocity curves, and keytracking curves. Several lanes, each its own output; read by phase, it follows the bar when its phase input is unpatched, so a span phase gives curves many bars long. Edited in a docked editor below the canvas ([module faces](../design/module-faces.md#the-curve-modules-docked-editor)). Working name: Curve. | Timebase, Retrigger | M3 | FR-LIB-12, FR-LIB-16 | Planned |
 | MT-MOD-03 | Note values | Turns note information into control signals: keytracking, note count, and one gate per pitch class. | | M3 | FR-LIB-12 | Planned |
 | MT-MOD-04 | Vibrato (abstraction) | An LFO with a delay and a fade-in, scaled by mod wheel or pressure. | | M3 | FR-LIB-12 | Planned |
+| MT-MOD-05 | Bounce | A falling body that keeps a fixed share of its height at each bounce. It fires a trigger on each bounce and outputs its height, so the gaps shrink by a steady ratio: a natural speeding up that settles. | Timebase, Retrigger | M3 | New | Planned |
+| MT-MOD-06 | Attractor | A point that moves on a strange attractor, either a continuous system such as Lorenz's or a two-dimensional map stepped on a clock. Its coordinates are values, and a gate says which side of the shape it is on. It never repeats and never leaves the shape. | Timebase | M3 | New | Planned |
+| MT-MOD-07 | Pendulum | A double pendulum. Its two angles are phases and its tip position is a value. Released from low it swings almost regularly; from high it tumbles. | Timebase, Retrigger | M3 | New | Planned |
+| MT-MOD-08 | Brownian | A particle that wanders smoothly: random pushes move it, and its velocity is pulled back toward rest. Its position and speed are values. | Seed, Timebase | M3 | New | Planned |
+| MT-MOD-09 | Voronoi field | A probe that moves through a plane divided into cells around drifting seed points. The cell number is a stepped value, the distance to the nearest edge a smooth one, and crossing an edge fires a trigger. X and Y inputs can steer the probe. | Seed, Timebase | M3 | New | Planned |
+| MT-MOD-10 | Fractal noise | Smooth random curves stacked in layers, each twice as fast and half as tall as the last. One layer drifts; several make a jagged ridge. | Seed, Timebase | M3 | New | Planned |
+| MT-MOD-11 | Iterated map | Applies a one-line rule, such as the logistic map, once per trigger, and outputs each new value. One setting moves it from settling on one value, through cycles of 2, 4, and 8, into chaos. | | M3 | New | Planned |
+| MT-MOD-12 | Escape-time fractal | Moves a point over the Mandelbrot set or a Julia set. It outputs how many steps the point's orbit takes to escape, fires a trigger when it does, and gives the orbit's position. X and Y inputs can steer the point. | | M3 | New | Planned |
 
 ## Randomness
 
@@ -178,7 +187,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | MT-LOGIC-03 | Memory | Stores a gate state: set and reset, toggle, data on a clock, and a latch that cycles through N states. | | M1 | FR-LIB-05 | Built (`loom.logic.memory`) |
 | MT-LOGIC-04 | Counter | Counts triggers from 0 to N-1, outputs the count as a phase, and fires when it wraps. Covers countdowns and "after N times". | | M3 | FR-LIB-22 | Specified |
 | MT-LOGIC-05 | Step select | N gate outputs, one high at a time, chosen by a phase. | | M3 | FR-LIB-22 | Specified |
-| MT-LOGIC-06 | Shift register | Passes values or gates down a chain of stages on each clock. | | M3 | New | Planned |
+| MT-LOGIC-06 | Shift register | Passes values or gates down a chain of stages on each clock. In a loop, the last stage feeds the first, and each bit may flip as it comes round, with a set chance: none gives a fixed loop, a little gives a loop that slowly changes. The first eight stages also give a stepped value. | Seed | M3 | New | Planned |
 | MT-LOGIC-07 | State machine | Moves between named states on triggers and conditions, with one gate out per state. | | M3 | FR-LIB-22 | Planned |
 | MT-LOGIC-08 | Value stack | Stores values and gives them back first-in-first-out or last-in-first-out. | | M4 | New | Planned |
 | MT-LOGIC-09 | Binary code | Converts a number to one gate per bit, and back. | | M4 | New | Planned |
@@ -190,13 +199,14 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | MT-GATE-01 | Gate shaper | Sets the length of a gate, delays it, or turns its start or end into a trigger. | Timebase | M3 | New | Planned |
 | MT-GATE-02 | Euclidean rhythm | Spreads N hits as evenly as possible over M steps, with rotation. | | M2 | FR-LIB-08 | Built (`loom.gate.euclid`) |
 | MT-GATE-03 | Repeater | Repeats a gate at a rate while it is high, or fires a quick burst of N triggers from one trigger. | Timebase | M3 | New | Planned |
+| MT-GATE-04 | Euclidean rings (abstraction) | Four Euclidean rhythms read from one phase, each with its own hits, steps, and rotation, so the hits that land together line up under one hand. | | M3 | New | Planned |
 
 ## Pitch and scale
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-PITCH-01 | Pitch math | Moves a pitch by octaves, semitones, scale steps, or a frequency ratio; sums several pitches; or spreads a pair around one pitch. | Scale awareness | M3 | FR-LIB-13 | Planned |
-| MT-PITCH-02 | Pitch quantiser | Snaps a pitch signal to the nearest note of a scale, or of the notes being held. | Scale awareness | M3 | FR-LIB-29 | Specified ([M2 modules](../design/p2-modules.md)) |
+| MT-PITCH-02 | Pitch quantiser | Snaps a pitch signal to the nearest note of a scale, or of the notes being held. A slowly wandering value sampled on a clock and quantised makes a melody that stays in key. Working name on the design canvas: Quantizer. | Scale awareness | M3 | FR-LIB-29 | Specified ([M2 modules](../design/p2-modules.md)) |
 | MT-PITCH-03 | Scale and tuning | Sets the patch-wide scale and tuning (equal divisions, just ratios, imported tuning files) that pitch modules follow. Can be changed live by a trigger. | | M3 | FR-LIB-29 | Specified ([scale and tuning](../design/scale-and-tuning.md)) |
 | MT-PITCH-04 | Pitch tracker | Estimates the pitch of incoming audio. | | M4 | New | Planned |
 
@@ -204,13 +214,16 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-SEQ-01 | Multi-lane sequencer | Steps through stored values in one or more lanes. Each lane has a type (value, gate, pitch, or curve), a length, a direction, and a read mode: by clock, by phase, or by a control value that points at a step. Steps can carry accent, chance, and repeat. The first version builds four lanes, each with its own length (polymeter), with step attributes (FR-LIB-08). Per-lane rate and direction come later in M3 (FR-LIB-14). | Timebase, Retrigger, Seed, Scale awareness | M3 | FR-LIB-08, FR-LIB-14 | Specified in part ([M2 modules](../design/p2-modules.md)) |
+| MT-SEQ-01 | Multi-lane sequencer | Steps through stored values in one or more lanes. Each lane has a type (value, gate, pitch, or curve), a length, a direction, and a read mode: by clock, by phase, or by a control value that points at a step. Steps can carry accent, chance, and repeat. The first version builds four lanes, each with its own length (polymeter), with step attributes (FR-LIB-08). Per-lane rate and direction come later in M3 (FR-LIB-14). With lanes of different lengths and rates, the face says after how many bars they line up again (working name for this form: Polymeter). | Timebase, Retrigger, Seed, Scale awareness | M3 | FR-LIB-08, FR-LIB-14 | Specified in part ([M2 modules](../design/p2-modules.md)) |
 | MT-SEQ-02 | Parameter sequencer | Each step sets its own group of parameter values elsewhere in the patch. | Timebase | M3 | FR-LIB-12 | Planned |
-| MT-SEQ-03 | Piano roll | Notes of any length and pitch in a loop, drawn or recorded. | Timebase, Scale awareness | M3 | New | Planned |
-| MT-SEQ-04 | Generator | Makes melodies or rhythms from a chosen algorithm: random notes in a scale, a random walk, a looping pattern that slowly mutates, a Markov chain, or rule systems such as L-systems and cellular automata. | Seed, Scale awareness, Timebase | M3 | FR-LIB-28 | Planned |
+| MT-SEQ-03 | Piano roll | Notes of any length and pitch in a loop, drawn or recorded. It is read by a phase, which follows the bar when unpatched, so phase modules play the same notes faster, backward, or later. Working name: Phrase. | Timebase, Scale awareness | M3 | New | Planned |
+| MT-SEQ-04 | Generator | Makes melodies or rhythms from a chosen algorithm: random notes in a scale, a random walk, a looping pattern that slowly mutates (for gates and values alone, the Shift register MT-LOGIC-06 does this), or rule systems such as L-systems. Markov chains (MT-SEQ-10) and cellular automata (MT-SEQ-09) are types of their own. | Seed, Scale awareness, Timebase | M3 | FR-LIB-28 | Planned |
 | MT-SEQ-05 | Note file player | Plays a stored note file in step with the transport. | Timebase | M4 | New | Planned |
 | MT-SEQ-06 | Style generator (abstraction) | A bass line, chord part, or drum part from a seed and a style setting, built from a generator and sequencer lanes. | Seed | M4 | FR-LIB-28 | Planned |
 | MT-SEQ-07 | Chord sequencer (abstraction) | Steps through a progression of chords and plays every note of each. A step names its chord (C major, A minor 7) or a step of the patch scale (the fourth chord), with a voicing: inversion and octave spread. Built from a sequencer's pitch and value lanes and a Chord module. | Timebase, Scale awareness | M3 | New | Planned |
+| MT-SEQ-08 | Fugue | Plays one stored phrase with several playheads. Each has its own direction (forward, backward, or back and forth), rate, and transposition, so one subject becomes a canon, read backward or at half speed. One pitch and gate output per playhead. | Timebase, Scale awareness | M3 | New | Planned |
+| MT-SEQ-09 | Automaton | Grows a row of steps from the last one by a rule over each step and its two neighbours, one row per bar or clock, and plays the newest row as gates. Some rules give order, some look random, some build structures. | Seed, Timebase | M3 | New | Planned |
+| MT-SEQ-10 | Markov | Picks each next note from a table of chances for what follows the current note, so a melody keeps its character but never quite repeats. | Seed, Scale awareness, Timebase | M3 | New | Planned |
 
 ## Note effects
 
@@ -221,7 +234,7 @@ Notes travel as per-voice signals ([ADR-0038](../adr/0038-notes-travel-as-per-vo
 | MT-NOTE-01 | Arpeggiator | Plays held notes one at a time in a pattern. | Timebase, Seed | M3 | FR-LIB-13 | Planned |
 | MT-NOTE-02 | Chord | Adds notes at set intervals, or scale steps, to each incoming note. The chord shape can also come from a control input, so a sequencer can change it on every step. | Scale awareness | M3 | FR-LIB-13 | Planned |
 | MT-NOTE-03 | Strum | Spreads the notes of a chord in time. | | M3 | FR-LIB-13 | Planned |
-| MT-NOTE-04 | Note repeat | Repeats notes: as fading echoes, at a steady rate while held, or speeding up or slowing down like a bouncing ball. | Timebase, Scale awareness | M3 | FR-LIB-13 | Planned |
+| MT-NOTE-04 | Note repeat | Repeats notes: as fading echoes, at a steady rate while held, or speeding up or slowing down like a bouncing ball. It repeats the notes it is given; Bounce (MT-MOD-05) makes the triggers and a height value itself. | Timebase, Scale awareness | M3 | FR-LIB-13 | Planned |
 | MT-NOTE-05 | Note variation | Small random changes to timing, velocity, and pitch, and a chance that a note plays at all. | Seed, Scale awareness | M3 | FR-LIB-13 | Planned |
 | MT-NOTE-06 | Note hold | Sets or scales note lengths, or holds notes after the keys are released. | | M3 | FR-LIB-13 | Planned |
 | MT-NOTE-07 | Note filter and split | Passes or routes notes by pitch, velocity, or channel. | | M3 | New | Planned |
@@ -359,8 +372,8 @@ A user's own sub-patch can declare a role and then fill any matching slot (FR-EN
 | M0 | 3 | 0 |
 | M1 | 35 | 0 |
 | M2 | 21 | 1 |
-| M3 | 69 | 25 |
+| M3 | 82 | 38 |
 | M4 | 46 | 30 |
-| **Total** | **174** | **56** |
+| **Total** | **187** | **69** |
 
 Plus 11 traits and 7 initial roles. The summary is counted from the tables above; update it when entries change.

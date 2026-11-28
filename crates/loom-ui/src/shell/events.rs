@@ -173,6 +173,7 @@ pub(crate) fn core_key(key: &WinitKey) -> Key {
             NamedKey::ContextMenu => Key::ContextMenu,
             NamedKey::F1 => Key::F1,
             NamedKey::F2 => Key::F2,
+            NamedKey::F6 => Key::F6,
             NamedKey::F10 => Key::F10,
             NamedKey::Shift
             | NamedKey::Control

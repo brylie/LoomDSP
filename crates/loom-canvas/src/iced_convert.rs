@@ -193,6 +193,7 @@ impl ToIced for Key {
             Key::ContextMenu => Named::ContextMenu,
             Key::F1 => Named::F1,
             Key::F2 => Named::F2,
+            Key::F6 => Named::F6,
             Key::F10 => Named::F10,
             Key::Modifier => Named::Shift,
             Key::Character(c) => return keyboard::Key::Character(c.to_string().into()),
@@ -307,6 +308,7 @@ impl ToCore for &keyboard::Key {
                 Named::ContextMenu => Key::ContextMenu,
                 Named::F1 => Key::F1,
                 Named::F2 => Key::F2,
+                Named::F6 => Key::F6,
                 Named::F10 => Key::F10,
                 Named::Shift | Named::Control | Named::Alt | Named::AltGraph | Named::Meta | Named::Super => {
                     Key::Modifier

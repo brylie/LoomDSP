@@ -312,13 +312,35 @@ fn toolbar_adds_two_tiles_without_covering_transport_or_each_other() {
     assert_eq!(ui.app().session.positions[&id], placed);
 }
 
-/// Shift+F10 and the menu key, typed in the search field, open the
-/// highlighted library row's menu through the window's own key path, and
-/// the canvas under the browser opens no tile menu for its selected tile.
+/// Alt+Enter on a module's row opens nothing, as the menu key does there,
+/// and never adds the module as Enter does: it is the menu key, not Enter.
+#[test]
+fn alt_enter_on_a_module_row_adds_nothing() {
+    use loom_ui_core::{Key, Modifiers};
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let before = ui.app().session.scene.modules().len();
+    ui.send(crate::Message::OpenBrowser);
+    let _ = ui.redraw();
+    ui.send(crate::Message::Browser(Message::Query("svf".into())));
+    let _ = ui.redraw();
+    let _ = ui.tap(Key::Enter, Modifiers::ALT);
+    let browser = ui.app().overlays.browser().expect("still open");
+    assert_eq!(browser.model().menu, None, "a module row has no menu");
+    assert_eq!(ui.app().session.scene.modules().len(), before, "nothing added");
+}
+
+/// Shift+F10, the menu key, and Alt+Enter, typed in the search field, open
+/// the highlighted library row's menu through the window's own key path,
+/// and the canvas under the browser opens no tile menu for its selected
+/// tile.
 #[test]
 fn the_menu_keys_open_a_library_rows_menu_from_the_field() {
     use loom_ui_core::{Key, Modifiers};
-    for (key, modifiers) in [(Key::F10, Modifiers::SHIFT), (Key::ContextMenu, Modifiers::NONE)] {
+    for (key, modifiers) in [
+        (Key::F10, Modifiers::SHIFT),
+        (Key::ContextMenu, Modifiers::NONE),
+        (Key::Enter, Modifiers::ALT),
+    ] {
         let mut ui = crate::ui_test::Ui::open("subtractive.ron");
         let _ = ui
             .app_mut()
@@ -337,4 +359,57 @@ fn the_menu_keys_open_a_library_rows_menu_from_the_field() {
             "{key:?}: no tile menu under it"
         );
     }
+}
+
+/// A right-click on empty canvas opens the browser there, and the module
+/// Enter adds has its top-left at the click, snapped to the grid, as after
+/// a double-click (module-browser.md, Opening the browser and Adding).
+#[test]
+fn a_right_click_on_empty_canvas_opens_the_browser_and_adds_there() {
+    use loom_canvas::{GRID, Hit};
+    use loom_ui_core::{Key, Modifiers, Point};
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let view = ui.canvas();
+    let world_of = |at: Point| {
+        view.camera
+            .to_world(Point::new(at.x - view.bounds.x, at.y - view.bounds.y))
+    };
+    // A point well clear of every tile, port, and cable.
+    let empty = (1..20)
+        .flat_map(|i| (1..20).map(move |j| (i, j)))
+        .map(|(i, j)| {
+            Point::new(
+                view.bounds.x + view.bounds.width * i as f32 / 20.0,
+                view.bounds.y + view.bounds.height * j as f32 / 20.0,
+            )
+        })
+        .find(|&at| matches!(ui.app().session.scene.hit(world_of(at), 2.0 * GRID), Hit::Nothing))
+        .expect("an empty place on the canvas");
+    let before: Vec<u32> = ui.app().session.positions.keys().copied().collect();
+    ui.move_to(empty);
+    ui.step(&[iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+        iced::mouse::Button::Right,
+    ))]);
+    ui.step(&[iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+        iced::mouse::Button::Right,
+    ))]);
+    let _ = ui.redraw();
+    assert!(ui.app().overlays.browser().is_some(), "the browser opened");
+    ui.typewrite("svf");
+    ui.tap(Key::Enter, Modifiers::NONE);
+    assert!(ui.app().overlays.browser().is_none(), "added, and closed");
+    let (&added, &(x, y)) = ui
+        .app()
+        .session
+        .positions
+        .iter()
+        .find(|(id, _)| !before.contains(id))
+        .expect("a module was added");
+    let world = world_of(empty);
+    assert_eq!((x % GRID, y % GRID), (0.0, 0.0), "module {added} sits on the grid");
+    assert!(
+        (x - world.x).abs() <= GRID && (y - world.y).abs() <= GRID,
+        "module {added} at ({x}, {y}), the click at {world:?}"
+    );
 }

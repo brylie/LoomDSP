@@ -169,3 +169,31 @@ fn named_modifiers_combine() {
     assert_eq!(Modifiers::META | Modifiers::SHIFT, held(true, false, false, true));
     assert_eq!(Modifiers::SHIFT | Modifiers::NONE, Modifiers::SHIFT);
 }
+
+/// The menu key, Shift+F10, and Alt+Enter open a menu, each with exactly
+/// those modifiers; Enter alone, F10 alone, and the others with more held
+/// do not.
+#[test]
+fn the_menu_keys_are_the_menu_key_shift_f10_and_alt_enter() {
+    let alt_shift = Modifiers::ALT | Modifiers::SHIFT;
+    for (key, modifiers) in [
+        (Key::ContextMenu, Modifiers::NONE),
+        (Key::F10, Modifiers::SHIFT),
+        (Key::Enter, Modifiers::ALT),
+    ] {
+        assert!(key.opens_menu(modifiers), "{key:?} with {modifiers:?}");
+        assert!(
+            !key.opens_menu(modifiers | Modifiers::CONTROL),
+            "{key:?} with Control too"
+        );
+    }
+    for (key, modifiers) in [
+        (Key::Enter, Modifiers::NONE),
+        (Key::Enter, alt_shift),
+        (Key::Enter, Modifiers::META),
+        (Key::F10, Modifiers::NONE),
+        (Key::Character('m'), Modifiers::ALT),
+    ] {
+        assert!(!key.opens_menu(modifiers), "{key:?} with {modifiers:?}");
+    }
+}

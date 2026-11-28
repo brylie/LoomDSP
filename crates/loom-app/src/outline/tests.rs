@@ -396,6 +396,68 @@ fn ctrl_tab_restores_canvas_and_inspector_focus_in_both_directions() {
     assert_eq!(focused(&mut ui), canvas);
 }
 
+/// Presses F6, or Shift+F6 when `backwards`: the region keys' other name.
+fn f6(ui: &mut Ui, backwards: bool) {
+    let modifiers = if backwards { Modifiers::SHIFT } else { NONE };
+    ui.tap(Key::F6, modifiers);
+}
+
+/// F6 and Shift+F6 move between the regions exactly as Ctrl+Tab and
+/// Ctrl+Shift+Tab do, in both directions (ui-layer.md, section 6, rule 7).
+#[test]
+fn f6_moves_between_regions_as_ctrl_tab_does() {
+    let mut ui = Ui::open("subtractive.ron");
+    let filter = tile_named(ui.app(), "SVF");
+    ui.tap(Key::Character('o'), NONE);
+    ui.send(Message::OutlineRow(row(filter)));
+    ui.tap(Key::Enter, NONE);
+    ui.redraw();
+    let canvas = focused(&mut ui);
+    ui.send(Message::Matrix(crate::matrix::Event::Tab(
+        crate::matrix::Tab::Inspector,
+    )));
+
+    f6(&mut ui, false);
+    let inspector = focused(&mut ui);
+    assert!(inspector.is_under(&crate::inspector::ids::panel(filter)), "{inspector}");
+    f6(&mut ui, true);
+    ui.redraw();
+    assert_eq!(focused(&mut ui), canvas);
+    f6(&mut ui, true);
+    assert!(focused(&mut ui).is_under(&crate::a11y::tree::toolbar_id()));
+    f6(&mut ui, true);
+    assert_eq!(focused(&mut ui), inspector);
+}
+
+/// F6 leaves a text field for the next region, as Ctrl+Tab does, and does
+/// nothing while an overlay has the input: the overlay keeps its loop.
+#[test]
+fn f6_leaves_a_field_and_does_nothing_under_an_overlay() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Canvas(loom_canvas::CanvasEvent::Select(vec![4])));
+    ui.redraw();
+    let field = crate::inspector::ids::part(
+        &crate::inspector::ids::row(4, crate::inspector::ids::Kind::Param, "cutoff"),
+        "field",
+    );
+    ui.focus(&field);
+    assert_eq!(focused(&mut ui), field);
+    f6(&mut ui, false);
+    ui.redraw();
+    assert!(
+        !focused(&mut ui).is_under(&crate::inspector::ids::panel(4)),
+        "F6 left the column"
+    );
+
+    ui.tap(Key::Character(','), Modifiers::platform_shortcut());
+    ui.redraw();
+    let close = crate::settings::panel::close_id();
+    assert_eq!(ui.runtime().focused(), Some(&close), "Preferences has the focus");
+    f6(&mut ui, false);
+    ui.redraw();
+    assert_eq!(ui.runtime().focused(), Some(&close), "F6 did nothing under it");
+}
+
 /// Focus on the outline wraps through the toolbar and canvas without changing its row.
 #[test]
 fn region_keys_wrap_around_and_restore_the_outline_row() {

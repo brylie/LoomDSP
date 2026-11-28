@@ -757,7 +757,7 @@ impl Element {
     pub fn slider(slider: crate::slider::Slider) -> Self {
         let mut element = Self::new(Kind::Slider(slider), Vec::new())
             .width(Length::FILL)
-            .height(Length::Fixed(crate::slider::THUMB));
+            .height(Length::Fixed(crate::slider::TARGET));
         element.focusable = true;
         element
     }

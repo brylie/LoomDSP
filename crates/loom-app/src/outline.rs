@@ -569,7 +569,12 @@ impl App {
             return false;
         }
         let key = *key;
-        if key == Key::Tab && modifiers.control && !modifiers.alt {
+        // F6 is the usual pane key on Windows and in browsers; Ctrl+Tab is
+        // its route on a keyboard with no function keys (ui-layer.md,
+        // section 6, rule 7).
+        let ctrl_tab = key == Key::Tab && modifiers.control && !modifiers.alt;
+        let f6 = key == Key::F6 && !modifiers.control && !modifiers.alt && !modifiers.meta;
+        if ctrl_tab || f6 {
             self.cycle_region(modifiers.shift);
             return true;
         }
