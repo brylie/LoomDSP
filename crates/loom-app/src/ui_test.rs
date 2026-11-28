@@ -50,15 +50,6 @@ use loom_ui::{DriverEvent, Runtime, WindowState};
 use loom_ui_core::{
     Code, Event as UiEvent, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, Rect, Size as UiSize,
 };
-// The tests reach Iced's values through `use super::*` until their values
-// change to ours, alone, in commit 6 of plan step P4 (ui-layer.md, section
-// 10, rule 2).
-#[cfg(test)]
-use iced::{mouse, window};
-#[cfg(test)]
-use loom_canvas::iced_convert::ToIced as _;
-// Iced's event, which the harness's methods still take from tests.
-use iced::Event;
 // The harness tests reach these through `use super::*`.
 #[cfg(test)]
 use loom_core::ModuleId;
@@ -107,8 +98,8 @@ pub struct Ui {
     draws_asked: usize,
 }
 
-/// One input a test gives the harness: ours, or Iced's until the tests'
-/// values change to ours (plan for leaving Iced, step P4, commit 6).
+/// One input a test gives the harness ([`Ui::step`]).
+#[derive(Debug, Clone)]
 pub(crate) enum Input {
     /// An event, with where the pointer is when it moves it.
     Event(UiEvent, Option<Point>),
@@ -118,47 +109,38 @@ pub(crate) enum Input {
     Window(loom_ui::WindowEvent),
 }
 
-/// A value a test hands [`Ui::step`] as one input.
-pub(crate) trait IntoInput {
-    /// The input, or `None` for an event that means nothing to the window.
-    fn into_input(self) -> Option<Input>;
-}
+impl Input {
+    /// The pointer moved to `at`, in window logical pixels.
+    pub(crate) fn moved(at: Point) -> Self {
+        Self::Event(UiEvent::Pointer(PointerEvent::Moved), Some(at))
+    }
 
-impl IntoInput for UiEvent {
-    fn into_input(self) -> Option<Input> {
-        Some(Input::Event(self, None))
+    /// A pointer event where the pointer is.
+    pub(crate) fn pointer(event: PointerEvent) -> Self {
+        Self::Event(UiEvent::Pointer(event), None)
+    }
+
+    /// The window lost the keys.
+    pub(crate) fn unfocused() -> Self {
+        Self::Window(loom_ui::WindowEvent::Focused(false))
     }
 }
 
-impl IntoInput for &UiEvent {
-    fn into_input(self) -> Option<Input> {
-        Some(Input::Event(self.clone(), None))
+impl From<UiEvent> for Input {
+    fn from(event: UiEvent) -> Self {
+        Self::Event(event, None)
     }
 }
 
-impl IntoInput for iced::Event {
-    fn into_input(self) -> Option<Input> {
-        (&self).into_input()
+impl From<&UiEvent> for Input {
+    fn from(event: &UiEvent) -> Self {
+        Self::Event(event.clone(), None)
     }
 }
 
-impl IntoInput for &iced::Event {
-    fn into_input(self) -> Option<Input> {
-        use loom_canvas::iced_convert::ToCore as _;
-        match self {
-            iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => Some(Input::Event(
-                UiEvent::Pointer(PointerEvent::Moved),
-                Some(position.to_core()),
-            )),
-            iced::Event::Window(iced::window::Event::RedrawRequested(_)) => Some(Input::Redraw),
-            iced::Event::Window(iced::window::Event::Unfocused) => {
-                Some(Input::Window(loom_ui::WindowEvent::Focused(false)))
-            }
-            iced::Event::Window(iced::window::Event::Focused) => {
-                Some(Input::Window(loom_ui::WindowEvent::Focused(true)))
-            }
-            event => loom_canvas::iced_convert::event_to_core(event).map(|event| Input::Event(event, None)),
-        }
+impl From<&Input> for Input {
+    fn from(input: &Input) -> Self {
+        input.clone()
     }
 }
 
@@ -556,13 +538,16 @@ impl Ui {
     /// hands it over, at the harness's time, then the frame is drawn and
     /// the control channel's next scripted step goes in, one a frame.
     /// Returns every message `update` got, in order.
-    pub(crate) fn step(&mut self, events: &[Event]) -> Vec<Message> {
-        self.step_inputs(events.iter().filter_map(IntoInput::into_input).collect())
+    pub(crate) fn step<'a, I>(&mut self, inputs: &'a [I]) -> Vec<Message>
+    where
+        Input: From<&'a I>,
+    {
+        self.step_inputs(inputs.iter().map(Input::from).collect())
     }
 
     /// [`Ui::step`] with our own events, as the harness's methods give them.
     fn step_ui(&mut self, events: &[UiEvent]) -> Vec<Message> {
-        self.step_inputs(events.iter().filter_map(IntoInput::into_input).collect())
+        self.step(events)
     }
 
     /// [`Ui::step`] with the inputs made.
@@ -1137,20 +1122,12 @@ impl Ui {
     }
 }
 
-/// Where a test puts the pointer: a window point, or nowhere. Iced's cursor
-/// too, until the tests' values change to ours (plan step P4, commit 6).
+/// Where a test puts the pointer: a window point, or nowhere.
 pub(crate) struct Cursor(Option<Point>);
 
 impl From<Option<Point>> for Cursor {
     fn from(at: Option<Point>) -> Self {
         Self(at)
-    }
-}
-
-impl From<iced::mouse::Cursor> for Cursor {
-    fn from(cursor: iced::mouse::Cursor) -> Self {
-        use loom_canvas::iced_convert::ToCore as _;
-        Self(cursor.position().map(|at| at.to_core()))
     }
 }
 
@@ -1168,28 +1145,27 @@ pub(crate) fn pressed(key: loom_ui_core::Key, modifiers: loom_ui_core::Modifiers
 }
 
 /// A key press with no modifiers and no text, as the keyboard sends it.
-pub(crate) fn key_pressed(key: Key, repeat: bool) -> Event {
+pub(crate) fn key_pressed(key: Key, repeat: bool) -> UiEvent {
     key_press(key, Modifiers::NONE, None, repeat)
 }
 
 /// A key press with `modifiers` held, carrying `text` when the key types
-/// a character, at a place nothing reads (`Code::Other`). Iced's event
-/// until the tests' values change to ours (plan step P4, commit 6).
-pub(crate) fn key_press(key: Key, modifiers: Modifiers, text: Option<&str>, repeat: bool) -> Event {
-    let press = KeyEvent::Pressed {
+/// a character, at a place nothing reads (`Code::Other`).
+pub(crate) fn key_press(key: Key, modifiers: Modifiers, text: Option<&str>, repeat: bool) -> UiEvent {
+    UiEvent::Key(KeyEvent::Pressed {
         key,
         code: Code::Other,
         modifiers,
         repeat,
         text: text.map(str::to_string),
-    };
-    Event::Keyboard(loom_canvas::iced_convert::key_event_to_iced(&press, modifiers))
+    })
 }
 
-/// A key release with `modifiers` held, as Iced's event.
-pub(crate) fn key_released(key: Key, modifiers: Modifiers) -> Event {
-    let release = KeyEvent::Released { key, code: Code::Other };
-    Event::Keyboard(loom_canvas::iced_convert::key_event_to_iced(&release, modifiers))
+/// A key release. A release carries no modifiers (ui-layer.md, section 6,
+/// rule 4), so `modifiers` is what was held, for the reader.
+pub(crate) fn key_released(key: Key, modifiers: Modifiers) -> UiEvent {
+    let _ = modifiers;
+    UiEvent::Key(KeyEvent::Released { key, code: Code::Other })
 }
 
 #[cfg(test)]

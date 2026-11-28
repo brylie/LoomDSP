@@ -252,13 +252,17 @@ fn step_6_a_shortcut_runs_in_its_keys_own_turn() {
 /// rule 6, step 1; section 8, rule 4).
 #[test]
 fn step_1_panic_is_heard_while_composing() {
-    use iced::advanced::input_method::Event as Ime;
     let mut ui = browsing();
-    ui.step(&[iced::Event::InputMethod(Ime::Opened)]);
-    ui.step(&[iced::Event::InputMethod(Ime::Preedit("か".to_string(), None))]);
+    ui.step(&[loom_ui_core::Event::Ime(loom_ui_core::ImeEvent::Enabled)]);
+    ui.step(&[loom_ui_core::Event::Ime(loom_ui_core::ImeEvent::Preedit {
+        text: "か".to_string(),
+        cursor: None,
+    })]);
     let messages = tap_panic(&mut ui);
     assert_panicked(&ui, &messages);
-    ui.step(&[iced::Event::InputMethod(Ime::Commit("か".to_string()))]);
+    ui.step(&[loom_ui_core::Event::Ime(loom_ui_core::ImeEvent::Commit(
+        "か".to_string(),
+    ))]);
     let browser = ui.app().overlays.browser().expect("the browser stays open");
     assert_eq!(browser.model().query, "か", "the composition went on");
 }

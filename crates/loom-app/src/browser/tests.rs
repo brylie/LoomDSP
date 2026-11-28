@@ -388,11 +388,11 @@ fn a_right_click_on_empty_canvas_opens_the_browser_and_adds_there() {
         .expect("an empty place on the canvas");
     let before: Vec<u32> = ui.app().session.positions.keys().copied().collect();
     ui.move_to(empty);
-    ui.step(&[iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
-        iced::mouse::Button::Right,
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Pressed(
+        loom_ui_core::PointerButton::Right,
     ))]);
-    ui.step(&[iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
-        iced::mouse::Button::Right,
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Released(
+        loom_ui_core::PointerButton::Right,
     ))]);
     let _ = ui.redraw();
     assert!(ui.app().overlays.browser().is_some(), "the browser opened");

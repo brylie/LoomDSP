@@ -1,7 +1,6 @@
 use super::*;
 use crate::question::{Answer, Message as QuestionMessage};
 use crate::{CanvasEvent, Message, files, tests, ui_test::Ui};
-use iced::mouse;
 use loom_ui_core::{Key, Modifiers, Point};
 
 /// Every built-in example parses and loads with the running registry.
@@ -122,8 +121,12 @@ fn help_from_selected_tile_inspector_and_menu() {
     let bounds = ui.app().session.scene.module(4).unwrap().bounds();
     let at = ui.canvas().to_window(Point::new(bounds.center().x, bounds.y + 4.0));
     ui.move_to(at);
-    ui.step(&[iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right))]);
-    ui.step(&[iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right))]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Pressed(
+        loom_ui_core::PointerButton::Right,
+    ))]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Released(
+        loom_ui_core::PointerButton::Right,
+    ))]);
     assert!(ui.app().overlays.tile_menu().is_some());
     let (_, menu_at) = ui.app().overlays.tile_menu().unwrap();
     ui.move_to(Point::new(menu_at.x + 30.0, menu_at.y + 15.0));
@@ -144,9 +147,9 @@ fn help_close_stays_visible_while_scrolling() {
     let _ = ui.redraw();
     let middle = ui.runtime().bounds(&body).expect("the body is laid out").center();
     ui.move_to(middle);
-    ui.step(&[iced::Event::Mouse(mouse::Event::WheelScrolled {
-        delta: mouse::ScrollDelta::Lines { x: 0.0, y: -12.0 },
-    })]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Scrolled(
+        loom_ui_core::ScrollDelta::Lines { x: 0.0, y: -12.0 },
+    ))]);
     let after = ui.text("Close").expect("close action remains visible");
     assert_eq!(before, after);
     let _ = ui.redraw();

@@ -8,7 +8,6 @@ use crate::Message;
 use crate::licence_chooser::Target;
 use crate::ui_test::{Ui, key_press};
 use accesskit::{Action, Role};
-use iced::advanced::input_method::Event as Method;
 use loom_ui_core::{Key, Modifiers, UiId};
 
 /// A window with the chooser open for the patch's licence, as patch info's
@@ -232,8 +231,11 @@ fn escape_and_tab_while_composing_are_the_compositions() {
     let mut ui = chooser();
     ui.a11y_action(&other_text_id(), Action::Focus);
     let _ = ui.step(&[
-        iced::Event::InputMethod(Method::Opened),
-        iced::Event::InputMethod(Method::Preedit("に".to_owned(), Some(3..3))),
+        loom_ui_core::Event::Ime(loom_ui_core::ImeEvent::Enabled),
+        loom_ui_core::Event::Ime(loom_ui_core::ImeEvent::Preedit {
+            text: "に".to_owned(),
+            cursor: Some((3, 3)),
+        }),
     ]);
     let none = Modifiers::NONE;
     let _ = ui.step(&[key_press(Key::Escape, none, None, false)]);

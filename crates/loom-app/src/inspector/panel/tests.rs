@@ -201,9 +201,9 @@ fn the_wheel_scrolls_the_column() {
     let at = centre(&mut ui, &tags_part());
     let _ = ui.move_to(at);
     let before = ui.runtime().scroll_offset(&column).expect("the column scrolls");
-    let _ = ui.step(&[iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
-        delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -6.0 },
-    })]);
+    let _ = ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Scrolled(
+        loom_ui_core::ScrollDelta::Lines { x: 0.0, y: -6.0 },
+    ))]);
     let after = ui.runtime().scroll_offset(&column).expect("the column scrolls");
     // The offset, then the most it can be.
     assert!(after.0 > before.0, "it scrolled: {before:?} to {after:?}");
@@ -581,9 +581,9 @@ fn a_modules_column_scrolls_its_rows_and_says_what_shows() {
 
     let at = centre(&mut ui, &ids::part(&ids::panel(4), "description"));
     let _ = ui.move_to(at);
-    let _ = ui.step(&[iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
-        delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -3.0 },
-    })]);
+    let _ = ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Scrolled(
+        loom_ui_core::ScrollDelta::Lines { x: 0.0, y: -3.0 },
+    ))]);
     let _ = ui.redraw();
     let after = ui.a11y_tree().node_by_id(&row).bounds().expect("the row's bounds");
     assert!(

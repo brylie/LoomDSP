@@ -128,7 +128,7 @@ fn canvas_input<T>(ui: &Ui, read: impl FnOnce(&CanvasInput) -> T) -> T {
 
 /// The window losing the keys, as the window's event gives it.
 fn lose_the_window(ui: &mut Ui) -> Vec<Message> {
-    ui.step(&[iced::Event::Window(iced::window::Event::Unfocused)])
+    ui.step(&[crate::ui_test::Input::unfocused()])
 }
 
 /// The window losing the keys while Space holds a canvas button releases

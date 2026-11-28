@@ -136,7 +136,7 @@ fn escape_and_focus_loss_cancel_an_inspector_drop() {
         ui.press();
         ui.move_to(row);
         if focus_loss {
-            ui.step(&[Event::Window(window::Event::Unfocused)]);
+            ui.step(&[crate::ui_test::Input::unfocused()]);
         } else {
             ui.tap(Key::Escape, Modifiers::NONE);
         }
@@ -160,8 +160,8 @@ fn empty_outside_and_learn_mode_make_no_inspector_assignment() {
     ui.move_to(from);
     ui.press();
     ui.move_to(row);
-    ui.set_cursor(mouse::Cursor::Unavailable);
-    ui.step(&[Event::Mouse(mouse::Event::CursorLeft)]);
+    ui.set_cursor(Option::<Point>::None);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::LeftWindow)]);
     ui.move_to(Point::new(WINDOW.width + 20.0, WINDOW.height + 20.0));
     assert!(
         ui.app()
@@ -1242,12 +1242,12 @@ fn the_camera_survives_opening_the_browser() {
     let empty = Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0);
     ui.move_to(empty);
     // A trackpad pans, and a mouse wheel zooms.
-    ui.step(&[Event::Mouse(mouse::Event::WheelScrolled {
-        delta: mouse::ScrollDelta::Pixels { x: 37.0, y: -23.0 },
-    })]);
-    ui.step(&[Event::Mouse(mouse::Event::WheelScrolled {
-        delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
-    })]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Scrolled(
+        loom_ui_core::ScrollDelta::Pixels { x: 37.0, y: -23.0 },
+    ))]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Scrolled(
+        loom_ui_core::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+    ))]);
     let moved = ui.canvas().camera;
     assert_ne!(moved, canvas.camera, "the scroll moved the camera");
 
@@ -1312,7 +1312,7 @@ fn a_segment_click_changes_the_mode_and_hides_its_controls() {
     let mut ui = Ui::open("sine.ron");
     let env = ui.app_mut().session.controller.add_module("loom.env.envelope").unwrap();
     ui.app_mut().refresh();
-    ui.step(&[]);
+    ui.step::<crate::ui_test::Input>(&[]);
     let tile = ui.app().session.scene.module(env.0).unwrap().clone();
     let rect = tile.widget_bounds(1).expect("the mode segments");
     let ad = loom_canvas::segment_centre(rect, 1, 2);
@@ -2384,7 +2384,7 @@ fn the_inspector_takes_typed_values() {
 
     // A press with no field focused drops a draft too.
     let _ = ui.app_mut().send(text("5"));
-    ui.step(&[]);
+    ui.step::<crate::ui_test::Input>(&[]);
     let at = ui.control(module, "level");
     ui.move_to(at);
     ui.press();
@@ -2479,7 +2479,7 @@ fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
     // Over the canvas, with the module selected, Backspace would delete it
     // and `a` would open the browser. The field has the keys all the same.
     let tile = ui.control(id.0, "level");
-    ui.set_cursor(mouse::Cursor::Available(tile.to_iced()));
+    ui.set_cursor(Some(tile));
     ui.tap(Key::Backspace, none);
     assert!(
         ui.app().session.controller.graph().node(id).is_some(),
@@ -2589,7 +2589,7 @@ fn a_draft_ends_when_focus_moves_or_the_patch_changes() {
     ui.typewrite("5");
     assert!(ui.app().session.value_draft.is_some());
     assert!(ui.app_mut().replace(crate::Source::Empty));
-    ui.step(&[]);
+    ui.step::<crate::ui_test::Input>(&[]);
     assert!(ui.app().session.value_draft.is_none());
     assert!(!ui.app().focus.is_some());
 }
@@ -2603,7 +2603,7 @@ fn a_readout_shows_text_and_a_press_selects_its_module() {
     let mut ui = Ui::open("sine.ron");
     let id = ui.app_mut().session.controller.add_module("test.readout").unwrap();
     ui.app_mut().refresh();
-    ui.step(&[]);
+    ui.step::<crate::ui_test::Input>(&[]);
     ui.app_mut().run_engine(4800);
     let snapshot = ui.app().ui_snapshot();
     let tile = snapshot.tiles.iter().find(|tile| tile.id == id.0).expect("the tile");
@@ -2956,9 +2956,15 @@ fn count_colour(image: &loom_ui::effect::Image, area: Rect, colour: [u8; 3]) -> 
     (found, all)
 }
 
+/// A colour as 8-bit RGBA, each channel scaled by 255 and rounded, as the
+/// GPU writes it.
+fn rgba8(c: loom_ui_core::Color) -> [u8; 4] {
+    [c.r, c.g, c.b, c.a].map(|v| (v * 255.0).round() as u8)
+}
+
 /// The canvas background as RGB.
 fn canvas_background() -> [u8; 3] {
-    let c = loom_canvas::Palette::default().background.to_iced().into_rgba8();
+    let c = rgba8(loom_canvas::Palette::default().background);
     [c[0], c[1], c[2]]
 }
 
@@ -2991,7 +2997,7 @@ fn the_canvas_draws_under_the_overlays_over_it() {
         "{bare} of {all} canvas pixels show the canvas background"
     );
     // Inside the browser's top padding, clear of its border and its rows.
-    let theme = loom_canvas::iced_convert::ToIced::to_iced(crate::style::PANEL_FILL).into_rgba8();
+    let theme = rgba8(crate::style::PANEL_FILL);
     assert_eq!(
         pixel_at(&image, browser.x + 20.0, browser.y + 3.0),
         [theme[0], theme[1], theme[2]],
@@ -3023,7 +3029,7 @@ fn a_capture_after_new_shows_the_new_canvas() {
     assert!(drawn > 10_000, "the subtractive patch shows its tiles ({drawn} pixels)");
 
     assert!(ui.app_mut().replace(crate::Source::Empty));
-    ui.step(&[]);
+    ui.step::<crate::ui_test::Input>(&[]);
     let after = capture_window(&mut ui).expect("drawn before");
     let (id, _) = ui
         .app()
@@ -3074,7 +3080,9 @@ fn locate_follows_a_pan_before_release() {
     let bounds = ui.canvas().bounds;
     let from = Point::new(bounds.x + 12.0, bounds.y + 12.0);
     ui.move_to(from);
-    ui.step(&[Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Middle))]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Pressed(
+        loom_ui_core::PointerButton::Middle,
+    ))]);
     ui.move_to(Point::new(from.x + 40.0, from.y + 25.0));
 
     let during = locate(&mut ui);
@@ -3085,7 +3093,9 @@ fn locate_follows_a_pan_before_release() {
         "the tile moved with the pan: {moved:?}"
     );
 
-    ui.step(&[Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle))]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Released(
+        loom_ui_core::PointerButton::Middle,
+    ))]);
     let after = locate(&mut ui);
     assert!((after.x - during.x).abs() < 0.01 && (after.y - during.y).abs() < 0.01);
 }
@@ -3258,11 +3268,11 @@ fn menu_over_a_focused_value_field(ui: &mut Ui) {
         .name;
     let out = ui.output(from.module.0, name);
     ui.move_to(out);
-    ui.step(&[iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
-        iced::mouse::Button::Right,
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Pressed(
+        loom_ui_core::PointerButton::Right,
     ))]);
-    ui.step(&[iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
-        iced::mouse::Button::Right,
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Released(
+        loom_ui_core::PointerButton::Right,
     ))]);
     ui.redraw();
     assert!(ui.app().overlays.probe_menu().is_some(), "the menu is open");

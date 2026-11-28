@@ -2279,7 +2279,7 @@ fn a_script_types_an_exact_value() {
     let mut ui = crate::ui_test::Ui::open("sine.ron");
     let id = ui.app_mut().session.controller.add_module("test.panel").unwrap();
     ui.app_mut().refresh();
-    ui.step(&[]);
+    ui.step::<crate::ui_test::Input>(&[]);
     let _ = ui
         .app_mut()
         .send(Message::Inspector(crate::inspector::Message::SelectModule(id.0)));

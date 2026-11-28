@@ -23,9 +23,7 @@ fn physical(ui: &mut Ui, code: Code, letter: char, modifiers: Modifiers) {
         repeat: false,
         text: Some(letter.to_string()),
     };
-    ui.step(&[iced::Event::Keyboard(loom_canvas::iced_convert::key_event_to_iced(
-        &press, modifiers,
-    ))]);
+    ui.step(&[loom_ui_core::Event::Key(press)]);
 }
 
 /// The subtractive patch reads in signal order, with monitors and Transport at the end.

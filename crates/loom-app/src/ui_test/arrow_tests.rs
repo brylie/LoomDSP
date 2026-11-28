@@ -318,7 +318,10 @@ fn history_hints_match_the_actions_during_gestures() {
 fn losing_focus_with_an_arrow_down_ends_the_group() {
     let mut ui = open_on_cutoff();
     let original = cutoff(&ui);
-    ui.step(&[key_pressed(right(), false), Event::Window(window::Event::Unfocused)]);
+    ui.step(&[
+        crate::ui_test::Input::from(key_pressed(right(), false)),
+        crate::ui_test::Input::unfocused(),
+    ]);
     assert_ne!(cutoff(&ui), original, "the arrow moved the knob");
     assert!(!ui.app().session.edits.gesture_open(), "losing focus ended the group");
 
