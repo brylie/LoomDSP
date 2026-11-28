@@ -277,6 +277,21 @@ fn example_uses_existing_unsaved_changes_flow() {
     assert!(clean.app().session.document.file().is_none());
 }
 
+/// Help opened with the pointer, by the empty inspector's Keyboard
+/// shortcuts button, takes the focus to its Close button with no ring, as
+/// a press focuses with none (help-pages.md, Keys, links, and focus).
+#[test]
+fn help_opened_with_the_pointer_shows_no_ring() {
+    let mut ui = Ui::open("subtractive.ron");
+    let button = ui.text("Keyboard shortcuts").expect("the shortcuts button").center();
+    click(&mut ui, button);
+    let _ = ui.redraw();
+    assert!(ui.app().overlays.help.is_some(), "help opened");
+    let close = crate::overlays::access::help_id().with("close");
+    assert_eq!(ui.runtime().focused(), Some(&close));
+    assert_eq!(ui.runtime().focus_ring(), None, "no ring after a press");
+}
+
 /// Clicks the middle of a window rectangle.
 fn click(ui: &mut Ui, at: Point) {
     ui.move_to(at);
@@ -429,7 +444,7 @@ fn tab_to_example(ui: &mut Ui) -> Point {
 
 /// Help opened with F1, a key, takes the focus to its Close button with a
 /// ring; opened by the pointer, without one (help-pages.md, Keys, links,
-/// and focus; the pointer case is `iced_bridge::pointers` tests').
+/// and focus). The pointer case follows.
 #[test]
 fn help_opened_from_the_keyboard_shows_the_ring_on_close() {
     let mut ui = Ui::open("subtractive.ron");

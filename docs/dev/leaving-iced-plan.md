@@ -545,7 +545,7 @@ Gates: every parity gate; `--measure-idle` (counts may fall, since the bridge's 
 
 ### P5. Remove the Iced dependencies
 
-1. First commit: delete the runtime's routing target (`loom_ui::Target`) and `Routed::Later`. P4 leaves the app on a target that passes every event (`layers::NoToolkit`), so nothing routes through it.
+1. First commit: delete the runtime's routing target (`loom_ui::Target`), `Routed::Later`, and `Runtime::deliver`, which only the bridge called. P4 leaves the app on a target that passes every event (`layers::NoToolkit`), so nothing routes through it.
 2. Drop `iced`, `iced_wgpu`, `iced_renderer`, `iced_winit`, and `iced_runtime` from the workspace and every crate. #683 names three; all five go (the spec wins).
 3. Set `wgpu`'s and `winit`'s features directly, where Iced turned some on. Check Linux window decorations survive: `cargo tree --target x86_64-unknown-linux-gnu -e features -i winit`.
 4. Purity: the Iced rules in `loom-app`'s and `loom-canvas`'s `tests/purity.rs` go, with no source scan in their place. `deny.toml` bans the `iced*` crates (`[bans] deny`), so `cargo deny check` catches Iced coming back, and `rfd` keeps its own rule (spec section 1, rule 7; Brylie, 2026-11-26).

@@ -429,7 +429,7 @@ impl App {
         self.session.value_draft = None;
     }
 
-    /// Focus moved to `focus`, as the bridge heard it from the window. A
+    /// Focus moved to `focus`, as the runtime reports it. A
     /// draft ends when its own field loses focus, even to another field. A
     /// value field that has just got focus selects its text, so a typed
     /// number replaces the value, as Enter on a canvas control does

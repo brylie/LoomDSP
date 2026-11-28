@@ -14,10 +14,9 @@
 //! - The platform's adapter is `loom_ui`'s window shell's, on every
 //!   platform: the app hands it the tree as an effect
 //!   (`Effects::accessibility`), and hears the screen reader through
-//!   `Hosted::accessibility_event` (`iced_bridge.rs`).
-//! - This file holds what joins them to the app: the [`Event`]s, the state
-//!   kept between events ([`Access`]), and the Iced glue that finds the
-//!   canvas in the window.
+//!   `App::accessibility_event` (`runtime_app.rs`).
+//! - This file holds what joins them to the app: the [`Event`]s and the
+//!   state kept between events ([`Access`]).
 //!
 //! The tree is built only while a screen reader listens, after a message
 //! that may have changed what it reports, and only the nodes that changed

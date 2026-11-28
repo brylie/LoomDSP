@@ -3556,3 +3556,37 @@ fn save_commits_a_draft_or_says_why_not() {
     assert!(!refused.exists(), "nothing written");
     assert!(app.session.value_draft.is_some(), "the draft is kept");
 }
+
+/// `select` and then `locate` on the inspector it rebuilt, fifty times
+/// over, alternating two modules: each `locate` waits for the layout of
+/// the inspector the `select` asked for, so it finds the new module's row,
+/// never the old layout's or none. Before the cut-over settled, a turn
+/// that laid out could answer between the two.
+#[test]
+fn select_then_locate_finds_the_new_inspector_every_time() {
+    let mut ui = crate::ui_test::Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let first_param = |ui: &crate::ui_test::Ui, module: u32| {
+        ui.app()
+            .session
+            .controller
+            .graph()
+            .node(loom_core::ModuleId(module))
+            .unwrap()
+            .descriptor
+            .params[0]
+            .name
+    };
+    for round in 0..50 {
+        let module = if round % 2 == 0 { 4 } else { 3 };
+        run_ui(&mut ui, &format!(r#"{{"cmd": "select", "modules": [{module}]}}"#))
+            .unwrap_or_else(|why| panic!("round {round}: select: {why}"));
+        let row = crate::inspector::ids::row(module, crate::inspector::ids::Kind::Param, first_param(&ui, module));
+        let reply = run_ui(&mut ui, &format!(r#"{{"cmd": "locate", "target": "{row}"}}"#))
+            .unwrap_or_else(|why| panic!("round {round}: locate {row}: {why}"));
+        assert!(
+            reply["width"].as_f64().is_some_and(|width| width > 0.0),
+            "round {round}: {reply:?}"
+        );
+    }
+}

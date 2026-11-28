@@ -65,8 +65,8 @@ impl App {
     ///   question too; any other question from [`answer_question`].
     /// - Work runs inline, to its end, and its messages follow in order.
     /// - Every other effect is returned, unrun, for the test to read.
-    /// - An input event is routed first, as the bridge routes it, and each
-    ///   message it becomes is applied in turn.
+    /// - Each message is one update, and the messages its effects post
+    ///   follow, as the runtime runs them.
     /// - There is no window: an update reads no canvas and no focused
     ///   field from it (`window_now.rs`). The `Ui` harness has both.
     pub(crate) fn send(&mut self, message: Message) -> Effects<Message> {

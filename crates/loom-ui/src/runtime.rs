@@ -1785,10 +1785,9 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
 
     /// Runs one turn for `message` alone, at `now`. Messages already in the
     /// queue, and a deadline that is due, wait for the next turn. For a
-    /// driver that must hand a message over at an exact point: the bridge
-    /// to Iced first runs what is queued, then hands over the window's word
-    /// on focus by itself, so no other message sees the new focus before
-    /// the app has heard of it.
+    /// driver that must hand a message over at an exact point, as the
+    /// bridge to Iced did with the window's word on focus; nothing calls it
+    /// since phase 4, P4, and P5 removes it with the routing target.
     pub fn deliver(&mut self, message: A::Message, now: Instant, driver: &mut impl Driver<A::Message>) -> Next {
         if self.exited {
             return Next {
