@@ -47,7 +47,7 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 | MT-PHASE-02 | Phase scale | Runs a phase faster or slower by a whole-number ratio, and stays locked to it. | | M1 | FR-LIB-27 | Built (`loom.phase.scale`) |
 | MT-PHASE-03 | Phase trigger | Fires a trigger each time a phase wraps. | | M1 | FR-LIB-27 | Built (`loom.phase.trigger`) |
 | MT-PHASE-04 | Phase reset | Restarts a phase at zero on a trigger. Proposed: a hold input that freezes the phase where it is. | | M2 | FR-LIB-01 | Built (`loom.phase.reset`); the hold input is proposed, not built |
-| MT-PHASE-05 | Phase warp | Changes how a phase moves within each cycle without changing its period: offset, bend, S-curve, skew, reverse, mirror, and smoothing that keeps the wrap point. Proposed: repeating part of a cycle (a stutter), a small seeded change of slope each cycle to loosen the timing, and swing as a named preset. | | M2 | FR-LIB-01 | Built in part (`loom.phase.shift`, `loom.phase.reverse`); the rest is planned |
+| MT-PHASE-05 | Phase warp | Changes how a phase moves within each cycle without changing its period: offset, bend, S-curve, skew, reverse, mirror, and smoothing that keeps the wrap point. Proposed: repeating part of a cycle (a stutter), a small seeded change of slope each cycle to loosen the timing, and swing as a named preset. | | M2 | FR-LIB-01 | Built in part (`loom.phase.shift`, `loom.phase.reverse`); the other shapes named in the first sentence are planned; the proposed additions are not planned |
 | MT-PHASE-06 | Phase split | Divides one cycle into N parts and outputs a phase for each part. | | M3 | New | Planned |
 | MT-PHASE-08 | Phase wrap and fold | Brings any signal into the 0 to 1 phase range, by wrapping it around or by folding it back at the edges. | | M1 | FR-LIB-01 | Built (`loom.phase.wrap`) |
 | MT-PHASE-07 | Span phase | A phase that covers N bars and is anchored to bar 1, so it has the same value at the same musical time after any jump. | | M3 | New | Planned |
@@ -177,7 +177,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | MT-RAND-01 | Random | A new random value on each trigger, within a range, on two independent outputs. In walk mode each moves by small steps instead. Proposed: a pick among set values, each with its own chance, and a deal mode that gives every value once before any repeats; a walk with mostly small steps and rare long jumps; and a pool of values copied with random loss until one is left; and chance spread across a bar in stripes, likely in some places and never in others. | Seed, Smoothing | M2 | FR-LIB-12 | Built (`loom.rand.random`); the proposed modes are not built |
 | MT-RAND-02 | Sample and hold | Captures the input on a trigger and holds it, or follows the input while a gate is high. | | M1 | FR-LIB-04 | Built (`loom.rand.sample-hold`) |
 | MT-RAND-03 | Chance | Passes each trigger with a set probability, or sends it to output A or B by chance. Several lanes in one module. Proposed: routing any signal, such as a phase, the same way. | Seed | M2 | FR-LIB-22 | Built (`loom.rand.chance`); routing other signals is proposed, not built |
-| MT-RAND-04 | The box | Two inputs. While the box is closed, the output is a blend that drifts from one input toward the other. A look trigger settles it on one of them, by the odds at that moment, and two gates say which. A linked pair settles two outputs at once, always opposite or always alike. | | Later | New | Idea |
+| MT-RAND-04 | The box | Two inputs. While the box is closed, the output is a blend that drifts from one input toward the other. A look trigger settles it on one of them, by the odds at that moment, and two gates say which. A linked pair settles two outputs at once, always opposite or always alike. | Seed | Later | New | Idea |
 | MT-RAND-05 | Sharp or sure | One control trades how exactly a note's pitch is fixed against how exactly its time is fixed. | | Later | New | Idea |
 
 ## Math and logic
@@ -235,8 +235,8 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | MT-SEQ-12 | Seed spiral | Each trigger places the next point, turned by the golden angle from the last. The angle is a phase and the distance a value, so a pattern spreads without bunching. | | Later | New | Idea |
 | MT-SEQ-13 | Step order | Points round a circle, each joined to a set multiple of itself. Following the lines gives a new order for the steps of any sequence. | | Later | New | Idea |
 | MT-SEQ-14 | Settling phrase | Every step of a phrase starts able to be any note. Rules for which notes may be neighbours are learned from a phrase the player gives. Each trigger settles the step with the fewest choices left, which narrows its neighbours. Steps can be pinned, and the rest fills in to fit. | | Later | New | Idea |
-| MT-SEQ-15 | Evolving melody | A set of melodies that each change a little every bar. The player keeps or skips what plays, and later melodies take after the ones kept. | | Later | New | Idea |
-| MT-SEQ-16 | Letter strands | A stored string of four letters read as notes. A second voice always plays the partner letter. A copy trigger rewrites the string with rare mistakes. | | Later | New | Idea |
+| MT-SEQ-15 | Evolving melody | A set of melodies that each change a little every bar. The player keeps or skips what plays, and later melodies take after the ones kept. | Seed | Later | New | Idea |
+| MT-SEQ-16 | Letter strands | A stored string of four letters read as notes. A second voice always plays the partner letter. A copy trigger rewrites the string with rare mistakes. | Seed | Later | New | Idea |
 
 ## Note effects
 
@@ -250,7 +250,7 @@ Notes travel as per-voice signals ([ADR-0038](../adr/0038-notes-travel-as-per-vo
 | MT-NOTE-04 | Note repeat | Repeats notes: as fading echoes, at a steady rate while held, or speeding up or slowing down like a bouncing ball. It repeats the notes it is given; Bounce (MT-MOD-05) makes the triggers and a height value itself. | Timebase, Scale awareness | M3 | FR-LIB-13 | Planned |
 | MT-NOTE-05 | Note variation | Small random changes to timing, velocity, and pitch, and a chance that a note plays at all. | Seed, Scale awareness | M3 | FR-LIB-13 | Planned |
 | MT-NOTE-06 | Note hold | Sets or scales note lengths, or holds notes after the keys are released. | | M3 | FR-LIB-13 | Planned |
-| MT-NOTE-07 | Note filter and split | Passes or routes notes by pitch, velocity, or channel. | | M3 | New | Planned |
+| MT-NOTE-07 | Note filter and split | Passes or routes notes by pitch, velocity, or channel. Proposed: dropping a note that repeats one still sounding. | | M3 | New | Planned |
 
 ## Time effects
 
@@ -337,7 +337,7 @@ Modules that follow the laws of motion: things that swing, bounce, collide, and 
 | MT-PHYS-05 | Billiards | A ball in a shaped table that fires a trigger at each wall. A round table gives a steady rhythm; other shapes never repeat. | | Later | New | Idea |
 | MT-PHYS-06 | Stick and slip | A level that builds slowly, then lets go in a jump of uneven size. | | Later | New | Idea |
 | MT-PHYS-07 | Driven oscillator | A simple oscillator pushed by an input. At a low push it locks to the input; at a high push it stumbles and turns chaotic. Presets: a stiff spring, a pulse that builds and snaps back like a heartbeat, and a dripping tap. | | Later | New | Idea |
-| MT-PHYS-08 | Wind chimes (abstraction) | Gusty noise swings several pendulums, which fire when they touch. Made from Noise, Pendulum (MT-MOD-07), and Compare. | | Later | New | Idea |
+| MT-PHYS-08 | Wind chimes (abstraction) | Gusty noise swings several pendulums, which fire when they touch. Made from Noise, Pendulum (MT-MOD-07), and Compare. | Seed | Later | New | Idea |
 | MT-PHYS-09 | Pulse and breath (abstraction) | A heartbeat pulse with a slower cycle that speeds it and slows it. Made from Driven oscillator and LFO. | | Later | New | Idea |
 
 ## Fields and patterns
@@ -366,9 +366,9 @@ Modules that behave like living things: they adapt, seek, tire, grow, and act in
 | MT-LIFE-06 | Life span | One long gesture that grows, matures, and declines over minutes. A push at any point changes how it ends. A preset swells and fades once from a trigger. | | Later | New | Idea |
 | MT-LIFE-07 | Trail walkers | Walkers cross a Figure from node to node and leave a fading mark on each edge. They prefer marked edges, so the routes used most win, and a blocked route is replaced. A mode grows a net and thins it to the busiest routes. Built on Figure. | | Later | New | Idea |
 | MT-LIFE-08 | Forager | A walker that searches an input or a field for high values, lingers where they are, uses them up, and moves on. | | Later | New | Idea |
-| MT-LIFE-09 | Seeker | Moves straight, then turns at random. It turns less often while things improve, so it drifts toward more of its input. | | Later | New | Idea |
+| MT-LIFE-09 | Seeker | Moves straight, then turns at random. It turns less often while things improve, so it drifts toward more of its input. | Seed | Later | New | Idea |
 | MT-LIFE-10 | Gait | Four gates for four legs. As speed rises the pattern changes by itself, from a walk to a run. | | Later | New | Idea |
-| MT-LIFE-11 | Division | One voice becomes two slightly changed copies, which divide again up to the voice limit, while old voices fade. | | Later | New | Idea |
+| MT-LIFE-11 | Division | One voice becomes two slightly changed copies, which divide again up to the voice limit, while old voices fade. | Seed | Later | New | Idea |
 | MT-LIFE-12 | Voices that lean | Pulls each voice's value toward its neighbours' values. One control goes from independent to unison. | | Later | New | Idea |
 | MT-LIFE-13 | Call and answer (abstraction) | Two voices that avoid sounding at once: each waits for the other to finish, then replies. Made from two cells of Cell network. | | Later | New | Idea |
 
@@ -395,7 +395,7 @@ Patterns from the counting numbers and the primes.
 | MT-NUM-02 | Prime staircase | A staircase that steps at every prime, beside the smooth curve made by adding waves one at a time. | | Later | New | Idea |
 | MT-NUM-03 | Prime steps | A counter that fires on prime-numbered steps and gives the gap since the last one as a value. A mode gives, for each even number, how many ways it is a sum of two primes. | | Later | New | Idea |
 | MT-NUM-04 | Factors | Each count plays one voice for every prime that divides it, so primes play alone. | | Later | New | Idea |
-| MT-NUM-05 | Prime sieve (abstraction) | A stack of clock dividers, one per prime. The steps none of them hit are primes, but only up to the square of the next prime that has no divider. Made from Clock divide (MT-CLOCK-03) and Logic (MT-LOGIC-02). | | Later | New | Idea |
+| MT-NUM-05 | Prime sieve (abstraction) | A stack of clock dividers, one per prime. A step is a prime if it is one of the dividers' own primes, or if no divider hits it and it lies above 1 and below the square of the next prime that has no divider. At that square the rule first goes wrong, and step 1 is not a prime. Made from Clock divide (MT-CLOCK-03) and Logic (MT-LOGIC-02). | | Later | New | Idea |
 
 ## Input and output
 

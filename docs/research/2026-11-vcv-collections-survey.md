@@ -50,7 +50,7 @@ Each gap that touches a built module was also checked against that module's desc
 
 ## Findings
 
-1. **Almost every kind is already built or planned.** Of the kinds found in 576 modules, 21 are gaps. Of those, 7 are a change to a planned type, 6 are a mode of a module we have built, 2 are abstractions, and 6 may need a new type. The three examples in the request are all planned: a burst generator is Repeater (MT-GATE-03), a shift register is MT-LOGIC-06, and a gate sequencer is a gate lane of the Multi-lane sequencer (MT-SEQ-01).
+1. **Almost every kind is already built or planned.** Of the kinds found in 576 modules, 22 are gaps. Of those, 8 are a change to a planned type, 6 are a mode of a module we have built, 2 are abstractions, and 6 may need a new type. The three examples in the request are all planned: a burst generator is Repeater (MT-GATE-03), a shift register is MT-LOGIC-06, and a gate sequencer is a gate lane of the Multi-lane sequencer (MT-SEQ-01).
 2. **A large share of each collection is variants that our rules fold away.** Step counts, channel counts, matrix sizes, polyphonic and dual and quad copies, "voltage controlled" versions, expanders, multiples, and blank panels. See [What folds away](#what-folds-away). This is the main lesson for the design system: our catalogue stays small because the engine and the traits do this work, so each type must show its size, its voices, and its modulation well.
 3. **One collection is built around the same idea as ours.** Of HetrickCV's 79 modules, 36 have a phase ramp in their name, and they read or shape one. They are independent evidence for "phase is life", and they show which phase tools players reach for. See [Phase tools](#phase-tools).
 4. **Utilities are what players miss first.** Count Modula and Bogaudio are mostly switches, logic, gate tools, and level tools. Most of ours are planned for M3. Building them early gives a familiar toolkit at low DSP cost.
@@ -168,7 +168,8 @@ HetrickCV's phase family, kind by kind. This is the closest prior art to our own
 | Split, merge, and sum voices | VCV, Bog | Built |
 | A value per voice: offsets and constants | Bog | Built: Voice Spread |
 | Reassign voices; unison with detune | Bog | Built: Voice Assigner |
-| Split or filter notes by voice, and drop repeated notes | Imp, Squ | Planned: Note filter and split (MT-NOTE-07) |
+| Split gates or notes by voice | Imp, Squ | Built: Voice Split |
+| Drop a note that repeats one still sounding | Imp | Gap, small. Note filter and split (MT-NOTE-07) routes by pitch, velocity, or channel only |
 | Show every voice of a cable | VCV | The voice lanes face. Showing every voice is the design's intent (Brylie, 2026-11-28; [module faces](../design/module-faces.md)); the engine's per-voice display data is still to come |
 
 ### Sound sources
@@ -287,7 +288,7 @@ Not classed, because the name, tags, and description did not say enough: Count M
 
 ## The gap list
 
-The 21 kinds marked as a gap in the tables above, in the order we would look at them. "Mode" means a change to an existing entry; "type" means a possible new entry. None is decided here.
+The 22 kinds marked as a gap in the tables above, in the order we would look at them. "Mode" means a change to an existing entry; "type" means a possible new entry. None is decided here.
 
 | # | Kind | Likely form | Why it matters |
 |---|---|---|---|
@@ -312,8 +313,9 @@ The 21 kinds marked as a gap in the tables above, in the order we would look at 
 | 19 | Scope with several traces | Mode of Scope (built) | Small |
 | 20 | Exciter | Abstraction of a filter, Shaper, and Crossfade | Small |
 | 21 | A tube as a waveguide | Type, a relative of String model (MT-SRC-10) | Small |
+| 22 | Drop a note that repeats one still sounding | Mode of Note filter and split (MT-NOTE-07) | Small |
 
-By likely form: 7 are a change to a planned type (rows 1 to 4, 9, 10, and 17), 6 are a mode of a module we have built (rows 5, 6, 8, 16, 18, and 19), 2 are abstractions (rows 13 and 20), and 6 may need a new type (rows 7, 11, 12, 14, 15, and 21).
+By likely form: 8 are a change to a planned type (rows 1 to 4, 9, 10, 17, and 22), 6 are a mode of a module we have built (rows 5, 6, 8, 16, 18, and 19), 2 are abstractions (rows 13 and 20), and 6 may need a new type (rows 7, 11, 12, 14, 15, and 21).
 
 Two smaller additions are not counted, because the tables do not mark them as gaps: swing on a phase, by name, which is likely a preset of Phase warp, and more distribution shapes on Random, which has two.
 

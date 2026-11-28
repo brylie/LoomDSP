@@ -56,7 +56,7 @@ Two conventions hold for every system module, because they are about signals, no
 - **Angles come out as phases.** The design agent proposed this. It ties every rotating system into the phase modules, the centre of our design.
 - **Events come out as gates or triggers,** so any system can clock, reset, or push any other.
 
-**Traits and roles.** The catalogue has two words, and both may apply. A *trait* is shared parameters and behaviour, as above. A *role* is a contract of port names that lets one module be swapped for another in a slot, as a filter is swapped in the synth voice. A system module that gives one modulation output could fill the existing Modulator role, so a player could swap an LFO for an attractor inside any shipped sub-patch without repatching.
+**Traits and roles.** The catalogue has two words, and both may apply. A *trait* is shared parameters and behaviour, as above. A *role* is a contract of port names that lets one module be swapped for another in a slot, as a filter is swapped in the synth voice. A system module that gives one modulation output could fill the existing Modulator role, so a player could swap an LFO for an attractor in any sub-patch that has a Modulator slot, without repatching. A sub-patch with no such slot, like the shipped synth voice, does not offer the swap.
 
 The generative review's finding 4, "every restart plays the same piece", belongs here too. A seed gives repeatability; a living piece sometimes wants a new seed on each start. The review's direction is a choice for the whole patch, "Same piece each run" or "New piece each run", with the seed shown so a good run can be repeated. System modules should follow that choice, not add their own.
 
@@ -336,7 +336,7 @@ The Sieve also has a history in music: composers have used sieves of numbers to 
 
 ### Atoms these suggest
 
-Four more candidates for the atoms table. Each already appears in three or more ideas, which is the test for promoting one.
+Four more candidates for the atoms table. Each already appears in three or more ideas, which makes it worth watching. The test for promoting one is unchanged: three built or specified modules share it.
 
 | Atom | What it is | Seen in |
 |---|---|---|
