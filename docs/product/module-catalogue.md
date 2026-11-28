@@ -6,7 +6,7 @@ Status: **Draft** (2026-10-17). Open for discussion.
 
 - **Decision behind it:** [ADR-0017](../adr/0017-primitives-traits-and-abstractions.md) (primitives, traits, and open abstractions).
 - **How it was written:** [ADR-0018](../adr/0018-clean-room-module-development.md) (clean-room development).
-- **Evidence it rests on:** the [prior-art survey](../research/2026-10-prior-art-survey.md), a dated snapshot of 15 other environments. The [VCV collections survey](../research/2026-11-vcv-collections-survey.md) of 2026-11-28 checked the catalogue against eleven more collections; the entries marked "Proposed" come from its gap list.
+- **Evidence it rests on:** the [prior-art survey](../research/2026-10-prior-art-survey.md), a dated snapshot of 15 other environments. The [VCV collections survey](../research/2026-11-vcv-collections-survey.md) of 2026-11-28 checked the catalogue against eleven more collections. The sentences marked "Proposed" and the entries with the status Idea come from that survey's gap list, from a check against other environments' kinds of module, and from the [living systems brainstorm](../research/2026-11-living-systems-brainstorm.md).
 
 ## How to read it
 
@@ -16,9 +16,9 @@ Each entry is a **module type**, not a module ID. A type says what a module does
 - **Catalogue IDs** look like `MT-FILTER-02` (MT for "module type"). They are stable, like requirement IDs: if an entry is dropped, mark it **Withdrawn** instead of reusing the ID. Issues say "Implements MT-FILTER-02", so the link survives renames.
 - **Primitive** entries are modules with one job. **Abstraction** entries are open patches made from primitives (FR-LIB-24): they work as one module, and you can open and change them.
 - **Traits** are shared options, listed by name. They are defined in [Traits](#traits).
-- **Phase** follows the use case the type unblocks: M1 for the subtractive tutorial (UC1), M2 for sub-patches and polyphony, M3 for panels and live play (UC2, UC3), self-arranging sets, and sequencing chords and note clips (UC8, UC10), M4 for the rest.
+- **Phase** follows the use case the type unblocks: M1 for the subtractive tutorial (UC1), M2 for sub-patches and polyphony, M3 for panels and live play (UC2, UC3), self-arranging sets, and sequencing chords and note clips (UC8, UC10), M4 for the rest. **Later** marks an idea with no milestone yet.
 - **Req.** links to the requirement that covers the type, or says **New** when no requirement covers it yet.
-- **Status** is **Built** (with its module IDs), **Built in part** (some of the described behaviour is built; the status names what is missing), **Specified** (in a design specification), or **Planned**.
+- **Status** is **Built** (with its module IDs), **Built in part** (some of the described behaviour is built; the status names what is missing), **Specified** (in a design specification), **Planned**, or **Idea**. An idea is named and described but not yet designed, and nothing is promised: it becomes Planned when backlog refinement gives it a phase.
 - **Proposed:** a sentence that starts with "Proposed:" is a suggested addition to an entry. It is not specified and not built, and it does not change the entry's status. Backlog refinement decides whether it stays.
 
 Why types and not modules: a plan written as module IDs would fix names and port lists before anyone designs them. A type fixes only the job, so the design stays open until its specification is written.
@@ -53,13 +53,14 @@ Timing is phase-driven: a ramp from 0 to 1 sets where in a cycle a module is ([P
 | MT-PHASE-07 | Span phase | A phase that covers N bars and is anchored to bar 1, so it has the same value at the same musical time after any jump. | | M3 | New | Planned |
 | MT-PHASE-09 | Clock to phase | Turns a clock that arrives as triggers into a phase, by measuring the time between them, so it can be multiplied and divided like any phase. Proposed: a looseness setting, so it leans toward the incoming clock over several beats in place of locking at once. | | M3 | FR-LIB-27 | Specified ([clock](../design/clock.md#clock-to-phase)) |
 | MT-PHASE-10 | Coupled phases | Several phases, each at its own rate, that pull toward one another each time one of them wraps. With no coupling they drift apart; with more, they fall into step, as many natural oscillators do. Each phase has a trigger output. | Timebase, Seed | M3 | New | Planned |
+| MT-PHASE-11 | Seasons (abstraction) | A slow cycle that changes the depth and rate of a faster one, nested two or three deep. Made from phase modules. | | Later | New | Idea |
 
 ## Sound sources
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-SRC-01 | Oscillator | A band-limited periodic wave with pitch, phase, and frequency modulation inputs, hard sync, and a sub output. The shape comes from the shape source trait. Can be read by an external phase, so it also works as a lookup table. | Shape source, Timebase, Retrigger, Quality | M1 | FR-LIB-02 | Built in part (`loom.osc.sine`, `loom.osc.saw`, `loom.osc.pulse`, `loom.osc.triangle`: pitch and phase inputs, tune and octave, [oscillators](../design/oscillators.md); frequency modulation, hard sync, and the sub output to come) |
-| MT-SRC-02 | Noise | White, pink, and other noise colours. Proposed: random impulses at a set density, alone or in clusters. | Seed | M1 | FR-LIB-02 | Built (`loom.osc.noise`: white, pink, and brown); impulses are proposed, not built |
+| MT-SRC-02 | Noise | White, pink, and other noise colours. Proposed: random impulses at a set density, alone or in clusters, or from a crowd of units that each fire once, so the impulses thin out. | Seed | M1 | FR-LIB-02 | Built (`loom.osc.noise`: white, pink, and brown); impulses are proposed, not built |
 | MT-SRC-03 | Additive oscillator | Builds a tone from many sine partials, with level control per partial and per group. | Quality | M4 | New | Planned |
 | MT-SRC-04 | Chaotic source | Signals from chaotic systems, such as iterated maps, attractors, and stochastic waveforms, at audio rate as sound sources. The slow modulators MT-MOD-06 (Attractor) and MT-MOD-11 (Iterated map) may share their algorithms. | Seed | M4 | New | Planned |
 | MT-SRC-05 | Swept sine | Sweeps a sine between two frequencies, for tests, risers, and effects. | Timebase | M4 | New | Planned |
@@ -128,7 +129,7 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 | MT-MIX-01 | Mixer | Sums several inputs, with level, pan, and mute per channel. At unity gain it is a quick merge. M1 builds level and mute. Pan comes later, with stereo signals. | | M1 | FR-LIB-05 | Built (`loom.mix.mixer`) |
 | MT-MIX-02 | Crossfade | Blends two signals by a control, with an equal-power or linear law. | | M1 | FR-LIB-05 | Built (`loom.mix.crossfade`) |
 | MT-MIX-03 | Stereo tool | Pans, sets width, converts between left/right and mid/side, and splits or joins channels. M1 builds join and split. Pan, width, and mid/side come later. | | M1 | FR-SIG-07 | Planned |
-| MT-MIX-04 | Channel mixer (abstraction) | A mixer whose channels each have tone controls, a pan, and sends to shared effects, with a master section. | | M3 | New | Planned |
+| MT-MIX-04 | Channel mixer (abstraction) | A mixer whose channels each have tone controls, a pan, and sends to shared effects, with a master section. | | Later | New | Idea |
 | MT-ROUTE-01 | Selector | Picks one of N inputs. It steps to the next on a trigger, jumps to the input a control value points at, or picks at random. | Seed, Smoothing | M2 | FR-LIB-30 | Built (`loom.route.selector`) |
 | MT-ROUTE-02 | Distributor | Sends one input to one of N outputs, with the same three ways to choose. | Seed | M3 | FR-LIB-30 | Planned |
 | MT-ROUTE-03 | Mute | Silences a signal on a button or gate, with a short fade so it never clicks. | | M3 | New | Planned |
@@ -158,13 +159,14 @@ Modulation assignments already scale and offset any parameter (ADR-0014), so the
 | MT-MOD-03 | Note values | Turns note information into control signals: keytracking, note count, and one gate per pitch class. | | M3 | FR-LIB-12 | Planned |
 | MT-MOD-04 | Vibrato (abstraction) | An LFO with a delay and a fade-in, scaled by mod wheel or pressure. | | M3 | FR-LIB-12 | Planned |
 | MT-MOD-05 | Bounce | A falling body that keeps a fixed share of its height at each bounce. It fires a trigger on each bounce and outputs its height, so the gaps shrink by a steady ratio: a natural speeding up that settles. | Timebase, Retrigger | M3 | New | Planned |
-| MT-MOD-06 | Attractor | A point that moves on a strange attractor, either a continuous system such as Lorenz's or a two-dimensional map stepped on a clock. Its coordinates are values, and a gate says which side of the shape it is on. It never repeats and never leaves the shape. | Timebase | M3 | New | Planned |
+| MT-MOD-06 | Attractor | A point that moves on a strange attractor, either a continuous system such as Lorenz's or a two-dimensional map stepped on a clock. Its coordinates are values, and a gate says which side of the shape it is on. It never repeats and never leaves the shape. Proposed: more systems, such as a single spiral that sometimes flips outward, a pair of spirals with jumps between them, and three linked amounts that cycle in turn. | Timebase | M3 | New | Planned |
 | MT-MOD-07 | Pendulum | A double pendulum. Its two angles are phases and its tip position is a value. Released from low it swings almost regularly; from high it tumbles. | Timebase, Retrigger | M3 | New | Planned |
-| MT-MOD-08 | Brownian | A particle that wanders smoothly: random pushes move it, and its velocity is pulled back toward rest. Its position and speed are values. | Seed, Timebase | M3 | New | Planned |
+| MT-MOD-08 | Brownian | A particle that wanders smoothly: random pushes move it, and its velocity is pulled back toward rest. Its position and speed are values. Proposed: a cooling mode that starts wild and settles, and reheats on a push. | Seed, Timebase | M3 | New | Planned |
 | MT-MOD-09 | Voronoi field | A probe that moves through a plane divided into cells around drifting seed points. The cell number is a stepped value, the distance to the nearest edge a smooth one, and crossing an edge fires a trigger. X and Y inputs can steer the probe. | Seed, Timebase | M3 | New | Planned |
 | MT-MOD-10 | Fractal noise | Smooth random curves stacked in layers, each twice as fast and half as tall as the last. One layer drifts; several make a jagged ridge. | Seed, Timebase | M3 | New | Planned |
-| MT-MOD-11 | Iterated map | Applies a one-line rule, such as the logistic map, once per trigger, and outputs each new value. One setting moves it from settling on one value, through cycles of 2, 4, and 8, into chaos. | | M3 | New | Planned |
+| MT-MOD-11 | Iterated map | Applies a one-line rule, such as the logistic map, once per trigger, and outputs each new value. One setting moves it from settling on one value, through cycles of 2, 4, and 8, into chaos. Proposed: a two-dimensional map, and the rule that halves an even number and triples an odd one. | | M3 | New | Planned |
 | MT-MOD-12 | Escape-time fractal | Moves a point over the Mandelbrot set or a Julia set. It outputs how many steps the point's orbit takes to escape, fires a trigger when it does, and gives the orbit's position. X and Y inputs can steer the point. | | M3 | New | Planned |
+| MT-MOD-13 | Tides (abstraction) | Several slow cycles whose lengths share no common multiple, summed, so the result rises and falls but never repeats. Made from LFO (MT-MOD-01). | | Later | New | Idea |
 
 ## Randomness
 
@@ -172,9 +174,11 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
-| MT-RAND-01 | Random | A new random value on each trigger, within a range, on two independent outputs. In walk mode each moves by small steps instead. Proposed: a pick among set values, each with its own chance, and a deal mode that gives every value once before any repeats. | Seed, Smoothing | M2 | FR-LIB-12 | Built (`loom.rand.random`); the pick and deal modes are proposed, not built |
+| MT-RAND-01 | Random | A new random value on each trigger, within a range, on two independent outputs. In walk mode each moves by small steps instead. Proposed: a pick among set values, each with its own chance, and a deal mode that gives every value once before any repeats; a walk with mostly small steps and rare long jumps; and a pool of values copied with random loss until one is left; and chance spread across a bar in stripes, likely in some places and never in others. | Seed, Smoothing | M2 | FR-LIB-12 | Built (`loom.rand.random`); the proposed modes are not built |
 | MT-RAND-02 | Sample and hold | Captures the input on a trigger and holds it, or follows the input while a gate is high. | | M1 | FR-LIB-04 | Built (`loom.rand.sample-hold`) |
 | MT-RAND-03 | Chance | Passes each trigger with a set probability, or sends it to output A or B by chance. Several lanes in one module. Proposed: routing any signal, such as a phase, the same way. | Seed | M2 | FR-LIB-22 | Built (`loom.rand.chance`); routing other signals is proposed, not built |
+| MT-RAND-04 | The box | Two inputs. While the box is closed, the output is a blend that drifts from one input toward the other. A look trigger settles it on one of them, by the odds at that moment, and two gates say which. A linked pair settles two outputs at once, always opposite or always alike. | | Later | New | Idea |
+| MT-RAND-05 | Sharp or sure | One control trades how exactly a note's pitch is fixed against how exactly its time is fixed. | | Later | New | Idea |
 
 ## Math and logic
 
@@ -184,7 +188,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | MT-MATH-02 | Function | Applies one chosen function: power, root, exponential, logarithm, rounding, absolute value and sign, minimum, maximum, mean, or trigonometry. The tile shows the symbol. | | M3 | New | Planned |
 | MT-MATH-03 | Convert | Converts between units: linear and decibels, frequency and pitch. Proposed: between a pair of X and Y values and an angle with a distance, with the angle as a phase. | | M1 | FR-SIG-05 | Built (`loom.math.convert`: dB, level, pitch, Hz; limits are -120 to 120 dB, 0.001 Hz, and pitch 1.0); the X and Y conversion is proposed, not built |
 | MT-MATH-04 | Expression | Evaluates a short typed formula on its inputs. The formula is data, parsed and checked when the patch loads, never run as code (vision, principle 7). | | M4 | New | Planned |
-| MT-LOGIC-01 | Compare | Outputs a gate when one signal is above, below, or equal to another, inside a window, or on a rising or falling edge. M1 builds above and below. The other modes come later. | | M1 | FR-LIB-05 | Built (`loom.logic.compare`) |
+| MT-LOGIC-01 | Compare | Outputs a gate when one signal is above, below, or equal to another, inside a window, or on a rising or falling edge. M1 builds above and below. The other modes come later. Proposed: a soft threshold that a signal below it sometimes passes, less often the further below it is. | | M1 | FR-LIB-05 | Built (`loom.logic.compare`) |
 | MT-LOGIC-02 | Logic | AND, OR, NOT, XOR, and their inverses, on two or more gates. | | M1 | FR-LIB-05 | Built (`loom.logic.logic`) |
 | MT-LOGIC-03 | Memory | Stores a gate state: set and reset, toggle, data on a clock, and a latch that cycles through N states. | | M1 | FR-LIB-05 | Built (`loom.logic.memory`) |
 | MT-LOGIC-04 | Counter | Counts triggers from 0 to N-1, outputs the count as a phase, and fires when it wraps. Covers countdowns and "after N times". | | M3 | FR-LIB-22 | Specified |
@@ -193,6 +197,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | MT-LOGIC-07 | State machine | Moves between named states on triggers and conditions, with one gate out per state. | | M3 | FR-LIB-22 | Planned |
 | MT-LOGIC-08 | Value stack | Stores values and gives them back first-in-first-out or last-in-first-out. | | M4 | New | Planned |
 | MT-LOGIC-09 | Binary code | Converts a number to one gate per bit, and back. | | M4 | New | Planned |
+| MT-LOGIC-10 | Sorter | Sends the high values of a stream one way and the low ones another, with a limit on how long it can go on before it must forget. | | Later | New | Idea |
 
 ## Gates and rhythm
 
@@ -208,7 +213,7 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | ID | Type | What it does | Traits | Phase | Req. | Status |
 |---|---|---|---|---|---|---|
 | MT-PITCH-01 | Pitch math | Moves a pitch by octaves, semitones, scale steps, or a frequency ratio; sums several pitches; or spreads a pair around one pitch. Proposed: keeping a pitch inside a chosen register, by moving it in octaves or by scaling. | Scale awareness | M3 | FR-LIB-13 | Planned |
-| MT-PITCH-02 | Pitch quantiser | Snaps a pitch signal to the nearest note of a scale, or of the notes being held. A slowly wandering value sampled on a clock and quantised makes a melody that stays in key. Working name on the design canvas: Quantizer. | Scale awareness | M3 | FR-LIB-29 | Specified ([M2 modules](../design/p2-modules.md)) |
+| MT-PITCH-02 | Pitch quantiser | Snaps a pitch signal to the nearest note of a scale, or of the notes being held. A slowly wandering value sampled on a clock and quantised makes a melody that stays in key. Working name on the design canvas: Quantizer. Proposed: a mode that holds a level until the input has moved far enough, then jumps, and sends a trigger whose size is the jump. | Scale awareness | M3 | FR-LIB-29 | Specified ([M2 modules](../design/p2-modules.md)) |
 | MT-PITCH-03 | Scale and tuning | Sets the patch-wide scale and tuning (equal divisions, just ratios, imported tuning files) that pitch modules follow. Can be changed live by a trigger. | | M3 | FR-LIB-29 | Specified ([scale and tuning](../design/scale-and-tuning.md)) |
 | MT-PITCH-04 | Pitch tracker | Estimates the pitch of incoming audio. Proposed: a rough, cheap estimate from zero crossings as a first mode. | | M4 | New | Planned |
 
@@ -226,6 +231,12 @@ All random modules take a seed, so a patch sounds the same each time it loads (N
 | MT-SEQ-08 | Fugue | Plays one stored phrase with several playheads. Each has its own direction (forward, backward, or back and forth), rate, and transposition, so one subject becomes a canon, read backward or at half speed. One pitch and gate output per playhead. | Timebase, Scale awareness | M3 | New | Planned |
 | MT-SEQ-09 | Automaton | Grows a row of steps from the last one by a rule over each step and its two neighbours, one row per bar or clock, and plays the newest row as gates. Some rules give order, some look random, some build structures. | Seed, Timebase | M3 | New | Planned |
 | MT-SEQ-10 | Markov | Picks each next note from a table of chances for what follows the current note, so a melody keeps its character but never quite repeats. | Seed, Scale awareness, Timebase | M3 | New | Planned |
+| MT-SEQ-11 | Rewriting | A sequence that grows by replacing each symbol with a short string, read as notes, steps, or turns. Presets give rhythms that never repeat yet are never random, and a bar divided by removing its middle again and again. A mode splits or merges one step each bar. | | Later | New | Idea |
+| MT-SEQ-12 | Seed spiral | Each trigger places the next point, turned by the golden angle from the last. The angle is a phase and the distance a value, so a pattern spreads without bunching. | | Later | New | Idea |
+| MT-SEQ-13 | Step order | Points round a circle, each joined to a set multiple of itself. Following the lines gives a new order for the steps of any sequence. | | Later | New | Idea |
+| MT-SEQ-14 | Settling phrase | Every step of a phrase starts able to be any note. Rules for which notes may be neighbours are learned from a phrase the player gives. Each trigger settles the step with the fewest choices left, which narrows its neighbours. Steps can be pinned, and the rest fills in to fit. | | Later | New | Idea |
+| MT-SEQ-15 | Evolving melody | A set of melodies that each change a little every bar. The player keeps or skips what plays, and later melodies take after the ones kept. | | Later | New | Idea |
+| MT-SEQ-16 | Letter strands | A stored string of four letters read as notes. A second voice always plays the partner letter. A copy trigger rewrites the string with rare mistakes. | | Later | New | Idea |
 
 ## Note effects
 
@@ -262,7 +273,7 @@ Notes travel as per-voice signals ([ADR-0038](../adr/0038-notes-travel-as-per-vo
 | MT-FX-10 | Spatialiser | Moves a sound around a stereo or multichannel field. | | M4 | New | Planned |
 | MT-FX-11 | Rotary speaker (abstraction) | The pitch wobble, level change, and filtering of a spinning speaker. | | M4 | New | Planned |
 | MT-FX-12 | Amp and cabinet (abstraction) | Amplifier-style drive followed by speaker colouring. | | M4 | New | Planned |
-| MT-FX-13 | Exciter (abstraction) | Adds brightness by shaping the high part of a signal and mixing it back in. | Mix and output | M4 | New | Planned |
+| MT-FX-13 | Exciter (abstraction) | Adds brightness by shaping the high part of a signal and mixing it back in. | Mix and output | Later | New | Idea |
 
 ## Dynamics, EQ, and spectral
 
@@ -286,12 +297,12 @@ Notes travel as per-voice signals ([ADR-0038](../adr/0038-notes-travel-as-per-vo
 | MT-VIEW-03 | Spectrum | Shows the frequency content of a signal. | | M2 | FR-LIB-17 | Built (`loom.display.spectrum`, [M2 modules](../design/p2-modules.md#spectrum-mt-view-03)) |
 | MT-VIEW-04 | Note monitor | Shows incoming notes and controller values, for checking a setup. | | M3 | New | Planned |
 | MT-VIEW-05 | Tuner | Shows the pitch of a signal against the nearest note. | | M4 | New | Planned |
-| MT-VIEW-06 | Response analyser | Sends a swept sine through any chain and shows the level that comes back at each frequency, so the real response of a patch can be seen. | | M4 | New | Planned |
+| MT-VIEW-06 | Response analyser | Sends a swept sine through any chain and shows the level that comes back at each frequency, so the real response of a patch can be seen. | | Later | New | Idea |
 | MT-UI-01 | Button | A large button that outputs a toggle or momentary gate. | | M1 | FR-LIB-27 | Built (`loom.ui.button`) |
 | MT-UI-02 | Macro | A knob or slider whose value is a signal. One macro can drive many parameters through modulation assignments. | Smoothing | M2 | FR-LIB-12 | Built (`loom.ui.macro`) |
 | MT-UI-03 | XY and vector pad | A two-axis control, or one point that blends between several sources. Proposed: several outputs, each rising as the point nears its own place on the surface. | Smoothing | M3 | FR-LIB-12 | Planned |
 | MT-UI-04 | Keyboard | Plays notes from the canvas or a front panel. | | M3 | New | Planned |
-| MT-UI-05 | Pad bank | A bank of pads. Each pad sends its own stored value, and a gate while it is pressed. | Smoothing | M3 | New | Planned |
+| MT-UI-05 | Pad bank | A bank of pads. Each pad sends its own stored value, and a gate while it is pressed. | Smoothing | Later | New | Idea |
 
 ## Structure, arrangement, and state
 
@@ -312,6 +323,79 @@ Notes travel as per-voice signals ([ADR-0038](../adr/0038-notes-travel-as-per-vo
 | MT-STATE-01 | Scene | Stores the state of chosen modules and recalls it on a trigger, with an optional morph time. | | M3 | FR-LIB-23 | Planned |
 | MT-STATE-02 | Scene morph | Places stored scenes on a line or a 2D surface and blends them by position. | | M4 | FR-PERF-03 | Planned |
 | MT-MULTI-01 | Multiband processor (abstraction) | A crossover with an effect slot on each band. | | M4 | FR-ENCAP-08 | Planned |
+
+## Physical systems
+
+Modules that follow the laws of motion: things that swing, bounce, collide, and settle. Bounce (MT-MOD-05) and Pendulum (MT-MOD-07) are of this kind. Ideas and sources: [living systems brainstorm](../research/2026-11-living-systems-brainstorm.md).
+
+| ID | Type | What it does | Traits | Phase | Req. | Status |
+|---|---|---|---|---|---|---|
+| MT-PHYS-01 | Spring | Follows its input like a weight on a spring, with an overshoot and a wobble that dies away. It may become a mode of Slew (MT-LEVEL-04). | | Later | New | Idea |
+| MT-PHYS-02 | Mass chain | A row of linked masses. A push at one end travels along the row as a wave and reflects, and each mass is an output. At audio rate it rings as a resonator. | | Later | New | Idea |
+| MT-PHYS-03 | Orbits | Bodies that circle a centre and pull on each other. Each angle is a phase, and a body speeds up when it is close in. Presets give ratios that drift in and out of step, and the flower shape drawn between two orbits. | | Later | New | Idea |
+| MT-PHYS-04 | Charged particle | A particle that circles in a field at a rate set by the field's strength, and bounces between two strong ends while it spirals. Its angle is a phase. | | Later | New | Idea |
+| MT-PHYS-05 | Billiards | A ball in a shaped table that fires a trigger at each wall. A round table gives a steady rhythm; other shapes never repeat. | | Later | New | Idea |
+| MT-PHYS-06 | Stick and slip | A level that builds slowly, then lets go in a jump of uneven size. | | Later | New | Idea |
+| MT-PHYS-07 | Driven oscillator | A simple oscillator pushed by an input. At a low push it locks to the input; at a high push it stumbles and turns chaotic. Presets: a stiff spring, a pulse that builds and snaps back like a heartbeat, and a dripping tap. | | Later | New | Idea |
+| MT-PHYS-08 | Wind chimes (abstraction) | Gusty noise swings several pendulums, which fire when they touch. Made from Noise, Pendulum (MT-MOD-07), and Compare. | | Later | New | Idea |
+| MT-PHYS-09 | Pulse and breath (abstraction) | A heartbeat pulse with a slower cycle that speeds it and slows it. Made from Driven oscillator and LFO. | | Later | New | Idea |
+
+## Fields and patterns
+
+A surface or a flat pattern, read at a point the patch can move. Voronoi field (MT-MOD-09) and Escape-time fractal (MT-MOD-12) are of this kind.
+
+| ID | Type | What it does | Traits | Phase | Req. | Status |
+|---|---|---|---|---|---|---|
+| MT-FIELD-01 | Ripple surface | A water surface. Each trigger drops a stone, and a reading point gives the height of the water where it sits. | | Later | New | Idea |
+| MT-FIELD-02 | Reaction field | Two substances that spread and react into spots and stripes. A reading point gives the amount of one of them. | | Later | New | Idea |
+| MT-FIELD-03 | Landscape walker | A reading point walks a fractal landscape. Height is a value, slope is another, and crossing a contour fires a trigger. Built on Fractal noise (MT-MOD-10). | | Later | New | Idea |
+| MT-FIELD-04 | Pattern field | A flat pattern made of regions, read at a point: which region, the distance to the nearest edge, and a trigger on crossing one. Kinds: tilings that repeat and tilings that never do, circles packed inside a circle, the still lines of a vibrating plate, two gratings sliding over each other, the field round a set of charges, and the counting numbers wound in a spiral with the primes marked. It has the same ports as Voronoi field (MT-MOD-09). | | Later | New | Idea |
+| MT-FIELD-05 | Grid automaton | A two-dimensional grid of cells that follow a local rule on each step. Presets: cells that live or die by their neighbours, one walker that turns by the colour of its cell, and grains that pile up and slide in avalanches of every size. It may become modes of Automaton (MT-SEQ-09). | | Later | New | Idea |
+
+## Living things
+
+Modules that behave like living things: they adapt, seek, tire, grow, and act in groups. Coupled phases (MT-PHASE-10) is of this kind.
+
+| ID | Type | What it does | Traits | Phase | Req. | Status |
+|---|---|---|---|---|---|---|
+| MT-LIFE-01 | Flock | Many bodies that steer by their neighbours: keep apart, line up, and stay together. Each body is one voice of the output. A mode lets groups fall into step, split, and rejoin. | | Later | New | Idea |
+| MT-LIFE-02 | Cell network | Cells that charge from their inputs, fire when full, rest, and nudge their neighbours. One cell alone is a bucket that fills, leaks, and fires. A ring of them carries a travelling pulse. A mode strengthens the links between cells that fire together. | | Later | New | Idea |
+| MT-LIFE-03 | Tiring | Each trigger gets a weaker response than the last. Left alone, it recovers. | | Later | New | Idea |
+| MT-LIFE-04 | Regulator | Watches a level and slowly moves its output to bring that level back to a target, so a patch leans back when it is pushed. | | Later | New | Idea |
+| MT-LIFE-05 | Population | Amounts that grow, compete, feed on each other, and fade. Presets: a hunter and its prey rising in turn, three kinds that each beat the next, and two that live only while the other does. It may become modes of Attractor (MT-MOD-06). | | Later | New | Idea |
+| MT-LIFE-06 | Life span | One long gesture that grows, matures, and declines over minutes. A push at any point changes how it ends. A preset swells and fades once from a trigger. | | Later | New | Idea |
+| MT-LIFE-07 | Trail walkers | Walkers cross a Figure from node to node and leave a fading mark on each edge. They prefer marked edges, so the routes used most win, and a blocked route is replaced. A mode grows a net and thins it to the busiest routes. Built on Figure. | | Later | New | Idea |
+| MT-LIFE-08 | Forager | A walker that searches an input or a field for high values, lingers where they are, uses them up, and moves on. | | Later | New | Idea |
+| MT-LIFE-09 | Seeker | Moves straight, then turns at random. It turns less often while things improve, so it drifts toward more of its input. | | Later | New | Idea |
+| MT-LIFE-10 | Gait | Four gates for four legs. As speed rises the pattern changes by itself, from a walk to a run. | | Later | New | Idea |
+| MT-LIFE-11 | Division | One voice becomes two slightly changed copies, which divide again up to the voice limit, while old voices fade. | | Later | New | Idea |
+| MT-LIFE-12 | Voices that lean | Pulls each voice's value toward its neighbours' values. One control goes from independent to unison. | | Later | New | Idea |
+| MT-LIFE-13 | Call and answer (abstraction) | Two voices that avoid sounding at once: each waits for the other to finish, then replies. Made from two cells of Cell network. | | Later | New | Idea |
+
+## Geometry
+
+Figures read as signals. A phase traces a figure or walks its nodes, and the figure's positions, angles, crossings, and ratios become modulation, phases, gates, and pitch.
+
+| ID | Type | What it does | Traits | Phase | Req. | Status |
+|---|---|---|---|---|---|---|
+| MT-GEO-01 | Path | A figure traced by a phase, with X, Y, the angle as a phase, the distance from the centre, and a trigger at each marked point. Presets: a flower shape set by one ratio, two swings at right angles, a wheel rolling on a wheel, polygons and stars, a path wound round a ring, and a curve that visits every cell of a square. A drawn path uses the shared curve data, and a chain of turning circles can draw any closed shape. The two-dimensional sibling of Curve reader (MT-MOD-02). | | Later | New | Idea |
+| MT-GEO-02 | Figure | A figure of nodes, edges, and regions, walked by a phase. It gives the point's position and distance, its angle as a phase, how many of the figure's shapes cover it, the pitch of the node last reached, gates at nodes, and one phase per shape as voices. Pitch comes from the ratios of the figure's lengths, from its counts read as harmonics, or from notes set on each node. Presets: overlapping circles on a six-sided grid, in rings; stars; nested triangles; a labyrinth; and a tree of nodes. | | Later | New | Idea |
+| MT-GEO-03 | Turning solid | A regular solid turns in space, and each corner is one voice with its own X and Y. | | Later | New | Idea |
+| MT-GEO-04 | Kaleidoscope | Takes an X and Y pair and gives several copies, turned or mirrored round the centre. | | Later | New | Idea |
+| MT-GEO-05 | Polariser | Passes only the part of an X and Y pair that lies along a chosen angle. | | Later | New | Idea |
+| MT-GEO-06 | Tone lattice | Notes laid out so that a step in one direction is a fifth and in another a third. A walk across it gives chords, and each small move changes one note. | | Later | New | Idea |
+
+## Numbers
+
+Patterns from the counting numbers and the primes.
+
+| ID | Type | What it does | Traits | Phase | Req. | Status |
+|---|---|---|---|---|---|---|
+| MT-NUM-01 | Zeta curve | A phase moves along the critical line of the zeta function. The output is the height of the curve, with a trigger at each nontrivial zero. It needs stored zeros and stored values of the curve between them. A second use, finding tunings from the curve's peaks, rests on a claim that is still to be checked. | | Later | New | Idea |
+| MT-NUM-02 | Prime staircase | A staircase that steps at every prime, beside the smooth curve made by adding waves one at a time. | | Later | New | Idea |
+| MT-NUM-03 | Prime steps | A counter that fires on prime-numbered steps and gives the gap since the last one as a value. A mode gives, for each even number, how many ways it is a sum of two primes. | | Later | New | Idea |
+| MT-NUM-04 | Factors | Each count plays one voice for every prime that divides it, so primes play alone. | | Later | New | Idea |
+| MT-NUM-05 | Prime sieve (abstraction) | A stack of clock dividers, one per prime. The steps none of them hit are primes, but only up to the square of the next prime that has no divider. Made from Clock divide (MT-CLOCK-03) and Logic (MT-LOGIC-02). | | Later | New | Idea |
 
 ## Input and output
 
@@ -350,6 +434,23 @@ Why traits: many module types differ only in an option that many other types als
 | TR-10 | Mix and output | Dry and wet balance and output level, with an equal-loudness option. |
 | TR-11 | Smoothing | Glides between output values, so changes do not step or click. |
 
+### Proposed traits
+
+Shared parts seen in several of the ideas above. A proposed trait has no ID. It becomes a trait above when three built or specified modules share it, so its shape is known before it is fixed.
+
+| Proposed trait | What it adds | Seen in |
+|---|---|---|
+| Push | An input that disturbs the state: a kick, a drop, a gust. | Driven oscillator, Ripple surface, Mass chain, Flock |
+| Energy | One main control from calm to wild. Where a system has several real controls, they stay visible. | Iterated map, Driven oscillator, Bounce |
+| Reading point | Where in a field the outputs read from, as X and Y inputs. | Voronoi field, Pattern field, Ripple surface, Reaction field |
+| Coupling | How strongly the parts pull on each other. | Coupled phases, Flock, Cell network, Voices that lean |
+| Damping | How fast it settles after a push. | Spring, Mass chain, Bounce |
+| Count | How many bodies, cells, or walkers, up to a fixed limit. | Flock, Orbits, Cell network, Trail walkers |
+| Look | The output is settled only when a trigger asks. | The box, Settling phrase, the jump mode proposed for Pitch quantiser; Sample and hold already works this way |
+| Trail | What is used grows stronger, and what is left alone fades. | Trail walkers, Cell network, Tiring |
+| Copy with error | Each copy differs a little from its source. | Letter strands, Division, Evolving melody |
+| Seek | It moves toward more of something on an input. | Seeker, Forager, Regulator, Clock to phase with looseness |
+
 ## Roles
 
 A role is a contract: a set of port names and core parameter names that a module or sub-patch promises to have (ADR-0017). A slot in an abstraction accepts anything that fills its role, so the user can swap it and keep the cables and the main settings. Role names and versions are settled (OQ-20, [sub-patches](../design/sub-patches.md#roles)): a role is `loom.role.<name>@<version>`, and each port and parameter is required or optional. A part fits a role when it has every required port and parameter, of the role's kind. Optional ones carry across when both parts have them.
@@ -377,8 +478,9 @@ A user's own sub-patch can declare a role and then fill any matching slot (FR-EN
 | M0 | 3 | 0 |
 | M1 | 35 | 0 |
 | M2 | 21 | 1 |
-| M3 | 84 | 40 |
-| M4 | 48 | 32 |
-| **Total** | **191** | **73** |
+| M3 | 82 | 38 |
+| M4 | 46 | 30 |
+| Later (ideas) | 53 | 53 |
+| **Total** | **240** | **122** |
 
-Plus 11 traits and 7 initial roles. The summary is counted from the tables above; update it when entries change.
+Plus 11 traits and 7 initial roles. The 10 proposed traits are not counted. The summary is counted from the tables above; update it when entries change.
