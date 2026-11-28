@@ -379,8 +379,17 @@ fn enter_that_opens_a_patch_does_not_answer_the_question_it_asks() {
         app.session.controller.add_module("loom.osc.sine").unwrap();
         app.commit();
     });
+    // The pad's row, by name: the folder's order differs between systems,
+    // and the unreadable file opens nothing.
+    ui.typewrite("Pad");
     let _ = ui.redraw();
-    assert!(model(&ui).highlight.is_some(), "a row is highlighted");
+    let rows = &model(&ui).rows;
+    let highlight = model(&ui).highlight.expect("a row is highlighted");
+    assert!(
+        rows[highlight].name.contains("Pad"),
+        "the Pad row: {:?}",
+        rows[highlight].name
+    );
     tap(&mut ui, Key::Enter);
     assert!(
         ui.app().overlays.question.is_some(),

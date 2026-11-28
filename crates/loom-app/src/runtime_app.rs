@@ -248,7 +248,7 @@ impl loom_ui::App for App {
 
     /// The input owner as a layer: an open question holds the window, and
     /// every other panel or menu over the canvas is an overlay (section 5,
-    /// rule 2). The canvas is the window's home element ([`Self::home`]).
+    /// rule 2). The canvas is the window's home element (`App::home`).
     fn input(&self) -> loom_ui::InputState {
         use crate::input_owner::InputOwner;
         loom_ui::InputState {
