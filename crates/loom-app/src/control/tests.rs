@@ -3627,3 +3627,39 @@ fn a_lost_real_pointer_holds_no_button() {
     let _ = app.pointer.gate(&Event::Pointer(PointerEvent::Lost));
     assert!(buttons(&app).is_empty(), "nothing held after the loss");
 }
+
+/// A real press, then a script, then the real pointer lost while the
+/// script runs, as a cancelled touch is: the loss is held back with the
+/// script's events and goes in after them, so the runtime does not keep
+/// the press. A cancelled touch sends no release to do it instead.
+#[test]
+fn a_real_pointer_lost_during_a_script_is_lost_after_it() {
+    use loom_ui_core::{Event, PointerButton, PointerEvent};
+    let pointer = crate::pointer::Pointer::new(true);
+    let lost = Event::Pointer(PointerEvent::Lost);
+    let pressed = Event::Pointer(PointerEvent::Pressed(PointerButton::Left));
+    assert!(
+        matches!(pointer.gate(&pressed), loom_ui::shell::Gate::Pass),
+        "the real press goes in"
+    );
+    let _ = pointer.push(vec![crate::pointer::Step::Wheel { dx: 0.0, dy: 1.0 }]);
+    assert!(
+        matches!(pointer.gate(&lost), loom_ui::shell::Gate::Hold),
+        "held while the script runs"
+    );
+    let script = pointer.next_input(|_| Err("no targets".into()));
+    assert!(
+        !script.iter().any(|step| step.event == lost),
+        "the script's own step first"
+    );
+    let after = pointer.next_input(|_| Err("no targets".into()));
+    assert_eq!(
+        after.iter().filter(|step| step.event == lost).count(),
+        1,
+        "the loss goes in once the script is done: {after:?}"
+    );
+    assert!(
+        pointer.next_input(|_| Err("no targets".into())).is_empty(),
+        "and only once"
+    );
+}

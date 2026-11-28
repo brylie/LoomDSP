@@ -154,7 +154,7 @@ pub(crate) struct Access {
     /// sent too.
     again: bool,
     /// A rebuild was asked for before there was a window to read: the
-    /// first update that has one reads it ([`App::a11y_window_held`]).
+    /// first update that has one reads it (`App::a11y_window_held`).
     waiting_window: bool,
     /// True while live values have changed and were not sent yet. The
     /// timer that sends them runs only then.

@@ -96,6 +96,10 @@ struct Inner {
     /// They go to the runtime once the command is done, so nothing the
     /// real pointer let go of stays held.
     deferred: Vec<PointerButton>,
+    /// A real pointer was lost while a command's events went in. The loss
+    /// goes to the runtime once the command is done, so a press it heard
+    /// before does not stay held: a cancelled touch sends no release.
+    lost_deferred: bool,
     /// Where the current drag started.
     anchor: Option<Point>,
     /// Where the current drag's `to` was last found.
@@ -157,9 +161,9 @@ impl Pointer {
 
     /// What the window does with a real pointer `event` (control-channel.md,
     /// "A real pointer takes over"): while a command runs it is held back,
-    /// a release kept for later so nothing stays held; after it, the first
-    /// real event lets go of what the script holds, at the script's
-    /// pointer, before it goes in.
+    /// a release or a loss kept for later so nothing stays held; after it,
+    /// the first real event lets go of what the script holds, at the
+    /// script's pointer, before it goes in.
     pub(crate) fn gate(&self, event: &Event) -> Gate {
         let mut inner = self.0.borrow_mut();
         let Event::Pointer(pointer) = event else {
@@ -175,8 +179,15 @@ impl Pointer {
             _ => {}
         }
         if !inner.queue.is_empty() {
-            if let PointerEvent::Released(button) = pointer {
-                inner.deferred.push(*button);
+            match pointer {
+                PointerEvent::Released(button) => inner.deferred.push(*button),
+                // The loss lets go of every button, so no release need
+                // follow it.
+                PointerEvent::Lost => {
+                    inner.deferred.clear();
+                    inner.lost_deferred = true;
+                }
+                _ => {}
             }
             return Gate::Hold;
         }
@@ -205,20 +216,24 @@ impl Pointer {
 
     /// The input for the next step, after the last one's frame: a modifier
     /// change with the event after it, or one event, each with the script's
-    /// pointer. Real releases held back while a command ran go in once it
-    /// is done. `locate` finds a target (`resolve`). Empty when nothing
-    /// waits.
+    /// pointer. Real releases or a loss held back while a command ran go in
+    /// once it is done. `locate` finds a target (`resolve`). Empty when
+    /// nothing waits.
     pub(crate) fn next_input(&self, mut resolve: impl FnMut(&str) -> Result<Point, String>) -> Vec<ScriptedInput> {
         let mut inner = self.0.borrow_mut();
         if inner.queue.is_empty() {
-            // Real releases held back while the command ran go in now,
-            // after the script lets go of what it holds.
-            if inner.deferred.is_empty() {
+            // Real releases, or a loss, held back while the command ran go
+            // in now, after the script lets go of what it holds.
+            if inner.deferred.is_empty() && !inner.lost_deferred {
                 return Vec::new();
             }
             let mut input = take_over(&mut inner);
             for button in std::mem::take(&mut inner.deferred) {
                 input.push(Event::Pointer(PointerEvent::Released(button)).into());
+            }
+            let lost = Event::Pointer(PointerEvent::Lost);
+            if std::mem::take(&mut inner.lost_deferred) && !input.iter().any(|step| step.event == lost) {
+                input.push(lost.into());
             }
             return input;
         }
