@@ -3353,9 +3353,28 @@ fn a_field_in_the_view_that_owns_the_input_still_works() {
 fn escape_drops_a_value_draft_with_nothing_focused() {
     let mut ui = Ui::open("subtractive.ron");
     let _ = ui.redraw();
-    ui.app_mut().type_value_draft(4, 0, "12".to_string());
-    assert!(ui.app().session.value_draft.is_some());
+    let value = |ui: &Ui| ui.app().session.controller.graph().node(ModuleId(4)).unwrap().params[0];
+    let before = value(&ui);
+    let steps = ui.app().session.edits.history.len();
+    // A draft that is a value, and not the one the parameter has.
+    let draft = if (before - 12.0).abs() < 0.5 { "13" } else { "12" };
+    ui.app_mut().type_value_draft(4, 0, draft.to_string());
+    let typed = ui.app().session.value_draft.as_ref().expect("a draft");
+    assert_eq!(typed.draft.error(), None, "the draft is a value");
     assert_eq!(ui.runtime().focused(), None, "nothing has the focus");
     ui.tap(Key::Escape, Modifiers::NONE);
     assert!(ui.app().session.value_draft.is_none(), "Escape dropped the draft");
+    assert_eq!(value(&ui), before, "and committed nothing");
+    assert_eq!(ui.app().session.edits.history.len(), steps, "no undo step");
+}
+
+/// The pointer leaving the window takes the harness's pointer away, as the
+/// shell forgets it before it says so, so a later press has no point.
+#[test]
+fn leaving_the_window_forgets_the_pointer() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.move_to(Point::new(400.0, 300.0));
+    assert!(ui.cursor.is_some());
+    ui.step(&[Input::pointer(loom_ui_core::PointerEvent::LeftWindow)]);
+    assert_eq!(ui.cursor, None);
 }

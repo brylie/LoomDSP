@@ -81,10 +81,12 @@ impl Found {
         );
     }
 
-    /// The one rule both read the layout by: a UI ID by what of it shows,
-    /// else text the window shows, which is cut to what shows too; and
-    /// whether the UI ID is laid out but scrolled out of view.
-    fn place_ours(
+    /// The one rule both read the layout by: a UI ID by what of it shows;
+    /// text the window shows, which is cut to what shows too, only for a
+    /// target that names no laid-out part, so a part scrolled out of view
+    /// is never taken for other text that reads the same; and whether the
+    /// UI ID is laid out but scrolled out of view.
+    pub(super) fn place_ours(
         &mut self,
         target: &str,
         bounds: impl Fn(&UiId) -> Option<Rect>,
@@ -92,8 +94,12 @@ impl Found {
         text: impl Fn(&str) -> Option<Rect>,
     ) {
         let id = ui_id(target);
-        self.ours = id.as_ref().and_then(&shown).or_else(|| text(target));
-        self.places.scrolled_out = id.is_some_and(|id| bounds(&id).is_some() && shown(&id).is_none());
+        let laid_out = id.as_ref().is_some_and(|id| bounds(id).is_some());
+        self.ours = match &id {
+            Some(id) if laid_out => shown(id),
+            _ => text(target),
+        };
+        self.places.scrolled_out = laid_out && self.ours.is_none();
     }
 }
 

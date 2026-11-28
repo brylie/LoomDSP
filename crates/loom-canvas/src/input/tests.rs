@@ -4828,3 +4828,62 @@ fn refit_frames_again_at_a_new_size_until_the_person_acts() {
     assert!(state.refit(&canvas, short).events.is_empty());
     assert_eq!(state.camera, before, "the person's camera stays");
 }
+
+/// A lost pointer lets go of a held button with a release and no click,
+/// and leaves the canvas idle (a touch the system cancels, or a real
+/// pointer taking over from a script).
+#[test]
+fn a_lost_pointer_releases_a_held_button() {
+    let scene = Scene::new(vec![button_module()], Vec::new());
+    let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+    let selected = BTreeSet::from([1]);
+    let canvas = CanvasModel::new(&scene, &selected);
+    let mut state = CanvasInput {
+        interaction: Interaction::Holding { module: 1, widget: 0 },
+        ..CanvasInput::default()
+    };
+    let events = drive(&canvas, &mut state, &Event::Pointer(PointerEvent::Lost), centre);
+    assert_eq!(events, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
+    assert!(matches!(state.interaction, Interaction::Idle));
+}
+
+/// A placement at the size the canvas framed for keeps the framing the
+/// canvas's own, so a later resize still frames again.
+#[test]
+fn refit_at_the_same_size_keeps_the_framing() {
+    let scene = Scene::new(vec![module(1, 0.0), module(2, 400.0)], Vec::new());
+    let none = BTreeSet::new();
+    let canvas = CanvasModel::new(&scene, &none).frame_key(2);
+    let tall = moment(None, Instant::now());
+    let short = Moment {
+        bounds: Rect::new(Point::new(0.0, 40.0), Size::new(800.0, 560.0)),
+        ..tall
+    };
+    let mut state = CanvasInput::default();
+    let _ = state.handle(&canvas, &Event::Redraw, tall);
+    assert!(state.refit(&canvas, tall).events.is_empty(), "the same size: nothing");
+    assert!(
+        !state.refit(&canvas, short).events.is_empty(),
+        "a later resize frames again"
+    );
+}
+
+/// A move with no place, the pointer leaving the canvas's view, clears
+/// what it was over.
+#[test]
+fn a_move_with_no_place_clears_the_hover() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+    let none = BTreeSet::new();
+    let canvas = CanvasModel::new(&scene, &none);
+    let mut state = CanvasInput::default();
+    let over = scene.module(1).unwrap().bounds().center();
+    let _ = drive(&canvas, &mut state, &Event::Pointer(PointerEvent::Moved), over);
+    assert!(state.hover.is_some(), "over the tile");
+    let gone = state.handle(
+        &canvas,
+        &Event::Pointer(PointerEvent::Moved),
+        moment(None, Instant::now()),
+    );
+    assert!(state.hover.is_none());
+    assert!(gone.redraw);
+}

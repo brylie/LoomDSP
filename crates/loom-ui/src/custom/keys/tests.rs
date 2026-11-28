@@ -102,6 +102,8 @@ struct Rolls {
     overlay: bool,
     /// The roll, the window's home, reads Tab from nothing first.
     home_first: bool,
+    /// Only the roll: no other stop in the window.
+    bare: bool,
     log: Vec<Message>,
 }
 
@@ -123,7 +125,17 @@ impl App for Rolls {
     }
 
     fn view(&self, view: &mut View) {
-        view.panel_with(UiId::panel("main"), Layer::Panels, &(), |_| {
+        let bare = self.bare;
+        view.panel_with(UiId::panel("main"), Layer::Panels, &bare, |bare| {
+            if *bare {
+                // The home element, and no stop at all, the roll included:
+                // Tab from nothing has nowhere else to go.
+                return Element::column([Element::custom(ROLL)
+                    .key("roll")
+                    .width(Length::Fixed(200.0))
+                    .height(Length::Fixed(100.0))
+                    .access(Access::new(Role::Group, "Roll"))]);
+            }
             Element::column([
                 stop("before"),
                 Element::custom(ROLL)
@@ -207,6 +219,7 @@ fn harness_with(home_first: bool) -> Harness<Rolls, NoTarget> {
     let app = Rolls {
         overlay: false,
         home_first,
+        bare: false,
         log: Vec::new(),
     };
     let window = WindowState::new(Size::new(400.0, 300.0));
@@ -416,6 +429,34 @@ fn with_home_first_tab_from_nothing_reaches_the_home_element_first() {
     tab(&mut harness, true);
     assert_eq!(tabs(&harness), 0);
     assert_eq!(harness.runtime().focused(), Some(&id("name")), "the last stop");
+}
+
+/// A Tab from nothing that the home element declines reaches it once: with
+/// no other stop to enter, the press goes on to the app without being
+/// offered to the home element a second time.
+#[test]
+fn a_declined_tab_reaches_the_home_element_once() {
+    let app = Rolls {
+        overlay: false,
+        home_first: true,
+        bare: true,
+        log: Vec::new(),
+    };
+    let window = WindowState::new(Size::new(400.0, 300.0));
+    let mut harness = Harness::new(app, NoTarget, window, Instant::now());
+    harness.lay_out(&mut Mono::default());
+    let tabs = |harness: &Harness<Rolls, NoTarget>| {
+        heard(harness)
+            .iter()
+            .filter(|event| matches!(event, CustomEvent::Key(KeyEvent::Pressed { key: Key::Tab, .. })))
+            .count()
+    };
+    // The roll takes Tab twice, past its first part, then declines it.
+    tab(&mut harness, false);
+    tab(&mut harness, false);
+    assert_eq!(tabs(&harness), 2);
+    tab(&mut harness, false);
+    assert_eq!(tabs(&harness), 3, "the declined press was offered once");
 }
 
 /// Under an open overlay, the home element hears no key: its layer takes

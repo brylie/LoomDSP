@@ -988,7 +988,9 @@ impl CanvasInput {
     pub fn refit(&mut self, model: &CanvasModel<'_>, moment: Moment) -> Reaction {
         let mut out = Reaction::default();
         let size = moment.bounds.size();
-        if self.fitted.take().is_some_and(|fitted| fitted != size) && size.width > 0.0 {
+        // A placement at the size framed for keeps the framing the canvas's,
+        // so a later resize still frames again.
+        if self.fitted.is_some_and(|fitted| fitted != size) && size.width > 0.0 {
             model.fit(self, size);
             self.fitted = Some(size);
             out.redraw();

@@ -1622,6 +1622,7 @@ impl App {
             debug_assert_eq!(self.focus.as_ref(), cx.focused(), "the app's copy of focus drifted");
         }
         self.read_window(cx);
+        self.a11y_window_held();
         // What reads the runtime's layout (where a part is for `locate`, the
         // nodes for the tree) waits for the draw that lays out a view a
         // live value just rebuilt, so it never reads a layout half made.

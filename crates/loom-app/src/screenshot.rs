@@ -365,7 +365,14 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
     // `update` (ui-layer.md, section 2, rule 1), so the still state goes
     // into a second app before its runtime starts.
     let canvas = {
-        let runtime = window_runtime(crate::snapshot::headless(args)?, logical, options.scale, &text);
+        // Only the layout is read here, so the engine runs no frames: the
+        // app below runs them once, for the state the image shows.
+        let probe = crate::Args {
+            frames: None,
+            hold_note: false,
+            ..args.clone()
+        };
+        let runtime = window_runtime(crate::snapshot::headless(&probe)?, logical, options.scale, &text);
         runtime
             .custom_bounds(&crate::canvas::canvas_id())
             .ok_or("the window has no patch canvas")?

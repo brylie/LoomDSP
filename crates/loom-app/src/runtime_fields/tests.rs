@@ -108,7 +108,8 @@ fn heard(messages: &[Message], message: &Message) -> bool {
 /// field, the clipboard keys, and a script's typing read it
 /// (`window_now.rs`).
 fn focus_answer(ui: &mut Ui) -> Option<UiId> {
-    let _ = ui.deliver(Message::MidiGhosts);
+    // A message the form maps to no focus, so reading moves nothing.
+    let _ = ui.deliver(Message::Tick);
     ui.app().focused_field_now().cloned()
 }
 

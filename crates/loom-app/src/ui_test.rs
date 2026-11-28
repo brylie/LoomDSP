@@ -563,6 +563,11 @@ impl Ui {
                     if let Some(at) = at {
                         self.cursor = Some(at);
                     }
+                    // The shell forgets the pointer before it says it left
+                    // the window, so a later press there has no point.
+                    if matches!(event, UiEvent::Pointer(PointerEvent::LeftWindow)) {
+                        self.cursor = None;
+                    }
                     self.real(event);
                 }
             }

@@ -162,6 +162,9 @@ pub struct Runtime<A: App, T> {
     after_draw: Vec<A::Message>,
     waiting_for_draw: Vec<A::Message>,
     exited: bool,
+    /// The window's home element was offered this key press already, by
+    /// Tab from nothing, and declined it: routing does not offer it again.
+    home_asked: bool,
     counts: Counts,
     /// Which of the runtime's own elements has keyboard focus.
     focus: Focus,
@@ -212,6 +215,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             after_draw: Vec::new(),
             waiting_for_draw: Vec::new(),
             exited: false,
+            home_asked: false,
             counts: Counts::default(),
             focus: Focus::default(),
             saved_focus: Vec::new(),
@@ -563,6 +567,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         self.panels.hint().map(|hint| (&hint.source, hint.rect))
     }
 
+    /// The runtime's element a pointer press went down on and still holds,
+    /// if one does: it clicks if the release comes back over it (section 3,
+    /// rule 4).
+    pub fn pressed(&self) -> Option<&UiId> {
+        self.pointer.pressed.as_ref().map(|(_, id)| id)
+    }
+
     /// The runtime's element under the pointer, if one of its layers holds
     /// the hover: what hover text reads (section 5, rule 10).
     pub fn hovered(&self) -> Option<&UiId> {
@@ -788,8 +799,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
     /// runtime took the key, and whether its focus changed, which needs a
     /// redraw even when the key goes on.
     fn tab(&mut self, event: &Event) -> (bool, bool) {
+        self.home_asked = false;
         let before = self.focus.id().cloned();
         let result = self.tab_step_from(event);
+        // A Tab taken here is routed no further, so nothing is left to skip.
+        if result.0 {
+            self.home_asked = false;
+        }
         // Tab or Shift+Tab that lands on a custom element tells it which
         // way it came in (section 9, rule 2).
         if let Event::Key(KeyEvent::Pressed { modifiers, .. }) = event
@@ -822,9 +838,13 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
             // runtime's last stop.
             let home_first = input.home_first && !modifiers.shift;
             let target_focus = self.target.focused().is_some();
-            if home_first && self.panels().key_to_home(event, target_focus) {
-                self.target.kept(event);
-                return (true, false);
+            if home_first {
+                if self.panels().key_to_home(event, target_focus) {
+                    self.target.kept(event);
+                    return (true, false);
+                }
+                // It declined: this press is not offered to it again.
+                self.home_asked = true;
             }
             let enters = input.layer <= Layer::Panels
                 && (home_first || !input.canvas_focused)
@@ -2015,26 +2035,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         // still ends the field's undo.
         let mut updates = 0;
         redraw |= self.run_batch(batch, now, driver, &mut updates);
-        // What custom elements sent runs in this turn too, after the batch,
-        // before the rebuild (section 9, rule 1): from the event, from a
-        // cancel an update caused, by an effect or by raising the input
-        // layer above a held capture, as an overlay that opens mid-drag
-        // does, and from a deadline an update made due, which ticks here,
-        // so the turn draws once (section 9, rule 4). This ends: after one
-        // cancel no capture is left to cancel, a tick must move its
-        // deadline on, and an update cannot make an element send.
-        loop {
-            let layer = self.app.input().layer;
-            self.panels().cancel_capture_below(layer);
-            if updates > 0 && ticks == Ticks::AfterUpdates {
-                self.panels().tick_due(now);
-            }
-            let sent = self.customs.take_sent();
-            if sent.is_empty() || self.exited {
-                break;
-            }
-            redraw |= self.run_batch(sent, now, driver, &mut updates);
-        }
+        redraw |= self.settle_customs(now, driver, &mut updates, ticks);
         // An element that asked for a frame gets one, once, whatever else
         // the turn did.
         redraw |= self.customs.take_redraw();
@@ -2055,6 +2056,8 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
         {
             updates += 1;
             redraw |= self.update(notice, now, driver);
+            // A deadline the notice made due ticks in this turn too.
+            redraw |= self.settle_customs(now, driver, &mut updates, ticks);
         }
         self.counts.updates += updates as u64;
 
@@ -2125,6 +2128,38 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     .min()
             },
         }
+    }
+
+    /// Runs what custom elements sent in this turn, after the updates and
+    /// before the rebuild (section 9, rule 1): from the event, from a
+    /// cancel an update caused, by an effect or by raising the input layer
+    /// above a held capture, as an overlay that opens mid-drag does, and,
+    /// with [`Ticks::AfterUpdates`], from a deadline an update made due,
+    /// which ticks here, so the turn draws once (section 9, rule 4). This
+    /// ends: after one cancel no capture is left to cancel, a tick must
+    /// move its deadline on, and an update cannot make an element send.
+    /// Returns true when an update asked for a draw.
+    fn settle_customs(
+        &mut self,
+        now: Instant,
+        driver: &mut impl Driver<A::Message>,
+        updates: &mut usize,
+        ticks: Ticks,
+    ) -> bool {
+        let mut redraw = false;
+        loop {
+            let layer = self.app.input().layer;
+            self.panels().cancel_capture_below(layer);
+            if *updates > 0 && ticks == Ticks::AfterUpdates {
+                self.panels().tick_due(now);
+            }
+            let sent = self.customs.take_sent();
+            if sent.is_empty() || self.exited {
+                break;
+            }
+            redraw |= self.run_batch(sent, now, driver, updates);
+        }
+        redraw
     }
 
     /// Runs one update for each message of `batch`, in order, counting
@@ -2208,7 +2243,7 @@ impl<A: App, T: Target<A::Message>> Runtime<A, T> {
                     && routed != Routed::Taken
                 {
                     let target_focus = self.target.focused().is_some();
-                    if self.panels().key_to_home(event, target_focus) {
+                    if !std::mem::take(&mut self.home_asked) && self.panels().key_to_home(event, target_focus) {
                         // A key the home element took is its alone, so a
                         // toolkit that heard it first drops it too.
                         self.target.kept(event);

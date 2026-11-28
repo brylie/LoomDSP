@@ -1098,11 +1098,8 @@ fn a_real_press_after_a_scripted_one_held_on_the_jump_list_closes_it() {
     )));
     open_branch(&mut ui);
     ui.lay_out_panels();
-    let list = ui
-        .runtime()
-        .bounds(&crate::outline::jump_id())
-        .expect("the list is laid out");
-    let row = loom_ui_core::Point::new(list.x + list.width / 2.0, list.y + 6.0);
+    let first = super::jump_option(0);
+    let row = ui.runtime().bounds(&first).expect("the first row is laid out").center();
     ui.app().pointer.push(vec![
         Step::MoveTo(Aim::At(row)),
         Step::Press(loom_ui_core::PointerButton::Left),
@@ -1110,11 +1107,17 @@ fn a_real_press_after_a_scripted_one_held_on_the_jump_list_closes_it() {
     for _ in 0..4 {
         let _ = ui.redraw();
     }
+    assert_eq!(
+        ui.runtime().pressed(),
+        Some(&first),
+        "the script's press holds the first row"
+    );
     assert!(ui.app().session.outline.has_jump(), "a press inside keeps it open");
     let at = ui.canvas().bounds.center();
     let mut heard = ui.move_to(at);
     heard.extend(ui.press());
     heard.extend(ui.release());
+    assert_eq!(ui.runtime().pressed(), None, "the takeover let go of the row");
     assert!(!ui.app().session.outline.has_jump(), "the real press closed it");
     assert_eq!(
         heard.iter().filter(|m| matches!(m, Message::DismissJump)).count(),

@@ -345,3 +345,58 @@ fn the_bounds_follow_a_reveal_in_the_same_layout() {
         "the pad shows in the container: {after:?}"
     );
 }
+
+/// One panel whose root is a keyless pad, 100 by 100, smaller than the
+/// window it fills.
+struct SmallRoot;
+
+impl App for SmallRoot {
+    type Message = ();
+
+    fn update(&mut self, _message: (), _cx: &Context<'_, ()>) -> Effects<()> {
+        Effects::none()
+    }
+
+    fn view(&self, view: &mut View) {
+        view.panel_with(UiId::panel("main"), Layer::Panels, &(), |_| {
+            Element::custom(PAD)
+                .width(Length::Fixed(100.0))
+                .height(Length::Fixed(100.0))
+                .access(crate::access::Access::new(crate::access::Role::Group, "Pad"))
+        });
+    }
+
+    fn window(&self) -> WindowSpec {
+        WindowSpec::default()
+    }
+
+    fn make_custom(&self, _id: &UiId, _kind: CustomKind) -> Option<Box<dyn Custom<Self>>> {
+        Some(Box::new(SmallRootPad))
+    }
+}
+
+/// The pad's state in [`SmallRoot`], which needs none of its own.
+struct SmallRootPad;
+
+impl Custom<SmallRoot> for SmallRootPad {}
+
+/// A keyless custom root takes its panel's UI ID, and what shows of it is
+/// its own box, not the panel's whole slot: a 100 by 100 root in a 400 by
+/// 200 window shows 100 by 100, though the panel's ID gives the slot.
+#[test]
+fn what_shows_of_a_keyless_root_is_its_own_box() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let mut harness = Harness::new(SmallRoot, NoTarget, window, Instant::now());
+    harness.lay_out(&mut Mono::default());
+    let panel = UiId::panel("main");
+    assert_eq!(
+        harness.runtime().bounds(&panel).map(|r| r.size()),
+        Some(Size::new(400.0, 200.0)),
+        "the panel's ID gives its slot"
+    );
+    assert_eq!(
+        harness.runtime().shown_bounds(&panel),
+        Some(Rect::new(Point::ORIGIN, Size::new(100.0, 100.0))),
+        "what shows of the root is its own box"
+    );
+}

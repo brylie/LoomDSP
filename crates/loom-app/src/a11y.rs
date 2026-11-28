@@ -153,6 +153,9 @@ pub(crate) struct Access {
     /// yet (the runtime's layout of a bar an autosave just changed) is
     /// sent too.
     again: bool,
+    /// A rebuild was asked for before there was a window to read: the
+    /// first update that has one reads it ([`App::a11y_window_held`]).
+    waiting_window: bool,
     /// True while live values have changed and were not sent yet. The
     /// timer that sends them runs only then.
     live_dirty: bool,
@@ -228,6 +231,7 @@ impl Default for Access {
             active: false,
             sent: tree::Sent::default(),
             locating: false,
+            waiting_window: false,
             again: false,
             live_dirty: false,
             flush_live: false,
@@ -381,10 +385,23 @@ impl crate::App {
         self.a11y_read_places();
     }
 
+    /// Starts the rebuild a screen reader asked for before the window was
+    /// held, once it is (`window_now.rs`). One read at a time, as ever.
+    pub(crate) fn a11y_window_held(&mut self) {
+        if self.window_now.window && std::mem::take(&mut self.a11y.waiting_window) {
+            self.a11y.locating = false;
+            self.a11y_rebuild();
+        }
+    }
+
     /// Reads the window after its latest layout.
     fn a11y_read_places(&mut self) {
-        // With no window there is nothing to read; the tree waits.
+        // With no window there is nothing to read yet. The read stays in
+        // flight, so later asks wait behind it, and the first update that
+        // has a window starts it again, so the screen reader is not left
+        // with no tree.
         if !self.window_now.window {
+            self.a11y.waiting_window = true;
             return;
         }
         let places = self.places_now();

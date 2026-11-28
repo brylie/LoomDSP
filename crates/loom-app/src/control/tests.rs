@@ -3590,3 +3590,40 @@ fn select_then_locate_finds_the_new_inspector_every_time() {
         );
     }
 }
+
+/// A UI ID that is laid out but scrolled out of view finds nothing, not
+/// other text in the window that reads the same as the target, so a
+/// pointer command never lands on a different part. A target that names
+/// no laid-out part is still found by its text.
+#[test]
+fn a_scrolled_out_id_is_not_taken_for_text_that_reads_the_same() {
+    let target = "inspector/4/param/cutoff";
+    let elsewhere = Rect::new(Point::new(5.0, 5.0), loom_ui_core::Size::new(40.0, 10.0));
+    let laid_out = Rect::new(Point::new(0.0, 900.0), loom_ui_core::Size::new(100.0, 20.0));
+    let mut found = Found::default();
+    found.place_ours(target, |_| Some(laid_out), |_| None, |_| Some(elsewhere));
+    assert_eq!(found.ours, None, "not the text elsewhere");
+    assert!(found.places.scrolled_out);
+
+    let mut found = Found::default();
+    found.place_ours(target, |_| None, |_| None, |_| Some(elsewhere));
+    assert_eq!(found.ours, Some(elsewhere), "no such part: its text");
+    assert!(!found.places.scrolled_out);
+}
+
+/// A real pointer that is lost holds no button: the snapshot stops
+/// reporting the button it pressed, as a release would.
+#[test]
+fn a_lost_real_pointer_holds_no_button() {
+    use loom_ui_core::{Event, PointerButton, PointerEvent};
+    let mut app = crate::tests::app();
+    app.pointer = crate::pointer::Pointer::new(true);
+    app.pointer.record_seen(Some(Point::new(10.0, 10.0)), None, None);
+    let _ = app
+        .pointer
+        .gate(&Event::Pointer(PointerEvent::Pressed(PointerButton::Left)));
+    let buttons = |app: &crate::App| app.pointer_state().map(|state| state.buttons).unwrap_or_default();
+    assert_eq!(buttons(&app), ["left"], "the real press");
+    let _ = app.pointer.gate(&Event::Pointer(PointerEvent::Lost));
+    assert!(buttons(&app).is_empty(), "nothing held after the loss");
+}

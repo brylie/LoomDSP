@@ -448,7 +448,14 @@ impl CanvasModel<'_> {
             }
             Event::Pointer(PointerEvent::Moved) => {
                 state.focus_first = false;
-                let Some(screen) = screen else { return };
+                // A move with no place is the pointer leaving the canvas's
+                // view, as into a panel above it: it is over nothing now.
+                let Some(screen) = screen else {
+                    if state.hover.take().is_some() {
+                        out.redraw();
+                    }
+                    return;
+                };
                 let world = state.camera.to_world(screen);
                 state.cursor = Some(world);
                 let hover = over.then(|| self.hit(state, world));
@@ -770,6 +777,16 @@ impl CanvasModel<'_> {
                 {
                     self.assign_drag(from, pointer, state.camera, bounds, out);
                 }
+            }
+            // The pointer was lost with no release, as when the system
+            // cancels a touch or a real pointer takes over from a script:
+            // a held button lets go and a drag ends, with no click and no
+            // drop. Keys held stay held: the keyboard has not left.
+            Event::Pointer(PointerEvent::Lost) => {
+                self.release_pointer_hold(state, out);
+                self.end_gestures(state, out);
+                state.hover = None;
+                out.redraw();
             }
             Event::WindowUnfocused => {
                 // A key release never arrives if the window loses focus

@@ -168,6 +168,10 @@ impl Pointer {
         match pointer {
             PointerEvent::Pressed(button) => inner.real_buttons.push(*button),
             PointerEvent::Released(button) => inner.real_buttons.retain(|held| held != button),
+            // A lost pointer holds no button, whether or not a script runs.
+            // A release kept for later still goes in after the script, so
+            // the runtime lets go of a press it heard before.
+            PointerEvent::Lost => inner.real_buttons.clear(),
             _ => {}
         }
         if !inner.queue.is_empty() {

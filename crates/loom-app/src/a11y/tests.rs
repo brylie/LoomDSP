@@ -4636,3 +4636,22 @@ fn the_runtimes_nodes_keep_their_ids_through_two_builds() {
         );
     }
 }
+
+/// A screen reader that starts before there is a window still gets its
+/// tree: the read waits, with none in flight, and the first update with a
+/// window starts it, so the reader is not left with no tree.
+#[test]
+fn a_reader_that_starts_before_the_window_gets_its_tree() {
+    let mut app = crate::tests::app();
+    let _ = app.send(Message::A11y(Event::Activated));
+    assert!(app.a11y.waiting_window, "no window yet: the read waits");
+    assert!(app.a11y.locating, "and it stays in flight, so later asks queue");
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let _ = ui.redraw();
+    let _ = ui.deliver(Message::Tick);
+    let _ = ui.redraw();
+    assert!(
+        !ui.take_sent_trees().is_empty(),
+        "the tree was sent once the window was up"
+    );
+}
