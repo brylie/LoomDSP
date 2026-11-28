@@ -3,7 +3,6 @@
 
 use super::super::{HEIGHT, LibraryItem, Message, WIDTH, browser_id, insert_linked_id, list_id, menu_id, search_id};
 use crate::ui_test::Ui;
-use iced::mouse;
 use loom_ui_core::{Key, Modifiers, Point, Rect, UiId};
 
 /// The app with the browser open, laid out.
@@ -61,9 +60,13 @@ fn centre(ui: &mut Ui, id: &UiId) -> Point {
 }
 
 /// A press and a release of `button` where the pointer is.
-fn click(ui: &mut Ui, button: mouse::Button) {
-    ui.step(&[iced::Event::Mouse(mouse::Event::ButtonPressed(button))]);
-    ui.step(&[iced::Event::Mouse(mouse::Event::ButtonReleased(button))]);
+fn click(ui: &mut Ui, button: loom_ui_core::PointerButton) {
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Pressed(
+        button,
+    ))]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Released(
+        button,
+    ))]);
 }
 
 /// Presses `key` with no modifier.
@@ -151,7 +154,7 @@ fn a_click_on_a_row_adds_it() {
     let second = model(&ui).rows[1].id.clone();
     let at = centre(&mut ui, &second);
     ui.move_to(at);
-    click(&mut ui, mouse::Button::Left);
+    click(&mut ui, loom_ui_core::PointerButton::Left);
     assert!(ui.app().overlays.browser().is_none());
     // The row may be a built-in sub-patch, which adds its modules too.
     assert!(ui.app().session.controller.graph().nodes().count() > before);
@@ -186,7 +189,7 @@ fn a_right_press_opens_a_library_rows_menu() {
     let row = library_row("Pad.ron");
     let at = centre(&mut ui, &row);
     ui.move_to(at);
-    click(&mut ui, mouse::Button::Right);
+    click(&mut ui, loom_ui_core::PointerButton::Right);
     assert_eq!(ui.runtime().focused(), Some(&search_id()), "the press kept the focus");
     assert_eq!(model(&ui).menu, Some(0));
     assert_eq!(model(&ui).menu_highlight, None, "opened by the pointer");
@@ -227,13 +230,13 @@ fn a_press_outside_the_menu_closes_it_and_outside_both_closes_both() {
     tap(&mut ui, Key::ContextMenu);
     let field = centre(&mut ui, &search_id());
     ui.move_to(field);
-    click(&mut ui, mouse::Button::Left);
+    click(&mut ui, loom_ui_core::PointerButton::Left);
     assert_eq!(model(&ui).menu, None, "the menu closed");
     assert!(ui.app().overlays.browser().is_some(), "the browser stays");
     tap(&mut ui, Key::ContextMenu);
     let panel = bounds(&mut ui, &browser_id());
     ui.move_to(Point::new(panel.x - 20.0, panel.y + 10.0));
-    click(&mut ui, mouse::Button::Left);
+    click(&mut ui, loom_ui_core::PointerButton::Left);
     assert!(ui.app().overlays.browser().is_none(), "both closed");
 }
 
@@ -332,9 +335,9 @@ fn with_long_library(count: usize) -> Ui {
 fn wheel(ui: &mut Ui, lines: f32) {
     let list = centre(ui, &list_id());
     ui.move_to(list);
-    ui.step(&[iced::Event::Mouse(mouse::Event::WheelScrolled {
-        delta: mouse::ScrollDelta::Lines { x: 0.0, y: lines },
-    })]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Scrolled(
+        loom_ui_core::ScrollDelta::Lines { x: 0.0, y: lines },
+    ))]);
     let _ = ui.redraw();
 }
 
@@ -376,13 +379,17 @@ fn the_menu_follows_its_row_and_closes_when_the_row_scrolls_away() {
 /// field is not composing (ui-layer.md, section 6, rule 6, step 2b).
 #[test]
 fn enter_while_composing_confirms_the_text_and_picks_nothing() {
-    use iced::advanced::input_method::Event as Ime;
     let mut ui = open();
-    ui.step(&[iced::Event::InputMethod(Ime::Opened)]);
-    ui.step(&[iced::Event::InputMethod(Ime::Preedit("か".to_string(), None))]);
+    ui.step(&[loom_ui_core::Event::Ime(loom_ui_core::ImeEvent::Enabled)]);
+    ui.step(&[loom_ui_core::Event::Ime(loom_ui_core::ImeEvent::Preedit {
+        text: "か".to_string(),
+        cursor: None,
+    })]);
     tap(&mut ui, Key::Enter);
     assert!(ui.app().overlays.browser().is_some(), "Enter picked nothing");
-    ui.step(&[iced::Event::InputMethod(Ime::Commit("か".to_string()))]);
+    ui.step(&[loom_ui_core::Event::Ime(loom_ui_core::ImeEvent::Commit(
+        "か".to_string(),
+    ))]);
     assert_eq!(model(&ui).query, "か");
     assert!(ui.app().overlays.browser().is_some());
 }

@@ -408,7 +408,7 @@ At confirmation, recheck the chosen endpoints and port pair. If the cable change
 
 ### Interaction ([#68](https://github.com/brylie/LoomDSP/issues/68))
 
-**Status:** Implemented. Code: `loom-canvas/src/widget.rs`, `controls.rs`.
+**Status:** Implemented. Code: `loom-canvas/src/input/`, `controls.rs`.
 
 | Gesture | Knob | Toggle, radio | Light, empty panel area | Header |
 |---|---|---|---|---|
@@ -428,7 +428,7 @@ At confirmation, recheck the chosen endpoints and port pair. If the cable change
 
 ### Level of detail ([#68](https://github.com/brylie/LoomDSP/issues/68))
 
-**Status:** Implemented. Code: `detail` in `loom-canvas/src/widget.rs`, `tile_text.rs`.
+**Status:** Implemented. Code: `detail` in `loom-canvas/src/input.rs`, `tile_text.rs`.
 
 The canvas already hides port labels and titles below a size on screen. Panels use the same two thresholds:
 

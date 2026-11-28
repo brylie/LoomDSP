@@ -628,3 +628,67 @@ fn a_draft_is_in_the_file_the_questions_save_writes() {
     assert!((cutoff - 1234.0).abs() < 1.0, "the value draft is saved: {cutoff}");
     assert!(ui.app().quit, "the close went on");
 }
+
+/// An open question holds every press below it: a click on the toolbar's
+/// Open and on a canvas tile does nothing, and the question stays. Once it
+/// closes, the same click on the tile selects it (ui-layer.md, section 5,
+/// rule 1).
+#[test]
+fn a_question_holds_presses_on_the_toolbar_and_the_canvas() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.app_mut().edit(|app| {
+        app.session.controller.add_module("loom.osc.sine").unwrap();
+        app.commit();
+    });
+    ui.send(AppMessage::File(FileAction::Close));
+    let _ = ui.redraw();
+    assert!(ui.app().overlays.question.is_some());
+    ui.lay_out_panels();
+    // The question's panel is the whole window, a scrim with the dialog
+    // centred in it; a press on the scrim answers nothing.
+    let window = ui
+        .runtime()
+        .bounds(&crate::overlays::access::question_id())
+        .expect("the question is laid out");
+    let half = crate::style::QUESTION_WIDTH / 2.0;
+    let centre = window.x + window.width / 2.0;
+    let dialog = |at: loom_ui_core::Point| (at.x - centre).abs() <= half;
+    // A point on a tile's title, beside the dialog.
+    let canvas = ui.canvas();
+    let (module, at) = ui
+        .app()
+        .session
+        .scene
+        .modules()
+        .iter()
+        .map(|tile| {
+            let bounds = tile.bounds();
+            (
+                tile.id,
+                canvas.to_window(loom_ui_core::Point::new(bounds.x + bounds.width / 2.0, bounds.y + 6.0)),
+            )
+        })
+        .find(|(_, at)| !dialog(*at) && canvas.bounds.contains(*at))
+        .expect("a tile outside the question");
+    let selection = ui.app().ui_snapshot().selection;
+
+    let mut heard = ui.click_text("Open");
+    heard.extend(ui.move_to(at));
+    heard.extend(ui.press());
+    heard.extend(ui.release());
+    assert!(
+        !heard
+            .iter()
+            .any(|m| matches!(m, AppMessage::File(_) | AppMessage::Canvas(_))),
+        "nothing below the question heard the presses: {heard:?}"
+    );
+    assert_eq!(ui.app().ui_snapshot().selection, selection);
+    assert!(ui.app().overlays.question.is_some(), "the question stays");
+
+    ui.tap(Key::Escape, Modifiers::NONE);
+    assert!(ui.app().overlays.question.is_none());
+    ui.move_to(at);
+    ui.press();
+    ui.release();
+    assert_eq!(ui.app().ui_snapshot().selection, vec![module], "the tile selects now");
+}

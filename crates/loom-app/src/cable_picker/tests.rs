@@ -238,12 +238,17 @@ fn a_press_beside_the_picker_closes_it_and_reaches_nothing_under_it() {
 /// section 5, rule 14).
 #[test]
 fn a_right_press_beside_the_picker_closes_it_and_opens_nothing() {
-    use iced::mouse::{Button, Event as Mouse};
     let mut ui = open_on_the_filter();
     let list = ui.runtime().bounds(&super::list_id()).expect("the list");
     ui.move_to(Point::new(list.x - 40.0, list.y + 10.0));
-    let mut messages = ui.step(&[iced::Event::Mouse(Mouse::ButtonPressed(Button::Right))]);
-    messages.extend(ui.step(&[iced::Event::Mouse(Mouse::ButtonReleased(Button::Right))]));
+    let mut messages = ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Pressed(
+        loom_ui_core::PointerButton::Right,
+    ))]);
+    messages.extend(
+        ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Released(
+            loom_ui_core::PointerButton::Right,
+        ))]),
+    );
     let _ = ui.redraw();
     assert!(
         ui.app().overlays.cable_menu().is_none(),

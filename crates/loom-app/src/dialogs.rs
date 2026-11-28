@@ -9,9 +9,8 @@
 //! applied to what waits.
 //!
 //! One dialog at a time: while one waits, a second is not asked, and the
-//! request is dropped. Nothing can ask one meanwhile today, since the bridge
-//! still shows each dialog to its end, but the `winit` shell keeps the
-//! window running while one is open (plan step 2.2).
+//! request is dropped. The `winit` shell keeps the window running while one
+//! is open, so a second can be asked meanwhile (plan step 2.2).
 
 use crate::question::AfterDiscard;
 use crate::{App, Args, Message, Source, files, recovery};

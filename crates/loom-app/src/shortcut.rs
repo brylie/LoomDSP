@@ -5,8 +5,9 @@
 //! Iced's, single-line or multi-line. While one has, the shortcut does
 //! nothing, and the field keeps passing the key on: the user is typing, and
 //! the shortcut would change the patch behind the field (Brylie's decision,
-//! 2026-11-19). The check asks the window, after the key's turn, so a key
-//! right after a click into a field sees the field (`window_question.rs`).
+//! 2026-11-19). The check reads the runtime's focus in the key's own turn
+//! (ui-layer.md, section 6, rule 6, step 6), so a key right after a click
+//! into a field sees the field (`window_now.rs`).
 //!
 //! Shortcuts for the whole window stay global and are not here: New, Open,
 //! Save, Save As, and Preferences.

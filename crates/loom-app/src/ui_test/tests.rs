@@ -136,7 +136,7 @@ fn escape_and_focus_loss_cancel_an_inspector_drop() {
         ui.press();
         ui.move_to(row);
         if focus_loss {
-            ui.step(&[Event::Window(window::Event::Unfocused)]);
+            ui.step(&[crate::ui_test::Input::unfocused()]);
         } else {
             ui.tap(Key::Escape, Modifiers::NONE);
         }
@@ -160,8 +160,8 @@ fn empty_outside_and_learn_mode_make_no_inspector_assignment() {
     ui.move_to(from);
     ui.press();
     ui.move_to(row);
-    ui.set_cursor(mouse::Cursor::Unavailable);
-    ui.step(&[Event::Mouse(mouse::Event::CursorLeft)]);
+    ui.set_cursor(Option::<Point>::None);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::LeftWindow)]);
     ui.move_to(Point::new(WINDOW.width + 20.0, WINDOW.height + 20.0));
     assert!(
         ui.app()
@@ -1242,12 +1242,12 @@ fn the_camera_survives_opening_the_browser() {
     let empty = Point::new(canvas.bounds.x + 8.0, canvas.bounds.y + 8.0);
     ui.move_to(empty);
     // A trackpad pans, and a mouse wheel zooms.
-    ui.step(&[Event::Mouse(mouse::Event::WheelScrolled {
-        delta: mouse::ScrollDelta::Pixels { x: 37.0, y: -23.0 },
-    })]);
-    ui.step(&[Event::Mouse(mouse::Event::WheelScrolled {
-        delta: mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
-    })]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Scrolled(
+        loom_ui_core::ScrollDelta::Pixels { x: 37.0, y: -23.0 },
+    ))]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Scrolled(
+        loom_ui_core::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+    ))]);
     let moved = ui.canvas().camera;
     assert_ne!(moved, canvas.camera, "the scroll moved the camera");
 
@@ -1312,7 +1312,7 @@ fn a_segment_click_changes_the_mode_and_hides_its_controls() {
     let mut ui = Ui::open("sine.ron");
     let env = ui.app_mut().session.controller.add_module("loom.env.envelope").unwrap();
     ui.app_mut().refresh();
-    ui.step(&[]);
+    ui.step::<crate::ui_test::Input>(&[]);
     let tile = ui.app().session.scene.module(env.0).unwrap().clone();
     let rect = tile.widget_bounds(1).expect("the mode segments");
     let ad = loom_canvas::segment_centre(rect, 1, 2);
@@ -2369,18 +2369,22 @@ fn the_inspector_takes_typed_values() {
     assert_eq!(param_value(&ui, id, "cutoff"), 440.0, "bad text commits nothing");
     assert!(ui.app().session.value_draft.is_some(), "and stays to be corrected");
 
-    // Escape drops it, through the same listener the app uses.
+    // Escape in its field drops it: the inspector takes Escape first and
+    // leaves, dropping the draft before the focus goes, which would commit
+    // it. A draft lives only while its field has focus.
+    let part = ui.app().value_field_part(module, index).expect("the cutoff field");
+    ui.focus(&part);
     let messages = ui.tap(Key::Escape, Modifiers::NONE);
     assert!(
         messages
             .iter()
-            .any(|m| matches!(m, Message::Inspector(crate::inspector::Message::ValueDraftClear)))
+            .any(|m| matches!(m, Message::PatchInfo(crate::patch_info::Message::Leave)))
     );
     assert!(ui.app().session.value_draft.is_none());
 
     // A press with no field focused drops a draft too.
     let _ = ui.app_mut().send(text("5"));
-    ui.step(&[]);
+    ui.step::<crate::ui_test::Input>(&[]);
     let at = ui.control(module, "level");
     ui.move_to(at);
     ui.press();
@@ -2475,7 +2479,7 @@ fn keys_in_an_inspector_field_do_not_reach_the_canvas() {
     // Over the canvas, with the module selected, Backspace would delete it
     // and `a` would open the browser. The field has the keys all the same.
     let tile = ui.control(id.0, "level");
-    ui.set_cursor(mouse::Cursor::Available(tile.to_iced()));
+    ui.set_cursor(Some(tile));
     ui.tap(Key::Backspace, none);
     assert!(
         ui.app().session.controller.graph().node(id).is_some(),
@@ -2585,7 +2589,7 @@ fn a_draft_ends_when_focus_moves_or_the_patch_changes() {
     ui.typewrite("5");
     assert!(ui.app().session.value_draft.is_some());
     assert!(ui.app_mut().replace(crate::Source::Empty));
-    ui.step(&[]);
+    ui.step::<crate::ui_test::Input>(&[]);
     assert!(ui.app().session.value_draft.is_none());
     assert!(!ui.app().focus.is_some());
 }
@@ -2599,7 +2603,7 @@ fn a_readout_shows_text_and_a_press_selects_its_module() {
     let mut ui = Ui::open("sine.ron");
     let id = ui.app_mut().session.controller.add_module("test.readout").unwrap();
     ui.app_mut().refresh();
-    ui.step(&[]);
+    ui.step::<crate::ui_test::Input>(&[]);
     ui.app_mut().run_engine(4800);
     let snapshot = ui.app().ui_snapshot();
     let tile = snapshot.tiles.iter().find(|tile| tile.id == id.0).expect("the tile");
@@ -2851,25 +2855,6 @@ fn gpu_required() -> bool {
     std::env::var("LOOM_REQUIRE_GPU").is_ok_and(|value| value == "1")
 }
 
-/// The harness lays out on a renderer that only measures, and the window
-/// draws with wgpu. Both lay Iced's view out alike, so the canvas lands in
-/// the same place on both (plan for leaving Iced, step 2.3, item 2). Since
-/// the matrix moved (plan 3.2, row 4e), the canvas is all Iced places:
-/// every other part is the runtime's, laid out by its own text measure.
-/// Skips with no GPU adapter, unless one is required.
-#[test]
-fn measure_and_wgpu_lay_out_alike() {
-    let mut ui = Ui::open("subtractive.ron");
-    ui.send(Message::Matrix(crate::MatrixEvent::Tab(crate::matrix::Tab::Matrix)));
-    let Some((measured, drawn)) = ui.places_on_both() else {
-        assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
-        return;
-    };
-    assert!(measured.canvas.is_some(), "the walk found the canvas");
-    assert_eq!(measured.len(), 0, "no part of Iced's own is named any more");
-    assert_eq!(measured, drawn, "with the matrix open");
-}
-
 /// A capture draws the toolbar's buttons in their role's looks
 /// (visual-system.md, Role tokens): an enabled button in its normal fill,
 /// and a turned-off one, Undo with nothing to undo, in its off fill (#460,
@@ -2971,9 +2956,15 @@ fn count_colour(image: &loom_ui::effect::Image, area: Rect, colour: [u8; 3]) -> 
     (found, all)
 }
 
+/// A colour as 8-bit RGBA, each channel scaled by 255 and rounded, as the
+/// GPU writes it.
+fn rgba8(c: loom_ui_core::Color) -> [u8; 4] {
+    [c.r, c.g, c.b, c.a].map(|v| (v * 255.0).round() as u8)
+}
+
 /// The canvas background as RGB.
 fn canvas_background() -> [u8; 3] {
-    let c = loom_canvas::Palette::default().background.to_iced().into_rgba8();
+    let c = rgba8(loom_canvas::Palette::default().background);
     [c[0], c[1], c[2]]
 }
 
@@ -3006,7 +2997,7 @@ fn the_canvas_draws_under_the_overlays_over_it() {
         "{bare} of {all} canvas pixels show the canvas background"
     );
     // Inside the browser's top padding, clear of its border and its rows.
-    let theme = loom_canvas::iced_convert::ToIced::to_iced(crate::style::PANEL_FILL).into_rgba8();
+    let theme = rgba8(crate::style::PANEL_FILL);
     assert_eq!(
         pixel_at(&image, browser.x + 20.0, browser.y + 3.0),
         [theme[0], theme[1], theme[2]],
@@ -3038,7 +3029,7 @@ fn a_capture_after_new_shows_the_new_canvas() {
     assert!(drawn > 10_000, "the subtractive patch shows its tiles ({drawn} pixels)");
 
     assert!(ui.app_mut().replace(crate::Source::Empty));
-    ui.step(&[]);
+    ui.step::<crate::ui_test::Input>(&[]);
     let after = capture_window(&mut ui).expect("drawn before");
     let (id, _) = ui
         .app()
@@ -3089,7 +3080,9 @@ fn locate_follows_a_pan_before_release() {
     let bounds = ui.canvas().bounds;
     let from = Point::new(bounds.x + 12.0, bounds.y + 12.0);
     ui.move_to(from);
-    ui.step(&[Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Middle))]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Pressed(
+        loom_ui_core::PointerButton::Middle,
+    ))]);
     ui.move_to(Point::new(from.x + 40.0, from.y + 25.0));
 
     let during = locate(&mut ui);
@@ -3100,55 +3093,32 @@ fn locate_follows_a_pan_before_release() {
         "the tile moved with the pan: {moved:?}"
     );
 
-    ui.step(&[Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle))]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Released(
+        loom_ui_core::PointerButton::Middle,
+    ))]);
     let after = locate(&mut ui);
     assert!((after.x - during.x).abs() < 0.01 && (after.y - during.y).abs() < 0.01);
 }
 
-/// A capture after a resize, before any frame at the new size, draws the
-/// last frame again into a smaller target. The canvas's text was prepared
-/// with scissors cut to the old size, and wgpu rejects a scissor larger
-/// than its target, so the canvas is prepared again for the new one. The
-/// shell can run a capture right after a resize, before the next frame.
+/// A capture after the window shrinks draws the window at its new size:
+/// the shell can run a capture right after a resize, before the next frame,
+/// and a capture draws the window afresh, so nothing of the old size's
+/// drawing, such as the canvas's text scissors, can run past the target.
 #[test]
-fn a_capture_after_a_shrink_draws_the_last_frame_again() {
-    use iced::advanced::renderer::Style;
-    use iced_runtime::user_interface::{Cache, UserInterface};
-    let ui = Ui::open("subtractive.ron");
-    let Some(mut offscreen) = crate::iced_bridge::offscreen::Offscreen::new() else {
+fn a_capture_after_a_shrink_draws_at_the_new_size() {
+    let mut ui = Ui::open("subtractive.ron");
+    if !ui.draws_the_canvas() {
         assert!(!gpu_required(), "LOOM_REQUIRE_GPU=1, but no GPU adapter was found");
         return;
-    };
-    let app = ui.app();
-    let theme = crate::iced_bridge::theme();
-    let background = loom_canvas::iced_convert::ToIced::to_iced(crate::style::PANEL_FILL);
-    let size = crate::WINDOW;
-    let mut built = UserInterface::build(app.view(), size, Cache::default(), &mut offscreen.renderer);
-    let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(ui.now()));
-    let _ = built.update(
-        &[redraw],
-        iced::mouse::Cursor::Unavailable,
-        &mut offscreen.renderer,
-        &mut iced::advanced::clipboard::Null,
-        &mut Vec::new(),
+    }
+    assert!(capture_window(&mut ui).is_some(), "the full window draws");
+    // Half the size: the old size's scissors would run past it.
+    ui.resize(WINDOW.width / 2.0, WINDOW.height / 2.0);
+    let image = capture_window(&mut ui).expect("the frame is read back");
+    assert_eq!(
+        (image.width(), image.height()),
+        ((WINDOW.width / 2.0) as u32, (WINDOW.height / 2.0) as u32)
     );
-    app.canvas_drawn.clear();
-    let style = Style {
-        text_color: loom_canvas::iced_convert::ToIced::to_iced(crate::style::TEXT),
-    };
-    built.draw(&mut offscreen.renderer, theme, &style, iced::mouse::Cursor::Unavailable);
-    let drawing = app.canvas_drawn.take();
-    assert!(drawing.is_some(), "the canvas built a frame");
-    let full = iced::Size::new(size.width as u32, size.height as u32);
-    assert!(offscreen.pixels(full, 1.0, background, drawing).is_some());
-
-    // Half the size: the text's old scissors would run past it.
-    let half = iced::Size::new(full.width / 2, full.height / 2);
-    let again = offscreen
-        .pixels_again(half, 1.0, background)
-        .expect("the frame is read back");
-    assert_eq!(again.len(), (half.width * half.height * 4) as usize);
-    drop(built);
 }
 
 /// A test that saves writes its own copy of the example, never the
@@ -3298,11 +3268,11 @@ fn menu_over_a_focused_value_field(ui: &mut Ui) {
         .name;
     let out = ui.output(from.module.0, name);
     ui.move_to(out);
-    ui.step(&[iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
-        iced::mouse::Button::Right,
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Pressed(
+        loom_ui_core::PointerButton::Right,
     ))]);
-    ui.step(&[iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
-        iced::mouse::Button::Right,
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Released(
+        loom_ui_core::PointerButton::Right,
     ))]);
     ui.redraw();
     assert!(ui.app().overlays.probe_menu().is_some(), "the menu is open");
@@ -3372,4 +3342,39 @@ fn a_field_in_the_view_that_owns_the_input_still_works() {
         .expect("the filter")
         .params[0];
     assert_eq!(cutoff, 777.0);
+}
+
+/// A value draft left with nothing focused is dropped by Escape, as the old
+/// listener row did: an Escape nothing takes reaches the app's unclaimed
+/// keys, which end a draft (`runtime_app.rs`). A draft outlives its field's
+/// focus only while an overlay has the focus, since a focus move anywhere
+/// else commits it (`controls.rs`, `focus_moved`).
+#[test]
+fn escape_drops_a_value_draft_with_nothing_focused() {
+    let mut ui = Ui::open("subtractive.ron");
+    let _ = ui.redraw();
+    let value = |ui: &Ui| ui.app().session.controller.graph().node(ModuleId(4)).unwrap().params[0];
+    let before = value(&ui);
+    let steps = ui.app().session.edits.history.len();
+    // A draft that is a value, and not the one the parameter has.
+    let draft = if (before - 12.0).abs() < 0.5 { "13" } else { "12" };
+    ui.app_mut().type_value_draft(4, 0, draft.to_string());
+    let typed = ui.app().session.value_draft.as_ref().expect("a draft");
+    assert_eq!(typed.draft.error(), None, "the draft is a value");
+    assert_eq!(ui.runtime().focused(), None, "nothing has the focus");
+    ui.tap(Key::Escape, Modifiers::NONE);
+    assert!(ui.app().session.value_draft.is_none(), "Escape dropped the draft");
+    assert_eq!(value(&ui), before, "and committed nothing");
+    assert_eq!(ui.app().session.edits.history.len(), steps, "no undo step");
+}
+
+/// The pointer leaving the window takes the harness's pointer away, as the
+/// shell forgets it before it says so, so a later press has no point.
+#[test]
+fn leaving_the_window_forgets_the_pointer() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.move_to(Point::new(400.0, 300.0));
+    assert!(ui.cursor.is_some());
+    ui.step(&[Input::pointer(loom_ui_core::PointerEvent::LeftWindow)]);
+    assert_eq!(ui.cursor, None);
 }

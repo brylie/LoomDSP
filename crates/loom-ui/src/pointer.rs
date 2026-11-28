@@ -225,6 +225,8 @@ impl<A: App> Panels<'_, A> {
     /// never sees it.
     pub fn pointer_below(&mut self, event: &Event, point: Point) -> Heard {
         let heard = self.pointer_below_in_turn(event, point);
+        // Outside a turn, the app hears a moved focus on the next one.
+        self.report_focus();
         self.report_custom_left();
         self.send_custom_later();
         heard
@@ -237,7 +239,8 @@ impl<A: App> Panels<'_, A> {
         let pressed = self.shown_pressed();
         let mut heard = self.offer(input, event, point, Side::Below);
         heard.redraw |= self.shown_pressed() != pressed;
-        self.report_focus();
+        // A moved focus is the first thing the app hears in this turn,
+        // before what a custom element sent (`Runtime::turn`).
         self.nudge_for_select();
         heard
     }

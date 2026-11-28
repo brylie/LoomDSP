@@ -184,8 +184,14 @@ impl CanvasModel<'_> {
                     // A new patch frames as always. A new level takes the
                     // camera it had, and frames on its first visit.
                     match self.level_camera.filter(|_| !new_frame) {
-                        Some(camera) => state.camera = camera,
-                        None => self.frame(state, bounds.size()),
+                        Some(camera) => {
+                            state.camera = camera;
+                            state.fitted = None;
+                        }
+                        None => {
+                            self.frame(state, bounds.size());
+                            state.fitted = Some(bounds.size());
+                        }
                     }
                     state.framed_key = Some(self.frame_key);
                     state.level_key = Some(self.level_key);
@@ -264,14 +270,18 @@ impl CanvasModel<'_> {
                     state.camera = base;
                     out.redraw();
                 }
-                let lights = visible_lights(self.scene, &state.camera, bounds.size());
-                if state.reported_lights.as_ref() != Some(&lights) {
-                    state.reported_lights = Some(lights.clone());
-                    self.emit(out, CanvasEvent::VisibleDisplays(lights));
-                }
-                let full = detail(state.camera.zoom) == Detail::Close;
-                if state.reported_full_traces.replace(full) != Some(full) {
-                    self.emit(out, CanvasEvent::TraceDetail(full));
+                // While the measuring animation moves the camera, what is on
+                // screen is reported once it ends, as `frame` says.
+                if !self.animate {
+                    let lights = visible_lights(self.scene, &state.camera, bounds.size());
+                    if state.reported_lights.as_ref() != Some(&lights) {
+                        state.reported_lights = Some(lights.clone());
+                        self.emit(out, CanvasEvent::VisibleDisplays(lights));
+                    }
+                    let full = detail(state.camera.zoom) == Detail::Close;
+                    if state.reported_full_traces.replace(full) != Some(full) {
+                        self.emit(out, CanvasEvent::TraceDetail(full));
+                    }
                 }
             }
             Event::Key(KeyEvent::ModifiersChanged(modifiers)) => {
@@ -438,7 +448,14 @@ impl CanvasModel<'_> {
             }
             Event::Pointer(PointerEvent::Moved) => {
                 state.focus_first = false;
-                let Some(screen) = screen else { return };
+                // A move with no place is the pointer leaving the canvas's
+                // view, as into a panel above it: it is over nothing now.
+                let Some(screen) = screen else {
+                    if state.hover.take().is_some() {
+                        out.redraw();
+                    }
+                    return;
+                };
                 let world = state.camera.to_world(screen);
                 state.cursor = Some(world);
                 let hover = over.then(|| self.hit(state, world));
@@ -760,6 +777,16 @@ impl CanvasModel<'_> {
                 {
                     self.assign_drag(from, pointer, state.camera, bounds, out);
                 }
+            }
+            // The pointer was lost with no release, as when the system
+            // cancels a touch or a real pointer takes over from a script:
+            // a held button lets go and a drag ends, with no click and no
+            // drop. Keys held stay held: the keyboard has not left.
+            Event::Pointer(PointerEvent::Lost) => {
+                self.release_pointer_hold(state, out);
+                self.end_gestures(state, out);
+                state.hover = None;
+                out.redraw();
             }
             Event::WindowUnfocused => {
                 // A key release never arrives if the window loses focus
@@ -1117,6 +1144,11 @@ impl CanvasModel<'_> {
 
     /// Frames the whole scene at a readable zoom. A scene with no modules
     /// keeps the camera it has.
+    /// Frames the scene again at `size`, for [`CanvasInput::refit`].
+    pub(super) fn fit(&self, state: &mut CanvasInput, size: Size) {
+        self.frame(state, size);
+    }
+
     fn frame(&self, state: &mut CanvasInput, size: Size) {
         if let Some(world) = self.scene.bounds() {
             state.camera.frame_readable(world, size, READABLE_ZOOM);

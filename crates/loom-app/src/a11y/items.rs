@@ -270,9 +270,9 @@ pub(crate) struct Item {
     pub set_number: Option<SetNumber>,
     /// What a SetValue with text sets.
     pub set_text: Option<SetText>,
-    /// For a field, the widget that takes keyboard focus. Only a field can
-    /// take it outside the canvas until phase 3 (section 7, rule 22).
-    pub focus: Option<iced::advanced::widget::Id>,
+    /// For a field, the part that takes keyboard focus: a focus effect
+    /// names it (section 7, rule 22).
+    pub focus: Option<UiId>,
     /// True when its SetValue, Increment, and Decrement join the screen
     /// reader's undo group, as a slider's do (section 7, rule 6).
     pub groups: bool,

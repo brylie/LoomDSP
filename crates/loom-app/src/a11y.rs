@@ -14,10 +14,9 @@
 //! - The platform's adapter is `loom_ui`'s window shell's, on every
 //!   platform: the app hands it the tree as an effect
 //!   (`Effects::accessibility`), and hears the screen reader through
-//!   `Hosted::accessibility_event` (`iced_bridge.rs`).
-//! - This file holds what joins them to the app: the [`Event`]s, the state
-//!   kept between events ([`Access`]), and the Iced glue that finds the
-//!   canvas in the window.
+//!   `App::accessibility_event` (`runtime_app.rs`).
+//! - This file holds what joins them to the app: the [`Event`]s and the
+//!   state kept between events ([`Access`]).
 //!
 //! The tree is built only while a screen reader listens, after a message
 //! that may have changed what it reports, and only the nodes that changed
@@ -154,6 +153,9 @@ pub(crate) struct Access {
     /// yet (the runtime's layout of a bar an autosave just changed) is
     /// sent too.
     again: bool,
+    /// A rebuild was asked for before there was a window to read: the
+    /// first update that has one reads it (`App::a11y_window_held`).
+    waiting_window: bool,
     /// True while live values have changed and were not sent yet. The
     /// timer that sends them runs only then.
     live_dirty: bool,
@@ -229,6 +231,7 @@ impl Default for Access {
             active: false,
             sent: tree::Sent::default(),
             locating: false,
+            waiting_window: false,
             again: false,
             live_dirty: false,
             flush_live: false,
@@ -382,11 +385,27 @@ impl crate::App {
         self.a11y_read_places();
     }
 
+    /// Starts the rebuild a screen reader asked for before the window was
+    /// held, once it is (`window_now.rs`). One read at a time, as ever.
+    pub(crate) fn a11y_window_held(&mut self) {
+        if self.window_now.window && std::mem::take(&mut self.a11y.waiting_window) {
+            self.a11y.locating = false;
+            self.a11y_rebuild();
+        }
+    }
+
     /// Reads the window after its latest layout.
     fn a11y_read_places(&mut self) {
-        self.ask_window(crate::window_question::WindowQuestion::places(|places| {
-            crate::Message::A11y(Event::Located(places))
-        }));
+        // With no window there is nothing to read yet. The read stays in
+        // flight, so later asks wait behind it, and the first update that
+        // has a window starts it again, so the screen reader is not left
+        // with no tree.
+        if !self.window_now.window {
+            self.a11y.waiting_window = true;
+            return;
+        }
+        let places = self.places_now();
+        self.post(crate::Message::A11y(Event::Located(places)));
     }
 
     /// Builds the tree and gives what the screen reader must be sent: the
@@ -739,8 +758,10 @@ impl crate::App {
     pub(crate) fn a11y_frames(&self) -> tree::Frames {
         let panel = match self.right_tab {
             // The runtime's inspector gives its own nodes (`inspector/panel.rs`).
-            crate::matrix::Tab::Inspector if self.inspector_ours() => Vec::new(),
-            crate::matrix::Tab::Inspector => crate::inspector::access::items(&self.inspector_model()),
+            // While a cable jump list covers it, the column shows the list,
+            // whose nodes the runtime gives too, and the inspector is not
+            // drawn, so it is not reported.
+            crate::matrix::Tab::Inspector => Vec::new(),
             // The runtime's matrix and Outline give their own nodes
             // (`matrix/panel.rs`, `outline/panel.rs`).
             crate::matrix::Tab::Matrix | crate::matrix::Tab::Outline => Vec::new(),
@@ -748,7 +769,7 @@ impl crate::App {
         let (overlay, overlay_focus) = self.overlay_items();
         tree::Frames {
             panel,
-            focused_field: self.focus.as_ref().map(crate::places::field_widget_id),
+            focused_field: self.focus.clone(),
             focused_item: self
                 .jump_focus()
                 .or_else(|| {
@@ -818,9 +839,7 @@ impl crate::App {
                 return Some(Vec::new());
             };
             self.reader_event(ReaderEvent::Close);
-            if let Some(part) = crate::places::field_of(&field) {
-                self.effect(loom_ui::Effects::focus(part));
-            }
+            self.effect(loom_ui::Effects::focus(field));
             return Some(Vec::new());
         }
         Some(self.a11y_item_action(&item, request, at))

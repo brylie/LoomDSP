@@ -706,6 +706,40 @@ impl Window {
         ))
     }
 
+    /// What of the element with UI ID `id` shows in the window: its bounds
+    /// cut by every clipping element around it and by its panel's clip, as
+    /// painting and hit-testing cut it. `None` for an element the window
+    /// does not have, and for one cut away entirely, as one scrolled out of
+    /// view is: a point there would land on something else.
+    pub(crate) fn shown_bounds(&self, id: &UiId) -> Option<Rect> {
+        let mut bounds = self.bounds(id)?;
+        let (_, record) = self
+            .records
+            .iter()
+            .filter(|(key, _)| id == *key || id.is_under(key))
+            .max_by_key(|(key, _)| key.keys().len())?;
+        // A keyless custom root takes its panel's UI ID (section 4, rule 6):
+        // what shows of it is its own box, which can be smaller than the
+        // slot the panel's ID gives.
+        if let Some(root) = record.layout.records().first()
+            && root.id.as_ref() == Some(id)
+        {
+            let own = Rect::new(
+                Point::new(record.origin.x + root.bounds.x, record.origin.y + root.bounds.y),
+                root.bounds.size(),
+            );
+            bounds = bounds.intersection(own)?;
+        }
+        let shown = match record.layout.clip_of(id).flatten() {
+            Some(clip) => bounds.intersection(Rect::new(
+                Point::new(record.origin.x + clip.x, record.origin.y + clip.y),
+                clip.size(),
+            ))?,
+            None => bounds,
+        };
+        shown.intersection(record.clip)
+    }
+
     /// Where the words of the link with UI ID `id` are in the window, one
     /// rectangle per line, or nothing for an element that is not a link
     /// inside a rich text.

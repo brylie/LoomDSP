@@ -283,7 +283,8 @@ fn the_slots_and_the_iced_space_agree() {
             assert_eq!(crumbs.y, bottom, "under the toolbar");
             bottom = crumbs.y + crumbs.height;
         }
-        assert_eq!(bottom, crate::style::top_height(inside), "inside: {inside}");
+        let top_height = crate::style::TOOLBAR_HEIGHT + if inside { crate::style::BREADCRUMB_HEIGHT } else { 0.0 };
+        assert_eq!(bottom, top_height, "inside: {inside}");
         let canvas = top.canvas();
         assert_eq!(canvas.bounds.y, bottom, "the canvas starts there, inside: {inside}");
     }

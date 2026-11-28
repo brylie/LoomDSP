@@ -23,9 +23,7 @@ fn physical(ui: &mut Ui, code: Code, letter: char, modifiers: Modifiers) {
         repeat: false,
         text: Some(letter.to_string()),
     };
-    ui.step(&[iced::Event::Keyboard(loom_canvas::iced_convert::key_event_to_iced(
-        &press, modifiers,
-    ))]);
+    ui.step(&[loom_ui_core::Event::Key(press)]);
 }
 
 /// The subtractive patch reads in signal order, with monitors and Transport at the end.
@@ -1086,4 +1084,88 @@ fn a_reader_focus_on_the_toolbar_takes_it_from_the_outline() {
     ui.a11y_action(&new, accesskit::Action::Focus);
     assert_eq!(focused(&mut ui), new);
     assert!(!ui.app().session.outline.active);
+}
+
+/// A script holds a press on the open cable jump list, and a real press
+/// lands on the canvas: the script's press is let go first, with no click
+/// on the list, then the real press closes the list, once, and reaches the
+/// canvas (control-channel.md, a real pointer takes over).
+#[test]
+fn a_real_press_after_a_scripted_one_held_on_the_jump_list_closes_it() {
+    use crate::pointer::{Aim, Step};
+    let mut ui = Ui::with_app(crate::tests::app_with_text(include_str!(
+        "../../../../examples/patches/subtractive.ron"
+    )));
+    open_branch(&mut ui);
+    ui.lay_out_panels();
+    let first = super::jump_option(0);
+    let row = ui.runtime().bounds(&first).expect("the first row is laid out").center();
+    ui.app().pointer.push(vec![
+        Step::MoveTo(Aim::At(row)),
+        Step::Press(loom_ui_core::PointerButton::Left),
+    ]);
+    for _ in 0..4 {
+        let _ = ui.redraw();
+    }
+    assert_eq!(
+        ui.runtime().pressed(),
+        Some(&first),
+        "the script's press holds the first row"
+    );
+    assert!(ui.app().session.outline.has_jump(), "a press inside keeps it open");
+    let at = ui.canvas().bounds.center();
+    let mut heard = ui.move_to(at);
+    heard.extend(ui.press());
+    heard.extend(ui.release());
+    assert_eq!(ui.runtime().pressed(), None, "the takeover let go of the row");
+    assert!(!ui.app().session.outline.has_jump(), "the real press closed it");
+    assert_eq!(
+        heard.iter().filter(|m| matches!(m, Message::DismissJump)).count(),
+        1,
+        "once: {heard:?}"
+    );
+    assert!(
+        !heard.iter().any(|m| matches!(m, Message::JumpChoice(_))),
+        "the held press chose no row: {heard:?}"
+    );
+}
+
+/// Every node of the window's frame has its place, so a screen reader can
+/// show and hit it: a tab, an Outline row, and a cable jump list's row,
+/// which the runtime's panels give. A panel the jump list covers is not
+/// reported at all.
+#[test]
+fn the_frames_nodes_have_bounds() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.send(Message::Matrix(crate::MatrixEvent::Tab(crate::RightTab::Outline)));
+    let _ = ui.redraw();
+    let tree = ui.a11y_tree();
+    let tab = tree.node_by_id(&crate::tabs::tab_id(crate::RightTab::Inspector));
+    assert!(tab.bounds().is_some(), "a tab has bounds");
+    let rows = tree.parts_under(&crate::outline::tree_id());
+    assert!(!rows.is_empty(), "the Outline shows rows");
+    for row in &rows {
+        assert!(tree.node_by_id(row).bounds().is_some(), "{row} has bounds");
+    }
+
+    // A cable jump list over the inspector: the column shows the list, so
+    // the tree reports the list's rows, placed, and none of the inspector,
+    // which is not drawn.
+    let mut ui = Ui::with_app(crate::tests::app_with_text(include_str!(
+        "../../../../examples/patches/subtractive.ron"
+    )));
+    ui.send(Message::Matrix(crate::MatrixEvent::Tab(crate::RightTab::Inspector)));
+    open_branch(&mut ui);
+    let _ = ui.redraw();
+    assert!(!ui.app().inspector_ours(), "the jump list covers the inspector");
+    let tree = ui.a11y_tree();
+    assert!(
+        tree.parts_under(&crate::inspector::panel::inspector_id()).is_empty(),
+        "the inspector, not drawn, is not reported"
+    );
+    let rows = tree.parts_under(&crate::outline::jump_id());
+    assert!(!rows.is_empty(), "the list's rows are");
+    for row in &rows {
+        assert!(tree.node_by_id(row).bounds().is_some(), "{row} has bounds");
+    }
 }

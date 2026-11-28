@@ -1405,12 +1405,12 @@ fn a_screen_reader_that_leaves_stops_the_tree() {
 #[test]
 fn a_rescaled_window_reports_its_scale_factor() {
     use loom_ui::App as _;
-    let hosted = crate::iced_bridge::Hosted(app_with_filter().0, None, Default::default());
+    let app = app_with_filter().0;
     assert!(matches!(
-        hosted.window_event(&loom_ui::WindowEvent::ScaleChanged(2.0)),
+        app.window_event(&loom_ui::WindowEvent::ScaleChanged(2.0)),
         Some(Message::WindowRescaled)
     ));
-    assert!(hosted.window_event(&loom_ui::WindowEvent::Focused(true)).is_none());
+    assert!(app.window_event(&loom_ui::WindowEvent::Focused(true)).is_none());
 }
 
 /// The tree reports focus on the control the canvas says has it, and on
@@ -1904,12 +1904,12 @@ fn a_focused_field_does_not_rebuild_the_tree_in_a_loop() {
     // answer is that a field has it.
     ui.focus(&crate::patch_info::tags_part());
     assert!(ui.text_field_focused(), "the tag field took focus");
-    let _ = ui.deliver(Message::TextFocusCheck);
+    let _ = ui.deliver(Message::Tick);
     assert!(ui.app().focus.is_some(), "the app heard of it");
     ui.app_mut().a11y_event(Event::Activated);
     // Its rebuild is not asked for here: this test counts the ones that
     // one message makes.
-    drop(ui.app().take_window_questions());
+    ui.app_mut().posted.clear();
     ui.app_mut().a11y.locating = false;
 
     let log = ui.deliver(Message::Canvas(CanvasEvent::Select(Vec::new())));
@@ -1945,8 +1945,10 @@ fn a_click_on_another_tile_drops_focus_from_the_first() {
     let _ = ui.redraw();
     assert_eq!(ui.app_mut().a11y_tree(&Places::default()).focus, cutoff);
 
-    ui.send(Message::A11y(Event::Action(request(Action::Click, other_tile, None))));
-    let drawn = ui.redraw();
+    // The canvas syncs after each update, in the same turn, so its answer
+    // comes with the Click's messages, not on a later frame.
+    let mut drawn = ui.deliver(Message::A11y(Event::Action(request(Action::Click, other_tile, None))));
+    drawn.extend(ui.redraw());
     assert!(
         drawn
             .iter()
@@ -3170,7 +3172,11 @@ fn every_small_overlay_part_is_named_and_placed() {
             matches!(role, Role::Menu | Role::Dialog | Role::AlertDialog),
             "{name}: {role:?}"
         );
-        assert!(places.of(&root.id).is_some(), "{name}: the window drew {}", root.id);
+        assert!(
+            ui.runtime().bounds(&root.id).is_some(),
+            "{name}: the window drew {}",
+            root.id
+        );
         let mut acting = 0;
         for item in root.walk() {
             let found = node(&update, node_of(ui.app_mut(), &item.id));
@@ -3188,10 +3194,11 @@ fn every_small_overlay_part_is_named_and_placed() {
                 continue;
             }
             acting += 1;
-            let place = places
-                .of(&item.id)
+            let place = ui
+                .runtime()
+                .bounds(&item.id)
                 .unwrap_or_else(|| panic!("{name}: the window drew no `{}`", item.id));
-            assert!(place.rect.width > 0.0 && place.rect.height > 0.0, "{}", item.id);
+            assert!(place.width > 0.0 && place.height > 0.0, "{}", item.id);
             assert!(found.bounds().is_some(), "{} has bounds", item.id);
         }
         assert!(acting > 0, "{name}: something acts");
@@ -4460,7 +4467,6 @@ fn a_lights_message_is_a_live_reading_of_its_own() {
     let mut app = app_with_every_widget();
     listen(&mut app);
     let _ = app.send(Message::FocusMoved(Some(UiId::panel("inspector"))));
-    let _ = app.take_focus_question();
     assert!(!app.a11y.live_waits());
 
     let (lights, meters) = (
@@ -4471,7 +4477,6 @@ fn a_lights_message_is_a_live_reading_of_its_own() {
     assert_eq!(requests_this_thread(FrameCause::Lights), lights + 1);
     assert_eq!(requests_this_thread(FrameCause::Meters), meters, "not meters");
     assert!(app.a11y.live_waits(), "a live reading");
-    assert!(!app.focus_question_waits(), "no focus question");
 
     // The live timer sends what waited, so the telemetry message below
     // must mark the live values again.
@@ -4483,11 +4488,6 @@ fn a_lights_message_is_a_live_reading_of_its_own() {
     assert_eq!(requests_this_thread(FrameCause::Meters), meters + 1);
     assert_eq!(requests_this_thread(FrameCause::Lights), lights + 1);
     assert!(app.a11y.live_waits(), "a telemetry message is a live reading too");
-    assert!(!app.focus_question_waits());
-
-    // Any other message with a focus asks where it went.
-    let _ = app.send(Message::CloseHelp);
-    assert!(app.focus_question_waits());
 }
 
 /// A change while a rebuild is in flight (an autosave's warning, say) is
@@ -4608,4 +4608,50 @@ fn canvas_ports_and_tiles_report_the_outline_connections() {
     assert_eq!(port.controls(), [multiply, scope]);
     assert!(port.description().unwrap().contains("To Multiply 8 A and Scope In"));
     assert!(node(&tree_update, multiply).controls().is_empty());
+}
+
+/// The runtime's nodes keep their IDs through every tree built from one
+/// reading of them. A build drops each ID it was not asked for, and the
+/// runtime's are numbered only when its nodes are read, so a second build
+/// before the next reading once lost them all: a screen reader's request
+/// on an inspector part then found no part.
+#[test]
+fn the_runtimes_nodes_keep_their_ids_through_two_builds() {
+    let (app, module, _) = app_with_filter();
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    ui.send(Message::Canvas(CanvasEvent::Select(vec![module])));
+    let _ = ui.redraw();
+    ui.read_runtime_nodes();
+    let places = ui.places();
+    let row = crate::inspector::ids::row(module, crate::inspector::ids::Kind::Param, "cutoff");
+    let slider = crate::inspector::ids::part(&row, "value");
+    for build in 0..2 {
+        let update = ui.app_mut().a11y_tree(&places);
+        assert!(
+            update
+                .nodes
+                .iter()
+                .any(|(node, _)| ui.app().a11y_ui_id(*node).as_ref() == Some(&slider)),
+            "build {build}: the slider's node has no UI ID"
+        );
+    }
+}
+
+/// A screen reader that starts before there is a window still gets its
+/// tree: the read waits, with none in flight, and the first update with a
+/// window starts it, so the reader is not left with no tree.
+#[test]
+fn a_reader_that_starts_before_the_window_gets_its_tree() {
+    let mut app = crate::tests::app();
+    let _ = app.send(Message::A11y(Event::Activated));
+    assert!(app.a11y.waiting_window, "no window yet: the read waits");
+    assert!(app.a11y.locating, "and it stays in flight, so later asks queue");
+    let mut ui = crate::ui_test::Ui::with_app(app);
+    let _ = ui.redraw();
+    let _ = ui.deliver(Message::Tick);
+    let _ = ui.redraw();
+    assert!(
+        !ui.take_sent_trees().is_empty(),
+        "the tree was sent once the window was up"
+    );
 }

@@ -2602,3 +2602,30 @@ fn focus_and_select_all_selects_the_whole_text() {
         "typing replaced all of it"
     );
 }
+
+/// An input method's cursor inside its composition is used only when it
+/// falls on character boundaries inside the text: a cursor off a boundary
+/// or past the end is dropped, with nothing composed lost, and a valid
+/// range is kept as the composition's selected clause, which the shaped
+/// text then draws.
+#[test]
+fn a_preedit_cursor_is_kept_only_on_character_boundaries() {
+    let Some(mut bench) = field_in("", 300.0) else { return };
+    let Bench {
+        field,
+        fonts,
+        layouts,
+        now,
+    } = &mut bench;
+    let mut compose = |cursor| {
+        let text = "にほんご".to_owned();
+        field.ime(&ImeEvent::Preedit { text, cursor }, *now, fonts, layouts);
+        assert_eq!(field.text(), "にほんご");
+        assert!(field.composing());
+        field.selection_bytes()
+    };
+    let none = compose(None);
+    assert_eq!(compose(Some((1, 4))), none, "off a boundary, as none");
+    assert_eq!(compose(Some((3, 99))), none, "past the end, as none");
+    assert_eq!(compose(Some((3, 9))), (3, 9), "the clause ほん");
+}

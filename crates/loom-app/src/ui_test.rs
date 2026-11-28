@@ -1,38 +1,26 @@
-//! Headless UI tests: real pointer and key events sent to the app view.
+//! Headless UI tests: real pointer and key events sent to the app's window.
 //!
 //! The other app tests call `App::update` with messages. These go one step
-//! earlier and check that Iced routes each event to the right widget. The
-//! [`Ui`] harness does what the Iced runtime does for each frame: build a
-//! `UserInterface` from `App::view`, send it events with a cursor position,
-//! apply the messages it returns with `App::update`, and keep the widget
-//! cache for the next frame, so the canvas remembers a drag in progress.
+//! earlier: the [`Ui`] harness runs the app in `loom_ui::Runtime`, as the
+//! window does, with a driver of its own (`ui_test/driver.rs`), and hands
+//! the runtime each event, so routing, focus, the custom canvas, and the
+//! turn run through the same code as in the window (ui-layer.md, section
+//! 10, rule 1). Each message is one update, and its effects run in memory:
+//! the clipboard is a string, work runs inline, a capture draws the window
+//! offscreen with the window's own painter (`drawing.rs`) and answers that
+//! there is no GPU where no adapter is found, and Quit marks
+//! [`Ui::exited`]. A dialog is answered from the fake dialogs in the
+//! crate's tests; in a test under `tests/`, where they are off, it panics,
+//! naming it.
 //!
-//! The view is laid out on a renderer that only measures
-//! (`iced_bridge/measure.rs`): it lays text out with Iced's own paragraphs,
-//! as the window's wgpu renderer does, and draws nothing, so event tests
-//! need no GPU and never start one. A capture draws with wgpu, made on the
-//! first capture, and answers that there is no GPU where no adapter is
-//! found.
+//! The window is laid out with the same `Typesetter` the window draws with
+//! (section 10, rule 3), so every part lands where the window draws it, and
+//! event tests need no GPU and never start one.
 //!
 //! Tests find things by name, not by pixel: [`Ui::output`], [`Ui::input`],
 //! [`Ui::control`], and [`Ui::text`] return window coordinates from the
-//! canvas bounds, its camera, and the scene. So a test keeps working when a
-//! tile moves or the inspector gets wider.
-//!
-//! The messages run through the app's own bridge to our runtime
-//! (`iced_bridge.rs`), with a driver of its own (`iced_bridge/headless.rs`):
-//! input is routed, each message is one update, and focus, scrolling, and
-//! window questions run as Iced runs them, on the harness's view. Effects
-//! run in memory: the clipboard is a string, work runs inline, a capture
-//! draws the view offscreen on wgpu (and answers that there is no GPU where
-//! no adapter is found), and Quit marks [`Ui::exited`]. A dialog is answered from the
-//! fake dialogs in the crate's tests; in a test under `tests/`, where they
-//! are off, it panics, naming it. A task the harness cannot run, such as a
-//! window command or one that waits on a timer, panics too, so a test never
-//! passes because something was quietly skipped.
-//!
-//! Subscriptions do not run, except the two key listeners the app uses:
-//! `keyboard::listen` and, while the browser is open, `browser_key`.
+//! runtime's layout, the canvas's camera, and the scene. So a test keeps
+//! working when a tile moves or the inspector gets wider.
 //!
 //! Time is the harness's own clock (`clock.rs`, #868), not the system's:
 //! each step moves it on by [`STEP`], [`Ui::wait`] moves it on by a chosen
@@ -48,66 +36,111 @@
 //! events while the pointer is outside the window.
 
 mod a11y;
+mod driver;
 
-use crate::iced_bridge::headless::{Pending, Surface, UiDriver, settle};
-use crate::iced_bridge::{Bridge, Bridged};
+use crate::canvas::{CanvasElement, canvas_id};
+use crate::offscreen::Offscreen;
 use crate::{App, Args, Message, screenshot};
 pub use a11y::{A11yNode, A11yTarget, A11yTree, A11yValue};
-use iced::advanced::Clipboard;
-use iced::advanced::clipboard::Kind;
-use iced::advanced::widget::Id;
-use iced::advanced::widget::Operation;
-use iced::advanced::widget::operation::Outcome;
-use iced::{Event, Rectangle, Size, mouse, window};
-use iced_runtime::user_interface::UserInterface;
+use driver::UiDriver;
 use loom_canvas::CanvasView;
-use loom_canvas::iced_convert::key_event_to_iced;
-use loom_canvas::iced_convert::{ToCore as _, ToIced as _};
-use loom_ui_core::{Code, Key, KeyEvent, Modifiers, Point, Rect};
+use loom_ui::paint::Typesetter;
+use loom_ui::shell::Gate;
+use loom_ui::{DriverEvent, Runtime, WindowState};
+use loom_ui_core::{
+    Code, Event as UiEvent, Key, KeyEvent, Modifiers, Point, PointerButton, PointerEvent, Rect, Size as UiSize,
+};
 // The harness tests reach these through `use super::*`.
 #[cfg(test)]
 use loom_core::ModuleId;
+use std::cell::RefCell;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 /// The window size the app opens with.
-pub(crate) const WINDOW: Size = crate::WINDOW;
+pub(crate) const WINDOW: UiSize = crate::WINDOW;
 
 /// How far the harness's clock moves on each step: about the time between
 /// two events a person makes in quick succession, and well inside a
 /// double-click.
 pub(crate) const STEP: Duration = Duration::from_millis(1);
 
-/// The app view, driven by events the way the Iced runtime drives it.
+/// The most turns the harness runs for one event before it gives up: a
+/// loop of turns that never ends, such as a sync that keeps sending,
+/// fails the test instead of hanging it.
+const MOST_TURNS: usize = 1000;
+
+/// The app's window, driven by events the way the shell drives it.
 pub struct Ui {
-    /// The app's own bridge, with the harness's driver.
-    bridge: Bridge<UiDriver>,
-    /// The renderer, the widget cache, and the cursor.
-    surface: Surface,
-    /// The pointer events between Iced and the runtime's layers, as the
-    /// window keeps them (`iced_bridge/pointers.rs`).
-    pointers: crate::iced_bridge::Pointers,
-    /// Lays out the runtime's own panels, as the window's draw does.
-    text: loom_ui::paint::Typesetter,
+    /// The runtime the window runs, around the app.
+    runtime: Runtime<App, crate::layers::NoToolkit>,
+    /// Carries out the effects in memory.
+    driver: UiDriver,
+    /// How many wake-ups the runtime's waker gave since the last turn.
+    wakes: Arc<AtomicUsize>,
+    /// Set while the harness itself puts a message in the queue: that turn
+    /// runs at once, so it needs no wake-up.
+    quiet: Arc<AtomicBool>,
+    /// Lays out and draws the window's text, as the window's layers do.
+    text: RefCell<Typesetter>,
+    /// The GPU for captures, made at the first one: `Some(None)` when no
+    /// adapter was found.
+    offscreen: Option<Option<Offscreen>>,
+    /// Where the pointer is, in window logical pixels.
+    cursor: Option<Point>,
     /// The copy folder [`Ui::open`] made for this `Ui`, removed when it
     /// drops. Kept from the start, because the open file can change after
     /// New, Open, or Save As. `None` for an app the test built.
     copy: Option<PathBuf>,
+    /// How many turns said to draw a frame, as the window would.
+    draws_asked: usize,
 }
 
-/// The clipboard Iced's widgets use during one frame: a copy of the
-/// driver's, written back after it, so a paste in a field and the
-/// clipboard effects share one text.
-#[derive(Debug, Default)]
-struct Memory(Option<String>);
+/// One input a test gives the harness ([`Ui::step`]).
+#[derive(Debug, Clone)]
+pub(crate) enum Input {
+    /// An event, with where the pointer is when it moves it.
+    Event(UiEvent, Option<Point>),
+    /// A redraw, as the window draws a frame.
+    Redraw,
+    /// A window event, as the shell hands the runtime one.
+    Window(loom_ui::WindowEvent),
+}
 
-impl Clipboard for Memory {
-    fn read(&self, _kind: Kind) -> Option<String> {
-        self.0.clone()
+impl Input {
+    /// The pointer moved to `at`, in window logical pixels.
+    pub(crate) fn moved(at: Point) -> Self {
+        Self::Event(UiEvent::Pointer(PointerEvent::Moved), Some(at))
     }
 
-    fn write(&mut self, _kind: Kind, contents: String) {
-        self.0 = Some(contents);
+    /// A pointer event where the pointer is.
+    pub(crate) fn pointer(event: PointerEvent) -> Self {
+        Self::Event(UiEvent::Pointer(event), None)
+    }
+
+    /// The window lost the keys.
+    pub(crate) fn unfocused() -> Self {
+        Self::Window(loom_ui::WindowEvent::Focused(false))
+    }
+}
+
+impl From<UiEvent> for Input {
+    fn from(event: UiEvent) -> Self {
+        Self::Event(event, None)
+    }
+}
+
+impl From<&UiEvent> for Input {
+    fn from(event: &UiEvent) -> Self {
+        Self::Event(event.clone(), None)
+    }
+}
+
+impl From<&Input> for Input {
+    fn from(input: &Input) -> Self {
+        input.clone()
     }
 }
 
@@ -275,65 +308,67 @@ impl Ui {
 
     /// The app, to read.
     pub(crate) fn app(&self) -> &App {
-        self.bridge.app()
+        self.runtime.app()
     }
 
     /// The app, for a test to set up state between turns. The runtime's
     /// queue, deadline, and focus stay as they are, so a test moves focus
     /// with a focus effect or a click, never by setting the app's copy.
     pub(crate) fn app_mut(&mut self) -> &mut App {
-        self.bridge.app_mut()
+        // What a test changes here, outside a turn, shows on the next frame,
+        // and the canvas syncs with it as after an update (`canvas.rs`).
+        self.runtime.mark_view_stale();
+        let app = self.runtime.app_mut();
+        app.updates += 1;
+        app
     }
 
     /// Takes every whole accessibility tree the app sent since the last
     /// call, oldest first: what a screen reader was handed.
     pub(crate) fn take_sent_trees(&mut self) -> Vec<accesskit::TreeUpdate> {
-        std::mem::take(&mut self.bridge.driver_mut().trees)
+        std::mem::take(&mut self.driver.trees)
     }
 
     /// Takes the incremental accessibility updates the screen reader received.
     pub(crate) fn take_sent_changes(&mut self) -> Vec<accesskit::TreeUpdate> {
-        std::mem::take(&mut self.bridge.driver_mut().changes)
+        std::mem::take(&mut self.driver.changes)
     }
 
     /// The clipboard's text.
     pub(crate) fn clipboard(&self) -> Option<&str> {
-        self.bridge.driver().headless.clipboard()
+        self.driver.headless.clipboard()
     }
 
     /// Puts `text` on the clipboard, or empties it.
     pub(crate) fn set_clipboard(&mut self, text: Option<String>) {
-        self.bridge.driver_mut().headless.set_clipboard(text);
+        self.driver.headless.set_clipboard(text);
     }
 
     /// True once the app has quit.
     pub(crate) fn exited(&self) -> bool {
-        self.bridge.driver().headless.exited()
+        self.driver.headless.exited()
     }
 
     /// Puts the pointer at `cursor`, or takes it out of the window, with
     /// no event: as when the window stops hearing the pointer.
-    pub(crate) fn set_cursor(&mut self, cursor: mouse::Cursor) {
-        self.surface.cursor = cursor;
+    pub(crate) fn set_cursor(&mut self, cursor: impl Into<Cursor>) {
+        self.cursor = cursor.into().0;
     }
 
-    /// True when a GPU adapter was found, so a capture draws the view, the
-    /// canvas included. Events never need one.
+    /// True when a GPU adapter was found, so a capture draws the window,
+    /// the canvas included. Events never need one.
     pub(crate) fn draws_the_canvas(&mut self) -> bool {
-        self.surface.draws_the_canvas()
+        self.offscreen().is_some()
     }
 
-    /// The window's places laid out on the measure renderer and on wgpu,
-    /// or `None` with no GPU adapter (`Surface::places_on_both`).
-    #[cfg(test)]
-    pub(crate) fn places_on_both(&mut self) -> Option<(crate::places::Places, crate::places::Places)> {
-        let Self { bridge, surface, .. } = self;
-        surface.places_on_both(bridge.app())
+    /// The GPU for captures, made the first time one is asked for.
+    fn offscreen(&mut self) -> Option<&mut Offscreen> {
+        self.offscreen.get_or_insert_with(Offscreen::new).as_mut()
     }
 
     /// A waker into the app's runtime, as a watcher thread holds one.
     pub(crate) fn waker(&self) -> loom_ui::Waker<Message> {
-        self.bridge.waker()
+        self.runtime.waker()
     }
 
     /// Presses Open on the toolbar. From `tests/`, where the fake dialogs are
@@ -344,7 +379,7 @@ impl Ui {
         self.lay_out_panels();
         let open = crate::toolbar::toolbar_id().with("open");
         let at = self.runtime().bounds(&open).expect("the toolbar's Open");
-        let _ = self.move_to(loom_ui_core::Point::new(at.x + at.width / 2.0, at.y + at.height / 2.0));
+        let _ = self.move_to(Point::new(at.x + at.width / 2.0, at.y + at.height / 2.0));
         let _ = self.press();
         let _ = self.release();
     }
@@ -368,113 +403,277 @@ impl Ui {
     pub(crate) fn with_app(mut app: App) -> Self {
         // The harness's own time, which moves only as the test does (#868).
         app.clock = crate::clock::Clock::stepped(Instant::now());
-        let (mut bridge, first) = Bridge::<UiDriver>::new(app);
-        bridge.log_messages();
-        let mut ui = Self {
-            bridge,
-            surface: Surface::new(WINDOW),
-            pointers: crate::iced_bridge::Pointers::default(),
-            text: loom_ui::paint::Typesetter::new(),
-            copy: None,
+        app.message_log = Some(Vec::new());
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let quiet = Arc::new(AtomicBool::new(false));
+        let wake = {
+            let (wakes, quiet) = (wakes.clone(), quiet.clone());
+            Arc::new(move || {
+                if !quiet.load(Ordering::SeqCst) {
+                    wakes.fetch_add(1, Ordering::SeqCst);
+                }
+            })
         };
-        ui.settle(vec![first]);
-        // The canvas frames the patch on its first redraw.
+        let window = WindowState::new(WINDOW);
+        let mut ui = Self {
+            runtime: Runtime::new(app, crate::layers::NoToolkit, window, wake),
+            driver: UiDriver::default(),
+            wakes,
+            quiet,
+            text: RefCell::new(Typesetter::new()),
+            offscreen: None,
+            cursor: None,
+            copy: None,
+            draws_asked: 0,
+        };
+        // The first turn builds the view and reads the first deadline, such
+        // as the crash recovery question (autosave.md, Crash recovery); the
+        // first frame places the canvas, which then frames the patch.
+        ui.turn(DriverEvent::Woken);
         ui.redraw();
         ui
     }
 
-    /// One frame: the events go to the view at the current cursor, the
-    /// messages they produce go to the bridge, what the bridge returns
-    /// runs, and the new view is drawn. Returns every message `update` got,
-    /// in order, with input as the messages it was routed to.
-    pub(crate) fn step(&mut self, events: &[Event]) -> Vec<Message> {
+    /// One turn of the runtime for `event`, at the harness's time, then
+    /// what comes of it until nothing waits: messages for the next turn,
+    /// wake-ups, a deadline that has come, and the captures, drawn
+    /// offscreen.
+    fn turn(&mut self, event: DriverEvent) {
+        let now = self.app().clock.now();
+        let mut next = self.runtime.handle(event, now, &mut self.driver);
+        let mut turns = 0;
+        loop {
+            self.draws_asked += usize::from(next.draw);
+            turns += 1;
+            assert!(
+                turns < MOST_TURNS,
+                "the runtime kept running turns for one event; the last messages: {:?}",
+                self.app()
+                    .message_log
+                    .as_ref()
+                    .map(|log| log.iter().rev().take(5).collect::<Vec<_>>())
+            );
+            self.answer_captures();
+            let now = self.app().clock.now();
+            let event = if next.again || self.wakes.swap(0, Ordering::SeqCst) > 0 {
+                DriverEvent::Woken
+            } else if next.deadline.is_some_and(|at| at <= now) {
+                DriverEvent::DeadlineReached
+            } else {
+                // The window lays out and draws only at a frame, which the
+                // harness's steps and redraws make (`Ui::frame`).
+                break;
+            };
+            next = self.runtime.handle(event, now, &mut self.driver);
+        }
+    }
+
+    /// An animation frame at `at`, as the window's display refresh gives
+    /// one while something animates, and the messages that came of it.
+    pub(crate) fn animation_frame(&mut self, at: Instant) -> Vec<Message> {
+        self.app().clock.advance_to(at);
+        self.turn(DriverEvent::Frame);
+        self.take_log()
+    }
+
+    /// Calls `f` with the shell's parts for this window, as the shell hands
+    /// them to the layers between turns.
+    pub(crate) fn with_parts<R>(
+        &mut self,
+        f: impl FnOnce(loom_ui::shell::Parts<'_, App, crate::layers::NoToolkit>) -> R,
+    ) -> R {
+        let waker = self.runtime.waker();
+        let window = self.runtime.window();
+        let (app, target, panels) = self.runtime.parts();
+        f(loom_ui::shell::Parts {
+            app,
+            target,
+            waker: &waker,
+            window,
+            panels,
+        })
+    }
+
+    /// How many turns so far said to draw a frame, as the window would
+    /// draw one after each.
+    pub(crate) fn draws_asked(&self) -> usize {
+        self.draws_asked
+    }
+
+    /// Draws the window offscreen for each capture that waits, and answers
+    /// it, or answers that there is no GPU.
+    fn answer_captures(&mut self) {
+        let captures = std::mem::take(&mut self.driver.captures);
+        if captures.is_empty() {
+            return;
+        }
+        self.lay_out_now();
+        let scale = self.runtime.window().scale;
+        let size = self.runtime.window().size;
+        let waker = self.runtime.waker();
+        let image = {
+            let Self {
+                runtime,
+                offscreen,
+                text,
+                ..
+            } = self;
+            let offscreen = offscreen.get_or_insert_with(Offscreen::new).as_mut();
+            let (_, _, mut panels) = runtime.parts();
+            match offscreen {
+                Some(offscreen) => offscreen.window(&mut panels, text, size, scale).and_then(|rgba| {
+                    let (width, height) = crate::offscreen::physical(size, scale);
+                    loom_ui::effect::Image::new(width, height, scale, rgba)
+                }),
+                None => None,
+            }
+        };
+        for reply in captures {
+            let answer = image.clone().ok_or(loom_ui::effect::NoGpu);
+            waker.send(reply.give(answer));
+        }
+    }
+
+    /// One frame of input: each event goes to the runtime as the window
+    /// hands it over, at the harness's time, then the frame is drawn and
+    /// the control channel's next scripted step goes in, one a frame.
+    /// Returns every message `update` got, in order.
+    pub(crate) fn step<'a, I>(&mut self, inputs: &'a [I]) -> Vec<Message>
+    where
+        Input: From<&'a I>,
+    {
+        self.step_inputs(inputs.iter().map(Input::from).collect())
+    }
+
+    /// [`Ui::step`] with our own events, as the harness's methods give them.
+    fn step_ui(&mut self, events: &[UiEvent]) -> Vec<Message> {
+        self.step(events)
+    }
+
+    /// [`Ui::step`] with the inputs made.
+    fn step_inputs(&mut self, inputs: Vec<Input>) -> Vec<Message> {
         // Each step happens a little after the last, as a person's input
         // would (`STEP`).
         self.app().clock.advance(STEP);
-        // As the window: Iced keeps each event first, then the runtime
-        // routes it. Iced hears what the runtime's layers above it leave,
-        // and no key the runtime took.
-        let mut kept = Vec::new();
-        for event in events {
-            let pointer = {
-                let (_, _, panels) = self.bridge.runtime_mut().parts();
-                self.pointers.before(&panels, event.clone(), &mut kept)
-            };
-            let routed = match (pointer, event) {
-                (Some((event, point)), _) => Some((event, Some(point))),
-                (None, Event::Keyboard(_) | Event::InputMethod(_)) => {
-                    loom_canvas::iced_convert::event_to_core(event).map(|key| (key, None))
-                }
-                _ => None,
-            };
-            if let Some((event, point)) = routed {
-                let task = self.bridge.input(event, point);
-                self.settle(vec![task]);
-                // The runtime took this key, or input method event: Iced
-                // does not hear it.
-                if self.bridge.runtime_mut().target_mut().take_drop_keys()
-                    && let Some(at) = kept.len().checked_sub(1)
-                {
-                    self.pointers.drop_key_at(at, &mut kept);
+        for input in inputs {
+            match input {
+                Input::Redraw => self.turn(DriverEvent::RedrawRequested),
+                Input::Window(event) => self.turn(DriverEvent::Window(event)),
+                Input::Event(event, at) => {
+                    if let Some(at) = at {
+                        self.cursor = Some(at);
+                    }
+                    // The shell forgets the pointer before it says it left
+                    // the window, so a later press there has no point.
+                    if matches!(event, UiEvent::Pointer(PointerEvent::LeftWindow)) {
+                        self.cursor = None;
+                    }
+                    self.real(event);
                 }
             }
         }
-        // Then Iced's update, in the window's order (`Pointers::update`).
-        let listeners = self.app().listeners();
-        let mut clipboard = Memory(self.clipboard().map(str::to_string));
-        let (outputs, messages) = {
-            let Self {
-                bridge,
-                surface,
-                pointers,
-                ..
-            } = self;
-            let (app, target, mut panels) = bridge.runtime_mut().parts();
-            if app.0.pointer.waiting() {
-                app.0.pointer.place_runtime_targets(&panels);
-            }
-            let mut iced = crate::iced_bridge::headless::HarnessIced {
-                app: &app.0,
-                surface,
-                clipboard: &mut clipboard,
-                listeners,
-                messages: Vec::new(),
-                outputs: Vec::new(),
-            };
-            let _ = pointers.update(kept, target, &mut panels, &mut iced);
-            (iced.outputs, iced.messages)
-        };
-        self.set_clipboard(clipboard.0);
-        // The release's focus answer first, then the update's messages.
-        let tasks = outputs
-            .into_iter()
-            .chain(messages.into_iter().map(Bridged::App))
-            .map(|bridged| self.bridge.update(bridged))
-            .collect();
-        self.settle(tasks);
-        // Something outside a turn may have asked where focus is, such as a
-        // test replacing the patch directly. The bridge asks after its next
-        // turn, so the harness runs one.
-        if self.app().focus_question_waits() {
-            let task = self.bridge.update(Bridged::Woken);
-            self.settle(vec![task]);
-        }
-        self.lay_out_panels();
-        let Self { bridge, surface, .. } = self;
-        surface.draw(bridge.app());
-        // The frame is shown: what waited for it runs now, as in the window
-        // (`Effects::after_draw`).
-        if self.bridge.runtime().waits_for_draw() {
-            let task = self.bridge.update(Bridged::Presented);
-            self.settle(vec![task]);
-        }
-        let mut log = self.bridge.take_log();
-        // A scripted key goes as a real one, each in a step of its own, as
-        // the window's bridge gives them (`Report::input`).
-        while let Some(key) = self.app().pointer.take_scripted_key() {
-            log.extend(self.step(&[key]));
+        self.frame();
+        let mut log = self.take_log();
+        // A scripted step goes as a real one, each in a frame of its own,
+        // as the window's layers give them (`Report::input`).
+        while self.feed_one() {
+            log.extend(self.take_log());
         }
         log
+    }
+
+    /// The control channel's next scripted step after a frame, as the
+    /// window's layers give it (`Report::input`): its input goes in as real
+    /// input, then a frame is drawn. False when no step waits.
+    fn feed_one(&mut self) -> bool {
+        let (input, jumps) = {
+            self.lay_out_now();
+            let (app, _, panels) = self.runtime.parts();
+            let input = app.next_scripted(&panels);
+            let jumps: Vec<Message> = input
+                .iter()
+                .flat_map(|step| app.press_messages(&panels, &step.event, step.at))
+                .collect();
+            (input, jumps)
+        };
+        if input.is_empty() {
+            return false;
+        }
+        for message in jumps {
+            self.waker().send(message);
+        }
+        for loom_ui::shell::ScriptedInput { event, at } in input {
+            if let Some(at) = at {
+                self.cursor = Some(at);
+            }
+            let pointer = self.cursor;
+            self.turn(DriverEvent::Input { event, pointer });
+        }
+        self.frame();
+        true
+    }
+
+    /// A real input event, as the window's shell hands it over: a real
+    /// pointer goes through the script's gate first (`Pointer::gate`), the
+    /// input the script held runs, the gate is asked again, and a press
+    /// that passes then closes the cable jump list if it is outside it, as
+    /// the layers do (`layers.rs`).
+    fn real(&mut self, event: UiEvent) {
+        if matches!(event, UiEvent::Pointer(_)) {
+            loop {
+                self.lay_out_now();
+                let gate = self.app().pointer.gate(&event);
+                match gate {
+                    Gate::Hold => return,
+                    Gate::Pass => break,
+                    Gate::After(first) => {
+                        for loom_ui::shell::ScriptedInput { event, at } in first {
+                            let pointer = at.or(self.cursor);
+                            self.turn(DriverEvent::Input { event, pointer });
+                        }
+                    }
+                }
+            }
+            let jump = {
+                let (app, _, panels) = self.runtime.parts();
+                app.press_messages(&panels, &event, self.cursor)
+            };
+            self.waker().send_all(jump);
+        }
+        let pointer = self.cursor;
+        self.turn(DriverEvent::Input { event, pointer });
+    }
+
+    /// A frame: the window is laid out and drawn, and what waited for it
+    /// runs, as in the window (`Effects::after_draw`). The control channel
+    /// keeps what the canvas says the pointer is on.
+    fn frame(&mut self) {
+        self.lay_out_panels();
+        // The canvas builds its frame, as the window's prepare does.
+        if let (Some(element), Some(bounds)) = (
+            self.runtime.custom::<CanvasElement>(&canvas_id()),
+            self.runtime.bounds(&canvas_id()),
+        ) {
+            element.build_frame(self.runtime.app(), bounds);
+        }
+        if self.runtime.waits_for_draw() {
+            self.turn(DriverEvent::Presented);
+        }
+        let (app, _, panels) = self.runtime.parts();
+        if app.pointer.records() {
+            let (canvas, typed) = crate::canvas::panel_pointer(app, &panels);
+            app.pointer.record_seen(self.cursor, canvas, typed);
+        }
+    }
+
+    /// The messages `update` got since the last call, in order.
+    fn take_log(&mut self) -> Vec<Message> {
+        self.runtime
+            .app_mut()
+            .message_log
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
     }
 
     /// Every text the runtime paints in `layer` now, with the box it is
@@ -482,13 +681,7 @@ impl Ui {
     /// holds its ink. For tests that check what sits next to what.
     pub(crate) fn painted_texts(&mut self, layer: loom_ui::Layer) -> Vec<(String, Rect)> {
         use loom_ui::paint::{Align, Vertical, testing::Painted};
-        self.lay_out_panels();
-        let style = crate::iced_bridge::paint::panel_style();
-        let mut recorder = loom_ui::paint::testing::Recorder::default();
-        let (_, _, mut panels) = self.bridge.runtime_mut().parts();
-        panels.paint(layer, &mut recorder, &style);
-        recorder
-            .painted
+        self.painted(layer)
             .iter()
             .filter_map(|painted| match painted {
                 Painted::Text { text, run } => {
@@ -502,7 +695,7 @@ impl Ui {
                         Vertical::Center => run.anchor.y - h / 2.0,
                         Vertical::Top => run.anchor.y,
                     };
-                    Some((text.clone(), Rect::new(Point::new(x, y), loom_ui_core::Size::new(w, h))))
+                    Some((text.clone(), Rect::new(Point::new(x, y), UiSize::new(w, h))))
                 }
                 _ => None,
             })
@@ -514,13 +707,7 @@ impl Ui {
     /// turned off.
     pub(crate) fn painted_text_colours(&mut self, layer: loom_ui::Layer) -> Vec<(String, loom_ui_core::Color)> {
         use loom_ui::paint::testing::Painted;
-        self.lay_out_panels();
-        let style = crate::iced_bridge::paint::panel_style();
-        let mut recorder = loom_ui::paint::testing::Recorder::default();
-        let (_, _, mut panels) = self.bridge.runtime_mut().parts();
-        panels.paint(layer, &mut recorder, &style);
-        recorder
-            .painted
+        self.painted(layer)
             .iter()
             .filter_map(|painted| match painted {
                 Painted::Text { text, run } => Some((text.clone(), run.colour)),
@@ -532,13 +719,7 @@ impl Ui {
     /// Every box the runtime paints in `layer` now, in the order painted.
     pub(crate) fn painted_quads(&mut self, layer: loom_ui::Layer) -> Vec<loom_ui::paint::Quad> {
         use loom_ui::paint::testing::Painted;
-        self.lay_out_panels();
-        let style = crate::iced_bridge::paint::panel_style();
-        let mut recorder = loom_ui::paint::testing::Recorder::default();
-        let (_, _, mut panels) = self.bridge.runtime_mut().parts();
-        panels.paint(layer, &mut recorder, &style);
-        recorder
-            .painted
+        self.painted(layer)
             .iter()
             .filter_map(|painted| match painted {
                 Painted::Quad(quad) => Some(*quad),
@@ -547,106 +728,91 @@ impl Ui {
             .collect()
     }
 
-    /// Lays out the runtime's own panels, as the window does before each
-    /// frame, so hits and focus read what was drawn.
+    /// What the runtime paints in `layer` now, as the window paints it.
+    fn painted(&mut self, layer: loom_ui::Layer) -> Vec<loom_ui::paint::testing::Painted> {
+        self.lay_out_panels();
+        let style = crate::drawing::panel_style();
+        let mut recorder = loom_ui::paint::testing::Recorder::default();
+        let (_, _, mut panels) = self.runtime.parts();
+        panels.paint(layer, &mut recorder, &style);
+        recorder.painted
+    }
+
+    /// Lays out the window, as the window does before each frame, so hits
+    /// and focus read what was drawn, and runs what the layout started: a
+    /// canvas it placed hears so on the next turn.
     pub(crate) fn lay_out_panels(&mut self) {
         // A test that set the app's state directly gets the view it set,
         // through one turn with nothing to run.
-        if self.bridge.runtime().view_is_stale() {
-            let task = self.bridge.update(crate::iced_bridge::Bridged::Woken);
-            self.settle(vec![task]);
+        if self.runtime.view_is_stale() {
+            self.turn(DriverEvent::Woken);
         }
-        let (_, _, mut panels) = self.bridge.runtime_mut().parts();
-        panels.lay_out(&mut self.text);
+        self.lay_out_now();
+        if self.wakes.load(Ordering::SeqCst) > 0 {
+            self.turn(DriverEvent::Woken);
+            self.lay_out_now();
+        }
     }
 
-    /// The runtime the bridge runs, to read its own focus and hover.
-    pub(crate) fn runtime(&self) -> &loom_ui::Runtime<crate::iced_bridge::Hosted, crate::iced_bridge::IcedTarget> {
-        self.bridge.runtime()
+    /// Lays the window out with the harness's typesetter, and nothing more.
+    fn lay_out_now(&mut self) {
+        self.runtime.lay_out(&mut *self.text.borrow_mut());
+    }
+
+    /// The runtime, to read its own focus, hover, and layout.
+    pub(crate) fn runtime(&self) -> &Runtime<App, crate::layers::NoToolkit> {
+        &self.runtime
     }
 
     /// Adds `loom-ui` panels to the window for a routing test, and lays
-    /// them out. The app's own views stay Iced's.
-    pub(crate) fn with_test_panels(&mut self, panels: crate::iced_bridge::TestPanels) {
-        self.bridge.runtime_mut().app_mut().2.panels = Some(panels);
+    /// them out.
+    pub(crate) fn with_test_panels(&mut self, panels: crate::test_panels::TestPanels) {
+        self.app_mut().test_panels = Some(panels);
         // The runtime builds its view after a turn that ran an update, so
         // one harmless message brings the panels in.
         let _ = self.deliver(Message::Tick);
         self.lay_out_panels();
     }
 
-    /// Runs what the bridge returned until nothing is left.
-    fn settle(&mut self, tasks: Vec<Pending>) {
-        settle(&mut self.bridge, &mut self.surface, tasks);
-    }
-
     /// Applies `message` as the runtime does, then every message it
     /// produces and what those produce in turn, and returns them all.
     pub(crate) fn deliver(&mut self, message: Message) -> Vec<Message> {
-        let task = self.bridge.update(Bridged::App(message));
-        self.settle(vec![task]);
-        self.bridge.take_log()
+        self.quiet.store(true, Ordering::SeqCst);
+        self.runtime.waker().send(message);
+        self.quiet.store(false, Ordering::SeqCst);
+        self.turn(DriverEvent::Woken);
+        self.take_log()
     }
 
-    /// Handles an accessibility event and serves a frame only if its
-    /// runtime turn requests one without Iced's automatic redraw.
+    /// Handles an accessibility event, and draws a frame only if its turn
+    /// asked for one.
     #[cfg(test)]
     pub(crate) fn accessibility_turn(&mut self, event: loom_ui::AccessEvent) -> Vec<Message> {
-        let (tasks, draw) = self.bridge.accessibility_turn(event);
-        self.settle(vec![tasks]);
-        if draw { self.redraw() } else { self.bridge.take_log() }
+        let before = self.runtime.counts().redraws;
+        self.turn(DriverEvent::Accessibility(event));
+        if self.runtime.counts().redraws != before {
+            self.frame();
+        }
+        self.take_log()
     }
 
     /// A screen reader's event, as the adapter gives the window one: the
     /// runtime's turn first, then what comes of it, as for a message.
     pub(crate) fn accessibility(&mut self, event: loom_ui::AccessEvent) -> Vec<Message> {
-        let task = self.bridge.accessibility(event);
-        self.settle(vec![task]);
-        self.bridge.take_log()
+        self.turn(DriverEvent::Accessibility(event));
+        self.take_log()
     }
 
-    /// Takes focus from every field, as the bridge does for a focus effect
-    /// to no element, with no message.
+    /// Takes focus from every field, as a focus effect to no element does,
+    /// with no message of the test's own.
     pub(crate) fn unfocus_all(&mut self) -> Vec<Message> {
-        // The runtime's focus too, as the app's own unfocus lets it go; the
-        // app hears of it on the next turn (plan 3.2, row 4d).
-        self.bridge.runtime_mut().unfocus();
-        let _ = self.deliver(Message::Tick);
-        let task =
-            crate::iced_bridge::focus_moves(&loom_ui::effect::FocusTarget::Nothing, loom_ui::effect::Selection::Keep);
-        self.settle(vec![task]);
-        self.bridge.take_log()
+        // The app hears of it on the next turn (plan 3.2, row 4d).
+        self.runtime.unfocus();
+        self.deliver(Message::Tick)
     }
 
-    /// Scrolls the part named `id` into view as the bridge's scroll does,
-    /// with no message, and returns the messages that came of it.
-    pub(crate) fn scroll_to(&mut self, id: &loom_ui_core::UiId) -> Vec<Message> {
-        let task = crate::iced_bridge::scroll_into_view(id);
-        self.settle(vec![task]);
-        self.bridge.take_log()
-    }
-
-    /// What the widgets say has focus now.
-    fn read_focus(&mut self) -> crate::iced_bridge::FocusAnswer {
-        let mut find = crate::iced_bridge::FindFocus::default();
-        {
-            let mut operation = iced::advanced::widget::operation::black_box(&mut find);
-            self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut operation));
-        }
-        find.0
-    }
-
-    /// Builds the view, runs `f` on it, and keeps its cache.
-    pub(crate) fn with_ui(
-        &mut self,
-        f: impl FnOnce(&mut UserInterface<'_, Message, iced::Theme, crate::Renderer>, &mut crate::Renderer, mouse::Cursor),
-    ) {
-        let Self { bridge, surface, .. } = self;
-        surface.with_ui(bridge.app(), f);
-    }
-
-    /// A redraw, as the runtime sends before each frame. The canvas uses it
-    /// to frame the patch and to report which lights are visible.
+    /// A frame, as the window draws one: the canvas syncs with the app on
+    /// it, frames the patch, and reports which lights are visible.
     pub(crate) fn redraw(&mut self) -> Vec<Message> {
         self.redraw_at(self.app().clock.now())
     }
@@ -665,9 +831,8 @@ impl Ui {
     /// section 5, rule 16).
     pub(crate) fn wake_after(&mut self, by: Duration) -> Vec<Message> {
         self.wait(by);
-        let task = self.bridge.update(crate::iced_bridge::Bridged::Woken);
-        self.settle(vec![task]);
-        self.bridge.take_log()
+        self.turn(DriverEvent::Woken);
+        self.take_log()
     }
 
     /// The harness's time now.
@@ -678,9 +843,9 @@ impl Ui {
     /// Resizes the harness's window, leaving the new layout for the next frame.
     #[cfg(test)]
     pub(crate) fn resize(&mut self, width: f32, height: f32) {
-        self.surface.size = iced::Size::new(width, height);
-        let task = self.bridge.resize(loom_ui_core::Size::new(width, height));
-        self.settle(vec![task]);
+        self.turn(DriverEvent::Window(loom_ui::WindowEvent::Resized(UiSize::new(
+            width, height,
+        ))));
     }
 
     /// A window event, as the shell hands the runtime one: a close request
@@ -688,18 +853,21 @@ impl Ui {
     /// what comes of it runs as for a message.
     #[cfg(test)]
     pub(crate) fn window_event(&mut self, event: loom_ui::WindowEvent) -> Vec<Message> {
-        let task = self.bridge.window_event(event);
-        self.settle(vec![task]);
-        self.bridge.take_log()
+        self.turn(DriverEvent::Window(event));
+        self.take_log()
     }
 
-    /// A redraw at a chosen time, so a test can pass a timer's deadline
+    /// A frame at a chosen time, so a test can pass a timer's deadline
     /// without sleeping.
     pub(crate) fn redraw_at(&mut self, at: Instant) -> Vec<Message> {
-        // The clock moves to the redraw's time, never back.
+        // The clock moves to the frame's time, never back.
         self.app().clock.advance_to(at);
         self.lay_out_panels();
-        self.step(&[Event::Window(window::Event::RedrawRequested(at))])
+        self.turn(DriverEvent::RedrawRequested);
+        self.frame();
+        // One scripted step a frame, as the window's layers give them.
+        self.feed_one();
+        self.take_log()
     }
 
     /// Presses a key and holds it. With `repeat`, it is a repeat the
@@ -713,12 +881,12 @@ impl Ui {
         self.step(&[key_released(key, Modifiers::NONE)])
     }
 
-    /// Clicks the first text widget that reads exactly `content`, such as a
-    /// toolbar button's label.
+    /// Clicks the first text the window shows that reads exactly
+    /// `content`, such as a toolbar button's label.
     pub(crate) fn click_text(&mut self, content: &str) -> Vec<Message> {
         let at = self
             .text(content)
-            .unwrap_or_else(|| panic!("no widget shows `{content}`"))
+            .unwrap_or_else(|| panic!("no element shows `{content}`"))
             .center();
         let mut messages = self.move_to(at);
         messages.extend(self.press());
@@ -733,37 +901,26 @@ impl Ui {
     }
 
     /// Gives keyboard focus to the text field of `part`, as a click on it
-    /// would, and draws the frame. It sends no message, as a focus that a
-    /// widget takes itself sends none: the app hears of it on the next turn
-    /// that asks.
+    /// would, and draws the frame.
     pub(crate) fn focus(&mut self, part: &loom_ui_core::UiId) {
-        // One of the runtime's fields takes the focus as a press on it
-        // gives it, in the runtime's own focus.
         self.lay_out_panels();
-        if let Some(at) = self.runtime().bounds(part) {
-            let centre = loom_ui_core::Point::new(at.x + at.width / 2.0, at.y + at.height / 2.0);
-            let _ = self.bridge.runtime_mut().focus_at(centre);
-            self.redraw();
-            return;
-        }
-        let mut operation =
-            iced::advanced::widget::operation::focusable::focus::<()>(crate::places::field_widget_id(part));
-        self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut operation));
+        let at = self
+            .runtime()
+            .bounds(part)
+            .unwrap_or_else(|| panic!("no field `{part}` in the window"));
+        let centre = Point::new(at.x + at.width / 2.0, at.y + at.height / 2.0);
+        let _ = self.runtime.focus_at(centre);
         self.redraw();
     }
 
-    /// True when a text field has keyboard focus, read from the widgets.
+    /// True when a text field has keyboard focus.
     pub(crate) fn text_field_focused(&mut self) -> bool {
-        self.runtime().focused_field().is_some() || self.read_focus().any
+        self.runtime().focused_field().is_some()
     }
 
-    /// The part whose text field has focus: one of the runtime's fields,
-    /// or else one of Iced's, read from the widgets.
+    /// The part whose text field has focus.
     pub(crate) fn focused_field(&mut self) -> Option<loom_ui_core::UiId> {
-        if let Some(field) = self.runtime().focused_field() {
-            return Some(field.clone());
-        }
-        self.read_focus().part()
+        self.runtime().focused_field().cloned()
     }
 
     /// Clicks the inspector's value field for `module`'s parameter `index`,
@@ -796,55 +953,30 @@ impl Ui {
         self.field(&part)
     }
 
-    /// Where the text field of `part` is in the window, to click on it: one
-    /// of the runtime's, from its layout, or else one of Iced's.
+    /// Where the text field of `part` is in the window, to click on it.
     pub(crate) fn field(&mut self, part: &loom_ui_core::UiId) -> Point {
         self.lay_out_panels();
-        if let Some(at) = self.runtime().bounds(part) {
-            return Point::new(at.x + at.width / 2.0, at.y + at.height / 2.0);
-        }
-        self.field_by_id(crate::places::field_widget_id(part))
-    }
-
-    /// The centre of the focusable widget with this ID.
-    fn field_by_id(&mut self, id: iced::advanced::widget::Id) -> Point {
-        use iced::advanced::widget::operation::{Focusable, Outcome};
-        use iced::advanced::widget::{Id, Operation};
-
-        struct Find(Id, Option<Rectangle>);
-        impl Operation for Find {
-            fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
-                operate(self);
-            }
-            fn focusable(&mut self, id: Option<&Id>, bounds: Rectangle, _state: &mut dyn Focusable) {
-                if id == Some(&self.0) {
-                    self.1 = Some(bounds);
-                }
-            }
-            fn finish(&self) -> Outcome<()> {
-                Outcome::None
-            }
-        }
-        let mut find = Find(id, None);
-        self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut find));
-        find.1.expect("a field with that ID is on screen").center().to_core()
+        let at = self
+            .runtime()
+            .bounds(part)
+            .unwrap_or_else(|| panic!("no field `{part}` in the window"));
+        Point::new(at.x + at.width / 2.0, at.y + at.height / 2.0)
     }
 
     /// Moves the pointer to a window point.
     pub(crate) fn move_to(&mut self, p: Point) -> Vec<Message> {
-        let position = p.to_iced();
-        self.surface.cursor = mouse::Cursor::Available(position);
-        self.step(&[Event::Mouse(mouse::Event::CursorMoved { position })])
+        self.cursor = Some(p);
+        self.step_ui(&[UiEvent::Pointer(PointerEvent::Moved)])
     }
 
     /// Presses the left button where the pointer is.
     pub(crate) fn press(&mut self) -> Vec<Message> {
-        self.step(&[Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))])
+        self.step_ui(&[UiEvent::Pointer(PointerEvent::Pressed(PointerButton::Left))])
     }
 
     /// Releases the left button where the pointer is.
     pub(crate) fn release(&mut self) -> Vec<Message> {
-        self.step(&[Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))])
+        self.step_ui(&[UiEvent::Pointer(PointerEvent::Released(PointerButton::Left))])
     }
 
     /// Presses at `from`, moves to `to` in `steps` even moves, and releases
@@ -868,7 +1000,7 @@ impl Ui {
     }
 
     /// Types text, one key press and release per character, as a keyboard
-    /// does. Only the widget with focus takes it.
+    /// does. Only the element with focus takes it.
     pub(crate) fn typewrite(&mut self, text: &str) -> Vec<Message> {
         let mut messages = Vec::new();
         let none = Modifiers::NONE;
@@ -881,24 +1013,30 @@ impl Ui {
         messages
     }
 
-    /// Where the canvas is in the window, and its camera.
+    /// Where the canvas is in the window, and its camera, read from its
+    /// element as the window last laid it out.
     pub(crate) fn canvas(&mut self) -> CanvasView {
-        let mut view = None;
-        self.with_ui(|ui, renderer, _| view = screenshot::canvas_view(ui, renderer));
-        view.expect("the app view has a patch canvas")
+        self.lay_out_panels();
+        let bounds = self
+            .runtime()
+            .bounds(&canvas_id())
+            .expect("the window has a patch canvas");
+        self.runtime()
+            .custom::<CanvasElement>(&canvas_id())
+            .expect("the canvas has its state")
+            .input()
+            .view(bounds)
     }
 
-    /// Where the window drew the canvas and each named part, as the
-    /// accessibility layer and the control channel's `locate` are told.
+    /// Where the canvas is and its open typed field, as the accessibility
+    /// layer and the control channel's `locate` are told.
     pub(crate) fn places(&mut self) -> crate::places::Places {
-        let mut collect = crate::places::Collect::default();
-        self.with_ui(|ui, renderer, _| {
-            ui.operate(
-                renderer,
-                &mut iced::advanced::widget::operation::black_box(&mut collect),
-            );
-        });
-        collect.places()
+        let canvas = self.canvas();
+        let typed = self
+            .runtime()
+            .custom::<CanvasElement>(&canvas_id())
+            .and_then(|element| element.input().typed_field(&self.app().canvas_model(), canvas.bounds));
+        crate::places::Places::live(Some(canvas), typed)
     }
 
     /// The centre of a module's output port, by its stable name.
@@ -977,70 +1115,24 @@ impl Ui {
     /// Holds these modifier keys, or none, for the steps that follow, as
     /// the runtime reports a change in the held modifiers.
     pub(crate) fn hold(&mut self, modifiers: Modifiers) -> Vec<Message> {
-        self.step(&[Event::Keyboard(iced::keyboard::Event::ModifiersChanged(
-            modifiers.to_iced(),
-        ))])
+        self.step_ui(&[UiEvent::Key(KeyEvent::ModifiersChanged(modifiers))])
     }
 
-    /// The current translation of a named scrollable widget.
-    pub(crate) fn scroll_translation(&mut self, name: &'static str) -> Option<iced::Vector> {
-        struct Find {
-            id: Id,
-            translation: Option<iced::Vector>,
-        }
-        impl Operation for Find {
-            fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
-                if self.translation.is_none() {
-                    operate(self);
-                }
-            }
-            fn scrollable(
-                &mut self,
-                id: Option<&Id>,
-                _bounds: Rectangle,
-                _content_bounds: Rectangle,
-                translation: iced::Vector,
-                _state: &mut dyn iced::advanced::widget::operation::Scrollable,
-            ) {
-                if id == Some(&self.id) {
-                    self.translation = Some(translation);
-                }
-            }
-        }
-        let mut find = Find {
-            id: Id::new(name),
-            translation: None,
-        };
-        self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut find));
-        find.translation
-    }
-
-    /// The bounds of the first text widget that reads exactly `content`,
-    /// for example an inspector row label. `None` if no widget shows it.
+    /// The bounds of the first text the window shows that reads exactly
+    /// `content`, for example an inspector row label, as last laid out.
+    /// `None` if no element shows it.
     pub(crate) fn text(&mut self, content: &str) -> Option<Rect> {
-        struct Find<'a>(&'a str, Option<Rectangle>);
-        impl Operation for Find<'_> {
-            fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
-                if self.1.is_none() {
-                    operate(self);
-                }
-            }
-            fn text(&mut self, _id: Option<&Id>, bounds: Rectangle, text: &str) {
-                if self.1.is_none() && text == self.0 {
-                    self.1 = Some(bounds);
-                }
-            }
-            fn finish(&self) -> Outcome<()> {
-                Outcome::None
-            }
-        }
-        let mut find = Find(content, None);
-        self.with_ui(|ui, renderer, _| ui.operate(renderer, &mut find));
-        // Then the runtime's own text (the stats bar), as last laid out.
-        find.1.map(|bounds| bounds.to_core()).or_else(|| {
-            self.lay_out_panels();
-            self.runtime().text_bounds(content)
-        })
+        self.lay_out_panels();
+        self.runtime().text_bounds(content)
+    }
+}
+
+/// Where a test puts the pointer: a window point, or nowhere.
+pub(crate) struct Cursor(Option<Point>);
+
+impl From<Option<Point>> for Cursor {
+    fn from(at: Option<Point>) -> Self {
+        Self(at)
     }
 }
 
@@ -1058,28 +1150,27 @@ pub(crate) fn pressed(key: loom_ui_core::Key, modifiers: loom_ui_core::Modifiers
 }
 
 /// A key press with no modifiers and no text, as the keyboard sends it.
-pub(crate) fn key_pressed(key: Key, repeat: bool) -> Event {
+pub(crate) fn key_pressed(key: Key, repeat: bool) -> UiEvent {
     key_press(key, Modifiers::NONE, None, repeat)
 }
 
 /// A key press with `modifiers` held, carrying `text` when the key types
-/// a character, at a place nothing reads (`Code::Other`). It is Iced's
-/// event, since the harness still feeds Iced (plan step P4).
-pub(crate) fn key_press(key: Key, modifiers: Modifiers, text: Option<&str>, repeat: bool) -> Event {
-    let press = KeyEvent::Pressed {
+/// a character, at a place nothing reads (`Code::Other`).
+pub(crate) fn key_press(key: Key, modifiers: Modifiers, text: Option<&str>, repeat: bool) -> UiEvent {
+    UiEvent::Key(KeyEvent::Pressed {
         key,
         code: Code::Other,
         modifiers,
         repeat,
         text: text.map(str::to_string),
-    };
-    Event::Keyboard(key_event_to_iced(&press, modifiers))
+    })
 }
 
-/// A key release with `modifiers` held, as Iced's event.
-pub(crate) fn key_released(key: Key, modifiers: Modifiers) -> Event {
-    let release = KeyEvent::Released { key, code: Code::Other };
-    Event::Keyboard(key_event_to_iced(&release, modifiers))
+/// A key release. A release carries no modifiers (ui-layer.md, section 6,
+/// rule 4), so `modifiers` is what was held, for the reader.
+pub(crate) fn key_released(key: Key, modifiers: Modifiers) -> UiEvent {
+    let _ = modifiers;
+    UiEvent::Key(KeyEvent::Released { key, code: Code::Other })
 }
 
 #[cfg(test)]

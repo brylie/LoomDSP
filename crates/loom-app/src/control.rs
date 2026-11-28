@@ -9,18 +9,13 @@
 //! thread sends nothing, so the window does not redraw (rule 7).
 
 use crate::pointer::{Aim, Step as PointerStep};
-use crate::window_question::WindowQuestion;
 use crate::{App, Message, settings};
-use iced::advanced::widget::operation::Outcome;
-use iced::advanced::widget::{Id, Operation};
 use loom_canvas::PanelValues;
-use loom_canvas::iced_convert::ToCore as _;
 use loom_canvas::{CanvasEvent, CanvasView, ControlPart, PortRef};
 use loom_core::{Graph, MidiControl, MidiEvent, ModuleId, OutputSafety, WidgetKind};
 use loom_ui_core::{Point, Rect};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use std::any::Any;
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -32,8 +27,8 @@ mod run;
 mod transport;
 
 use resolve::*;
-pub(crate) use resolve::{Find, may_be_ours, ours_for_pointer, ui_id, waits_for_ours};
 pub use resolve::{Found, locate};
+pub(crate) use resolve::{may_be_ours, ours_for_pointer, waits_for_ours};
 pub use transport::{Listener, close, exit_status, watch};
 
 /// Command-line options for the control channel.

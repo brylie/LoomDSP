@@ -516,6 +516,91 @@ fn the_thumb_drags_and_the_track_pages() {
     assert_eq!(offset(&harness, &list()), 0.0, "a page up");
 }
 
+/// Ten keyed stops in an inner container 60 px tall, 20 px down, in an
+/// outer one 100 px tall.
+fn nested_stops(_: u32, _: Option<&UiId>) -> Vec<(UiId, Layer, Element)> {
+    let stops = (0..10).map(|n| stop(&format!("s{n}"))).collect();
+    list_panel(container(
+        "outer",
+        100.0,
+        vec![
+            Element::space(Length::Shrink, Length::Fixed(20.0)),
+            container("inner", 60.0, stops),
+            Element::space(Length::Shrink, Length::Fixed(100.0)),
+        ],
+    ))
+}
+
+/// Nested scroll containers each cut what shows of a part: a stop the
+/// inner container cuts shows only what the inner leaves, and one below
+/// the inner's view shows nothing, though the outer's view reaches it.
+#[test]
+fn nested_containers_each_cut_what_shows() {
+    let harness = showing(nested_stops);
+    let stop = |key: &str| id("outer").with("inner").with(key);
+    let inner = harness
+        .runtime()
+        .bounds(&id("outer").with("inner"))
+        .expect("the inner list");
+    let bottom = inner.y + inner.height;
+    let cut = (0..10)
+        .map(|n| stop(&format!("s{n}")))
+        .find(|id| {
+            harness
+                .runtime()
+                .bounds(id)
+                .is_some_and(|b| b.y < bottom && b.y + b.height > bottom)
+        })
+        .expect("a stop across the inner's bottom edge");
+    let shown = harness.runtime().shown_bounds(&cut).expect("in part");
+    assert_eq!(shown.y + shown.height, bottom, "cut at the inner's edge");
+    let past = (0..10)
+        .map(|n| stop(&format!("s{n}")))
+        .find(|id| {
+            harness
+                .runtime()
+                .bounds(id)
+                .is_some_and(|b| b.y >= bottom && b.y < 100.0)
+        })
+        .expect("a stop below the inner's view, inside the outer's");
+    assert_eq!(harness.runtime().shown_bounds(&past), None);
+}
+
+/// A lost pointer ends a drag with no button up, as a real pointer that
+/// takes over from a script, or a web page that loses the pointer,
+/// reports: a scroll thumb's drag stops, and a slider's drag ends where it
+/// is, with its End, as a release does (section 5, rule 16). A move after
+/// it drags nothing.
+#[test]
+fn a_lost_pointer_ends_a_thumb_and_a_slider_drag() {
+    let mut harness = showing(ten_rows);
+    let on_thumb = Point::new(395.0, 10.0);
+    step(
+        &mut harness,
+        pointer(PointerEvent::Pressed(PointerButton::Left), on_thumb),
+    );
+    step(&mut harness, pointer(PointerEvent::Moved, Point::new(200.0, 40.0)));
+    step(&mut harness, pointer(PointerEvent::Lost, Point::new(200.0, 40.0)));
+    let after = offset(&harness, &list());
+    step(&mut harness, pointer(PointerEvent::Moved, Point::new(395.0, 90.0)));
+    assert_eq!(offset(&harness, &list()), after, "the thumb no longer drags");
+
+    let mut harness = showing(with_slider);
+    let level = id("rows").with("level");
+    step(
+        &mut harness,
+        pointer(PointerEvent::Pressed(PointerButton::Left), Point::new(10.0, 10.0)),
+    );
+    step(&mut harness, pointer(PointerEvent::Moved, Point::new(60.0, 10.0)));
+    step(&mut harness, pointer(PointerEvent::Lost, Point::new(60.0, 10.0)));
+    let heard = harness.app().slid.clone();
+    let (_, _, phase) = heard.last().cloned().expect("the drag reported");
+    assert_eq!(phase, crate::SlidePhase::End, "the drag ended: {heard:?}");
+    step(&mut harness, pointer(PointerEvent::Moved, Point::new(150.0, 10.0)));
+    assert_eq!(harness.app().slid.len(), heard.len(), "a move after it reports nothing");
+    assert!(heard.iter().all(|(id, ..)| *id == level));
+}
+
 /// Section 5, rule 12: Tab to a stop below the fold scrolls the least
 /// distance that shows it and its ring, with 2 px to spare, and Shift+Tab
 /// does the same going up. No ring of a focused element is ever cut.
@@ -571,6 +656,22 @@ fn scroll_into_view_is_ours_for_our_elements_and_the_targets_otherwise() {
     harness.send(Message::Focus(id("rows").with("s0")));
     harness.lay_out(&mut Mono::default());
     assert_eq!(offset(&harness, &list()), 0.0, "a focus effect shows its element");
+}
+
+/// A reveal of a part the window does not have scrolls nothing: the list
+/// stays where it was, as the matrix's list does when an assignment is gone
+/// before its reveal runs.
+#[test]
+fn a_reveal_of_a_missing_part_scrolls_nothing() {
+    let mut harness = showing(ten_stops);
+    step(&mut harness, DriverEvent::Woken);
+    harness.send(Message::Reveal(id("rows").with("s9")));
+    harness.lay_out(&mut Mono::default());
+    let before = offset(&harness, &list());
+    assert!(before > 0.0);
+    harness.send(Message::Reveal(id("rows").with("s42")));
+    harness.lay_out(&mut Mono::default());
+    assert_eq!(offset(&harness, &list()), before);
 }
 
 /// Section 5, rule 12 and SC 2.1.1: a container whose content has no stop
@@ -883,4 +984,37 @@ fn a_root_under_an_element_near_the_corner_stays_inside_the_window() {
     let harness = showing(near_corner);
     let menu = harness.runtime().bounds(&UiId::panel("menu")).expect("the menu");
     assert_eq!((menu.x, menu.y, menu.width, menu.height), (340.0, 160.0, 60.0, 40.0));
+}
+
+/// What shows of a part is its bounds cut by the scroll container around
+/// it: a stop wholly in view shows whole, one half out shows only what is
+/// in view, and one scrolled out of view shows nothing, so `locate` never
+/// gives a point that would land on something else. Scrolling it in shows
+/// it again.
+#[test]
+fn a_part_shows_what_its_scroll_container_leaves_in_view() {
+    let mut harness = showing(ten_stops);
+    let shown = |harness: &Harness<Shown, Toolkit>, key: &str| harness.runtime().shown_bounds(&id("rows").with(key));
+    let laid = |harness: &Harness<Shown, Toolkit>, key: &str| harness.runtime().bounds(&id("rows").with(key));
+    assert_eq!(shown(&harness, "s0"), laid(&harness, "s0"), "wholly in view");
+    assert_eq!(shown(&harness, "s9"), None, "scrolled out of view");
+    assert!(laid(&harness, "s9").is_some(), "though it is laid out");
+    // Eight pixels down: s0 runs from -4 to 12, and the top 4 px are cut.
+    let pixels = pointer(
+        PointerEvent::Scrolled(ScrollDelta::Pixels { x: 0.0, y: -8.0 }),
+        Point::new(50.0, 50.0),
+    );
+    step(&mut harness, pixels);
+    let whole = laid(&harness, "s0").expect("s0");
+    let half = shown(&harness, "s0").expect("s0 shows in part");
+    assert_eq!(
+        (whole.y, half.y, half.height),
+        (-4.0, 0.0, 12.0),
+        "cut at the container's edge"
+    );
+    for _ in 0..10 {
+        step(&mut harness, key(Key::Tab));
+    }
+    assert!(shown(&harness, "s9").is_some(), "Tab scrolled it in");
+    assert_eq!(shown(&harness, "s0"), None, "and the first out");
 }

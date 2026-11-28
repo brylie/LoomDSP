@@ -76,8 +76,10 @@ pub struct Frame<'a> {
     /// Physical pixels per logical pixel.
     pub scale: f32,
     /// True for a capture, drawn offscreen for the app; false for the
-    /// window's own frame. A capture shows what the window last showed, so
-    /// layers do no frame work for it: they may draw their last frame again.
+    /// window's own frame. A capture draws the window as it is now, laid
+    /// out and painted as a frame is, so it shows any change since the
+    /// last frame too. Layers keep a capture out of their frame pacing:
+    /// it is not a frame the window showed.
     pub capture: bool,
 }
 
@@ -123,12 +125,42 @@ pub struct Report {
     /// [`Layers::alone`] for it.
     pub alone: bool,
     /// Input the layers hold for the runtime, in order: a control
-    /// channel's scripted keys. The shell gives each one to the runtime as
-    /// [`DriverEvent::Input`], one turn each, as it gives a real key, so a
-    /// scripted key goes where a real one would: the runtime's Tab, its
-    /// panel keys and fields, then the target (ui-layer.md, section 6,
-    /// rule 6).
-    pub input: Vec<loom_ui_core::Event>,
+    /// channel's scripted keys and pointer steps. The shell gives each one
+    /// to the runtime as [`DriverEvent::Input`], one turn each, as it gives
+    /// a real event, so a scripted event goes where a real one would: the
+    /// runtime's Tab, its panel keys and fields, a custom element, then the
+    /// target (ui-layer.md, section 6, rule 6; section 10, rule 6).
+    pub input: Vec<ScriptedInput>,
+}
+
+/// What the shell does with a real pointer event ([`Layers::pointer_gate`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Gate {
+    /// The runtime routes it, as always.
+    Pass,
+    /// It is dropped: the runtime never hears it.
+    Hold,
+    /// The runtime routes this input first, one turn each; then the gate
+    /// is asked again for the event, and it goes on as that answer says.
+    After(Vec<ScriptedInput>),
+}
+
+/// One input event the layers hold for the runtime ([`Report::input`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScriptedInput {
+    /// The event.
+    pub event: loom_ui_core::Event,
+    /// Where the pointer is with it, in window logical pixels: a scripted
+    /// pointer's own place. `None` keeps the window's pointer, as for a
+    /// scripted key.
+    pub at: Option<loom_ui_core::Point>,
+}
+
+impl From<loom_ui_core::Event> for ScriptedInput {
+    /// An event with the window's own pointer.
+    fn from(event: loom_ui_core::Event) -> Self {
+        Self { event, at: None }
+    }
 }
 
 /// What the shell remembers of the input method between reports: what
@@ -264,6 +296,22 @@ pub trait Layers<A: App, T> {
     /// A window event, as winit gave it. Called before the shell turns it
     /// into the runtime's events, so the app's side can keep its own copy.
     fn window_event(&mut self, _parts: Parts<'_, A, T>, _event: &WinitEvent) {}
+
+    /// A real pointer event, with where the pointer is, before the runtime
+    /// routes it: the layers may let it through, hold it back, or route
+    /// input of their own before it. An app whose script drives a pointer
+    /// uses this so the person at the computer wins: it holds real pointer
+    /// events while a scripted command runs, and lets go of what the
+    /// script held before the next real one. By default every event
+    /// passes.
+    fn pointer_gate(
+        &mut self,
+        _parts: Parts<'_, A, T>,
+        _event: &loom_ui_core::Event,
+        _pointer: Option<loom_ui_core::Point>,
+    ) -> Gate {
+        Gate::Pass
+    }
 
     /// Draws a whole frame into `frame.view`, the clear included. Called
     /// for the window and for a capture, so it never assumes the screen.
@@ -444,7 +492,7 @@ struct Handler<A: App, T, L, S> {
     /// The redraw rule.
     pacing: Pacing,
     /// Input the layers reported for the runtime, not yet given to it.
-    scripted: std::collections::VecDeque<loom_ui_core::Event>,
+    scripted: std::collections::VecDeque<ScriptedInput>,
     /// What stopped the loop, if anything failed.
     error: Option<Error>,
 }
@@ -561,6 +609,27 @@ where
         }
     }
 
+    /// What the layers do with the real pointer event `event`.
+    fn gate(&mut self, event: &loom_ui_core::Event, pointer: Option<loom_ui_core::Point>) -> Gate {
+        let Some(live) = self.live.as_mut() else {
+            return Gate::Pass;
+        };
+        let waker = live.runtime.waker();
+        let window = live.runtime.window();
+        let (app, target, panels) = live.runtime.parts();
+        self.layers.pointer_gate(
+            Parts {
+                app,
+                target,
+                waker: &waker,
+                window,
+                panels,
+            },
+            event,
+            pointer,
+        )
+    }
+
     /// Captures what was asked, applies the layers' report, and ends the
     /// loop once the app has quit. While the layers hold a message to run
     /// alone, runs it and asks them again, in a loop, so the stack stays
@@ -573,10 +642,10 @@ where
             // Then the layers' input, one turn each, as the window's own
             // would come, with what each turn reports applied after it.
             let quit = self.driver.exit || self.live.as_ref().is_none_or(|live| live.runtime.exited());
-            let Some(event) = self.scripted.pop_front().filter(|_| !quit) else {
+            let Some(ScriptedInput { event, at }) = self.scripted.pop_front().filter(|_| !quit) else {
                 break;
             };
-            let pointer = self.held.pointer;
+            let pointer = at.or(self.held.pointer);
             self.run(|runtime, driver| runtime.handle(DriverEvent::Input { event, pointer }, Instant::now(), driver));
         }
     }
@@ -831,7 +900,31 @@ where
             // applies now.
             self.after(event_loop);
         }
-        for converted in converted {
+        'events: for converted in converted {
+            let ask = |shell: &mut Self| match &converted {
+                DriverEvent::Input {
+                    event: event @ loom_ui_core::Event::Pointer(_),
+                    pointer,
+                } => shell.gate(event, *pointer),
+                _ => Gate::Pass,
+            };
+            // The input the layers hold goes first, one turn each; then
+            // the gate is asked again, so what the layers do for the real
+            // event itself comes after that input, not before it.
+            let mut gate = ask(self);
+            loop {
+                match gate {
+                    Gate::Pass => break,
+                    Gate::Hold => continue 'events,
+                    Gate::After(first) => {
+                        for ScriptedInput { event, at } in first {
+                            let pointer = at.or(self.held.pointer);
+                            self.turn(event_loop, DriverEvent::Input { event, pointer });
+                        }
+                        gate = ask(self);
+                    }
+                }
+            }
             self.turn(event_loop, converted);
         }
     }
@@ -846,9 +939,9 @@ where
 }
 
 /// The captures to draw now: all of them once a frame has been `shown`,
-/// none before. A capture is the window as it was last drawn, and before
-/// the first frame there is none, so it waits for the first frame rather
-/// than give a blank image.
+/// none before. A capture draws the window as it is now, and before the
+/// first frame the window is not on screen yet, so it waits for that frame
+/// rather than give an image of a window nobody saw.
 fn due_captures<R>(shown: bool, captures: &mut Vec<R>) -> Vec<R> {
     if shown { std::mem::take(captures) } else { Vec::new() }
 }

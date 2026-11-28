@@ -33,7 +33,7 @@ fn a_pointer_move_is_in_logical_pixels_and_is_kept() {
 fn buttons_carry_the_pointer_and_leaving_forgets_it() {
     let mut held = Held {
         pointer: Some(Point::new(4.0, 5.0)),
-        modifiers: Modifiers::NONE,
+        ..Held::default()
     };
     for (state, expected) in [
         (ElementState::Pressed, PointerEvent::Pressed(PointerButton::Right)),
@@ -344,4 +344,56 @@ fn input_method_events_become_the_runtimes() {
             }]
         );
     }
+}
+
+/// A touch at the given phase, finger, and physical position.
+fn finger(phase: winit::event::TouchPhase, id: u64, x: f64, y: f64) -> W {
+    W::Touch(winit::event::Touch {
+        device_id: DeviceId::dummy(),
+        phase,
+        location: PhysicalPosition::new(x, y),
+        force: None,
+        id,
+    })
+}
+
+/// A tap is a click where the finger is: the first finger moves the
+/// pointer there, in logical pixels, and presses the main button; moving
+/// it moves the pointer; lifting it releases the button. A second finger
+/// changes nothing, and a cancelled touch ends as a lost pointer, so it
+/// clicks nothing.
+#[test]
+fn a_touch_drives_the_pointer_with_its_first_finger() {
+    use winit::event::TouchPhase::{Cancelled, Ended, Moved, Started};
+    let pointer = |event: PointerEvent, x: f32, y: f32| DriverEvent::Input {
+        event: Event::Pointer(event),
+        pointer: Some(Point::new(x, y)),
+    };
+    let left = PointerButton::Left;
+    let mut held = Held::default();
+    let mut events = |event: W| driver_events(&event, 2.0, &mut held);
+    assert_eq!(
+        events(finger(Started, 7, 200.0, 100.0)),
+        [
+            pointer(PointerEvent::Moved, 100.0, 50.0),
+            pointer(PointerEvent::Pressed(left), 100.0, 50.0)
+        ]
+    );
+    assert_eq!(events(finger(Started, 8, 0.0, 0.0)), [], "a second finger");
+    assert_eq!(events(finger(Moved, 8, 0.0, 0.0)), []);
+    assert_eq!(
+        events(finger(Moved, 7, 220.0, 100.0)),
+        [pointer(PointerEvent::Moved, 110.0, 50.0)]
+    );
+    assert_eq!(
+        events(finger(Ended, 7, 220.0, 100.0)),
+        [pointer(PointerEvent::Released(left), 110.0, 50.0)]
+    );
+    assert_eq!(events(finger(Ended, 8, 0.0, 0.0)), [], "the second finger's end");
+    events(finger(Started, 9, 40.0, 40.0));
+    assert_eq!(
+        events(finger(Cancelled, 9, 40.0, 40.0)),
+        [pointer(PointerEvent::Lost, 20.0, 20.0)]
+    );
+    assert_eq!(held.touch, None);
 }

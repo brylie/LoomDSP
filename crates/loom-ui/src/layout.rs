@@ -764,6 +764,13 @@ impl Layout {
         self.by_id.get(id).map(|index| self.records[*index].bounds)
     }
 
+    /// What of the element with UI ID `id` shows, cut by every clipping
+    /// element around it, in the panel: `Some(None)` when nothing around
+    /// it clips, `None` for no such element.
+    pub(crate) fn clip_of(&self, id: &UiId) -> Option<Option<Rect>> {
+        self.by_id.get(id).map(|index| self.records[*index].clip)
+    }
+
     /// The nearest element on or around the element with UI ID `id` that
     /// takes `key` before it ([`Element::takes_first`]), in this panel.
     pub(crate) fn takes_first(&self, id: &UiId, key: Key) -> Option<&UiId> {
@@ -1027,7 +1034,16 @@ impl Layout {
         .expect("a new node always fits");
 
         let index = self.records.len();
-        let id = key.map(|key| scope.clone().with(key));
+        // A custom element that is its panel's root, with no key of its
+        // own, takes the panel's UI ID, so a panel can be one custom
+        // element whose inner parts sit under the panel's name, as the
+        // patch canvas's `canvas/…` parts do (ui-layer.md, section 9,
+        // rule 3).
+        let id = match key {
+            Some(key) => Some(scope.clone().with(key)),
+            None if parent.is_none() && custom.is_some() => Some(scope.clone()),
+            None => None,
+        };
         let (kept, lost) = self.claim(id.as_ref(), index, lost);
         let keys_first = if kept.is_some() { keys_first } else { Vec::new() };
         // A scroll container keeps its offset by its UI ID, and a custom

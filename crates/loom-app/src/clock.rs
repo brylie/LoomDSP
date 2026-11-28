@@ -10,7 +10,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-/// Where the app, its bridge, and the canvas read the time.
+/// Where the app reads the time. The canvas is given the time with each
+/// event, in its moment, so it reads no clock.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Clock {
     /// The stepped clock, or `None` for the system clock.
@@ -64,12 +65,6 @@ impl Clock {
         if at > now {
             self.advance(at - now);
         }
-    }
-}
-
-impl loom_canvas::Clock for Clock {
-    fn now(&self) -> Instant {
-        Clock::now(self)
     }
 }
 

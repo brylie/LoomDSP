@@ -787,11 +787,11 @@ impl App {
         )));
     }
 
-    /// Takes a real text field through the focus bridge, or a keyboard-operable action.
+    /// Takes a real text field by a focus effect, or a keyboard-operable action.
     fn focus_inspector_stop(&mut self, item: &crate::a11y::items::Item) {
         self.session.outline.last_inspector = Some(item.id.clone());
         self.effect(loom_ui::Effects::scroll_into_view(item.id.clone()));
-        if let Some(part) = item.focus.as_ref().and_then(crate::places::field_of) {
+        if let Some(part) = item.focus.clone() {
             self.session.outline.inspector_action = None;
             self.effect(loom_ui::Effects::focus(part));
         } else {

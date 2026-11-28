@@ -331,9 +331,9 @@ fn far_zoom_clicks_clear_nothing() {
     let (light, _) = targets(&mut ui, meter);
     ui.move_to(light);
     for _ in 0..40 {
-        ui.step(&[iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
-            delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
-        })]);
+        ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Scrolled(
+            loom_ui_core::ScrollDelta::Lines { x: 0.0, y: -1.0 },
+        ))]);
     }
     assert!(ui.canvas().camera.zoom < 0.35, "far out: {}", ui.canvas().camera.zoom);
     let (light, bar) = targets(&mut ui, meter);

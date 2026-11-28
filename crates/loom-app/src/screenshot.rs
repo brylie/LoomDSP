@@ -3,27 +3,19 @@
 //! whole window: toolbar, canvas, inspector, and stats bar.
 //!
 //! The frame goes through the same `Scene`, `PanelValues`, canvas
-//! renderer, and frame function (`iced_bridge/paint.rs`) as the window,
-//! drawn offscreen (`iced_bridge/offscreen.rs`). So the image is what a
+//! renderer, and frame drawing (`drawing.rs`) as the window, drawn
+//! offscreen (`offscreen.rs`). So the image is what a
 //! user sees, and an agent or a reviewer can check a UI
 //! change without a person at the screen. It opens no window, no audio
 //! device, and no MIDI port.
 
-use crate::iced_bridge::offscreen::Offscreen;
-use iced::advanced::mouse;
-use iced::advanced::renderer::Style;
-use iced::advanced::widget::Id;
-use iced::advanced::widget::operation::Operation;
-use iced::{Rectangle, Size, Theme};
-use iced_runtime::user_interface::{Cache, UserInterface};
-use loom_canvas::iced_convert::{ToCore as _, ToIced as _};
+use crate::offscreen::Offscreen;
 use loom_canvas::{
-    Camera, CanvasInput, CanvasModel, CanvasView, FrameCache, MAX_ZOOM, MIN_ZOOM, Palette, PanelValues, PortRef, Scene,
-    Still, StillDrag,
+    Camera, CanvasInput, CanvasModel, FrameCache, MAX_ZOOM, MIN_ZOOM, Palette, PanelValues, PortRef, Scene, Still,
+    StillDrag,
 };
 use loom_core::{AssignmentId, Controller, ModuleId, OutputRef};
-use loom_ui_core::Point;
-use std::any::Any;
+use loom_ui_core::{Point, Size};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::str::FromStr;
@@ -34,6 +26,15 @@ pub const NO_GPU: &str = "no GPU adapter for offscreen drawing";
 
 /// The error when the GPU drew a frame but it could not be read back.
 const NO_READ_BACK: &str = "the GPU could not read the frame back";
+
+/// An image's size in physical pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Physical {
+    /// Its width.
+    pub(crate) width: u32,
+    /// Its height.
+    pub(crate) height: u32,
+}
 
 /// Command-line options for a screenshot.
 #[derive(clap::Args, Debug, Clone)]
@@ -332,7 +333,7 @@ pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
         &loom_patch::ModulePath::root(),
         &loaded.positions,
         &loaded.sizes,
-        logical.to_core(),
+        logical,
     )?;
     let mut values = PanelValues::new();
     crate::scene::update_panel_values_dragging(
@@ -350,20 +351,33 @@ pub fn run(args: &crate::Args, path: &Path) -> Result<(), String> {
 }
 
 /// `loom-app --screenshot-window`: builds the app as `--dump-ui` does, with
-/// no audio and no MIDI, draws the whole window, and writes the PNG.
+/// no audio and no MIDI, runs it in a headless runtime, draws the whole
+/// window as the window draws a frame (`drawing.rs`), and writes the PNG.
 pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
-    let mut app = crate::snapshot::headless(args)?;
     let options = &args.view;
     let logical = options.size.map_or(crate::WINDOW, ImageSize::logical);
     let physical = physical_size(logical, options.scale)?;
     let mut offscreen = Offscreen::new().ok_or(NO_GPU)?;
+    let text = std::cell::RefCell::new(loom_ui::paint::Typesetter::new());
 
-    // The camera fits the canvas, not the window, so lay the window out
-    // once to find the canvas size.
-    let renderer = &mut offscreen.renderer;
-    let mut ui = UserInterface::build(app.view(), logical, Cache::default(), renderer);
-    let canvas = canvas_view(&mut ui, renderer).ok_or("the window has no patch canvas")?;
-    drop(ui);
+    // The camera fits the canvas, not the window, so a first run lays the
+    // window out to find the canvas's size. The app changes only through
+    // `update` (ui-layer.md, section 2, rule 1), so the still state goes
+    // into a second app before its runtime starts.
+    let canvas = {
+        // Only the layout is read here, so the engine runs no frames: the
+        // app below runs them once, for the state the image shows.
+        let probe = crate::Args {
+            frames: None,
+            hold_note: false,
+            ..args.clone()
+        };
+        let runtime = window_runtime(crate::snapshot::headless(&probe)?, logical, options.scale, &text);
+        runtime
+            .custom_bounds(&crate::canvas::canvas_id())
+            .ok_or("the window has no patch canvas")?
+    };
+    let mut app = crate::snapshot::headless(args)?;
     let (scene, shown) = shown(
         options,
         &mut app.session.controller,
@@ -371,87 +385,78 @@ pub fn run_window(args: &crate::Args, path: &Path) -> Result<(), String> {
         &app.session.level,
         &app.session.positions,
         &app.session.sizes,
-        canvas.bounds.size(),
+        canvas.size(),
     )?;
     app.session.scene = scene;
     app.session.gestures.show_depth(shown.dragging);
     app.refresh_values();
     app.session.selection.extend(shown.selected);
     app.still = Some(shown.still);
-
-    let pixels = draw_window(&app, &mut offscreen, logical, options.scale).ok_or(NO_READ_BACK)?;
+    let pixels = window_pixels(app, &mut offscreen, logical, options.scale).ok_or(NO_READ_BACK)?;
     write_png(path, physical, &pixels)
 }
 
-/// Draws one frame of the whole window and returns its RGBA pixels, or
+/// `app` run in a headless runtime with a window `logical` pixels at
+/// `scale`, and drawn as the window draws a frame: its RGBA pixels, or
 /// `None` when they could not be read back from the GPU.
-///
-/// The frame first gets a redraw event, as every frame in the app does.
-/// Iced's buttons choose their look (enabled, hovered, disabled) while they
-/// handle a redraw, and draw as disabled before the first one (#460).
-fn draw_window(app: &crate::App, offscreen: &mut Offscreen, logical: Size, scale: f32) -> Option<Vec<u8>> {
-    let physical = physical_size(logical, scale).expect("the caller checked the size");
-    // A new cache, so the canvas starts from the still state.
-    let theme = crate::iced_bridge::theme();
-    let renderer = &mut offscreen.renderer;
-    let mut ui = UserInterface::build(app.view(), logical, Cache::default(), renderer);
-    let redraw = iced::Event::Window(iced::window::Event::RedrawRequested(std::time::Instant::now()));
-    // The image is one still frame, so what the widgets ask for is dropped.
-    let mut messages = Vec::new();
-    let _ = ui.update(
-        &[redraw],
-        mouse::Cursor::Unavailable,
-        renderer,
-        &mut iced::advanced::clipboard::Null,
-        &mut messages,
-    );
-    let style = Style {
-        text_color: crate::style::TEXT.to_iced(),
-    };
-    // The canvas leaves its frame in the app's slot while Iced draws.
-    app.canvas_drawn.clear();
-    ui.draw(renderer, theme, &style, mouse::Cursor::Unavailable);
-    let drawing = app.canvas_drawn.take();
-    // The renderer holds text paragraphs weakly, and the widget tree owns
-    // them, so the tree must live until the frame is drawn.
-    let panels = crate::iced_bridge::offscreen::still_panels(app, logical);
-    let pixels = offscreen.pixels_with(
-        physical,
-        scale,
-        crate::style::PANEL_FILL.to_iced(),
-        drawing,
-        Some(panels),
-    );
-    drop(ui);
-    pixels
+pub(crate) fn window_pixels(app: crate::App, offscreen: &mut Offscreen, logical: Size, scale: f32) -> Option<Vec<u8>> {
+    let text = std::cell::RefCell::new(loom_ui::paint::Typesetter::new());
+    let mut runtime = window_runtime(app, logical, scale, &text);
+    let (_, _, mut panels) = runtime.parts();
+    offscreen.window(&mut panels, &text, logical, scale)
 }
 
-/// Where the canvas is in the window, and its camera. The canvas reports a
-/// [`CanvasView`] to widget operations.
-pub(crate) fn canvas_view<M>(
-    ui: &mut UserInterface<'_, M, Theme, crate::Renderer>,
-    renderer: &mut crate::Renderer,
-) -> Option<CanvasView> {
-    #[derive(Default)]
-    struct Find(Option<CanvasView>);
-    impl Operation for Find {
-        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
-            operate(self);
+/// `app` in a headless runtime with a window `logical` pixels at `scale`,
+/// run until it is laid out and its canvas has synced, as a window shows
+/// its first frame.
+fn window_runtime(
+    app: crate::App,
+    logical: Size,
+    scale: f32,
+    text: &std::cell::RefCell<loom_ui::paint::Typesetter>,
+) -> loom_ui::Runtime<crate::App, crate::layers::NoToolkit> {
+    let mut window = loom_ui::WindowState::new(logical);
+    window.scale = scale;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let wakes = std::sync::Arc::new(AtomicUsize::new(0));
+    let woken = std::sync::Arc::clone(&wakes);
+    let wake = std::sync::Arc::new(move || {
+        woken.fetch_add(1, Ordering::SeqCst);
+    });
+    let mut runtime = loom_ui::Runtime::new(app, crate::layers::NoToolkit, window, wake);
+    let mut driver = loom_ui::headless::Headless::new();
+    let now = std::time::Instant::now();
+    // As the `Ui` harness settles a window: the first turn builds the view,
+    // and each layout may place the canvas, which then hears it and syncs
+    // with the app. Turns run while a message, a wake, or a due deadline
+    // waits, so the image is the frame the window would show.
+    let mut next = runtime.handle(loom_ui::DriverEvent::Woken, now, &mut driver);
+    for _ in 0..MOST_TURNS {
+        runtime.lay_out(&mut *text.borrow_mut());
+        let woke = wakes.swap(0, Ordering::SeqCst) > 0;
+        let due = next.deadline.is_some_and(|at| at <= now);
+        if !next.again && !woke && !due {
+            return runtime;
         }
-        fn custom(&mut self, _id: Option<&Id>, _bounds: Rectangle, state: &mut dyn Any) {
-            if let Some(view) = state.downcast_ref::<CanvasView>() {
-                self.0 = Some(*view);
-            }
-        }
+        let event = if due && !next.again && !woke {
+            loom_ui::DriverEvent::DeadlineReached
+        } else {
+            loom_ui::DriverEvent::Woken
+        };
+        next = runtime.handle(event, now, &mut driver);
     }
-    let mut find = Find::default();
-    ui.operate(renderer, &mut find);
-    find.0
+    debug_assert!(false, "the window kept running turns before its first frame");
+    runtime.lay_out(&mut *text.borrow_mut());
+    runtime
 }
+
+/// The most turns a screenshot's window runs before its first frame, as
+/// the `Ui` harness allows one event.
+const MOST_TURNS: usize = 1000;
 
 /// The image size in physical pixels. The scale can push it to zero or past
 /// [`MAX_SIDE`] even when the logical size is fine, so it is checked again.
-fn physical_size(logical: Size, scale: f32) -> Result<Size<u32>, String> {
+fn physical_size(logical: Size, scale: f32) -> Result<Physical, String> {
     let side = |v: f32| {
         let v = (v * scale).round();
         (1.0..=MAX_SIDE as f32)
@@ -459,7 +464,10 @@ fn physical_size(logical: Size, scale: f32) -> Result<Size<u32>, String> {
             .then_some(v as u32)
             .ok_or_else(|| format!("at scale {scale}, a side of {v} pixels is not from 1 to {MAX_SIDE}"))
     };
-    Ok(Size::new(side(logical.width)?, side(logical.height)?))
+    Ok(Physical {
+        width: side(logical.width)?,
+        height: side(logical.height)?,
+    })
 }
 
 /// The camera for an image of `size`: the whole scene framed, as when a
@@ -635,7 +643,7 @@ pub fn render(
     values: &PanelValues,
     selection: &BTreeSet<u32>,
     still: Still,
-    size: Size<u32>,
+    size: Physical,
     scale: f32,
 ) -> Result<Vec<u8>, String> {
     let mut offscreen = Offscreen::new().ok_or(NO_GPU)?;
@@ -652,11 +660,11 @@ pub fn render(
     let bounds = loom_ui_core::Rect::new(Point::ORIGIN, logical);
     let drawing = input.drawing(&model, bounds, &cache);
     offscreen
-        .pixels(size, scale, palette.background.to_iced(), Some(drawing))
+        .canvas((size.width, size.height), scale, palette.background, &drawing)
         .ok_or_else(|| NO_READ_BACK.to_string())
 }
 
-pub(crate) fn write_png(path: &Path, size: Size<u32>, rgba: &[u8]) -> Result<(), String> {
+pub(crate) fn write_png(path: &Path, size: Physical, rgba: &[u8]) -> Result<(), String> {
     let error = |e: &dyn std::fmt::Display| format!("cannot write {}: {e}", path.display());
     let file = std::fs::File::create(path).map_err(|e| error(&e))?;
     let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), size.width, size.height);
@@ -669,5 +677,3 @@ pub(crate) fn write_png(path: &Path, size: Size<u32>, rgba: &[u8]) -> Result<(),
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod text_gate_tests;

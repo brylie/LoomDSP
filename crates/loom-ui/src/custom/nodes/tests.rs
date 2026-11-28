@@ -44,17 +44,29 @@ enum Message {
 #[derive(Default)]
 struct GridState {
     part: Option<IdKey>,
+    /// The app's due moment its last deadline tick answered.
+    answered: Option<Instant>,
+    /// How many deadline ticks it heard.
+    ticks: usize,
 }
 
 impl Custom<Grids> for GridState {
-    fn event(&mut self, _app: &Grids, event: &CustomEvent, _moment: &Moment, out: &mut Out<'_, Message>) -> Used {
+    fn event(&mut self, app: &Grids, event: &CustomEvent, _moment: &Moment, out: &mut Out<'_, Message>) -> Used {
         match event {
             // A press changes what its nodes show; a frame only redraws.
             CustomEvent::Pointer(PointerEvent::Pressed(_)) => out.nodes_changed(),
             CustomEvent::Frame => out.redraw(),
+            CustomEvent::Deadline => {
+                self.answered = app.due;
+                self.ticks += 1;
+            }
             _ => {}
         }
         Used::Yes
+    }
+
+    fn next_deadline(&self, app: &Grids) -> Option<Instant> {
+        app.due.filter(|due| self.answered != Some(*due))
     }
 
     fn animating(&self, app: &Grids) -> bool {
@@ -128,6 +140,11 @@ impl Custom<Grids> for GridState {
 /// an overlay over them when open.
 struct Grids {
     cells: Vec<&'static str>,
+    /// A moment the grid's deadline follows, set when the app hears its
+    /// tree changed.
+    due: Option<Instant>,
+    /// True when the tree's change notice makes the grid's deadline due.
+    due_when_changed: bool,
     /// Moves when the cells change, as the grid's access version.
     version: u64,
     animate: bool,
@@ -147,8 +164,12 @@ struct Grids {
 impl App for Grids {
     type Message = Message;
 
-    fn update(&mut self, message: Message, _cx: &Context<'_, Message>) -> Effects<Message> {
+    fn update(&mut self, message: Message, cx: &Context<'_, Message>) -> Effects<Message> {
         let effects = match &message {
+            Message::Changed if self.due_when_changed => {
+                self.due = Some(cx.now());
+                Effects::none()
+            }
             Message::Cells(cells) => {
                 self.cells = cells.clone();
                 if !self.stale {
@@ -235,6 +256,8 @@ fn grid() -> UiId {
 fn grids() -> Grids {
     Grids {
         cells: vec!["a", "b"],
+        due: None,
+        due_when_changed: false,
         version: 0,
         animate: false,
         overlay: false,
@@ -423,6 +446,36 @@ fn a_change_is_told_to_the_app() {
     );
 }
 
+/// A deadline the tree's change notice makes due ticks in the notice's own
+/// turn, as one any other update makes due does (section 9, rule 4), so the
+/// loop does not wake again for it.
+#[test]
+fn a_deadline_the_change_notice_makes_due_ticks_in_its_turn() {
+    let mut app = grids();
+    app.due_when_changed = true;
+    let mut harness = harness(app);
+    let ticks = |harness: &Harness<Grids, NoTarget>| {
+        harness
+            .runtime()
+            .custom::<GridState>(&grid())
+            .map(|grid| grid.ticks)
+            .expect("the grid's state")
+    };
+    let notices =
+        |harness: &Harness<Grids, NoTarget>| harness.app().log.iter().filter(|m| **m == Message::Changed).count();
+    let (ticked, told) = (ticks(&harness), notices(&harness));
+    // One turn, by hand, at a later moment: the cells change, the nodes are
+    // built again, the notice runs, and its deadline ticks, all in it.
+    let now = harness.now() + std::time::Duration::from_millis(5);
+    let mut driver = crate::headless::Headless::new();
+    let runtime = harness.runtime_mut();
+    runtime.waker().send(Message::Cells(vec!["a", "b", "c"]));
+    let next = runtime.handle(DriverEvent::Woken, now, &mut driver);
+    assert_eq!(notices(&harness), told + 1, "the notice ran in the turn");
+    assert_eq!(ticks(&harness), ticked + 1, "the grid ticked in the notice's turn");
+    assert_eq!(next.deadline, None, "nothing left to wake for");
+}
+
 /// The focus is on the part inside the element that has it, as the app
 /// hears it.
 #[test]
@@ -475,6 +528,33 @@ fn an_action_on_a_part_reaches_the_element() {
         .cloned()
         .collect();
     assert_eq!(clicked, [Message::Clicked("b".into()), Message::Clicked(String::new())]);
+}
+
+/// A request on a path under the element that it gave no node for is not
+/// the element's: while the element takes input, it goes on to the app, which may build nodes of its own
+/// there, as the patch canvas builds its tiles' nodes in the app until the
+/// canvas gives its own (ui-layer.md, section 9).
+#[test]
+fn an_action_on_a_part_with_no_node_goes_on_to_the_app() {
+    let mut harness = harness(grids());
+    let _ = tree(&harness);
+    act(&mut harness, &grid().with("not-a-cell"), accesskit::Action::Click);
+    assert!(
+        !harness.app().log.iter().any(|m| matches!(m, Message::Clicked(_))),
+        "the element hears nothing"
+    );
+    assert!(harness.app().log.contains(&Message::Reader(accesskit::Action::Click)));
+
+    // Under a layer that has the input, the same request is used up: the
+    // app hears nothing of it either, as for the element's own nodes.
+    send(&mut harness, Message::Overlay(true));
+    let heard = harness.app().log.len();
+    act(&mut harness, &grid().with("not-a-cell"), accesskit::Action::Click);
+    assert!(
+        !harness.app().log[heard..].contains(&Message::Reader(accesskit::Action::Click)),
+        "used up under the overlay: {:?}",
+        &harness.app().log[heard..]
+    );
 }
 
 /// Focus on a part goes on to the app, as any Focus does, and so does an

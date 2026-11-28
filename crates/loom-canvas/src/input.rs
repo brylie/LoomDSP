@@ -408,13 +408,13 @@ impl<'a> CanvasModel<'a> {
     }
 
     /// Reports typed field changes while a screen reader is listening.
-    pub(crate) fn report_typed(mut self, report: bool) -> Self {
+    pub fn report_typed(mut self, report: bool) -> Self {
         self.report_typed = report;
         self
     }
 
     /// Centres on a point when a request with a new key arrives.
-    pub(crate) fn centre_request(mut self, key: u64, point: Option<Point>) -> Self {
+    pub fn centre_request(mut self, key: u64, point: Option<Point>) -> Self {
         self.centre_request = (key, point);
         self
     }
@@ -501,6 +501,25 @@ impl<'a> CanvasModel<'a> {
         self
     }
 
+    /// The window's physical pixels per logical pixel, for cable hit
+    /// testing.
+    pub fn display_scale(mut self, scale: f32) -> Self {
+        self.display_scale = scale;
+        self
+    }
+
+    /// A screen reader's draft edit, applied when its key changes.
+    pub fn typed_request(mut self, key: u64, request: Option<&'a TypedRequest>) -> Self {
+        self.typed_request = (key, request);
+        self
+    }
+
+    /// The level overview, shown by the view's visibility policy.
+    pub fn overview(mut self, map: Option<MapView<'a>>) -> Self {
+        self.map = map;
+        self
+    }
+
     /// True if dropping `from` on this control makes an assignment: an
     /// output, a control that takes modulation, and not in MIDI learn mode,
     /// where touching a control arms it instead.
@@ -549,7 +568,7 @@ impl<'a> CanvasModel<'a> {
         out: &mut Reaction,
     ) {
         self.handle(state, event, pointer, bounds, now, out);
-        self.sync_hover_text(state, event, now, out);
+        self.sync_hover_text(state, now, out);
     }
 
     fn emit(&self, out: &mut Reaction, event: CanvasEvent) {
@@ -839,6 +858,11 @@ pub struct CanvasInput {
     framed_key: Option<u64>,
     /// The level key last shown, so a change is seen on the next redraw.
     level_key: Option<u64>,
+    /// The size the canvas framed a new patch or a level's first visit
+    /// at, until a press, a wheel step, or a key press: a host that ran the
+    /// redraw before a layout resized the canvas frames again with
+    /// [`CanvasInput::refit`].
+    fitted: Option<Size>,
     interaction: Interaction,
     /// A release after CursorLeft cannot target the inspector until the
     /// window reports CursorEntered again.
@@ -922,6 +946,19 @@ impl CanvasInput {
     /// The shared path of [`CanvasInput::handle`] and [`CanvasInput::pass`].
     fn run(&mut self, model: &CanvasModel<'_>, event: Option<&Event>, moment: Moment) -> Reaction {
         let mut out = Reaction::default();
+        // A framing is the canvas's own only until the person acts on the
+        // view: a press, a wheel step, or a key press. A pointer move, or a
+        // change in the held modifiers, which the host sends with any event,
+        // moves nothing.
+        if matches!(
+            event,
+            Some(
+                Event::Pointer(PointerEvent::Pressed(_) | PointerEvent::Scrolled(_))
+                    | Event::Key(KeyEvent::Pressed { .. })
+            )
+        ) {
+            self.fitted = None;
+        }
         let before = self.focus.control();
         let typed = model.report_typed.then(|| self.focus.typed().cloned()).flatten();
         model.on_event(self, event, moment.pointer, moment.bounds, moment.now, &mut out);
@@ -941,8 +978,64 @@ impl CanvasInput {
         self.focus.control()
     }
 
+    /// Frames the patch or level again at the canvas's size now, when the
+    /// last redraw framed it at another size and no press, wheel step, or
+    /// key press came since. A host whose redraw ran before a layout resized the
+    /// canvas calls it once the new size is known: opening a sub-patch
+    /// shows the breadcrumb, which takes room from the canvas in the same
+    /// update that changed the level. A camera the person moved, or one a
+    /// level kept from an earlier visit, is left as it is.
+    pub fn refit(&mut self, model: &CanvasModel<'_>, moment: Moment) -> Reaction {
+        let mut out = Reaction::default();
+        let size = moment.bounds.size();
+        // A placement at the size framed for keeps the framing the canvas's,
+        // so a later resize still frames again.
+        if self.fitted.is_some_and(|fitted| fitted != size) && size.width > 0.0 {
+            model.fit(self, size);
+            self.fitted = Some(size);
+            out.redraw();
+            out.emit(CanvasEvent::Camera(self.camera));
+        }
+        out
+    }
+
+    /// The part whose hover text shows now, if any.
+    pub fn hover_text_shown(&self) -> Option<crate::hover::HoverTarget> {
+        self.hover_text.shown()
+    }
+
+    /// True while a select's choice list is open, over the canvas.
+    pub fn list_open(&self) -> bool {
+        self.focus.popup().is_some()
+    }
+
+    /// True while the measuring animation runs: the host gives the canvas
+    /// a [`CanvasInput::animation_frame`] at each display refresh until it
+    /// stops.
+    pub fn animating(&self, model: &CanvasModel<'_>) -> bool {
+        model.animate
+    }
+
+    /// One step of the measuring animation, at an animation frame: moves
+    /// the camera and asks for a frame, and reports nothing, since a frame
+    /// runs no update (ui-layer.md, section 9, rule 4). The camera stays
+    /// the canvas's while it moves; the lights on screen and the traces'
+    /// detail are reported once, at the first redraw after the animation
+    /// ends, which puts the camera back. So the bench measures drawing, not
+    /// the app's work for each step.
+    pub fn animation_frame(&mut self, model: &CanvasModel<'_>, moment: Moment) -> Reaction {
+        let mut out = Reaction::default();
+        if model.animate {
+            let (start, base) = *self.animation.get_or_insert((moment.now, self.camera));
+            let t = (moment.now - start).as_secs_f32();
+            self.camera = animated(base, moment.bounds.size(), t);
+            out.redraw();
+        }
+        out
+    }
+
     /// When the canvas next needs to wake with no input, if it does: the
-    /// earlier of an edit group closing and hover text appearing.
+    /// earliest of an edit group closing and hover text appearing.
     ///
     /// This is a fact of the state, so it can be asked at any time and
     /// gives the same answer until an event changes it. The driver wakes
@@ -952,10 +1045,7 @@ impl CanvasInput {
             EditGroupView::Open { due } => Some(due),
             _ => None,
         };
-        match (edit_group, self.hover_text.due()) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (one, other) => one.or(other),
-        }
+        [edit_group, self.hover_text.due()].into_iter().flatten().min()
     }
 
     /// The pointer shape to show: the one of the gesture in progress, or
@@ -991,6 +1081,11 @@ impl CanvasInput {
             pinned: model.pin(self),
             drag: PointerDrag::of(&self.interaction),
         }
+    }
+
+    /// The open field for the control channel and the accessibility tree.
+    pub fn typed_field(&self, model: &CanvasModel<'_>, canvas: Rect) -> Option<CanvasTyped> {
+        self.typed(model, canvas)
     }
 
     /// The open field for the control channel and the accessibility tree.

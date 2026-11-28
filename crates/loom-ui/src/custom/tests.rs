@@ -224,14 +224,33 @@ fn update_reads_the_state() {
     assert_eq!(harness.app().read, [(Some(1), true)]);
 }
 
-/// A custom element with no key has no UI ID to keep its state by, which
-/// a debug build refuses at layout.
+/// A custom element with no key inside a panel has no UI ID to keep its
+/// state by, which a debug build refuses at layout.
 #[test]
 #[cfg(debug_assertions)]
 #[should_panic(expected = "an element in panel p breaks a rule: it has no key")]
 fn a_custom_element_needs_a_key() {
     let mut layout = Layout::new(UiId::panel("p"));
-    layout.rebuild(Element::custom(PAD));
+    layout.rebuild(Element::column([Element::custom(PAD)]));
+}
+
+/// A custom element that is its panel's root, with no key of its own,
+/// takes the panel's UI ID, so a panel can be one custom element whose
+/// parts sit under the panel's name.
+#[test]
+fn a_keyless_custom_root_takes_its_panels_ui_id() {
+    let mut layout = Layout::new(UiId::panel("p"));
+    layout.rebuild(
+        Element::custom(PAD)
+            .width(Length::Fixed(40.0))
+            .height(Length::Fixed(30.0)),
+    );
+    layout.compute(Size::new(100.0, 100.0), &mut Mono::default());
+    assert!(layout.access_problems().is_empty(), "{:?}", layout.access_problems());
+    assert_eq!(
+        layout.bounds(&UiId::panel("p")),
+        Some(Rect::new(Point::ORIGIN, Size::new(40.0, 30.0)))
+    );
 }
 
 /// A kind the app does not know gets no state, which a debug build
@@ -324,5 +343,60 @@ fn the_bounds_follow_a_reveal_in_the_same_layout() {
     assert!(
         after.y + after.height <= 50.0,
         "the pad shows in the container: {after:?}"
+    );
+}
+
+/// One panel whose root is a keyless pad, 100 by 100, smaller than the
+/// window it fills.
+struct SmallRoot;
+
+impl App for SmallRoot {
+    type Message = ();
+
+    fn update(&mut self, _message: (), _cx: &Context<'_, ()>) -> Effects<()> {
+        Effects::none()
+    }
+
+    fn view(&self, view: &mut View) {
+        view.panel_with(UiId::panel("main"), Layer::Panels, &(), |_| {
+            Element::custom(PAD)
+                .width(Length::Fixed(100.0))
+                .height(Length::Fixed(100.0))
+                .access(crate::access::Access::new(crate::access::Role::Group, "Pad"))
+        });
+    }
+
+    fn window(&self) -> WindowSpec {
+        WindowSpec::default()
+    }
+
+    fn make_custom(&self, _id: &UiId, _kind: CustomKind) -> Option<Box<dyn Custom<Self>>> {
+        Some(Box::new(SmallRootPad))
+    }
+}
+
+/// The pad's state in [`SmallRoot`], which needs none of its own.
+struct SmallRootPad;
+
+impl Custom<SmallRoot> for SmallRootPad {}
+
+/// A keyless custom root takes its panel's UI ID, and what shows of it is
+/// its own box, not the panel's whole slot: a 100 by 100 root in a 400 by
+/// 200 window shows 100 by 100, though the panel's ID gives the slot.
+#[test]
+fn what_shows_of_a_keyless_root_is_its_own_box() {
+    let window = WindowState::new(Size::new(400.0, 200.0));
+    let mut harness = Harness::new(SmallRoot, NoTarget, window, Instant::now());
+    harness.lay_out(&mut Mono::default());
+    let panel = UiId::panel("main");
+    assert_eq!(
+        harness.runtime().bounds(&panel).map(|r| r.size()),
+        Some(Size::new(400.0, 200.0)),
+        "the panel's ID gives its slot"
+    );
+    assert_eq!(
+        harness.runtime().shown_bounds(&panel),
+        Some(Rect::new(Point::ORIGIN, Size::new(100.0, 100.0))),
+        "what shows of the root is its own box"
     );
 }

@@ -1343,7 +1343,6 @@ fn panic_is_not_an_edit() {
     app.session.engine.holding = true;
     let _ = app.send(Message::Panic);
     // The MIDI poll runs while the app has an engine, and finds nothing.
-    let _ = app.subscription();
     let _ = app.send(Message::MidiPoll);
     assert!(app.alerts.status().starts_with("Panic"), "{}", app.alerts.status());
     assert!(!app.session.engine.holding, "Hold note lets go");

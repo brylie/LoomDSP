@@ -88,6 +88,31 @@ pub trait App: 'static {
         None
     }
 
+    /// The message for a key press that is always heard, whoever has the
+    /// input, such as Panic (section 6, rule 6, step 1). The runtime asks
+    /// first, for every press, before any element, the Question layer and
+    /// a field that is composing text included. A press it answers goes no
+    /// further, and the routing target never hears it. A keyboard a plugin
+    /// host forwards to the window enters here too, as every key does.
+    /// `None`, the default, lets the key go on. It reads state and changes
+    /// none.
+    fn always_key(&self, key: &loom_ui_core::KeyEvent) -> Option<Self::Message> {
+        let _ = key;
+        None
+    }
+
+    /// The messages for a key that nothing took: no element, panel, field,
+    /// or the window's home element, and the routing target passed it
+    /// (section 6, rule 6, step 6). The app's shortcuts are here: Save,
+    /// Undo, and the rest. It hears presses and releases. Each message is
+    /// its own update, in order, in this key's own turn, and reads focus
+    /// from that turn's context. Empty, the default, when the app has no
+    /// use for the key.
+    fn unclaimed_key(&self, key: &loom_ui_core::KeyEvent) -> Vec<Self::Message> {
+        let _ = key;
+        Vec::new()
+    }
+
     /// The message for a press outside the panel `root`, whose root asks
     /// for it ([`Element::closes_on_press_outside`](crate::Element::closes_on_press_outside)),
     /// while its layer takes input: usually, close it (section 5, rule
@@ -306,13 +331,14 @@ pub struct InputState {
     /// Tab does not enter the runtime's stops (section 6, rule 1). The
     /// default is false.
     pub canvas_focused: bool,
-    /// True while the target's own Tab stops read before the runtime's
-    /// (ui-layer.md, section 6, rule 2, between the toolkits): Tab with
-    /// nothing focused is then the target's, and enters the runtime's
-    /// stops only when the target hands it over. Shift+Tab from nothing
-    /// still enters the runtime's last stop, the last in reading order.
-    /// The default is false: the runtime's stops come first.
-    pub target_first: bool,
+    /// True while the window's home element reads Tab before the
+    /// runtime's stops (section 6, rule 2): Tab with nothing focused goes
+    /// to the home element first, and enters the runtime's first stop only
+    /// when the home element lets it go, as the canvas does past its last
+    /// control. Shift+Tab from nothing still enters the runtime's last
+    /// stop, the last in reading order. The default is false: the runtime's
+    /// stops come first.
+    pub home_first: bool,
 }
 
 impl Default for InputState {
@@ -320,7 +346,7 @@ impl Default for InputState {
         Self {
             layer: Layer::Canvas,
             canvas_focused: false,
-            target_first: false,
+            home_first: false,
         }
     }
 }
@@ -421,6 +447,13 @@ impl<'a, M> Context<'a, M> {
     /// an ID no panel of the runtime's has.
     pub fn bounds(&self, id: &UiId) -> Option<loom_ui_core::Rect> {
         self.panels?.bounds(id)
+    }
+
+    /// What of the runtime's element with UI ID `id` shows in the window,
+    /// as last laid out: its bounds cut by every clip around it. `None` for
+    /// an ID no panel has, and for an element scrolled out of view.
+    pub fn shown_bounds(&self, id: &UiId) -> Option<loom_ui_core::Rect> {
+        self.panels?.shown_bounds(id)
     }
 
     /// Where the first of the runtime's text elements that reads `text` is

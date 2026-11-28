@@ -1,42 +1,41 @@
 //! The control channel's pointer: `hover`, `press`, `release`, `drag`, and
-//! `scroll` (`docs/design/control-channel.md`, Pointer commands).
+//! `scroll` (`docs/design/control-channel.md`, Pointer commands), and its
+//! `key` and `type`.
 //!
-//! A command becomes pointer events in a queue. [`Injector`] wraps the
-//! whole window view. On each redraw it takes one event from the queue and
-//! sends it to the view, with the script's pointer as the cursor, so the
-//! event goes through the same widget handling as a real one (rule 3).
-//! The messages it produces reach `App::update` as usual, and the window is
-//! drawn before the next event goes in.
+//! A command becomes steps in a queue. After each frame the window's layers
+//! (`layers.rs`), or the `Ui` harness, take the next step as one input
+//! event with the script's pointer ([`Pointer::next_input`]), and the
+//! driver gives it to the runtime as it gives a real event, so it goes
+//! through the same routing: the runtime's layers, its fields and keys, and
+//! the canvas (rule 3; ui-layer.md, section 10, rule 6). The window is
+//! drawn before the next step goes in.
 //!
-//! A target (`"4:cutoff"`, `"Cutoff"`) is found when its event goes in,
-//! from the live view, as `locate` finds it.
+//! A target (`"4:cutoff"`, `"Cutoff"`) is found when its step goes in, from
+//! the runtime's layout and the canvas's camera, as `locate` finds it.
 //!
-//! While the control channel is on, the injector also reads what the
-//! canvas says the pointer is on, once per drawn frame, for the snapshot's
-//! `pointer` field.
+//! A real pointer takes over ([`Pointer::gate`]): while a command runs, the
+//! window holds real pointer events back, and the next real one after it
+//! first lets go of what the script holds.
+//!
+//! While the control channel is on, the pointer also keeps what the canvas
+//! says it is on, once per drawn frame, for the snapshot's `pointer` field.
 
 use crate::control::Found;
-use crate::{App, Element, Message};
-use iced::advanced::layout::{self, Layout};
-use iced::advanced::renderer;
-use iced::advanced::widget::{Id, Operation, Tree, tree};
-use iced::advanced::{Clipboard, Shell, Widget, overlay};
-use iced::{Event, Length, Point, Rectangle, Size, Vector, keyboard, mouse, window};
-use loom_canvas::iced_convert::{ToCore as _, ToIced as _};
-use loom_canvas::{CanvasPointer, CanvasTyped, CanvasView, Hit, PointerDrag, PortRef};
+use crate::{App, Message};
+use loom_canvas::{CanvasPointer, CanvasTyped, Hit, PointerDrag, PortRef};
+use loom_ui::shell::{Gate, ScriptedInput};
+use loom_ui_core::{Event, KeyEvent, Point, PointerButton, PointerEvent, ScrollDelta};
 use serde::Serialize;
-use std::any::Any;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::time::Instant;
 
 /// Where an event goes: a window point, or a target found when the event
 /// goes in.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Aim {
     /// Logical window pixels.
-    At(loom_ui_core::Point),
+    At(Point),
     /// A target as `locate` takes it.
     Target(String),
 }
@@ -51,17 +50,16 @@ pub enum Step {
     /// stays put, so a target that appears during the drag works.
     Toward { to: Aim, t: f32 },
     /// A mouse button goes down where the pointer is.
-    Press(mouse::Button),
+    Press(PointerButton),
     /// A mouse button goes up where the pointer is.
-    Release(mouse::Button),
+    Release(PointerButton),
     /// A wheel step where the pointer is, in lines.
     Wheel { dx: f32, dy: f32 },
     /// The modifier keys held from now on. Sent with the next event, not
     /// on a frame of its own.
     Modifiers(loom_ui_core::Modifiers),
-    /// A key press or release, at the pointer. What no widget takes goes to
-    /// the app as the input listener would send it.
-    Key(loom_ui_core::KeyEvent),
+    /// A key press or release, at the pointer, routed as a real key is.
+    Key(KeyEvent),
 }
 
 /// A step and the command it belongs to.
@@ -71,7 +69,7 @@ struct Queued {
     step: Step,
 }
 
-/// What the view last drew of the pointer.
+/// What the window last drew of the pointer.
 #[derive(Debug, Clone, Default)]
 struct Seen {
     /// The pointer in window coordinates, if it is in the window.
@@ -83,7 +81,7 @@ struct Seen {
 
 #[derive(Debug, Default)]
 struct Inner {
-    /// Read the canvas's pointer state for the snapshot. True while the
+    /// Keep the canvas's pointer state for the snapshot. True while the
     /// control channel is on, so an app without it does no extra work.
     record: bool,
     queue: VecDeque<Queued>,
@@ -91,62 +89,34 @@ struct Inner {
     /// pointer event in the window takes over.
     at: Option<Point>,
     /// Buttons the script holds down.
-    buttons: Vec<mouse::Button>,
+    buttons: Vec<PointerButton>,
     /// Buttons a real pointer holds down.
-    real_buttons: Vec<mouse::Button>,
+    real_buttons: Vec<PointerButton>,
     /// Real button releases that came while a command's events went in.
-    /// They go to the view once the command is done, so nothing the real
-    /// pointer let go of stays held.
-    deferred: Vec<mouse::Button>,
+    /// They go to the runtime once the command is done, so nothing the
+    /// real pointer let go of stays held.
+    deferred: Vec<PointerButton>,
+    /// A real pointer was lost while a command's events went in. The loss
+    /// goes to the runtime once the command is done, so a press it heard
+    /// before does not stay held: a cancelled touch sends no release.
+    lost_deferred: bool,
     /// Where the current drag started.
     anchor: Option<Point>,
     /// Where the current drag's `to` was last found.
     toward: Option<Point>,
-    /// The redraw an event last went in at. The runtime can send the same
-    /// redraw to the view up to three times when it produces messages; only
-    /// the first takes an event, so every event is drawn before the next.
-    last_redraw: Option<Instant>,
     /// The first error of each command, by serial.
     errors: Vec<(u64, String)>,
-    /// Scripted pointer events Iced's widgets left unused, with where they
-    /// happened, for the runtime's own layers below Iced, as the bridge
-    /// hands it a real event Iced left (`iced_bridge/pointers.rs`).
-    for_runtime: Vec<(Event, Point, Delivery)>,
-    /// Scripted key presses and releases, for the bridge to give the
-    /// window as real keys: Iced keeps its copy, and the runtime's turn
-    /// routes it, as a key from the keyboard goes (ui-layer.md, section 6,
-    /// rule 6). In order.
-    scripted_keys: std::collections::VecDeque<Event>,
-    /// Physical pointer events that the injector suppressed during a script.
-    suppressed: Vec<loom_ui_core::Event>,
-    /// Scripted holds to cancel before routing a physical event.
-    cancelled: Vec<mouse::Button>,
-    /// Where named targets of the pending script are in the runtime layout.
-    runtime_targets: std::collections::BTreeMap<String, loom_ui_core::Rect>,
     next_serial: u64,
     seen: Option<Seen>,
 }
 
-/// The script's pointer and its queue of events, shared by the app and the
-/// view it builds.
+/// The script's pointer and its queue of events, shared by the app and
+/// what drives the window.
 #[derive(Debug, Clone, Default)]
 pub struct Pointer(Rc<RefCell<Inner>>);
 
-/// How a scripted pointer event reached the runtime.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum Delivery {
-    /// Iced left the event for the runtime.
-    Unused,
-    /// Iced handled the event. The runtime still cancels conflicting holds.
-    Captured,
-    /// Iced never heard it: one of the runtime's overlays owns the input
-    /// (the question or a runtime menu, row 3b), so the event goes to the
-    /// runtime's layers above Iced, as a real one would.
-    Above,
-}
-
 impl Pointer {
-    /// A pointer that reads the canvas's pointer state for the snapshot
+    /// A pointer that keeps the canvas's pointer state for the snapshot
     /// when `record` is true.
     pub fn new(record: bool) -> Self {
         let pointer = Self::default();
@@ -167,12 +137,7 @@ impl Pointer {
 
     /// True while a command still has events to send.
     pub fn busy(&self, serial: u64) -> bool {
-        let inner = self.0.borrow();
-        // A key the injector let go waits in `scripted_keys` for its turn,
-        // one a report: until the last has gone, the command has not been
-        // applied, so its answer waits too (control-channel.md, rule 5),
-        // and `type` then `snapshot` reads the whole text.
-        inner.queue.iter().any(|q| q.serial == serial) || !inner.scripted_keys.is_empty()
+        self.0.borrow().queue.iter().any(|q| q.serial == serial)
     }
 
     /// The error a command met, if any. It is forgotten once taken.
@@ -183,62 +148,10 @@ impl Pointer {
     }
 
     /// The pointer in window coordinates: the script's while it leads,
-    /// else where the view last saw the real one.
+    /// else where the window last saw the real one.
     pub fn position(&self) -> Option<Point> {
         let inner = self.0.borrow();
         inner.at.or_else(|| inner.seen.as_ref().and_then(|s| s.cursor))
-    }
-
-    /// Queues `key` as a scripted key, as the injector does, for a test of
-    /// what the bridge does with it.
-    #[cfg(test)]
-    pub(crate) fn script_key(&self, key: Event) {
-        self.0.borrow_mut().scripted_keys.push_back(key);
-    }
-
-    /// The oldest scripted key not yet given to the window, which then
-    /// goes as a real key goes (`scripted_keys`).
-    pub(crate) fn take_scripted_key(&self) -> Option<Event> {
-        self.0.borrow_mut().scripted_keys.pop_front()
-    }
-
-    /// Takes the scripted pointer events that Iced's widgets left unused,
-    /// in order, for the runtime's layers below Iced.
-    pub(crate) fn take_for_runtime(&self) -> Vec<(Event, Point, Delivery)> {
-        std::mem::take(&mut self.0.borrow_mut().for_runtime)
-    }
-
-    /// Reads current runtime targets before the next injected movement.
-    pub(crate) fn place_runtime_targets<A: loom_ui::App>(&self, panels: &loom_ui::Panels<'_, A>) {
-        let mut inner = self.0.borrow_mut();
-        inner.runtime_targets = inner
-            .queue
-            .iter()
-            .filter_map(|queued| {
-                let (Step::MoveTo(Aim::Target(name))
-                | Step::Toward {
-                    to: Aim::Target(name), ..
-                }) = &queued.step
-                else {
-                    return None;
-                };
-                if !crate::control::may_be_ours(name) {
-                    return None;
-                }
-                panels
-                    .locate(crate::control::ui_id(name).as_ref(), name)
-                    .map(|rect| (name.clone(), rect))
-            })
-            .collect();
-    }
-
-    /// Separates physical input that Iced never received from ordinary statuses.
-    pub(crate) fn take_physical_changes(&self) -> (Vec<loom_ui_core::Event>, Vec<mouse::Button>) {
-        let mut inner = self.0.borrow_mut();
-        (
-            std::mem::take(&mut inner.suppressed),
-            std::mem::take(&mut inner.cancelled),
-        )
     }
 
     /// True when a command is waiting for its events to go in.
@@ -246,20 +159,85 @@ impl Pointer {
         !self.0.borrow().queue.is_empty()
     }
 
-    /// Takes one event from the queue for the redraw at `now`, with the
-    /// modifier changes before it. `resolve` finds a target. Returns each
-    /// event with the cursor to send it with.
-    fn next_events(
-        &self,
-        now: Instant,
-        mut resolve: impl FnMut(&str) -> Result<Point, String>,
-    ) -> Vec<(Event, Option<Point>)> {
+    /// What the window does with a real pointer `event` (control-channel.md,
+    /// "A real pointer takes over"): while a command runs it is held back,
+    /// a release or a loss kept for later so nothing stays held; after it,
+    /// the first real event lets go of what the script holds, at the
+    /// script's pointer, before it goes in.
+    pub(crate) fn gate(&self, event: &Event) -> Gate {
         let mut inner = self.0.borrow_mut();
-        if inner.queue.is_empty() || inner.last_redraw == Some(now) {
-            return Vec::new();
+        let Event::Pointer(pointer) = event else {
+            return Gate::Pass;
+        };
+        match pointer {
+            PointerEvent::Pressed(button) => inner.real_buttons.push(*button),
+            PointerEvent::Released(button) => inner.real_buttons.retain(|held| held != button),
+            // A lost pointer holds no button, whether or not a script runs.
+            // A release kept for later still goes in after the script, so
+            // the runtime lets go of a press it heard before.
+            PointerEvent::Lost => inner.real_buttons.clear(),
+            _ => {}
         }
-        inner.last_redraw = Some(now);
-        let mut events = Vec::new();
+        if !inner.queue.is_empty() {
+            match pointer {
+                PointerEvent::Released(button) => inner.deferred.push(*button),
+                // The loss lets go of every button, so no release need
+                // follow it.
+                PointerEvent::Lost => {
+                    inner.deferred.clear();
+                    inner.lost_deferred = true;
+                }
+                _ => {}
+            }
+            return Gate::Hold;
+        }
+        let first = take_over(&mut inner);
+        if first.is_empty() {
+            Gate::Pass
+        } else {
+            Gate::After(first)
+        }
+    }
+
+    /// Keeps what the canvas says the pointer is on, and where the real
+    /// pointer is, once per drawn frame, for the snapshot, while the
+    /// control channel is on.
+    pub(crate) fn record_seen(&self, cursor: Option<Point>, canvas: Option<CanvasPointer>, typed: Option<CanvasTyped>) {
+        let mut inner = self.0.borrow_mut();
+        if inner.record {
+            inner.seen = Some(Seen { cursor, canvas, typed });
+        }
+    }
+
+    /// True while the snapshot keeps the canvas's pointer state.
+    pub(crate) fn records(&self) -> bool {
+        self.0.borrow().record
+    }
+
+    /// The input for the next step, after the last one's frame: a modifier
+    /// change with the event after it, or one event, each with the script's
+    /// pointer. Real releases or a loss held back while a command ran go in
+    /// once it is done. `locate` finds a target (`resolve`). Empty when
+    /// nothing waits.
+    pub(crate) fn next_input(&self, mut resolve: impl FnMut(&str) -> Result<Point, String>) -> Vec<ScriptedInput> {
+        let mut inner = self.0.borrow_mut();
+        if inner.queue.is_empty() {
+            // Real releases, or a loss, held back while the command ran go
+            // in now, after the script lets go of what it holds.
+            if inner.deferred.is_empty() && !inner.lost_deferred {
+                return Vec::new();
+            }
+            let mut input = take_over(&mut inner);
+            for button in std::mem::take(&mut inner.deferred) {
+                input.push(Event::Pointer(PointerEvent::Released(button)).into());
+            }
+            let lost = Event::Pointer(PointerEvent::Lost);
+            if std::mem::take(&mut inner.lost_deferred) && !input.iter().any(|step| step.event == lost) {
+                input.push(lost.into());
+            }
+            return input;
+        }
+        let mut input = Vec::new();
         while let Some(Queued { serial, step }) = inner.queue.pop_front() {
             // A target is found with the pointer let go of: finding one can
             // build the accessibility tree, whose snapshot reads the pointer.
@@ -268,7 +246,7 @@ impl Pointer {
                 _ => None,
             };
             let found = match aim {
-                Some(Aim::At(p)) => Some(Ok(p.to_iced())),
+                Some(Aim::At(p)) => Some(Ok(p)),
                 Some(Aim::Target(target)) => {
                     drop(inner);
                     let found = resolve(&target);
@@ -282,27 +260,24 @@ impl Pointer {
             let event = match step {
                 Step::Modifiers(modifiers) => {
                     // A change of keys needs no frame of its own.
-                    events.push((
-                        Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers.to_iced())),
+                    input.push(ScriptedInput {
+                        event: Event::Key(KeyEvent::ModifiersChanged(modifiers)),
                         at,
-                    ));
+                    });
                     continue;
                 }
-                // Iced still hears a scripted key until the window leaves
-                // Iced (plan step P4), so it goes as Iced's here, once.
                 Step::Key(key) => {
-                    let key = loom_canvas::iced_convert::key_event_to_iced(&key, loom_ui_core::Modifiers::NONE);
-                    events.push((Event::Keyboard(key), at));
+                    input.push(ScriptedInput {
+                        event: Event::Key(key),
+                        at,
+                    });
                     break;
                 }
-                Step::MoveTo(aim) => match find(&aim) {
-                    Ok(p) => {
-                        inner.anchor = Some(p);
-                        inner.toward = None;
-                        Ok((Event::Mouse(mouse::Event::CursorMoved { position: p }), p))
-                    }
-                    Err(e) => Err(e),
-                },
+                Step::MoveTo(aim) => find(&aim).map(|p| {
+                    inner.anchor = Some(p);
+                    inner.toward = None;
+                    (PointerEvent::Moved, p)
+                }),
                 Step::Toward { to, t } => {
                     let found = find(&to);
                     if let Ok(p) = found {
@@ -312,44 +287,41 @@ impl Pointer {
                     match (found, inner.anchor, inner.toward) {
                         // The last move must reach `to` (control-channel.md).
                         (Err(e), _, _) if last => Err(e),
-                        (_, Some(a), Some(b)) => {
-                            let p = Point::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
-                            Ok((Event::Mouse(mouse::Event::CursorMoved { position: p }), p))
-                        }
+                        (_, Some(a), Some(b)) => Ok((
+                            PointerEvent::Moved,
+                            Point::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t),
+                        )),
                         // Not found yet: stay put until it appears.
                         _ => match at {
-                            Some(p) => Ok((Event::Mouse(mouse::Event::CursorMoved { position: p }), p)),
+                            Some(p) => Ok((PointerEvent::Moved, p)),
                             None => Err("the pointer is not in the window yet".to_string()),
                         },
                     }
                 }
                 Step::Press(button) | Step::Release(button) => match at {
                     Some(p) => {
-                        let down = matches!(step, Step::Press(_));
-                        if down {
+                        if matches!(step, Step::Press(_)) {
                             inner.buttons.push(button);
-                            Ok((Event::Mouse(mouse::Event::ButtonPressed(button)), p))
+                            Ok((PointerEvent::Pressed(button), p))
                         } else {
                             inner.buttons.retain(|b| *b != button);
-                            Ok((Event::Mouse(mouse::Event::ButtonReleased(button)), p))
+                            Ok((PointerEvent::Released(button), p))
                         }
                     }
                     None => Err("the pointer is not in the window yet; give a `target` or `x` and `y`".to_string()),
                 },
                 Step::Wheel { dx, dy } => match at {
-                    Some(p) => Ok((
-                        Event::Mouse(mouse::Event::WheelScrolled {
-                            delta: mouse::ScrollDelta::Lines { x: dx, y: dy },
-                        }),
-                        p,
-                    )),
+                    Some(p) => Ok((PointerEvent::Scrolled(ScrollDelta::Lines { x: dx, y: dy }), p)),
                     None => Err("the pointer is not in the window yet; give a `target` or `x` and `y`".to_string()),
                 },
             };
             match event {
                 Ok((event, p)) => {
                     inner.at = Some(p);
-                    events.push((event, Some(p)));
+                    input.push(ScriptedInput {
+                        event: Event::Pointer(event),
+                        at: Some(p),
+                    });
                 }
                 Err(error) => {
                     // The command ends here. Its button releases and key
@@ -369,442 +341,94 @@ impl Pointer {
             }
             break;
         }
-        events
+        input
     }
 }
 
-/// Finds the canvas, its pointer state, and the first text widget that
-/// reads `text`, in the live view.
-struct FindNow<'a> {
-    text: Option<&'a str>,
-    found: Found,
-    pointer: Option<CanvasPointer>,
-    typed: Option<CanvasTyped>,
-    /// Collects the window's named parts on the same walk.
-    parts: crate::places::Collect,
+/// The script lets go of what it holds, at its pointer, and leads no more:
+/// what to give the runtime first. A held button is cancelled, never
+/// released, so it finishes no click and no drag (control-channel.md, "A
+/// real pointer takes over").
+fn take_over(inner: &mut Inner) -> Vec<ScriptedInput> {
+    let Some(at) = inner.at.take() else {
+        return Vec::new();
+    };
+    if std::mem::take(&mut inner.buttons).is_empty() {
+        return Vec::new();
+    }
+    vec![ScriptedInput {
+        event: Event::Pointer(PointerEvent::Lost),
+        at: Some(at),
+    }]
 }
 
-impl Operation for FindNow<'_> {
-    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
-        let outside = self.parts.enter();
-        operate(self);
-        self.parts.leave(outside);
-    }
-
-    fn container(&mut self, id: Option<&Id>, bounds: Rectangle) {
-        Operation::<crate::places::Places>::container(&mut self.parts, id, bounds);
-    }
-
-    fn scrollable(
-        &mut self,
-        id: Option<&Id>,
-        bounds: Rectangle,
-        content_bounds: Rectangle,
-        translation: iced::Vector,
-        state: &mut dyn iced::advanced::widget::operation::Scrollable,
-    ) {
-        Operation::<crate::places::Places>::scrollable(&mut self.parts, id, bounds, content_bounds, translation, state);
-    }
-
-    fn custom(&mut self, id: Option<&Id>, bounds: Rectangle, state: &mut dyn Any) {
-        if let Some(view) = state.downcast_ref::<CanvasView>() {
-            self.found.canvas = Some(*view);
+impl App {
+    /// The next scripted input after a frame, with its targets found in the
+    /// layout `panels` hold and the canvas's camera, as `locate` finds
+    /// them; and a press outside the cable jump list closes it first, as a
+    /// real press does (`layers.rs`). Keeps the canvas's pointer state for
+    /// the snapshot too.
+    pub(crate) fn next_scripted(&self, panels: &loom_ui::Panels<'_, App>) -> Vec<ScriptedInput> {
+        let view = crate::canvas::panel_view(panels);
+        // The canvas's typed field too, so a step can aim at it, as
+        // `locate` can.
+        let (canvas, typed) = crate::canvas::panel_pointer(self, panels);
+        if self.pointer.records() {
+            self.pointer.record_seen(panels.pointer(), canvas, typed.clone());
         }
-        // The places need the canvas too: a canvas UI ID is placed by the
-        // tree, which reads the canvas from them.
-        Operation::<crate::places::Places>::custom(&mut self.parts, id, bounds, state);
-        if let Some(pointer) = state.downcast_ref::<CanvasPointer>() {
-            self.pointer = Some(pointer.clone());
-        }
-        if let Some(typed) = state.downcast_ref::<CanvasTyped>() {
-            self.typed = Some(typed.clone());
-        }
-    }
-
-    fn text(&mut self, _id: Option<&Id>, bounds: Rectangle, text: &str) {
-        if self.found.text.is_none() && Some(text) == self.text {
-            self.found.text = Some(bounds.to_core());
-        }
-    }
-}
-
-/// Wraps the window view and sends it the script's pointer events.
-pub struct Injector<'a> {
-    content: Element<'a, Message>,
-    pointer: Pointer,
-    app: &'a App,
-    /// What an injected event becomes, as the app's input listeners hear it.
-    on_input: Box<dyn Fn(Event, iced::event::Status) -> Vec<Message> + 'a>,
-}
-
-impl<'a> Injector<'a> {
-    /// Wraps `content`, the whole window view of `app`.
-    pub(crate) fn new(
-        content: impl Into<Element<'a, Message>>,
-        app: &'a App,
-        on_input: impl Fn(Event, iced::event::Status) -> Vec<Message> + 'a,
-    ) -> Self {
-        Self {
-            content: content.into(),
-            pointer: app.pointer.clone(),
-            app,
-            on_input: Box::new(on_input),
-        }
-    }
-
-    /// Searches the live view for `text` and the canvas.
-    fn find(
-        &mut self,
-        tree: &mut Tree,
-        layout: Layout<'_>,
-        renderer: &crate::Renderer,
-        text: Option<&str>,
-    ) -> (Found, Option<CanvasPointer>, Option<CanvasTyped>) {
-        let mut op = FindNow {
-            text,
-            found: Found::default(),
-            pointer: None,
-            typed: None,
-            parts: crate::places::Collect::default(),
-        };
-        self.content.as_widget_mut().operate(tree, layout, renderer, &mut op);
-        op.found.places = op.parts.places();
-        (op.found, op.pointer, op.typed)
-    }
-
-    /// Dismisses the list on the same pointer path for users and scripts.
-    fn observe_jump_press(
-        &mut self,
-        child: &mut Tree,
-        event: &Event,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        renderer: &crate::Renderer,
-        shell: &mut Shell<'_, Message>,
-    ) {
-        if self.app.session.outline.has_jump()
-            && matches!(event, Event::Mouse(mouse::Event::ButtonPressed(_)))
-            && let Some(point) = cursor.position()
-        {
-            let (found, _, _) = self.find(child, layout, renderer, None);
-            if found
-                .places
-                .of(&crate::outline::jump_id())
-                .is_none_or(|part| !part.rect.contains(point.to_core()))
-            {
-                shell.publish(Message::DismissJump);
-            }
-        }
-    }
-
-    /// A real pointer event takes over from the script, which first lets go
-    /// of what it holds, where its pointer is.
-    fn take_over(
-        &mut self,
-        tree: &mut Tree,
-        layout: Layout<'_>,
-        renderer: &crate::Renderer,
-        clipboard: &mut dyn Clipboard,
-        shell: &mut Shell<'_, Message>,
-        viewport: &Rectangle,
-    ) {
-        let held = {
-            let mut inner = self.pointer.0.borrow_mut();
-            inner.at.take().map(|at| (at, std::mem::take(&mut inner.buttons)))
-        };
-        let Some((at, buttons)) = held else { return };
-        for button in buttons {
-            self.pointer.0.borrow_mut().cancelled.push(button);
-            let release = Event::Mouse(mouse::Event::ButtonReleased(button));
-            self.content.as_widget_mut().update(
-                tree,
-                &release,
-                layout,
-                mouse::Cursor::Available(at),
-                renderer,
-                clipboard,
-                shell,
-                viewport,
-            );
-        }
-    }
-
-    /// Where a target is in the window now: the centre of what `locate`
-    /// finds.
-    fn resolve(
-        &mut self,
-        tree: &mut Tree,
-        layout: Layout<'_>,
-        renderer: &crate::Renderer,
-        target: &str,
-    ) -> Result<Point, String> {
-        let runtime = self.pointer.0.borrow().runtime_targets.get(target).copied();
-        let (mut found, _, _) = self.find(tree, layout, renderer, Some(target));
-        found.ours = runtime;
-        let rect = crate::control::locate(self.app, target, &found)?;
-        let window = layout.bounds();
-        if !window.contains(rect.center().to_iced()) {
-            return Err(format!("`{target}` is not on screen"));
-        }
-        Ok(rect.center().to_iced())
-    }
-}
-
-impl Widget<Message, iced::Theme, crate::Renderer> for Injector<'_> {
-    fn size(&self) -> Size<Length> {
-        self.content.as_widget().size()
-    }
-
-    fn size_hint(&self) -> Size<Length> {
-        self.content.as_widget().size_hint()
-    }
-
-    fn layout(&mut self, tree: &mut Tree, renderer: &crate::Renderer, limits: &layout::Limits) -> layout::Node {
-        self.content
-            .as_widget_mut()
-            .layout(&mut tree.children[0], renderer, limits)
-    }
-
-    fn draw(
-        &self,
-        tree: &Tree,
-        renderer: &mut crate::Renderer,
-        theme: &iced::Theme,
-        style: &renderer::Style,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-    ) {
-        let cursor = self.pointer.0.borrow().at.map_or(cursor, mouse::Cursor::Available);
-        self.content
-            .as_widget()
-            .draw(&tree.children[0], renderer, theme, style, layout, cursor, viewport);
-    }
-
-    fn tag(&self) -> tree::Tag {
-        tree::Tag::stateless()
-    }
-
-    fn children(&self) -> Vec<Tree> {
-        vec![Tree::new(&self.content)]
-    }
-
-    fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(std::slice::from_ref(&self.content));
-    }
-
-    fn operate(
-        &mut self,
-        tree: &mut Tree,
-        layout: Layout<'_>,
-        renderer: &crate::Renderer,
-        operation: &mut dyn Operation,
-    ) {
-        self.content
-            .as_widget_mut()
-            .operate(&mut tree.children[0], layout, renderer, operation);
-    }
-
-    fn update(
-        &mut self,
-        tree: &mut Tree,
-        event: &Event,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        renderer: &crate::Renderer,
-        clipboard: &mut dyn Clipboard,
-        shell: &mut Shell<'_, Message>,
-        viewport: &Rectangle,
-    ) {
-        let child = &mut tree.children[0];
-        if let Event::Mouse(mouse_event) = event {
-            {
-                let mut inner = self.pointer.0.borrow_mut();
-                match mouse_event {
-                    mouse::Event::ButtonPressed(b) => inner.real_buttons.push(*b),
-                    mouse::Event::ButtonReleased(b) => inner.real_buttons.retain(|x| x != b),
-                    _ => {}
-                }
-                // The script leads while its command runs. A real release
-                // waits for the command to end.
-                if !inner.queue.is_empty() {
-                    if let Some(event) = crate::iced_bridge::pointers::ours(event) {
-                        inner.suppressed.push(event);
-                    }
-                    if let mouse::Event::ButtonReleased(b) = mouse_event {
-                        inner.deferred.push(*b);
-                    }
-                    return;
-                }
-            }
-            self.take_over(child, layout, renderer, clipboard, shell, viewport);
-            self.observe_jump_press(child, event, layout, cursor, renderer, shell);
-            self.content
-                .as_widget_mut()
-                .update(child, event, layout, cursor, renderer, clipboard, shell, viewport);
-            return;
-        }
-        let redraw = match event {
-            Event::Window(window::Event::RedrawRequested(now)) => Some(*now),
-            _ => None,
-        };
-        if let Some(now) = redraw
-            && self.pointer.waiting()
-        {
-            let pointer = self.pointer.clone();
-            let events = pointer.next_events(now, |target| {
-                self.resolve(&mut tree.children[0], layout, renderer, target)
-            });
-            for (injected, at) in events {
-                // A scripted key goes as a real one: the bridge gives it to
-                // the window, where Iced keeps its copy and the runtime's
-                // turn routes it (its Tab, an element's keys, a field), so
-                // what the runtime takes never reaches Iced. Under an open
-                // question that is every key: Space and Enter on the
-                // focused answer first, then the question's own keys
-                // (ui-layer.md, section 6, rule 6, step 2). Modifier
-                // changes still reach the view only, below.
-                if let Event::Keyboard(keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. }) =
-                    &injected
-                {
-                    self.pointer.0.borrow_mut().scripted_keys.push_back(injected);
-                    continue;
-                }
-                // While one of the runtime's overlays owns the input, a
-                // pointer event is the runtime's layers' above Iced, as a
-                // real one is (Panels::over_target): Iced never hears it.
-                if self.app.runtime_overlay_open()
-                    && let (Event::Mouse(_), Some(at)) = (&injected, at)
-                {
-                    self.pointer
-                        .0
-                        .borrow_mut()
-                        .for_runtime
-                        .push((injected.clone(), at, Delivery::Above));
-                    continue;
-                }
-                // A shell of its own, to tell whether a widget took it.
-                let mut messages = Vec::new();
-                let mut own = Shell::new(&mut messages);
-                let cursor = at.map_or(cursor, mouse::Cursor::Available);
-                self.observe_jump_press(&mut tree.children[0], &injected, layout, cursor, renderer, &mut own);
-                self.content.as_widget_mut().update(
-                    &mut tree.children[0],
-                    &injected,
-                    layout,
-                    cursor,
-                    renderer,
-                    clipboard,
-                    &mut own,
-                    viewport,
-                );
-                let status = own.event_status();
-                shell.merge(own, |m| m);
-                // A pointer event no widget of Iced's took goes on to the
-                // runtime's layers below it, so a script reaches the stats
-                // bar as a real pointer does.
-                if matches!(injected, Event::Mouse(_))
-                    && let Some(at) = at
-                {
-                    let delivery = if status == iced::event::Status::Captured {
-                        Delivery::Captured
-                    } else {
-                        Delivery::Unused
-                    };
-                    self.pointer
-                        .0
-                        .borrow_mut()
-                        .for_runtime
-                        .push((injected.clone(), at, delivery));
-                }
-                // Modifier changes reach the view only (control-channel.md,
-                // Pointer commands).
-                if !matches!(injected, Event::Keyboard(keyboard::Event::ModifiersChanged(_))) {
-                    for message in (self.on_input)(injected, status) {
-                        shell.publish(message);
-                    }
-                }
-            }
-            // Draw this event, then send the next one.
-            shell.request_redraw();
-            // Real releases held back while the command ran go in now.
-            let deferred = {
-                let mut inner = self.pointer.0.borrow_mut();
-                if inner.queue.is_empty() {
-                    std::mem::take(&mut inner.deferred)
-                } else {
-                    Vec::new()
-                }
+        self.pointer.next_input(|target| {
+            let mut found = Found {
+                canvas: view,
+                places: crate::places::Places::live(view, typed.clone()),
+                ..Found::default()
             };
-            if !deferred.is_empty() {
-                self.take_over(&mut tree.children[0], layout, renderer, clipboard, shell, viewport);
-                for button in deferred {
-                    let release = Event::Mouse(mouse::Event::ButtonReleased(button));
-                    self.content.as_widget_mut().update(
-                        &mut tree.children[0],
-                        &release,
-                        layout,
-                        cursor,
-                        renderer,
-                        clipboard,
-                        shell,
-                        viewport,
-                    );
-                }
+            found.find_ours_in(target, panels);
+            let rect = crate::control::locate(self, target, &found)?;
+            let window = loom_ui_core::Rect::new(Point::ORIGIN, panels.size());
+            if !window.contains(rect.center()) {
+                return Err(format!("`{target}` is not on screen"));
+            }
+            Ok(rect.center())
+        })
+    }
+
+    /// What a press at `at`, real or scripted, does before it goes in, as
+    /// messages: one outside the open cable jump list closes it, and the
+    /// press goes on (control-channel.md, Pointer commands); one while a
+    /// value draft waits with no field focused ends the draft, as a press
+    /// elsewhere did when the window answered where focus was.
+    pub(crate) fn press_messages(
+        &self,
+        panels: &loom_ui::Panels<'_, App>,
+        event: &Event,
+        at: Option<Point>,
+    ) -> Vec<Message> {
+        if !matches!(event, Event::Pointer(PointerEvent::Pressed(_))) {
+            return Vec::new();
+        }
+        let mut messages = Vec::new();
+        if self.session.outline.has_jump() {
+            let inside = at.is_some_and(|at| {
+                panels
+                    .bounds(&crate::outline::jump_id())
+                    .is_some_and(|rect| rect.contains(at))
+            });
+            if !inside {
+                messages.push(Message::DismissJump);
             }
         }
-        let cursor = self.pointer.0.borrow().at.map_or(cursor, mouse::Cursor::Available);
-        self.content.as_widget_mut().update(
-            &mut tree.children[0],
-            event,
-            layout,
-            cursor,
-            renderer,
-            clipboard,
-            shell,
-            viewport,
-        );
-        if redraw.is_some() && self.pointer.0.borrow().record {
-            let (_, canvas, typed) = self.find(&mut tree.children[0], layout, renderer, None);
-            self.pointer.0.borrow_mut().seen = Some(Seen {
-                cursor: cursor.position(),
-                canvas,
-                typed,
-            });
+        let on_canvas = at.is_some_and(|at| {
+            panels
+                .bounds(&crate::canvas::canvas_id())
+                .is_some_and(|rect| rect.contains(at))
+        });
+        if !on_canvas {
+            messages.push(Message::PressedElsewhere);
         }
-    }
-
-    fn mouse_interaction(
-        &self,
-        tree: &Tree,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        viewport: &Rectangle,
-        renderer: &crate::Renderer,
-    ) -> mouse::Interaction {
-        let cursor = self.pointer.0.borrow().at.map_or(cursor, mouse::Cursor::Available);
-        self.content
-            .as_widget()
-            .mouse_interaction(&tree.children[0], layout, cursor, viewport, renderer)
-    }
-
-    fn overlay<'b>(
-        &'b mut self,
-        tree: &'b mut Tree,
-        layout: Layout<'b>,
-        renderer: &crate::Renderer,
-        viewport: &Rectangle,
-        translation: Vector,
-    ) -> Option<overlay::Element<'b, Message, iced::Theme, crate::Renderer>> {
-        self.content
-            .as_widget_mut()
-            .overlay(&mut tree.children[0], layout, renderer, viewport, translation)
-    }
-}
-
-impl<'a> From<Injector<'a>> for Element<'a, Message> {
-    fn from(injector: Injector<'a>) -> Self {
-        Element::new(injector)
+        if self.session.value_draft.is_some() && panels.focused_field().is_none() {
+            messages.push(Message::FocusMoved(None));
+        }
+        messages
     }
 }
 
@@ -901,20 +525,21 @@ pub enum DragState {
 }
 
 /// A mouse button by name.
-pub fn button(name: Option<&str>) -> Result<mouse::Button, String> {
+pub fn button(name: Option<&str>) -> Result<PointerButton, String> {
     match name.unwrap_or("left") {
-        "left" => Ok(mouse::Button::Left),
-        "right" => Ok(mouse::Button::Right),
-        "middle" => Ok(mouse::Button::Middle),
+        "left" => Ok(PointerButton::Left),
+        "right" => Ok(PointerButton::Right),
+        "middle" => Ok(PointerButton::Middle),
         other => Err(format!("unknown mouse button `{other}`; buttons: left, right, middle")),
     }
 }
 
-fn button_name(button: mouse::Button) -> Option<&'static str> {
+/// A button's name in the snapshot.
+fn button_name(button: PointerButton) -> Option<&'static str> {
     match button {
-        mouse::Button::Left => Some("left"),
-        mouse::Button::Right => Some("right"),
-        mouse::Button::Middle => Some("middle"),
+        PointerButton::Left => Some("left"),
+        PointerButton::Right => Some("right"),
+        PointerButton::Middle => Some("middle"),
         _ => None,
     }
 }

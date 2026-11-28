@@ -1,110 +1,10 @@
-//! The window: the toolbar, the canvas with its overlays, the right panel,
-//! and the stats bar. Each is drawn from the app's parts; nothing here
-//! changes state.
+//! What the toolbar's disabled buttons say. The window itself is the
+//! runtime's: its root panel (`chrome.rs`), with the canvas in a slot of it
+//! (`canvas.rs`).
 
-use crate::Element;
-use crate::edits::ArrowGroup;
-use crate::{App, Message, pointer, style};
-use iced::Length;
-use iced::widget::{column, container, row, rule, space, stack};
-use loom_canvas::{DragLine, EditGroupView, PatchCanvas};
+use crate::App;
 
 impl App {
-    pub(crate) fn view(&self) -> Element<'_, Message> {
-        let mut canvas = PatchCanvas::new(&self.session.scene, &self.session.selection, Message::Canvas)
-            .drawn(&self.canvas_drawn)
-            .clock(&self.clock)
-            .display_scale(self.window_scale)
-            .values(&self.session.values)
-            .window_drag_line(self.session.gestures.assign_drag().is_some())
-            .traces(&self.session.traces)
-            .activity(
-                self.session
-                    .carrying
-                    .iter()
-                    .map(|output| (output.module.0, output.port)),
-            )
-            .frame_key(self.frame_key)
-            .level(
-                self.session.level_key,
-                self.session.cameras.get(&self.session.level).copied(),
-            )
-            .browser_key(self.browser_key)
-            .focus_policy(self.canvas_focus_policy())
-            .focus_request(self.a11y.focus_request().0, self.a11y.focus_request().1)
-            .edit_group(match self.session.edits.arrow_group() {
-                // A screen reader's group waits as a released arrow group
-                // does, so the canvas is shown both as an open group: it
-                // wakes once at the deadline, and reports the key or
-                // pointer press that ends the group sooner. Nothing wakes
-                // while no group is open.
-                ArrowGroup::Closed => match self.session.edits.reader_group().due() {
-                    Some(due) => EditGroupView::Open { due },
-                    None => EditGroupView::Closed,
-                },
-                ArrowGroup::Held => EditGroupView::Held,
-                ArrowGroup::Released { due } => EditGroupView::Open { due },
-            })
-            .matrix_line(self.matrix_line())
-            .typed_check(|module, widget, text| self.typed_check(module, widget, text))
-            .report_typed(self.a11y.is_active())
-            .typed_request(self.a11y.typed_request().0, self.a11y.typed_request().1)
-            .overview(self.map_view())
-            .centre_request(self.session.outline.centre.0, self.session.outline.centre.1)
-            .animate(self.animating)
-            .learn(self.session.learn.shown());
-        if let Some(still) = self.still {
-            canvas = canvas.still(still);
-        }
-
-        let body = row![
-            container(canvas).width(Length::Fill).height(Length::Fill),
-            rule::vertical(1),
-            self.right_panel(),
-        ];
-
-        // The breadcrumb slot is always there, empty at the top level, so the
-        // canvas keeps its place in the widget tree and with it its state
-        // (the camera) when a level opens or closes.
-        // The toolbar and the breadcrumb are `loom-ui`'s (`chrome.rs`): Iced
-        // keeps their place, empty, at the same height.
-        let main = column![
-            space().height(style::top_height(!self.session.level.is_root())),
-            body,
-            rule::horizontal(1),
-            // The stats bar is `loom-ui`'s (`stats_bar.rs`): Iced keeps its
-            // place, empty, at the same height.
-            space().height(style::STATS_BAR_HEIGHT)
-        ];
-        // Always a stack, so opening the browser keeps the canvas's state
-        // (its camera) in the same place in the widget tree. Tested by
-        // `ui_test::tests::the_camera_survives_opening_the_browser`.
-        let mut layers = stack![main];
-        if let Some(drag) = self.session.gestures.assign_drag()
-            && let Some(at) = drag.at
-            && let Some(port) = self.session.scene.port(drag.from)
-        {
-            layers = layers.push(DragLine::new(drag.start, at, port.colour, drag.zoom));
-        }
-        // The module browser is the runtime's, in its Overlays layer, with
-        // its press outside (row 5, `browser/panel.rs`).
-        // The menus (tile, cable, probe, Recent) are the runtime's, in its
-        // Overlays layer over everything Iced draws (rows 3b and 3d,
-        // `menus/panel.rs`).
-        // Preferences (row 8), Your patches (row 5b), and the licence
-        // chooser (row 3c) are the runtime's, in its Overlays layer; the
-        // chooser is over Preferences, which opens it.
-        // Help is the runtime's, in its Overlays layer, over the dialogs
-        // Iced draws, because F1 opens it from them (help-pages.md; row 6).
-        // The question is the runtime's, in its Question layer, over
-        // everything Iced draws (row 3b).
-        // The control channel's pointer events go in here, as a real
-        // pointer's would (control-channel.md, Pointer commands).
-        let listeners = self.listeners();
-        let on_input = move |event: iced::Event, status| listeners.messages(&event, status);
-        pointer::Injector::new(layers, self, on_input).into()
-    }
-
     /// Hold note's hover text: why it is disabled, if it is.
     pub(crate) fn hold_hover(&self) -> Option<&'static str> {
         self.session.engine.midi.is_none().then_some(HOLD_DISABLED)
@@ -117,21 +17,6 @@ impl App {
         } else {
             "The last patches you opened or saved"
         }
-    }
-
-    /// Inspector and matrix share the same width in the right-hand column.
-    pub(crate) fn right_panel(&self) -> Element<'_, Message> {
-        // The runtime draws the tabs in the root panel's slot here
-        // (`tabs.rs`), so Iced keeps the space.
-        let tabs = space().width(Length::Fill).height(style::RIGHT_TABS_HEIGHT);
-        // The runtime's inspector, matrix, Outline, and jump list draw in
-        // the root panel's slot here (`inspector/panel.rs`,
-        // `matrix/panel.rs`, `outline/panel.rs`), so Iced keeps the space.
-        let panel = space().width(Length::Fill).height(Length::Fill);
-        column![tabs, panel]
-            .width(style::RIGHT_COLUMN_WIDTH)
-            .height(Length::Fill)
-            .into()
     }
 }
 

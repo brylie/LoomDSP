@@ -49,6 +49,10 @@ loom-host-desktop.workspace = true
 loom-canvas.workspace = true
 loom-ui-core.workspace = true
 loom-ui = { workspace = true, features = ["shell"] }
+# The app draws its own frames: the window's, its captures, and the
+# harness's (`drawing.rs`, `offscreen.rs`).
+wgpu.workspace = true
+pollster.workspace = true
 iced_wgpu.workspace = true
 iced_renderer.workspace = true
 # The window on loom-ui's shell: Iced's event conversion and clipboard, and

@@ -1,36 +1,20 @@
-//! Where `loom-app` may name Iced's task and effect calls, and `rfd`, while
-//! the app moves onto our own runtime (docs/dev/leaving-iced-plan.md, step
-//! 2.1, item 2; docs/design/ui-layer.md, section 2). The app still depends
-//! on Iced for its views, so the compiler cannot hold this line; this test
-//! does.
+//! Where `loom-app` may name Iced and `rfd` (docs/dev/leaving-iced-plan.md,
+//! P4 and P5; docs/design/ui-layer.md, section 1, rule 7). The workspace
+//! still holds Iced until P5 removes it, so the compiler cannot hold these
+//! lines; this test does.
 //!
-//! **Iced's `Task`, its widget operations, its clipboard, exit, and
-//! screenshot, and `rfd` are named only in the bridge:** `src/iced_bridge.rs`
-//! and files under `src/iced_bridge/`. A file not yet ported is listed in
-//! [`NOT_YET_PORTED`]. The list only shrinks: a listed file that no longer
-//! names any of them fails the test, so it is taken off when it is ported.
-//! Test files are not checked, since the `Ui` harness and its tests run the
-//! same calls until step 2.3.
+//! - **Iced is named nowhere in `src/`,** test files included: the app
+//!   runs on `loom-ui`'s runtime and shell since phase 4, P4. P5 drops the
+//!   dependencies, and `deny.toml` then bans the crates.
+//! - **`rfd` only in the window's services:** `src/services.rs` and files
+//!   under `src/services/`, which carry out the runtime's dialogs for the
+//!   window. Test files are not checked for it.
+//!
+//! Comments are not checked: they may name Iced, as the plan's file name
+//! does.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-
-/// What only the bridge may name. `Task` is a whole word, so `iced::Task`,
-/// `Task::done`, and a renamed import `use iced::Task as T` all match.
-const BRIDGE_ONLY: [&str; 7] = [
-    "Task",
-    "iced::widget::operation",
-    "iced::advanced::widget::operate",
-    "iced::clipboard",
-    "iced::exit",
-    "iced::window::screenshot",
-    "rfd",
-];
-
-/// Files under `src/` that still name them, until each is ported. The list
-/// only shrinks. It is empty since the app runs on the `winit` shell (step
-/// 2.2b-ii), and stays as the place for one that must name them for a while.
-const NOT_YET_PORTED: [&str; 0] = [];
 
 /// True for a file that holds tests: `tests.rs`, a name ending in
 /// `_tests.rs`, or any file under a `tests` folder.
@@ -66,48 +50,80 @@ fn names(text: &str, word: &str) -> bool {
     })
 }
 
-/// What `text` names of [`BRIDGE_ONLY`].
-fn bridge_names(text: &str) -> Vec<&'static str> {
-    BRIDGE_ONLY.into_iter().filter(|word| names(text, word)).collect()
+/// The code of `text`: each line without a `//` comment.
+fn code(text: &str) -> String {
+    text.lines()
+        .map(|line| line.split("//").next().unwrap_or(line))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-/// The rule in the module's doc.
-#[test]
-fn iced_tasks_and_dialogs_are_named_only_in_the_bridge() {
+/// True when `code` names Iced or one of its crates: the word `iced`, as
+/// in `iced::` or `use iced`, or a crate name such as `iced_wgpu`.
+fn names_iced(code: &str) -> bool {
+    names(code, "iced")
+        || code
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|w| w.starts_with("iced_"))
+}
+
+/// The files under `src/`, each with its path relative to it and its
+/// code.
+fn sources() -> Vec<(String, PathBuf, String)> {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     rust_files(&src, &mut files);
-    let mut wrong = Vec::new();
-    let mut ported = Vec::new();
-    for path in files {
-        let relative = path
-            .strip_prefix(&src)
-            .expect("under src")
-            .to_string_lossy()
-            .replace('\\', "/");
-        if relative == "iced_bridge.rs" || relative.starts_with("iced_bridge/") || is_test_file(&path) {
-            continue;
-        }
-        let text = fs::read_to_string(&path).expect("a source file");
-        let named = bridge_names(&text);
-        let listed = NOT_YET_PORTED.contains(&relative.as_str());
-        if !listed && !named.is_empty() {
-            wrong.push(format!("{relative}: {named:?}"));
-        }
-        if listed && named.is_empty() {
-            ported.push(relative);
-        }
-    }
-    assert!(wrong.is_empty(), "only the bridge may name these: {wrong:#?}");
-    assert!(ported.is_empty(), "ported, so take them off NOT_YET_PORTED: {ported:?}");
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| {
+            let relative = path
+                .strip_prefix(&src)
+                .expect("under src")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let text = fs::read_to_string(&path).expect("a source file");
+            (relative, path, code(&text))
+        })
+        .collect()
 }
 
-/// The check itself: whole words only, so a renamed import is caught and
-/// a longer name is not.
+/// No file under `src/`, test files included, names Iced in its code.
 #[test]
-fn the_check_matches_whole_words() {
-    assert_eq!(bridge_names("use iced::Task as T;"), ["Task"]);
-    assert_eq!(bridge_names("Task::done(m)"), ["Task"]);
-    assert_eq!(bridge_names("rfd::FileDialog::new()"), ["rfd"]);
-    assert!(bridge_names("TaskList, my_task, rfdx").is_empty());
+fn iced_is_named_nowhere() {
+    let files = sources();
+    assert!(files.len() > 50, "the scan found the app's files, not {}", files.len());
+    let wrong: Vec<_> = files
+        .iter()
+        .filter(|(_, _, code)| names_iced(code))
+        .map(|(relative, ..)| relative.clone())
+        .collect();
+    assert!(wrong.is_empty(), "these name Iced: {wrong:#?}");
+}
+
+/// `rfd` is named only in the window's services, outside the tests.
+#[test]
+fn dialogs_are_named_only_in_the_services() {
+    let wrong: Vec<_> = sources()
+        .into_iter()
+        .filter(|(relative, path, code)| {
+            let services = relative == "services.rs" || relative.starts_with("services/");
+            !services && !is_test_file(path) && names(code, "rfd")
+        })
+        .map(|(relative, ..)| relative)
+        .collect();
+    assert!(wrong.is_empty(), "only services.rs may name rfd: {wrong:#?}");
+}
+
+/// The checks themselves: whole words and crate names only, in code only,
+/// so a longer name and a comment pass.
+#[test]
+fn the_checks_match_what_they_mean() {
+    assert!(names_iced("use iced::Event;"));
+    assert!(names_iced("let r = iced_wgpu::Renderer::new();"));
+    assert!(names_iced("use iced;"));
+    assert!(!names_iced(&code("let x = 1; // the leaving-iced plan")));
+    assert!(!names_iced("let sliced = 1;"));
+    assert!(names(&code("rfd::FileDialog::new()"), "rfd"));
+    assert!(!names("rfdx", "rfd"));
 }

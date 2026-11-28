@@ -1,0 +1,55 @@
+{"id": "start", "cmd": "wait", "ms": 1000}
+{"id": "module", "cmd": "locate", "target": "4"}
+{"id": "control", "cmd": "locate", "target": "4:cutoff"}
+{"id": "port-in", "cmd": "locate", "target": "4:input:in"}
+{"id": "port-out", "cmd": "locate", "target": "3:out"}
+{"id": "light", "cmd": "locate", "target": "5:level"}
+{"id": "scope", "cmd": "locate", "target": "11:display:out"}
+{"id": "canvas-param", "cmd": "locate", "target": "canvas/4/param/cutoff"}
+{"id": "canvas-input", "cmd": "locate", "target": "canvas/4/input/in"}
+{"id": "meter-add", "cmd": "probe", "from": "3:out", "kind": "meter"}
+{"id": "meter", "cmd": "locate", "target": "12"}
+{"id": "toolbar", "cmd": "locate", "target": "toolbar/undo"}
+{"id": "stats", "cmd": "locate", "target": "stats"}
+{"id": "tab-inspector", "cmd": "locate", "target": "panel/inspector"}
+{"id": "tab-matrix", "cmd": "locate", "target": "panel/matrix"}
+{"id": "tab-outline", "cmd": "locate", "target": "panel/outline"}
+{"id": "missing", "cmd": "locate", "target": "no such thing"}
+{"id": "select", "cmd": "select", "modules": [4]}
+{"id": "inspector", "cmd": "locate", "target": "inspector"}
+{"id": "inspector-text", "cmd": "locate", "target": "Resonance"}
+{"id": "text", "cmd": "locate", "target": "Cutoff"}
+{"id": "to-matrix", "cmd": "press", "target": "panel/matrix"}
+{"id": "to-matrix-up", "cmd": "release"}
+{"id": "matrix", "cmd": "locate", "target": "matrix"}
+{"id": "to-outline", "cmd": "press", "target": "panel/outline"}
+{"id": "to-outline-up", "cmd": "release"}
+{"id": "outline", "cmd": "locate", "target": "outline"}
+{"id": "to-inspector", "cmd": "press", "target": "panel/inspector"}
+{"id": "to-inspector-up", "cmd": "release"}
+{"id": "preferences-open", "cmd": "key", "key": ",", "modifiers": ["cmd"]}
+{"id": "preferences", "cmd": "locate", "target": "preferences"}
+{"id": "preferences-close", "cmd": "key", "key": "escape"}
+{"id": "canvas-hover", "cmd": "hover", "x": 200, "y": 300}
+{"id": "browser-open", "cmd": "key", "key": "a"}
+{"id": "browser", "cmd": "locate", "target": "browser"}
+{"id": "browser-close", "cmd": "key", "key": "escape"}
+{"id": "edit", "cmd": "set", "module": 4, "param": "cutoff", "value": 800}
+{"id": "question-open", "cmd": "toolbar", "button": "new"}
+{"id": "question", "cmd": "locate", "target": "question"}
+{"id": "question-text", "cmd": "locate", "target": "Cancel"}
+{"id": "question-close", "cmd": "toolbar", "button": "cancel"}
+{"id": "badges-open", "cmd": "open", "path": "${LOOM_EXAMPLES}/patches/modulation.ron"}
+{"id": "badges-loaded", "cmd": "wait", "ms": 500}
+{"id": "badge", "cmd": "locate", "target": "5:badge:out"}
+{"id": "canvas-badge", "cmd": "locate", "target": "canvas/5/badge/out"}
+{"id": "nested-open", "cmd": "open", "path": "${LOOM_EXAMPLES}/patches/nested-subtractive.ron"}
+{"id": "nested-loaded", "cmd": "wait", "ms": 500}
+{"id": "nested-select", "cmd": "press", "target": "2"}
+{"id": "nested-select-up", "cmd": "release"}
+{"id": "nested-enter", "cmd": "key", "key": "enter", "modifiers": ["cmd"]}
+{"id": "nested-entered", "cmd": "wait", "ms": 500}
+{"id": "breadcrumb", "cmd": "locate", "target": "breadcrumb"}
+{"id": "inner-module", "cmd": "locate", "target": "12"}
+{"id": "inner-control", "cmd": "locate", "target": "16:attack"}
+{"id": "end", "cmd": "quit"}

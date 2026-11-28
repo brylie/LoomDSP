@@ -240,17 +240,29 @@ impl<A: App> Panels<'_, A> {
     /// section 7, rule 22).
     pub(crate) fn custom_action(&mut self, id: &UiId, request: &AccessRequest) -> Option<bool> {
         let (owner, rest) = self.customs.node_owner(id)?;
+        let input = crate::runtime::in_input_layer(self.window, self.app, &owner);
         let access = if rest.is_empty() {
             self.window.access_of(&owner)
         } else {
-            self.window
+            // A path under the element that it gave no node for is not its
+            // node: the request goes on to the app, which may build nodes
+            // of its own there (`App::accessibility_event`), but only while
+            // the element takes input, as for its own nodes: under a layer
+            // that has the input, it is used up.
+            let node = self
+                .window
                 .custom_nodes
                 .get(&owner)
                 .and_then(|nodes| nodes.iter().find(|node| node.path == rest))
-                .map(CustomNode::access)
+                .map(CustomNode::access);
+            match node {
+                Some(access) => Some(access),
+                None if input => return None,
+                None => return Some(false),
+            }
         };
         let offered = access.is_some_and(|access| access.offers(request.action) && !access.is_disabled());
-        if !offered || !crate::runtime::in_input_layer(self.window, self.app, &owner) {
+        if !offered || !input {
             return Some(false);
         }
         self.customs

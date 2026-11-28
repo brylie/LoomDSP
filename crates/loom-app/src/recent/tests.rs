@@ -678,9 +678,9 @@ fn in_a_short_window_the_list_scrolls_to_its_focused_row() {
     assert!(scrolled > 0.0, "the list scrolled to it");
     // The wheel scrolls it back up.
     ui.move_to(box_.center());
-    ui.step(&[iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
-        delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: 3.0 },
-    })]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Scrolled(
+        loom_ui_core::ScrollDelta::Lines { x: 0.0, y: 3.0 },
+    ))]);
     ui.redraw();
     let (after, _) = ui.runtime().scroll_offset(&list).expect("the list scrolls");
     assert!(after < scrolled, "the wheel scrolled it: {after} from {scrolled}");

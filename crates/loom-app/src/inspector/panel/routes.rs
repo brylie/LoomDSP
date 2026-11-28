@@ -294,6 +294,21 @@ impl App {
         items::find(&access::items(&model), id).is_some_and(|item| item.set_text.is_some())
     }
 
+    /// The inspector row that takes a dropped output under `at`, a window
+    /// point, as the runtime's layout last placed the rows: what a hover
+    /// on it would light while an output is dragged out of the canvas.
+    pub(crate) fn inspector_drop_row_at(
+        &self,
+        at: loom_ui_core::Point,
+        cx: &loom_ui::Context<'_, crate::Message>,
+    ) -> Option<(u32, usize)> {
+        let model = self.inspector_model();
+        rows(&model)
+            .into_iter()
+            .find(|(_, p)| p.accepts_drop && cx.shown_bounds(&p.ui).is_some_and(|rect| rect.contains(at)))
+            .map(|(module, p)| (module, p.index))
+    }
+
     /// The message for the pointer coming onto a row that takes a dragged
     /// output, or leaving it (`None`): the row lights while the drag is
     /// over it (modulation.md).

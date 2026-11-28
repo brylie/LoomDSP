@@ -8,7 +8,7 @@
 //! period from now, and stops the rest; the message a timer sends moves it
 //! on by one period from when it was due (a fixed rate, as `time::every`
 //! ticked). `App::next_deadline` gives the runtime the earliest,
-//! and the bridge wakes the loop then.
+//! and the shell wakes the loop then.
 //!
 //! The frames that run work in `update` (`Frame` while measuring,
 //! `LiveFrame` while modulation plays) are deadlines at display rate,

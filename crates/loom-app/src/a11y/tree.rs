@@ -412,8 +412,6 @@ pub(crate) fn tree(
     // The window around the canvas, in the order it is drawn: the
     // toolbar and the panel's tabs first, the bar at the bottom last.
     let mut frame = Frame {
-        places,
-        scale,
         covered: ids.covered,
         field: frames.focused_field.as_ref(),
         focused: None,
@@ -687,6 +685,14 @@ pub(crate) fn tree(
     root.set_label(snapshot.title.clone());
     root.set_children(children);
     nodes.push((root_node, root));
+    // The runtime's nodes were numbered when they were read, which may be
+    // a build or more ago: mark them seen, so a node this tree sends keeps
+    // its ID.
+    for (node, _) in &ours.nodes {
+        if let Some(id) = table.id(node.0).cloned() {
+            table.number(&id);
+        }
+    }
     table.retain_seen();
 
     let mut info = TreeInfo::new(root_node);
@@ -755,8 +761,8 @@ pub(crate) struct Frames {
     /// The open panel's parts: the inspector's or the matrix's, by the tab
     /// that is open.
     pub panel: Vec<items::Item>,
-    /// The text field with keyboard focus, as the window last said.
-    pub focused_field: Option<iced::advanced::widget::Id>,
+    /// The part with keyboard focus, as the runtime last said.
+    pub focused_field: Option<UiId>,
     /// The panel part the keys act on while no text field has them: the
     /// matrix's chosen cell while the matrix has the keys.
     pub focused_item: Option<UiId>,
@@ -804,16 +810,12 @@ pub(crate) fn is_live_bar_item(id: &UiId) -> bool {
 /// Builds the nodes of the window around the canvas: the toolbar, the
 /// right panel's tabs, and the bar at the bottom.
 struct Frame<'a> {
-    /// Where the window drew each named part.
-    places: &'a Places,
-    /// The window's scale factor.
-    scale: f32,
     /// True while a pointer press cannot reach these parts, because a
     /// panel or a menu lies over the window: the nodes are then hidden
     /// (ui-layer.md, section 5, rule 3).
     covered: bool,
-    /// The text field that has keyboard focus, as the window last said.
-    field: Option<&'a iced::advanced::widget::Id>,
+    /// The part that has keyboard focus, as the runtime last said.
+    field: Option<&'a UiId>,
     /// The node of that field, once it is built.
     focused: Option<NodeId>,
     table: &'a mut IdTable,
@@ -821,19 +823,9 @@ struct Frame<'a> {
 }
 
 impl Frame<'_> {
-    /// Adds `node` under `id`, with its place in the window if it was
-    /// drawn, and gives its node ID.
+    /// Adds `node` under `id`, hidden while the window is covered, and
+    /// gives its node ID.
     fn add(&mut self, id: &UiId, mut node: Node) -> NodeId {
-        if let Some(place) = self.places.of(id) {
-            let s = f64::from(self.scale);
-            let r = place.rect;
-            node.set_bounds(accesskit::Rect {
-                x0: f64::from(r.x) * s,
-                y0: f64::from(r.y) * s,
-                x1: f64::from(r.x + r.width) * s,
-                y1: f64::from(r.y + r.height) * s,
-            });
-        }
         if self.covered {
             node.set_hidden();
         }
@@ -850,33 +842,17 @@ impl Frame<'_> {
     /// it shows would claim rows out of view are visible.
     fn panel(&mut self, item: &items::Item) -> NodeId {
         let id = self.item(item);
-        self.clip_to_shown(id, &item.id);
+        self.clip_to_shown(id);
         id
     }
 
-    /// Marks node `id`, drawn as `ui`, as cutting off its children, and
-    /// gives it the bounds of the part of it that shows: its content can be
-    /// taller than the area that scrolls it, and a clipping node larger than
-    /// what it shows would claim rows out of view are visible.
-    fn clip_to_shown(&mut self, id: NodeId, ui: &UiId) {
-        let shown = self.places.of(ui).and_then(|place| {
-            let clip = place.clip?;
-            Some(place.rect.intersection(clip).unwrap_or(loom_ui_core::Rect::new(
-                loom_ui_core::Point::new(place.rect.x, place.rect.y),
-                loom_ui_core::Size::new(0.0, 0.0),
-            )))
-        });
-        let s = f64::from(self.scale);
+    /// Marks node `id` as cutting off its children. The app builds no
+    /// panel of the window's frame now, so none has bounds to give: every
+    /// panel is the runtime's, which gives its nodes with their places
+    /// (`AccessNodes`); this path goes with `items.rs` in phase 4, P6.
+    fn clip_to_shown(&mut self, id: NodeId) {
         if let Some((_, node)) = self.nodes.iter_mut().rev().find(|(node, _)| *node == id) {
             node.set_clips_children();
-            if let Some(r) = shown {
-                node.set_bounds(accesskit::Rect {
-                    x0: f64::from(r.x) * s,
-                    y0: f64::from(r.y) * s,
-                    x1: f64::from(r.x + r.width) * s,
-                    y1: f64::from(r.y + r.height) * s,
-                });
-            }
         }
     }
 
@@ -979,7 +955,7 @@ impl Frame<'_> {
         let id = self.add(&item.id, node);
         // List boxes scroll, so their bounds clip descendants.
         if item.kind == Kind::ListBox {
-            self.clip_to_shown(id, &item.id);
+            self.clip_to_shown(id);
         }
         // A covered field is hidden, so it cannot be focused, even while
         // the window has not yet said its keys have moved.

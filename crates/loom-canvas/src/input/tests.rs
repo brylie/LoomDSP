@@ -4716,3 +4716,174 @@ fn the_map_rebuilds_its_marks_when_only_its_graph_changes() {
     assert_eq!(paint(&graph, 1), 1);
     assert_eq!(paint(&MapGraph::default(), 2), 0);
 }
+
+/// The measuring animation runs on animation frames: each frame moves the
+/// camera and asks for a frame, and none sends a message, since a frame
+/// runs no update. A redraw while it runs reports nothing either. Once the
+/// animation ends, one redraw puts the camera back and reports what is on
+/// screen, once. It asks for no deadline (ui-layer.md, section 9, rule 4).
+#[test]
+fn the_animation_moves_on_frames_and_reports_once_it_ends() {
+    let scene = Scene::new(vec![module(1, 0.0), module(2, 400.0)], Vec::new());
+    let none = BTreeSet::new();
+    let model = CanvasModel::new(&scene, &none).animate(true);
+    let mut input = CanvasInput::default();
+    let start = Instant::now();
+    let _ = input.handle(&CanvasModel::new(&scene, &none), &Event::Redraw, moment(None, start));
+    let base = input.camera;
+    assert!(input.animating(&model));
+    for step in 1..=5 {
+        let at = start + std::time::Duration::from_millis(16 * step);
+        let frame = input.animation_frame(&model, moment(None, at));
+        assert!(frame.redraw, "step {step} moved the camera");
+        assert_eq!(frame.events, [], "a frame sends nothing");
+        let redraw = input.handle(&model, &Event::Redraw, moment(None, at));
+        assert_eq!(redraw.events, [], "nor does a redraw while it runs");
+    }
+    assert_ne!(input.camera, base, "the camera moved");
+    assert_eq!(input.next_deadline(&model), None, "no deadline for it");
+
+    let still = CanvasModel::new(&scene, &none);
+    assert!(!input.animating(&still));
+    let later = start + std::time::Duration::from_secs(1);
+    let _ = input.handle(&still, &Event::Redraw, moment(None, later));
+    assert_eq!(input.camera, base, "the end puts the camera back");
+    assert!(
+        !input.animation_frame(&still, moment(None, later)).redraw,
+        "and frames do nothing"
+    );
+}
+
+/// A sync with nothing new sends nothing, so a host that syncs the canvas
+/// after each update stops once the app has taken what the last sync sent.
+#[test]
+fn a_second_sync_with_nothing_new_sends_nothing() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+    let none = BTreeSet::new();
+    let model = CanvasModel::new(&scene, &none);
+    let mut input = CanvasInput::default();
+    let now = Instant::now();
+    let first = input.handle(&model, &Event::Redraw, moment(None, now));
+    assert!(
+        !first.events.is_empty(),
+        "the first sync frames the scene and reports it"
+    );
+    let second = input.handle(&model, &Event::Redraw, moment(None, now));
+    assert_eq!(second.events, []);
+}
+
+/// `refit` frames a new patch again when a layout resized the canvas after
+/// the redraw that framed it, and reports the camera. A press, a wheel
+/// step, or a key press in between makes the camera the person's, so
+/// `refit` then leaves it; a pointer move or a change of the held
+/// modifiers does not. A second call at the same size does nothing.
+#[test]
+fn refit_frames_again_at_a_new_size_until_the_person_acts() {
+    let scene = Scene::new(vec![module(1, 0.0), module(2, 400.0)], Vec::new());
+    let none = BTreeSet::new();
+    let canvas = CanvasModel::new(&scene, &none).frame_key(2);
+    let now = Instant::now();
+    let tall = Moment {
+        pointer: None,
+        bounds: Rect::new(Point::ORIGIN, Size::new(800.0, 600.0)),
+        now,
+    };
+    let short = Moment {
+        bounds: Rect::new(Point::new(0.0, 40.0), Size::new(800.0, 560.0)),
+        ..tall
+    };
+    let mut framed = Camera::default();
+    framed.frame_readable(scene.bounds().unwrap(), short.bounds.size(), READABLE_ZOOM);
+
+    let mut state = CanvasInput::default();
+    let _ = state.handle(&canvas, &Event::Redraw, tall);
+    assert_ne!(state.camera, framed, "framed at the first size");
+    let refit = state.refit(&canvas, short);
+    assert_eq!(state.camera, framed);
+    assert_eq!(refit.events, vec![CanvasEvent::Camera(framed)]);
+    assert!(state.refit(&canvas, short).events.is_empty(), "once");
+
+    // A pointer move and a change of the held modifiers act on nothing, so
+    // the framing is still the canvas's (a host sends the modifiers with
+    // its next event, the placement included).
+    let mut state = CanvasInput::default();
+    let _ = state.handle(&canvas, &Event::Redraw, tall);
+    let _ = state.handle(&canvas, &Event::Pointer(PointerEvent::Moved), tall);
+    let shift = Modifiers {
+        shift: true,
+        ..Modifiers::NONE
+    };
+    let _ = state.handle(&canvas, &Event::Key(KeyEvent::ModifiersChanged(shift)), tall);
+    assert_eq!(state.refit(&canvas, short).events, vec![CanvasEvent::Camera(framed)]);
+
+    // A wheel step is the person's.
+    let mut state = CanvasInput::default();
+    let _ = state.handle(&canvas, &Event::Redraw, tall);
+    let wheel = Event::Pointer(PointerEvent::Scrolled(loom_ui_core::ScrollDelta::Lines {
+        x: 0.0,
+        y: 1.0,
+    }));
+    let _ = state.handle(&canvas, &wheel, moment(Some(Point::new(100.0, 100.0)), now));
+    let before = state.camera;
+    assert!(state.refit(&canvas, short).events.is_empty());
+    assert_eq!(state.camera, before, "the person's camera stays");
+}
+
+/// A lost pointer lets go of a held button with a release and no click,
+/// and leaves the canvas idle (a touch the system cancels, or a real
+/// pointer taking over from a script).
+#[test]
+fn a_lost_pointer_releases_a_held_button() {
+    let scene = Scene::new(vec![button_module()], Vec::new());
+    let centre = scene.module(1).unwrap().widget_bounds(0).unwrap().center();
+    let selected = BTreeSet::from([1]);
+    let canvas = CanvasModel::new(&scene, &selected);
+    let mut state = CanvasInput {
+        interaction: Interaction::Holding { module: 1, widget: 0 },
+        ..CanvasInput::default()
+    };
+    let events = drive(&canvas, &mut state, &Event::Pointer(PointerEvent::Lost), centre);
+    assert_eq!(events, vec![CanvasEvent::ButtonReleased { module: 1, widget: 0 }]);
+    assert!(matches!(state.interaction, Interaction::Idle));
+}
+
+/// A placement at the size the canvas framed for keeps the framing the
+/// canvas's own, so a later resize still frames again.
+#[test]
+fn refit_at_the_same_size_keeps_the_framing() {
+    let scene = Scene::new(vec![module(1, 0.0), module(2, 400.0)], Vec::new());
+    let none = BTreeSet::new();
+    let canvas = CanvasModel::new(&scene, &none).frame_key(2);
+    let tall = moment(None, Instant::now());
+    let short = Moment {
+        bounds: Rect::new(Point::new(0.0, 40.0), Size::new(800.0, 560.0)),
+        ..tall
+    };
+    let mut state = CanvasInput::default();
+    let _ = state.handle(&canvas, &Event::Redraw, tall);
+    assert!(state.refit(&canvas, tall).events.is_empty(), "the same size: nothing");
+    assert!(
+        !state.refit(&canvas, short).events.is_empty(),
+        "a later resize frames again"
+    );
+}
+
+/// A move with no place, the pointer leaving the canvas's view, clears
+/// what it was over.
+#[test]
+fn a_move_with_no_place_clears_the_hover() {
+    let scene = Scene::new(vec![module(1, 0.0)], Vec::new());
+    let none = BTreeSet::new();
+    let canvas = CanvasModel::new(&scene, &none);
+    let mut state = CanvasInput::default();
+    let over = scene.module(1).unwrap().bounds().center();
+    let _ = drive(&canvas, &mut state, &Event::Pointer(PointerEvent::Moved), over);
+    assert!(state.hover.is_some(), "over the tile");
+    let gone = state.handle(
+        &canvas,
+        &Event::Pointer(PointerEvent::Moved),
+        moment(None, Instant::now()),
+    );
+    assert!(state.hover.is_none());
+    assert!(gone.redraw);
+}

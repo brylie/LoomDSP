@@ -145,7 +145,7 @@ impl App for Layers {
         InputState {
             layer: self.input,
             canvas_focused: self.canvas,
-            target_first: false,
+            home_first: false,
         }
     }
 
@@ -445,6 +445,21 @@ fn a_release_elsewhere_clicks_nothing() {
     harness.step(at(300.0, 100.0, PointerEvent::Pressed(PointerButton::Left)));
     harness.step(at(5.0, 5.0, PointerEvent::Released(PointerButton::Left)));
     assert!(clicks(&harness).is_empty());
+}
+
+/// A lost pointer cancels a press held on one of our buttons, with no
+/// click: the release that follows, over the same button, clicks nothing.
+/// A real pointer taking over from a script sends it, so the script's held
+/// press never clicks. The next press and release click as usual.
+#[test]
+fn a_lost_pointer_cancels_a_held_press() {
+    let mut harness = harness(false, Routed::Passed);
+    harness.step(at(5.0, 5.0, PointerEvent::Pressed(PointerButton::Left)));
+    harness.step(at(5.0, 5.0, PointerEvent::Lost));
+    harness.step(at(5.0, 5.0, PointerEvent::Released(PointerButton::Left)));
+    assert!(clicks(&harness).is_empty(), "the release after a loss clicks nothing");
+    click(&mut harness, 5.0, 5.0);
+    assert_eq!(clicks(&harness).len(), 1, "a new press clicks");
 }
 
 /// A release the target takes cancels the press too, as a release over
@@ -1490,7 +1505,7 @@ impl App for Paragraph {
         InputState {
             layer: Layer::Canvas,
             canvas_focused: false,
-            target_first: false,
+            home_first: false,
         }
     }
 

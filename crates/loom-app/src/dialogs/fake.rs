@@ -65,13 +65,10 @@ impl App {
     ///   question too; any other question from [`answer_question`].
     /// - Work runs inline, to its end, and its messages follow in order.
     /// - Every other effect is returned, unrun, for the test to read.
-    /// - An input event is routed first, as the bridge routes it, and each
-    ///   message it becomes is applied in turn.
-    /// - A focus question is answered from the app's own copy of focus,
-    ///   after the turn's effects, as the bridge answers it after the turn.
-    ///   The other window questions are dropped: there is no window to ask
-    ///   where a part is (`window_question.rs`). The `Ui` harness answers
-    ///   them all.
+    /// - Each message is one update, and the messages its effects post
+    ///   follow, as the runtime runs them.
+    /// - There is no window: an update reads no canvas and no focused
+    ///   field from it (`window_now.rs`). The `Ui` harness has both.
     pub(crate) fn send(&mut self, message: Message) -> Effects<Message> {
         self.send_scaled(message, 1.0)
     }
@@ -85,31 +82,25 @@ impl App {
             ..WindowState::new(loom_ui_core::Size::new(crate::WINDOW.width, crate::WINDOW.height))
         };
         let mut unrun = Effects::none();
-        let mut pending = VecDeque::from(crate::input_owner::route(message));
+        let mut pending = VecDeque::from([message]);
         while let Some(message) = pending.pop_front() {
             // No window here: the app's own copy stands in for the
             // runtime's record of focus, as `FocusMoved` keeps it.
             let cx = Context::new(Instant::now(), &waker, self.focus.clone(), window);
             let effects = self.update(message, &cx);
-            let questions = self.take_window_questions();
             for effect in effects {
                 match answer(effect, &waker) {
                     Some(Effect::Work(job)) => job.run(&waker),
                     // As the runtime does: after what was sent so far.
                     Some(Effect::NextTurn(messages)) => {
-                        pending.extend(queue.try_iter().flat_map(crate::input_owner::route));
+                        pending.extend(queue.try_iter());
                         pending.extend(messages);
                     }
                     Some(other) => unrun.push(other),
                     None => {}
                 }
             }
-            pending.extend(queue.try_iter().flat_map(crate::input_owner::route));
-            for question in questions {
-                if let crate::window_question::WindowQuestion::Focus(reply) = question {
-                    pending.push_back(reply(self.focus.clone()));
-                }
-            }
+            pending.extend(queue.try_iter());
         }
         unrun
     }

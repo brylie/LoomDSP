@@ -1,20 +1,15 @@
-//! Who has the input, and which messages a window event becomes.
+//! Who has the input over the window.
 //!
-//! Iced keeps subscriptions in a hash map, so several listeners that hear one
-//! event send their messages in no set order. So one listener, [`input_event`],
-//! hears what depends on who has the input, and [`Listening::route`] turns that
-//! into messages in one fixed order. A second listener, [`always_event`], hears
-//! what does not. The real window, the control channel's `pointer::Injector`, and
-//! the headless `Ui` all go through [`heard_messages`] or the same two listeners,
-//! so a test sees what the app does.
-//!
-//! The listeners hear `loom-ui-core` events. Iced still delivers them until
-//! the window leaves Iced (plan step P4), and `subscriptions::Listeners`
-//! converts each one once on the way in.
+//! Every event reaches the runtime first, which routes it by section 6,
+//! rule 6 of the UI layer spec: Panic, always heard (`App::always_key`,
+//! `runtime_app.rs`), then the open question, the elements and fields, the
+//! open overlay's keys, the canvas as the window's home element, and last
+//! the app's shortcuts for a key nothing took (`App::unclaimed_key`). The
+//! app's side of it is here: who owns the input, the overlay's keys, and
+//! what the canvas may take.
 
-use crate::{App, Message, panic, settings};
-use crate::{controls, subscriptions};
-use loom_ui_core::{Event, Key, KeyEvent, PointerEvent};
+use crate::{App, settings};
+use loom_ui_core::{Key, KeyEvent};
 
 /// Who the keys and clicks over the window belong to. When two are open, the
 /// earlier one has the input. From `Question` down to `Preferences` this is the
@@ -47,145 +42,6 @@ pub(crate) enum InputOwner {
     TileMenu,
     /// Nothing is over the canvas.
     Canvas,
-}
-
-/// A listener: what an event becomes, if anything. Each one also gets whether
-/// a widget used the event.
-type Listener = fn(&Event, bool) -> Option<Message>;
-
-/// Which listeners hear events. It is read before an event arrives and travels
-/// with the event's message, because widgets act on an event first. Without
-/// it, an Enter that makes a widget open a question would also answer the
-/// question it just opened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct Listening {
-    /// No question is open.
-    open: bool,
-    /// The module browser has the input.
-    browser: bool,
-    /// The patches browser has the input.
-    patches: bool,
-    /// An inspector value field has a draft.
-    value_draft: bool,
-}
-
-#[cfg(test)]
-impl Listening {
-    /// Every combination of who listens, for tests that must hold for all.
-    pub(crate) fn all() -> Vec<Self> {
-        (0..16u8)
-            .map(|bits| Self {
-                open: bits & 1 != 0,
-                browser: bits & 2 != 0,
-                patches: bits & 4 != 0,
-                value_draft: bits & 8 != 0,
-            })
-            .collect()
-    }
-}
-
-/// An event the input listener heard, and whether a widget used it.
-#[derive(Debug, Clone)]
-pub(crate) struct Heard {
-    event: Event,
-    /// A widget used the event.
-    used: bool,
-}
-
-impl Heard {
-    /// The message for this event, with who was listening when it was heard.
-    pub(crate) fn message(self, listening: Listening) -> Message {
-        Message::Input {
-            event: self.event,
-            used: self.used,
-            listening,
-        }
-    }
-}
-
-/// The input listener. It lets through only what a row of [`Listening::rows`]
-/// can use, so moving the pointer and redrawing send no message and an idle app
-/// stays idle.
-///
-/// Its subscription restarts when [`Listening`] changes, and an event still
-/// queued for the old one is lost. That is rare: the window is usually very
-/// short, though longer while the main thread is busy, and a person just presses
-/// the key again. What must never be lost goes through [`always_event`].
-pub(crate) fn input_event(event: &Event, used: bool) -> Option<Heard> {
-    let heard = matches!(event, Event::Key(_) | Event::Pointer(PointerEvent::Pressed(_)));
-    heard.then(|| Heard {
-        event: event.clone(),
-        used,
-    })
-}
-
-/// The listener for what works whoever has the input: the panic key
-/// (panic.md). Its subscription never restarts, so it never loses one.
-/// A file dropped on the window is a window event, which the runtime hands
-/// the app (`subscriptions::window_message`).
-pub(crate) fn always_event(event: &Event, used: bool) -> Option<Message> {
-    panic::key(event, used)
-}
-
-/// What the two listeners send for an event, for the paths that hand events on
-/// themselves, through `subscriptions::Listeners`.
-pub(crate) fn heard_messages(event: &Event, used: bool, listening: Listening) -> Vec<Message> {
-    input_event(event, used)
-        .map(|heard| heard.message(listening))
-        .into_iter()
-        .chain(always_event(event, used))
-        .collect()
-}
-
-impl Listening {
-    /// The listeners, each with whether it hears events, in the order their
-    /// messages are applied. `Key` comes first, so a key no widget used
-    /// reaches the overlay that has it before anything closes that overlay.
-    fn rows(self) -> [(bool, Listener); 4] {
-        // An open question has every key, Panic's included: the runtime
-        // keeps each press from Iced and gives it to `question::key_of`
-        // (ui-layer.md, section 6, rule 6, step 2), so no listener here
-        // hears one. They stay off while it is open anyway, so one key
-        // cannot answer it and also reach what is behind it once the answer
-        // has closed it (files.md, Asking before losing work).
-        [
-            (self.open, app_key),
-            // The matrix's keys are the runtime's: its card list takes the
-            // grid's keys before its cells (`matrix/panel.rs`).
-            // The module browser's keys are the runtime's: its search field
-            // leaves them to the browser before it edits (`browser/panel.rs`).
-            (self.open, subscriptions::help_key),
-            // Your patches' keys are the runtime's too (`patches/panel.rs`).
-            // A draft in a value field ends on Escape, and the app has to know
-            // when text focus may have moved (panel-widgets.md, Typing a value).
-            (self.open && self.value_draft, controls::value_draft_event),
-            (self.open, controls::text_focus_event),
-        ]
-    }
-
-    /// The messages an event becomes, in the order they are applied.
-    pub(crate) fn route(self, event: &Event, used: bool) -> Vec<Message> {
-        self.rows()
-            .into_iter()
-            .filter(|(on, _)| *on)
-            .filter_map(|(_, listener)| listener(event, used))
-            .collect()
-    }
-}
-
-/// A key no widget used goes to the app, as `keyboard::listen` would send it.
-fn app_key(event: &Event, used: bool) -> Option<Message> {
-    match event {
-        Event::Key(
-            key @ KeyEvent::Pressed {
-                key: Key::Tab,
-                modifiers,
-                ..
-            },
-        ) if modifiers.control => Some(Message::Key(key.clone())),
-        Event::Key(key) if !used => Some(Message::Key(key.clone())),
-        _ => None,
-    }
 }
 
 impl App {
@@ -234,16 +90,6 @@ impl App {
         }
     }
 
-    /// Which listeners hear events now.
-    pub(crate) fn listening(&self) -> Listening {
-        Listening {
-            open: self.overlays.question.is_none(),
-            browser: self.input_owner() == InputOwner::Browser,
-            patches: self.input_owner() == InputOwner::Patches,
-            value_draft: self.session.value_draft.is_some(),
-        }
-    }
-
     /// A key no widget used while an overlay has the input. An overlay's keys
     /// stop here, so none reaches the canvas or a window behind it.
     pub(crate) fn overlay_key(&mut self, event: &KeyEvent) {
@@ -270,23 +116,6 @@ impl App {
                 _ => {}
             },
         }
-    }
-}
-
-/// The messages an input event becomes, routed before `update` by whoever
-/// runs the app (the bridge, the `Ui` harness, `App::send`): each is its
-/// own update, in order (ui-layer.md, section 2, rule 5). A route with no
-/// message still redraws, so it counts as input for `--measure-idle`.
-pub(crate) fn route(message: Message) -> Vec<Message> {
-    match message {
-        Message::Input { event, used, listening } => {
-            let messages = listening.route(&event, used);
-            if messages.is_empty() {
-                loom_canvas::stats::request_frame(loom_canvas::stats::FrameCause::Input);
-            }
-            messages
-        }
-        message => vec![message],
     }
 }
 

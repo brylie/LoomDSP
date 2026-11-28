@@ -217,6 +217,40 @@ impl<A: App> Panels<'_, A> {
             .or_else(|| self.window.text_bounds(text))
     }
 
+    /// Where the element with UI ID `id` is in the current layout, in
+    /// logical pixels, as [`Context::bounds`](crate::Context::bounds) gives
+    /// it in a turn.
+    pub fn bounds(&self, id: &UiId) -> Option<Rect> {
+        self.window.bounds(id)
+    }
+
+    /// What of the element with UI ID `id` shows in the current layout,
+    /// cut by every clip around it, as
+    /// [`Context::shown_bounds`](crate::Context::shown_bounds) gives it.
+    pub fn shown_bounds(&self, id: &UiId) -> Option<Rect> {
+        self.window.shown_bounds(id)
+    }
+
+    /// Where the pointer is, in window logical pixels, as the runtime last
+    /// heard, or `None` outside the window.
+    pub fn pointer(&self) -> Option<Point> {
+        self.pointer.at
+    }
+
+    /// The window's inside, in logical pixels.
+    pub fn size(&self) -> Size {
+        self.size
+    }
+
+    /// The state of the custom element with UI ID `id`, as its own type
+    /// `S`, as [`Context::custom`](crate::Context::custom) reads it in a
+    /// turn: for a driver that reads it between turns, such as a script's
+    /// pointer finding a target.
+    pub fn custom<S: 'static>(&self, id: &UiId) -> Option<&S> {
+        let state: &dyn std::any::Any = self.customs.state(id)?;
+        state.downcast_ref()
+    }
+
     /// Chooses the hover text to show, from the hovered element and the
     /// focused one in the layers that take input, and lays it out
     /// (section 5, rule 11).

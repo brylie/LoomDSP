@@ -1,7 +1,6 @@
 use crate::inspector::Inspector;
 use crate::ui_test::Ui;
 use crate::{App, Loaded, Message, Source};
-use iced::{Event, mouse};
 use loom_core::{EngineConfig, ModuleId};
 use loom_patch::{ModulePath, Patch};
 use loom_ui_core::{Key, Modifiers, Point};
@@ -176,9 +175,9 @@ fn each_level_keeps_its_camera() {
     // Zoom in over the canvas.
     let centre = ui.canvas().bounds.center();
     ui.move_to(centre);
-    ui.step(&[Event::Mouse(mouse::Event::WheelScrolled {
-        delta: mouse::ScrollDelta::Lines { x: 0.0, y: 3.0 },
-    })]);
+    ui.step(&[crate::ui_test::Input::pointer(loom_ui_core::PointerEvent::Scrolled(
+        loom_ui_core::ScrollDelta::Lines { x: 0.0, y: 3.0 },
+    ))]);
     ui.redraw();
     let zoomed = ui.canvas().camera;
     assert!(zoomed.zoom > framed.zoom, "{zoomed:?} vs {framed:?}");

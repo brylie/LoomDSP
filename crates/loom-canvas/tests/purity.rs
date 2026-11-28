@@ -1,22 +1,18 @@
-//! Where `loom-canvas` may name Iced, and where it may read the clock
+//! What `loom-canvas` may not name, and where it may not read the clock
 //! (docs/design/ui-layer.md, section 9; docs/dev/leaving-iced-plan.md,
-//! Phase 1 done). The crate depends on Iced, so the compiler cannot hold
-//! these rules; this test does.
+//! P4). The workspace still holds Iced until P5, so the compiler cannot
+//! hold the first rule; this test does.
 //!
-//! 1. **Iced is named only on the widget side:** `src/widget.rs`, files
-//!    under `src/widget/`, `src/iced_convert.rs`, and files under
-//!    `src/iced_convert/`. Every other file under `src/`, test files
-//!    included, has no path into Iced or one of its crates. The one line
-//!    `pub mod iced_convert;` in `src/lib.rs` is allowed, because a module
-//!    must be declared somewhere. The canvas can then move to our own UI
-//!    layer by replacing those files alone.
+//! 1. **Iced is named nowhere:** no file under `src/`, test files
+//!    included, has a path into Iced or one of its crates. The Iced widget
+//!    and its conversions went in phase 4, P4: the app hosts the canvas as
+//!    a `loom-ui` custom element.
 //! 2. **Canvas input never reads the clock:** `src/input.rs`, files under
 //!    `src/input/`, and `src/reaction.rs`, without their test files. The
 //!    time arrives in a `Moment`, so a test chooses it.
 //! 3. **The canvas takes `loom-ui` without its window shell:** only the
 //!    `gpu` feature, for the paint renderer. So no window toolkit reaches
-//!    the canvas through `loom-ui`. Until phase 4, Iced still brings
-//!    `winit`; that path is Iced's, not ours.
+//!    the canvas through `loom-ui`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,10 +25,6 @@ const ICED: [&str; 2] = ["iced::", "iced_"];
 /// The ways to read the clock.
 const CLOCK: [&str; 3] = ["Instant::now", "SystemTime", ".elapsed("];
 
-/// The one line outside the widget side that may name the conversion
-/// module: its declaration in `src/lib.rs`.
-const DECLARATION: &str = "pub mod iced_convert;";
-
 /// True for a file that holds tests: `tests.rs`, a name ending in
 /// `_tests.rs`, or any file under a `tests` folder.
 fn is_test_file(path: &Path) -> bool {
@@ -42,13 +34,6 @@ fn is_test_file(path: &Path) -> bool {
         || path
             .parent()
             .is_some_and(|parent| parent.iter().any(|part| part == "tests"))
-}
-
-/// True for a file on the widget side, which may name Iced. `path` is
-/// relative to `src/`.
-fn is_widget_side(path: &Path) -> bool {
-    let first = path.iter().next().and_then(|part| part.to_str()).unwrap_or("");
-    matches!(first, "widget.rs" | "widget" | "iced_convert.rs" | "iced_convert")
 }
 
 /// True for a canvas input file, which may not read the clock. `path` is
@@ -65,13 +50,10 @@ fn code_of(line: &str) -> &str {
 }
 
 /// Each of `names` found in the code of `source`, with its 1-based line
-/// number. A line that is exactly `allowed` is skipped.
-fn violations(source: &str, names: &[&'static str], allowed: Option<&str>) -> Vec<(usize, &'static str)> {
+/// number.
+fn violations(source: &str, names: &[&'static str]) -> Vec<(usize, &'static str)> {
     let mut found = Vec::new();
     for (index, line) in source.lines().enumerate() {
-        if allowed.is_some_and(|allowed| line.trim() == allowed) {
-            continue;
-        }
         for name in names {
             if code_of(line).contains(name) {
                 found.push((index + 1, *name));
@@ -112,18 +94,17 @@ fn scan(names: &[&'static str], applies: impl Fn(&Path) -> bool) -> (usize, Vec<
     for path in files.iter().filter(|path| applies(path)) {
         scanned += 1;
         let source = fs::read_to_string(src.join(path)).expect("a source file can be read");
-        let allowed = (path == Path::new("lib.rs")).then_some(DECLARATION);
-        for (line, name) in violations(&source, names, allowed) {
+        for (line, name) in violations(&source, names) {
             found.push(format!("{}:{line}: {name}", path.display()));
         }
     }
     (scanned, found)
 }
 
-/// Outside the widget side, no file names Iced, test files included.
+/// No file names Iced, test files included.
 #[test]
-fn iced_is_named_only_on_the_widget_side() {
-    let (scanned, found) = scan(&ICED, |path| !is_widget_side(path));
+fn iced_is_named_nowhere() {
+    let (scanned, found) = scan(&ICED, |_| true);
     assert!(scanned > 20, "the scan found the crate's files, not {scanned}");
     assert_eq!(found, Vec::<String>::new());
 }
@@ -136,28 +117,19 @@ fn canvas_input_never_reads_the_clock() {
     assert_eq!(found, Vec::<String>::new());
 }
 
-/// The scan sees each forbidden name in code, and leaves comments, harmless
-/// words, and the allowed line alone.
+/// The scan sees each forbidden name in code, and leaves comments and
+/// harmless words alone.
 #[test]
 fn the_scan_finds_each_forbidden_name_in_code_only() {
     let source = "\
 use iced::Point;
 use iced_core::mouse;
-use crate::iced_convert::ToIced as _;
 pub mod iced_convert;
-// The Iced widget calls iced::Shell and Instant::now for us.
+// The Iced widget called iced::Shell and Instant::now for us.
 let noticed = sliced(now); // not iced::anything
 let due = moment.now + delay;
 ";
-    assert_eq!(
-        violations(source, &ICED, Some(DECLARATION)),
-        [(1, "iced::"), (2, "iced_"), (3, "iced_")]
-    );
-    assert_eq!(
-        violations(source, &ICED, None),
-        [(1, "iced::"), (2, "iced_"), (3, "iced_"), (4, "iced_")],
-        "the declaration counts where it is not allowed"
-    );
+    assert_eq!(violations(source, &ICED), [(1, "iced::"), (2, "iced_"), (3, "iced_")]);
 
     let clock = "\
 let now = Instant::now();
@@ -166,42 +138,36 @@ let waited = at.elapsed();
 // Instant::now is read by the host.
 ";
     assert_eq!(
-        violations(clock, &CLOCK, None),
+        violations(clock, &CLOCK),
         [(1, "Instant::now"), (2, "SystemTime"), (3, ".elapsed(")]
     );
 }
 
-/// The scan knows which files hold tests, which are on the widget side,
-/// and which are canvas input.
+/// The scan knows which files hold tests and which are canvas input.
 #[test]
 fn the_scan_sorts_files_into_the_right_rule() {
-    for (path, test, widget, input) in [
-        ("lib.rs", false, false, false),
-        ("gpu.rs", false, false, false),
-        ("gpu/tests.rs", true, false, false),
-        ("input.rs", false, false, true),
-        ("input/handle.rs", false, false, true),
-        ("input/tests.rs", true, false, false),
-        ("input/focus/tests.rs", true, false, false),
-        ("input/panel_tests.rs", true, false, false),
-        ("input/tests/helpers.rs", true, false, false),
-        ("reaction.rs", false, false, true),
-        ("widget.rs", false, true, false),
-        ("widget/painter.rs", false, true, false),
-        ("widget/tests.rs", true, true, false),
-        ("iced_convert.rs", false, true, false),
-        ("iced_convert/tests.rs", true, true, false),
-        ("widgets.rs", false, false, false),
+    for (path, test, input) in [
+        ("lib.rs", false, false),
+        ("gpu.rs", false, false),
+        ("gpu/tests.rs", true, false),
+        ("input.rs", false, true),
+        ("input/handle.rs", false, true),
+        ("input/tests.rs", true, false),
+        ("input/focus/tests.rs", true, false),
+        ("input/panel_tests.rs", true, false),
+        ("input/tests/helpers.rs", true, false),
+        ("reaction.rs", false, true),
+        ("inputs.rs", false, false),
     ] {
         let path = Path::new(path);
         assert_eq!(is_test_file(path), test, "{path:?} test");
-        assert_eq!(is_widget_side(path), widget, "{path:?} widget side");
         assert_eq!(is_input(path), input, "{path:?} input");
     }
 }
 
 /// What `cargo tree` prints for this crate with `args`, one package or
-/// feature per line, from the lock file alone.
+/// feature per line, from the lock file alone. An inverted tree for a
+/// package that does not reach the crate at all is empty.
 fn tree(args: &[&str]) -> String {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
@@ -212,16 +178,17 @@ fn tree(args: &[&str]) -> String {
         .args(args)
         .output()
         .expect("cargo runs");
-    assert!(
-        output.status.success(),
-        "cargo tree failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() && stderr.contains("did not match any packages") {
+        return String::new();
+    }
+    assert!(output.status.success(), "cargo tree failed: {stderr}");
     String::from_utf8(output.stdout).expect("cargo tree prints UTF-8")
 }
 
 /// The canvas turns on `loom-ui`'s `gpu` feature and not its `shell`, and
-/// no path from the canvas to `winit` goes through `loom-ui`.
+/// no path from the canvas to `winit` goes through `loom-ui`. Since the
+/// Iced widget went, `winit` does not reach the canvas at all.
 #[test]
 fn loom_ui_comes_without_its_shell() {
     let features = tree(&["-e", "normal,features", "-i", "loom-ui"]);

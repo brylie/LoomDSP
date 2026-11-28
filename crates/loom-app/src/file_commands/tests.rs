@@ -88,11 +88,16 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         // The window may still focus a field the new patch's views keep, so
         // it stays until the window says otherwise; the app asks it again.
         focus: _,
-        focus_question,
-        // Empty between frames: every draw empties it before Iced's draw
-        // call and takes the frame after, so no frame of the old patch is
-        // left to draw (`iced_bridge/paint.rs`). Checked below.
-        canvas_drawn,
+        // The canvas syncs after each update and lets go of what it held
+        // when the window lost the keys, whatever the patch: the window's,
+        // so they stay (`canvas.rs`).
+        updates: _,
+        unfocused: _,
+        pressed_elsewhere: _,
+        canvas_keys: _,
+        // The `Ui` harness's.
+        message_log: _,
+        test_panels: _,
         generation,
         test_modules,
         // The update that sets it ends by exiting the app, so a replace never
@@ -134,7 +139,7 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
         // time across New and Open (`clock.rs`).
         clock: _,
         // Filled and taken within one turn, by the bridge.
-        window_questions: _,
+        window_now: _,
         // The control channel's: a command that sent `new` is still
         // answered in the new patch.
         control_replies: _,
@@ -224,8 +229,6 @@ fn replacing_the_patch_keeps_or_resets_every_field() {
     assert_eq!(gestures.adding(), None);
     assert!(linked_before.is_none());
     assert!(value_draft.is_none());
-    assert!(focus_question.get(), "the window is asked where focus is");
-    assert!(canvas_drawn.take().is_none(), "no canvas frame is left between frames");
     assert!(lights.is_empty());
     assert!(!run_driven);
     assert!(meter_levels.is_empty());

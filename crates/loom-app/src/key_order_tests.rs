@@ -225,3 +225,44 @@ fn step_6_a_shortcut_acts_unless_a_field_has_focus() {
     ui.tap(Key::Character('d'), Modifiers::platform_shortcut());
     assert_eq!(modules(&ui), before + 1, "with no field, Cmd+D duplicates");
 }
+
+/// Step 6: a shortcut runs in its key's own turn, not one after: the
+/// runtime runs one turn for the press, and Cmd+D has duplicated the tile
+/// by its end (Agreed, rule 6, step 6).
+#[test]
+fn step_6_a_shortcut_runs_in_its_keys_own_turn() {
+    let mut ui = Ui::open("subtractive.ron");
+    ui.app_mut().session.selection = [4].into_iter().collect();
+    ui.redraw();
+    let before = modules(&ui);
+    let turns = ui.runtime().counts().turns;
+    ui.step(&[key_press(
+        Key::Character('d'),
+        Modifiers::platform_shortcut(),
+        Some("d"),
+        false,
+    )]);
+    assert_eq!(modules(&ui), before + 1, "Cmd+D duplicated the tile");
+    assert_eq!(ui.runtime().counts().turns, turns + 1, "in one turn");
+}
+
+/// Step 1: Panic is heard while an input method composes in a field,
+/// though the composition takes every other key, Escape included; the
+/// composition goes on, and its commit still types the text (section 6,
+/// rule 6, step 1; section 8, rule 4).
+#[test]
+fn step_1_panic_is_heard_while_composing() {
+    let mut ui = browsing();
+    ui.step(&[loom_ui_core::Event::Ime(loom_ui_core::ImeEvent::Enabled)]);
+    ui.step(&[loom_ui_core::Event::Ime(loom_ui_core::ImeEvent::Preedit {
+        text: "か".to_string(),
+        cursor: None,
+    })]);
+    let messages = tap_panic(&mut ui);
+    assert_panicked(&ui, &messages);
+    ui.step(&[loom_ui_core::Event::Ime(loom_ui_core::ImeEvent::Commit(
+        "か".to_string(),
+    ))]);
+    let browser = ui.app().overlays.browser().expect("the browser stays open");
+    assert_eq!(browser.model().query, "か", "the composition went on");
+}
