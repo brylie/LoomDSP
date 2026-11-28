@@ -10,7 +10,7 @@ Brylie named eleven favourite collections, and asked which generic kinds of modu
 
 ## How to use this document
 
-- It names other products' modules as facts. Only research snapshots may do that (ADR-0018). The catalogue, specifications, and help pages use our own words.
+- It names other products' modules as facts. Only research snapshots, "Prior art" sections of ADRs, and explainers in `docs/learn/` may do that (ADR-0018). The catalogue, specifications, and help pages use our own words.
 - It records the **kind** of each module: what it is for. It records no panel layout, control name, parameter set, or help text, and a LoomDSP module must not be designed from one of these modules. Design from the purpose and the theory, and cite the references.
 - No source code was read. Every collection is listed as open source in the VCV Library. The 2026-10 survey notes that Bogaudio and Count Modula are GPL-3.0, which ADR-0006 does not allow us to use; we did not check the others, and the rule is the same for all: listings only.
 - Module lists here are examples, not complete lists.
@@ -50,7 +50,7 @@ Each gap that touches a built module was also checked against that module's desc
 
 ## Findings
 
-1. **Almost every kind is already built or planned.** Of the kinds found in 576 modules, about twenty are gaps, and most of those are a mode of a planned type, not a new type. The three examples in the request are all planned: a burst generator is Repeater (MT-GATE-03), a shift register is MT-LOGIC-06, and a gate sequencer is a gate lane of the Multi-lane sequencer (MT-SEQ-01).
+1. **Almost every kind is already built or planned.** Of the kinds found in 576 modules, 22 are gaps, and most of those are a mode of a planned type, not a new type. The three examples in the request are all planned: a burst generator is Repeater (MT-GATE-03), a shift register is MT-LOGIC-06, and a gate sequencer is a gate lane of the Multi-lane sequencer (MT-SEQ-01).
 2. **A large share of each collection is variants that our rules fold away.** Step counts, channel counts, matrix sizes, polyphonic and dual and quad copies, "voltage controlled" versions, expanders, multiples, and blank panels. See [What folds away](#what-folds-away). This is the main lesson for the design system: our catalogue stays small because the engine and the traits do this work, so each type must show its size, its voices, and its modulation well.
 3. **One collection is built around the same idea as ours.** Of HetrickCV's 79 modules, 36 have a phase ramp in their name, and they read or shape one. They are independent evidence for "phase is life", and they show which phase tools players reach for. See [Phase tools](#phase-tools).
 4. **Utilities are what players miss first.** Count Modula and Bogaudio are mostly switches, logic, gate tools, and level tools. Most of ours are planned for M3. Building them early gives a familiar toolkit at low DSP cost.
@@ -287,7 +287,7 @@ Not classed, because the name, tags, and description did not say enough: Count M
 
 ## The gap list
 
-Twenty kinds, in the order we would look at them. "Mode" means a change to an existing entry; "type" means a possible new entry. None is decided here.
+Twenty-two kinds, in the order we would look at them. "Mode" means a change to an existing entry; "type" means a possible new entry. None is decided here.
 
 | # | Kind | Likely form | Why it matters |
 |---|---|---|---|
@@ -310,7 +310,9 @@ Twenty kinds, in the order we would look at them. "Mode" means a change to an ex
 | 17 | Convert between X/Y and angle/distance | Mode of Convert or Function | Makes the attractor modulators patchable as phases |
 | 18 | Gate delay with taps | Mode of Gate shaper | Small |
 | 19 | Send a phase one of two ways by chance | Mode of Chance | Small |
-| 20 | Scope with several traces; exciter; tube waveguide | Small additions | Low priority |
+| 20 | Scope with several traces | Mode of Scope | Small |
+| 21 | Exciter | Abstraction of a filter, Shaper, and Crossfade | Small |
+| 22 | A tube as a waveguide | A relative of String model (MT-SRC-10) | Small |
 
 ## For the design system
 

@@ -36,7 +36,7 @@ So these are **atoms**, in the sense the catalogue already uses for traits: a se
 
 | Atom | What it is | Status | Fits | Does not fit |
 |---|---|---|---|---|
-| **Rate** | How fast it runs: free, synced to the bar, or one step per trigger | Timebase trait (TR-02) | Attractors, orbits, fields | Regulator, Tiring, and Leaky bucket have time constants of their own; Shuffle steps per trigger |
+| **Rate** | How fast it runs: free, synced to the bar, or driven by an external phase. One step per trigger is a fourth way that these modules would add | Timebase trait (TR-02) for the first three. Stepping per trigger is not in the trait today; it is a proposed extension | Attractors, orbits, fields | Regulator, Tiring, and Leaky bucket have time constants of their own; Shuffle steps per trigger |
 | **Seed** | Where it starts. The same seed gives the same piece | Seed trait (TR-07) | Anything with chance or a chosen start | Spring, Regulator, Leaky bucket |
 | **Reset** | A gate input that returns it to its start | Retrigger trait (TR-03) | Nearly all | |
 | **Push** | An input that disturbs the state: a kick, a drop, a gust | Candidate trait | Driven oscillator, Ripple tank, Chain, Flock | Shuffle, Figure, fixed rhythms |
@@ -288,7 +288,7 @@ Brylie asked for anything from Maxwell's equations (2026-11-28). They describe e
 
 Brylie also asked about the primes, and a result about primes on a particular line that makes an interesting curve.
 
-**A correction first.** The famous statement is the Riemann hypothesis: the zeros of the zeta function all lie on one line, called the critical line. To our knowledge it has not been proved. What was in the news is likely the 2024 result of Guth and Maynard, which narrowed how many zeros could lie away from the line. It is progress, not a proof. Check this before any help text says anything about it.
+**A correction first.** The famous statement is the Riemann hypothesis: the zeta function's nontrivial zeros all lie on one line, called the critical line. (It also has simple, well-understood zeros at the negative even numbers, which the hypothesis is not about. "Zeros" below means the nontrivial ones.) To our knowledge it has not been proved. What was in the news is likely the 2024 result of Guth and Maynard, which narrowed how many zeros could lie away from the line. It is progress, not a proof. Check this before any help text says anything about it.
 
 The curve is real, and it is a good signal. Follow the zeta function along the critical line and its size rises and falls in an irregular wave that never repeats. Each place it touches zero is one of the zeros. Their spacing has a known character: they keep apart from each other, so they are never bunched like raindrops and never even like a clock. That is a kind of rhythm nothing else here makes.
 
@@ -296,9 +296,9 @@ There is a second, deeper link to sound. Riemann's formula builds the staircase 
 
 | Module | What it does musically | Teaches | Likely form |
 |---|---|---|---|
-| Zeta curve | A phase moves along the critical line. The output is the curve; each zero fires a trigger. One control sets how far along the line to start | The zeros, and spacing that is neither regular nor random | New type. Read from a stored table of zeros, so it costs little |
+| Zeta curve | A phase moves along the critical line. The output is the curve; each zero fires a trigger. One control sets how far along the line to start | The zeros, and spacing that is neither regular nor random | New type. It needs two things: a stored table of zeros for the triggers, and the curve's values between them, from a stored table of samples or from a known formula worked out off the audio thread. Either way the audio thread only reads a table |
 | Prime staircase | A staircase that steps at every prime, and beside it the smooth curve made by adding waves. A Waves control adds them one at a time, and the smooth curve grows corners at the primes | That the primes hide a spectrum | New type. The face is the lesson |
-| Sieve | A stack of clock dividers, one per prime: every 2nd step, every 3rd, every 5th. Each is a rhythm, and the steps that none of them hit are the next primes | The sieve of Eratosthenes, and how rhythm layers make gaps | Abstraction of Clock Divide and Logic, both built. Patchable today for the first few primes |
+| Sieve | A stack of clock dividers, one per prime: every 2nd step, every 3rd, every 5th. Each is a rhythm, and the steps that none of them hit are primes, up to a limit: with dividers for 2, 3, and 5, every unhit step from 7 to 47 is prime, and 49 is the first wrong one, because it is 7 times 7. Each new divider moves the limit to the square of the next prime. Step 1 is never hit and is not a prime | The sieve of Eratosthenes, how rhythm layers make gaps, and why the sieve needs each new prime | Abstraction of Clock Divide and Logic, both built. Patchable today for a few dividers, within that limit |
 | Prime steps | A counter that fires on prime-numbered steps, and gives the gap since the last one as a value | That gaps between primes grow, but small ones keep turning up | New type, small |
 | Number spiral | The counting numbers wound in a square spiral, with primes marked. Lines of primes appear along diagonals. A path walks it and fires at each prime | A pattern in the primes anyone can see | A pattern field (the Ulam spiral) |
 | Factors | Each count plays a voice for every prime that divides it: 12 plays the 2 voice twice and the 3 voice once. Primes play alone | Every number is built from primes in one way | New type. A system that makes voices |
@@ -424,7 +424,7 @@ If M3 builds a handful first, these give the most life for the least work, and b
 | 7 | Driven oscillator | The first chaotic module with a Push, so it settles the determinism question |
 | 8 | Rewriting | One type gives four of the proposed rhythm and melody modules |
 | 9 | Attractor modes | Planned already; adds Rössler, Double scroll, and Chemical clock as modes |
-| 10 | Zeta curve | Brylie's priority. Modulation, a rhythm found nowhere else, and a tuning finder, from one stored table |
+| 10 | Zeta curve | Brylie's priority. Modulation, a rhythm found nowhere else, and a tuning finder, read from stored tables |
 | In parallel | Fields, Flock, Neurons, Evolving melody | The flagship modules. They need the engine work above, so that work starts at the same time as the small modules, not after them |
 
 ## Open
