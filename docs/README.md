@@ -58,6 +58,8 @@ Why decisions are kept apart from specifications: a decision record explains *wh
 | [Desktop play test, 2026-11-19](research/2026-11-19-desktop-playtest.md) | Three playable examples, repeatable UX checks, and backlog follow-ups |
 | [Desktop UX audit and design language, 2026-11-19](research/2026-11-19-release-polish.md) | Release priorities, window captures, module shapes, live polyphonic envelope study, and checks with musicians |
 | [UI redesign canvas, 2026-11-27](research/2026-11-ui-redesign.md) | A design canvas for module anatomy, faces, and signal colours, its two reviews, and the colours measured on the real tile |
+| [VCV collections against our catalogue, 2026-11-28](research/2026-11-vcv-collections-survey.md) | Eleven VCV Rack collections sorted into kinds of module, mapped to the catalogue, with twenty gaps |
+| [Living systems brainstorm, 2026-11-28](research/2026-11-living-systems-brainstorm.md) | Module ideas from physics, chaos, geometry, biology, and number theory, sorted by mechanism, with candidate traits |
 
 ## Benchmarks
 
