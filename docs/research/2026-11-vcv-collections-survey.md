@@ -50,11 +50,11 @@ Each gap that touches a built module was also checked against that module's desc
 
 ## Findings
 
-1. **Almost every kind is already built or planned.** Of the kinds found in 576 modules, 22 are gaps, and most of those are a mode of a planned type, not a new type. The three examples in the request are all planned: a burst generator is Repeater (MT-GATE-03), a shift register is MT-LOGIC-06, and a gate sequencer is a gate lane of the Multi-lane sequencer (MT-SEQ-01).
+1. **Almost every kind is already built or planned.** Of the kinds found in 576 modules, 21 are gaps. Of those, 7 are a change to a planned type, 6 are a mode of a module we have built, 2 are abstractions, and 6 may need a new type. The three examples in the request are all planned: a burst generator is Repeater (MT-GATE-03), a shift register is MT-LOGIC-06, and a gate sequencer is a gate lane of the Multi-lane sequencer (MT-SEQ-01).
 2. **A large share of each collection is variants that our rules fold away.** Step counts, channel counts, matrix sizes, polyphonic and dual and quad copies, "voltage controlled" versions, expanders, multiples, and blank panels. See [What folds away](#what-folds-away). This is the main lesson for the design system: our catalogue stays small because the engine and the traits do this work, so each type must show its size, its voices, and its modulation well.
 3. **One collection is built around the same idea as ours.** Of HetrickCV's 79 modules, 36 have a phase ramp in their name, and they read or shape one. They are independent evidence for "phase is life", and they show which phase tools players reach for. See [Phase tools](#phase-tools).
 4. **Utilities are what players miss first.** Count Modula and Bogaudio are mostly switches, logic, gate tools, and level tools. Most of ours are planned for M3. Building them early gives a familiar toolkit at low DSP cost.
-5. **The gaps cluster in four places:** phase tools that change timing inside a cycle, random sources with a shaped distribution, patterns and live recording in sequencers, and control signals stored in buffers.
+5. **The gaps cluster in four places:** phase tools that change timing inside a cycle, random sources (weighted choice, and impulses at a density), patterns and live recording in sequencers, and control signals stored in buffers.
 
 ## What folds away
 
@@ -287,7 +287,7 @@ Not classed, because the name, tags, and description did not say enough: Count M
 
 ## The gap list
 
-Twenty-two kinds, in the order we would look at them. "Mode" means a change to an existing entry; "type" means a possible new entry. None is decided here.
+The 21 kinds marked as a gap in the tables above, in the order we would look at them. "Mode" means a change to an existing entry; "type" means a possible new entry. None is decided here.
 
 | # | Kind | Likely form | Why it matters |
 |---|---|---|---|
@@ -295,24 +295,27 @@ Twenty-two kinds, in the order we would look at them. "Mode" means a change to a
 | 2 | Live recording into sequencer lanes | Mode of MT-SEQ-01 | Performance |
 | 3 | Repeat part of a phase (stutter, ratchet) | Mode of Phase warp, or a type | Rhythm from phase, our core idea |
 | 4 | Loosen a phase's timing a little each cycle | Mode of Phase warp with the seed trait | Same |
-| 5 | A phase that runs N times and stops | Mode of Phase (MT-PHASE-01) | One-shot gestures |
-| 6 | Hold or freeze a phase | Mode of Phase reset | Performance |
-| 7 | Swing on a phase, by name | Preset of Phase warp | Clock's swing is planned; a phase-read sequencer needs it too |
-| 8 | More distribution shapes on Random | Mode of Random, which has two | Generative patches; small |
-| 9 | Weighted choice among set values | Type, or a mode of Random | Generative patches |
-| 10 | Random impulses at a density | Mode of Noise, or a type | Textures and triggers without a clock |
-| 11 | Buffers that hold control signals | A sentence in MT-SAMPLE-01 | Every cable is the same kind of signal, so it may need little more than saying so |
-| 12 | A curve that varies each pass | Mode of Curve reader | Fits the Curve work on the design canvas |
-| 13 | A bank of pads sending stored values | Type, or a mode of Button | Performance surface |
-| 14 | Mixer with sends and a master section | Abstraction | Familiar to every player |
-| 15 | Frequency response analyser | Type, or an abstraction with Swept sine | Learning; pairs with the response curve face |
-| 16 | Mass and spring network as a resonator | Type (M4) | Fits the "systems" modules and the state space face |
-| 17 | Convert between X/Y and angle/distance | Mode of Convert or Function | Makes the attractor modulators patchable as phases |
-| 18 | Gate delay with taps | Mode of Gate shaper | Small |
-| 19 | Send a phase one of two ways by chance | Mode of Chance | Small |
-| 20 | Scope with several traces | Mode of Scope | Small |
-| 21 | Exciter | Abstraction of a filter, Shaper, and Crossfade | Small |
-| 22 | A tube as a waveguide | A relative of String model (MT-SRC-10) | Small |
+| 5 | A phase that runs N times and stops | Mode of Phase (built in part) | One-shot gestures |
+| 6 | Hold or freeze a phase | Mode of Phase Reset (built) | Performance |
+| 7 | Weighted choice among set values | Type, or a mode of Random | Generative patches |
+| 8 | Random impulses at a density | Mode of Noise (built), or a type | Textures and triggers without a clock |
+| 9 | Buffers that hold control signals | A sentence in MT-SAMPLE-01 | Every cable is the same kind of signal, so it may need little more than saying so |
+| 10 | A curve that varies each pass | Mode of Curve reader | Fits the Curve work on the design canvas |
+| 11 | A bank of pads sending stored values | Type, or a mode of Button | Performance surface |
+| 12 | A point in a plane that drives many outputs by distance | Type, or a mode of XY and vector pad (MT-UI-03) | Performance surface; near Voronoi field |
+| 13 | Mixer with sends and a master section | Abstraction | Familiar to every player |
+| 14 | Frequency response analyser | Type, or an abstraction with Swept sine | Learning; pairs with the response curve face |
+| 15 | Mass and spring network as a resonator | Type (M4) | Fits the "systems" modules and the state space face |
+| 16 | Convert between X/Y and angle/distance | Mode of Convert (built) or Function | Makes the attractor modulators patchable as phases |
+| 17 | Gate delay with taps | Mode of Gate shaper | Small |
+| 18 | Send a phase one of two ways by chance | Mode of Chance (built) | Small |
+| 19 | Scope with several traces | Mode of Scope (built) | Small |
+| 20 | Exciter | Abstraction of a filter, Shaper, and Crossfade | Small |
+| 21 | A tube as a waveguide | Type, a relative of String model (MT-SRC-10) | Small |
+
+By likely form: 7 are a change to a planned type (rows 1 to 4, 9, 10, and 17), 6 are a mode of a module we have built (rows 5, 6, 8, 16, 18, and 19), 2 are abstractions (rows 13 and 20), and 6 may need a new type (rows 7, 11, 12, 14, 15, and 21).
+
+Two smaller additions are not counted, because the tables do not mark them as gaps: swing on a phase, by name, which is likely a preset of Phase warp, and more distribution shapes on Random, which has two.
 
 ## For the design system
 

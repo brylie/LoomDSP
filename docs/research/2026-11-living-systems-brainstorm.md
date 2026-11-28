@@ -70,12 +70,12 @@ The design agent's five groups (physical, chaotic, fractal and rewriting, random
 | **Map:** a point that hops once per trigger | Logistic map, Hénon map, Clifford | Iterated map (MT-MOD-11), Attractor | Modes |
 | **Driven oscillator:** a simple oscillator pushed by an input | Driven spring, Heartbeat | None | **New type.** Its input is the Push, and it locks to it or stumbles |
 | **Spring:** one mass that follows its input | Spring follower | Slew (built), character trait | Mode of Slew, or a small new type |
-| **Chain:** many masses in a row | Mass-spring chain | None (survey gap 16) | **New type**, shared with the audio-rate resonator |
+| **Chain:** many masses in a row | Mass-spring chain | None (a gap in the VCV survey) | **New type**, shared with the audio-rate resonator |
 | **Bodies:** a few objects under gravity | Orbits, Orbital resonance, Pendulum, Bounce, Wind chimes | Pendulum (MT-MOD-07), Bounce (MT-MOD-05) | **Orbits** is a new type; Orbital resonance is a preset of it; Wind chimes is an abstraction of Noise, Pendulum, and Compare |
 | **Field:** a surface with a rule, read by a probe | Ripple tank, Turing patterns, Voronoi field, Mandelbrot and Julia | Voronoi field (MT-MOD-09), Escape-time fractal (MT-MOD-12) | **One interface, several types.** The costliest group; see below |
 | **Grid automaton:** cells that follow a local rule on a clock | Cellular automaton, Langton's ant, Sandpile | Automaton (MT-SEQ-09), one row | Modes of Automaton, or one two-dimensional type |
 | **Rewriting:** a sequence grown by replacing symbols | L-system melody, Cantor rhythm, Golden rhythm, Thue-Morse | Generator (MT-SEQ-04) names L-systems | **One new type**, with the three fixed rhythms as presets |
-| **Chance:** randomness with a shape | Rain, Shuffle, Weighted dice, Lévy flight, Brownian, Markov | Random (built), Brownian (MT-MOD-08), Markov (MT-SEQ-10) | Modes of Random, except Rain, which is a mode of Noise or a small type. These are survey gaps 8 to 10 |
+| **Chance:** randomness with a shape | Rain, Shuffle, Weighted dice, Lévy flight, Brownian, Markov | Random (built), Brownian (MT-MOD-08), Markov (MT-SEQ-10) | Modes of Random, except Rain, which is a mode of Noise or a small type. These appear in the VCV survey's gap list and its smaller additions |
 | **Agents:** many parts that steer by their neighbours | Flock, Murmuration, Fireflies, Spiking neurons | Coupled phases (MT-PHASE-10) | **Flock** and **Neurons** are new types; Murmuration is Flock with coupled phases |
 | **Population:** amounts that grow, compete, and fade | Predator and prey, Outbreak | None | **New type**, or modes of Attractor. Outbreak is a one-shot, so it sits closer to an envelope |
 | **Selection:** variation plus a player's choice | Evolving melody | None | **New type.** The only one where the player is inside the loop |
@@ -378,7 +378,7 @@ Some of these are small enough to build as sub-patches from modules we have, as 
 | Tides, Seasons | LFOs and phase modules | Nothing but convenience; ship them as abstractions |
 | Wind chimes | Noise, Slew, Compare | Real pendulums, once Pendulum exists |
 
-A sub-patch that feeds a sum back through a 1-Sample Delay runs once per sample, so its speed depends on the sample rate. That is the main reason the small ones still want a module in the end. If Rain works well as a patch, gap 10 of the VCV survey is smaller than it says.
+A sub-patch that feeds a sum back through a 1-Sample Delay runs once per sample, so its speed depends on the sample rate. That is the main reason the small ones still want a module in the end. If Rain works well as a patch, the survey's gap for random impulses is smaller than it says.
 
 ## A "Systems" family?
 
@@ -417,7 +417,7 @@ If M3 builds a handful first, these give the most life for the least work, and b
 |---|---|---|
 | 1 | Regulator | The clearest "it listens" module; tiny |
 | 2 | Leaky bucket, Cooldown, Tiring | Three small event modules that make rhythm react to density |
-| 3 | Rain, Shuffle, Weighted dice | Close three survey gaps as modes of what exists |
+| 3 | Rain, Shuffle, Weighted dice | Close two gaps and one smaller addition from the VCV survey as modes of what exists |
 | 4 | Spring | A slew that bounces; familiar, and it sets up Chain |
 | 5 | Figure, starting with the seed and flower of life | A main request, cheap to run, and it gives modulation, phases, gates, and pitch from one module |
 | 6 | Path, with Kaleidoscope | Cheap, beautiful, and visible at once on the XY Scope we have. It proves the Trace idea, and Kaleidoscope works on every later system |
